@@ -1,0 +1,12 @@
+[package]
+name = "yydb-types"
+version.workspace = true
+edition.workspace = true
+description = "Shared types for the YYDB embedded database"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+uuid = { workspace = true }

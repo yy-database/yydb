@@ -1,0 +1,26 @@
+[package]
+name = "yydb-tools"
+version.workspace = true
+edition.workspace = true
+description = "CLI tools for YYDB (yydb.exe)"
+publish = false
+
+[[bin]]
+name = "yydb"
+path = "src/main.rs"
+
+[dependencies]
+base64 = { workspace = true }
+clap = { workspace = true }
+oxc_allocator = { workspace = true }
+oxc_ast = { workspace = true }
+oxc_codegen = { workspace = true }
+oxc_span = { workspace = true }
+oxc_syntax = { workspace = true }
+sha1 = { workspace = true }
+thiserror = "2"
+vos = { workspace = true }
+yydb = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = "1"

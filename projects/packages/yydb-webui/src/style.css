@@ -1,0 +1,106 @@
+:root {
+    color-scheme: light;
+    --ink: #1a2332;
+    --muted: #5a6a7a;
+    --line: #d5dde6;
+    --warn-bg: #fff4e5;
+    --warn-ink: #8a4b00;
+    --accent: #0b6e4f;
+    --surface: #f7f9fb;
+    font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+    line-height: 1.5;
+    color: var(--ink);
+    background: var(--surface);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+}
+
+button,
+input,
+textarea {
+    font: inherit;
+}
+
+button {
+    cursor: pointer;
+    background: var(--accent);
+    color: white;
+    border: 0;
+    border-radius: 6px;
+    padding: 0.45rem 0.9rem;
+}
+
+button.secondary {
+    background: #e8eef4;
+    color: var(--ink);
+}
+
+input,
+textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.5rem 0.65rem;
+    background: white;
+}
+
+textarea {
+    min-height: 8rem;
+    font-family: ui-monospace, Consolas, monospace;
+}
+
+.panel {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+}
+
+.grid {
+    display: grid;
+    gap: 1rem;
+}
+
+@media (min-width: 900px) {
+    .grid.two {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+label {
+    display: grid;
+    gap: 0.35rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.row {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.mono {
+    font-family: ui-monospace, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.warn {
+    background: var(--warn-bg);
+    color: var(--warn-ink);
+    border: 1px solid #f0d2a0;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+}
+
+.error {
+    color: #a11;
+}

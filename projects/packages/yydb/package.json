@@ -1,0 +1,59 @@
+{
+    "name": "@yydb/yydb",
+    "version": "0.1.0",
+    "description": "Single-file YYDB database for TypeScript and Node.js; manages the local engine for you",
+    "license": "MPL-2.0",
+    "private": true,
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "test": "node --experimental-strip-types --test src/resolve-bin.test.ts"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/yy-database/yydb.rs.git",
+        "directory": "projects/packages/yydb"
+    },
+    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb#readme",
+    "bugs": {
+        "url": "https://github.com/yy-database/yydb.rs/issues"
+    },
+    "keywords": [
+        "yydb",
+        "vos",
+        "database",
+        "embedded",
+        "typescript"
+    ],
+    "publishConfig": {
+        "access": "public"
+    },
+    "dependencies": {
+        "@yydb/yydb-client": "workspace:*"
+    },
+    "devDependencies": {
+        "@types/node": "^20.10.0",
+        "typescript": "~5.3.0"
+    },
+    "engines": {
+        "node": ">=18"
+    },
+    "optionalDependencies": {
+        "@yydb/yydb-win32-x64": "workspace:*",
+        "@yydb/yydb-linux-x64": "workspace:*",
+        "@yydb/yydb-darwin-x64": "workspace:*",
+        "@yydb/yydb-darwin-arm64": "workspace:*"
+    }
+}

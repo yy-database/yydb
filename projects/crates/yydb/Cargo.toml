@@ -1,0 +1,20 @@
+[package]
+name = "yydb"
+version.workspace = true
+edition.workspace = true
+description = "Embedded single-file database with native VOS schema semantics"
+license = "MPL-2.0"
+repository = "https://github.com/yy-database/yydb.rs"
+homepage = "https://github.com/yy-database/yydb.rs"
+documentation = "https://docs.rs/yydb"
+readme = "README.md"
+keywords = ["database", "embedded", "storage", "vos"]
+categories = ["database-implementations", "embedded"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+blake3 = { workspace = true }
+vos = { workspace = true }
+yydb-types = { workspace = true }

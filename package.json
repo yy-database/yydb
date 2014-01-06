@@ -1,0 +1,17 @@
+{
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "check": "cargo check --workspace",
+        "fmt": "node scripts/format.mjs",
+        "fmt:check": "node scripts/format.mjs --check",
+        "regenerate": "$env:REGENERATE_TESTS=1; cargo test --release --all-features",
+        "test": "cargo test --release --workspace",
+        "p": "cargo workspace publish --resume",
+        "u": "cargo upgrade --pinned"
+    },
+    "packageManager": "pnpm@10.18.3",
+    "devDependencies": {
+        "@biomejs/biome": "^2.4.8"
+    }
+}

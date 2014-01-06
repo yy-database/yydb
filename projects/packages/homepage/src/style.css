@@ -1,0 +1,92 @@
+:root {
+    --ink: #142033;
+    --muted: #5b6b7c;
+    --line: #d9e1ea;
+    --accent: #0b6e4f;
+    --bg: #f5f7fa;
+    font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+}
+
+a {
+    color: var(--accent);
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 100vh;
+}
+
+@media (max-width: 800px) {
+    .layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.sidebar {
+    background: white;
+    border-right: 1px solid var(--line);
+    padding: 1.25rem;
+}
+
+.brand {
+    font-weight: 700;
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+}
+
+.nav button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    padding: 0.45rem 0.5rem;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--ink);
+}
+
+.nav button.active,
+.nav button:hover {
+    background: #e7f3ee;
+}
+
+.content {
+    padding: 1.5rem;
+    max-width: 820px;
+}
+
+.markdown h1 {
+    margin-top: 0;
+}
+
+.markdown pre {
+    background: #101820;
+    color: #e8eef4;
+    padding: 0.9rem;
+    border-radius: 8px;
+    overflow: auto;
+}
+
+.markdown code {
+    font-family: ui-monospace, Consolas, monospace;
+}
+
+.warn {
+    background: #fff4e5;
+    border: 1px solid #f0d2a0;
+    color: #8a4b00;
+    padding: 0.85rem 1rem;
+    border-radius: 8px;
+}

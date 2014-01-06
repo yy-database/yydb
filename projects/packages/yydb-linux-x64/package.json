@@ -1,0 +1,32 @@
+{
+    "name": "@yydb/yydb-linux-x64",
+    "version": "0.1.0",
+    "description": "YYDB CLI engine for Linux x64; installed automatically by @yydb/yydb",
+    "license": "MPL-2.0",
+    "private": true,
+    "os": [
+        "linux"
+    ],
+    "cpu": [
+        "x64"
+    ],
+    "bin": {
+        "yydb": "yydb"
+    },
+    "files": [
+        "yydb",
+        "README.md"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/yy-database/yydb.rs.git",
+        "directory": "projects/packages/yydb-linux-x64"
+    },
+    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-linux-x64#readme",
+    "bugs": {
+        "url": "https://github.com/yy-database/yydb.rs/issues"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}

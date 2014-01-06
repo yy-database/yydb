@@ -1,0 +1,13 @@
+[package]
+name = "yydb-client"
+version.workspace = true
+edition.workspace = true
+description = "Rust remote client for yydb serve (non-embedded; TCP binary wire v1)"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+yydb = { workspace = true }
+yydb-types = { workspace = true }

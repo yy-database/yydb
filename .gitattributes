@@ -1,0 +1,4 @@
+# Keep text fixtures byte-stable across Windows checkouts (autocrlf).
+backends/yydb-tools/fixtures/** text eol=lf
+*.vos text eol=lf
+*.generated.ts text eol=lf

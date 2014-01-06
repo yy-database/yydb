@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = ["projects/crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+blake3 = "1"
+clap = { version = "4", features = ["derive"] }
+sha1 = "0.10"
+base64 = "0.22"
+uuid = { version = "1", features = ["serde", "v4"] }
+# Shared VOS schema contract — always the voml/vos-language `dev` branch (not a
+# forked dialect). Path overrides are for local hacking only; publish/CI use git.
+vos = { version = "0.1.0", git = "https://github.com/voml/vos-language.git", branch = "dev" }
+oxc_allocator = "0.100.0"
+oxc_ast = "0.100.0"
+oxc_codegen = "0.100.0"
+oxc_span = "0.100.0"
+oxc_syntax = "0.100.0"
+yydb = { path = "projects/crates/yydb" }
+yydb-client = { path = "projects/crates/yydb-client" }
+yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }

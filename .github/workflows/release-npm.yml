@@ -1,0 +1,212 @@
+name: Release
+
+# Independent of CI (check/test). Trigger only by pushing a semver tag:
+#   git tag v0.1.0 && git push origin v0.1.0
+# Publishes @yydb/* (OIDC), GitHub Release engine zips, and ghcr.io docker image.
+# Already-published npm versions / existing release assets are skipped (retry-safe).
+# Docker tags are overwritten on retry (also retry-safe).
+# Trusted Publisher workflow filename must stay: release-npm.yml
+# Setup: documentation/ci-secrets.md
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: yydb
+
+jobs:
+  build-engine:
+    name: engine ${{ matrix.pkg }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            pkg: yydb-win32-x64
+            bin: yydb.exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            pkg: yydb-linux-x64
+            bin: yydb
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            pkg: yydb-darwin-x64
+            bin: yydb
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            pkg: yydb-darwin-arm64
+            bin: yydb
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build yydb-tools
+        run: cargo build -p yydb-tools --release --target ${{ matrix.target }}
+      - name: Stage binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="target/${{ matrix.target }}/release/${{ matrix.bin }}"
+          DEST="projects/packages/${{ matrix.pkg }}/${{ matrix.bin }}"
+          cp "$SRC" "$DEST"
+          chmod +x "$DEST" || true
+          ls -la "$DEST"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: engine-${{ matrix.pkg }}
+          path: projects/packages/${{ matrix.pkg }}/${{ matrix.bin }}
+          if-no-files-found: error
+
+  publish-npm:
+    name: publish npm
+    needs: build-engine
+    runs-on: ubuntu-latest
+    environment: NPM_PUBLISH
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        # version from package.json packageManager (pnpm@10.18.3)
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          scope: "@yydb"
+          cache: pnpm
+      - name: Ensure npm CLI supports OIDC
+        run: |
+          npm install -g npm@latest
+          node -v
+          npm -v
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download engine artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: engine-*
+          path: _engines
+
+      - name: Resolve version from tag
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
+            echo "expected semver tag like v1.2.3, got: $tag" >&2
+            exit 1
+          fi
+          version="${tag#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publishing version $version (tag $tag)"
+
+      - name: Prepare packages for publish
+        env:
+          INPUT_VERSION: ${{ steps.ver.outputs.version }}
+        run: node scripts/prepare-npm-publish.mjs
+
+      - run: pnpm --filter @yydb/yydb-client build
+      - run: pnpm --filter @yydb/yydb build
+
+      # OIDC only ? do not set NODE_AUTH_TOKEN (even empty).
+      - name: Publish npm
+        run: node scripts/publish-npm-packages.mjs
+
+  github-release:
+    name: github release zips
+    needs: build-engine
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download engine artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: engine-*
+          path: _engines
+
+      - name: Upload zips to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/upload-github-release-zips.mjs
+
+  docker:
+    name: docker ghcr
+    needs: build-engine
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download linux-x64 engine
+        uses: actions/download-artifact@v8
+        with:
+          name: engine-yydb-linux-x64
+          path: _engine
+
+      - name: Stage image context
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _docker
+          cp docker/yydb/Dockerfile _docker/Dockerfile
+          cp _engine/yydb _docker/yydb
+          chmod +x _docker/yydb
+          ls -la _docker
+
+      - name: Image tags
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${owner}/${{ env.IMAGE_NAME }}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: _docker
+          file: _docker/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.title=yydb
+            org.opencontainers.image.description=YYDB single-file database CLI / serve

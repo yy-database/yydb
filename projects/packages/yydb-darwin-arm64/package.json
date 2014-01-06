@@ -1,0 +1,32 @@
+{
+    "name": "@yydb/yydb-darwin-arm64",
+    "version": "0.1.0",
+    "description": "YYDB CLI engine for Apple Silicon Macs; installed automatically by @yydb/yydb",
+    "license": "MPL-2.0",
+    "private": true,
+    "os": [
+        "darwin"
+    ],
+    "cpu": [
+        "arm64"
+    ],
+    "bin": {
+        "yydb": "yydb"
+    },
+    "files": [
+        "yydb",
+        "README.md"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/yy-database/yydb.rs.git",
+        "directory": "projects/packages/yydb-darwin-arm64"
+    },
+    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-darwin-arm64#readme",
+    "bugs": {
+        "url": "https://github.com/yy-database/yydb.rs/issues"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}
