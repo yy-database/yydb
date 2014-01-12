@@ -43,6 +43,16 @@ pub enum Error {
     Unsupported(&'static str),
     /// Wire protocol / serve client failure.
     Protocol { message: String },
+    /// Independent compare-and-set failed.
+    CasConflict { key: String },
+    /// Lease cannot be claimed under the given expectation.
+    LeaseUnavailable { key: String },
+    /// Lease token does not match the active claim.
+    FencingMismatch { key: String },
+    /// Lease has expired.
+    LeaseExpired { key: String },
+    /// Registered UDF version does not match the invocation.
+    UdfVersionMismatch { name: String, expected: u32, got: u32 },
 }
 
 impl fmt::Display for Error {
@@ -73,8 +83,60 @@ impl fmt::Display for Error {
             Self::ObjectCorrupt { message } => write!(f, "object corrupt: {message}"),
             Self::Unsupported(feature) => write!(f, "unsupported: {feature}"),
             Self::Protocol { message } => write!(f, "protocol: {message}"),
+            Self::CasConflict { key } => write!(f, "CAS conflict on key {key}"),
+            Self::LeaseUnavailable { key } => write!(f, "lease unavailable on key {key}"),
+            Self::FencingMismatch { key } => {
+                write!(f, "fencing mismatch on key {key}")
+            }
+            Self::LeaseExpired { key } => write!(f, "lease expired on key {key}"),
+            Self::UdfVersionMismatch { name, expected, got } => write!(
+                f,
+                "UDF {name} version mismatch: expected {expected}, got {got}"
+            ),
         }
     }
+}
+
+/// Monotonic commit counter returned from fenced batch commits.
+pub type CommitSequence = u64;
+
+/// Handle proving an active lease claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaseToken {
+    /// Frontier or work item key under lease.
+    pub key: String,
+    /// Worker that holds the claim.
+    pub worker_id: String,
+    /// Monotonic fencing token assigned at claim time.
+    pub fencing_token: u64,
+    /// Wall-clock expiry in milliseconds since UNIX epoch.
+    pub lease_until: u64,
+}
+
+/// Preconditions for [`yydb::Connection::claim_lease`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeaseExpectation {
+    /// Key has no active claim or the prior claim expired.
+    AbsentOrExpired,
+    /// Key is in the queued state.
+    Queued,
+}
+
+/// How to release a lease after work finishes or fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleaseOutcome {
+    /// Return the item to the queued state.
+    Requeue,
+    /// Schedule a retry at a future timestamp.
+    RetryAt {
+        /// Milliseconds since UNIX epoch.
+        when: u64,
+    },
+    /// Mark the item failed with a reason string.
+    Failed {
+        /// Human-readable failure reason.
+        reason: String,
+    },
 }
 
 impl error::Error for Error {
