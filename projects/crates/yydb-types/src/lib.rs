@@ -53,6 +53,8 @@ pub enum Error {
     LeaseExpired { key: String },
     /// Registered UDF version does not match the invocation.
     UdfVersionMismatch { name: String, expected: u32, got: u32 },
+    /// Namespace quota cannot admit another record.
+    QuotaExceeded { namespace: String },
 }
 
 impl fmt::Display for Error {
@@ -93,6 +95,9 @@ impl fmt::Display for Error {
                 f,
                 "UDF {name} version mismatch: expected {expected}, got {got}"
             ),
+            Self::QuotaExceeded { namespace } => {
+                write!(f, "quota exceeded for namespace {namespace}")
+            }
         }
     }
 }
@@ -120,6 +125,54 @@ pub enum LeaseExpectation {
     AbsentOrExpired,
     /// Key is in the queued state.
     Queued,
+}
+
+/// Per-key version counter returned from TTL writes.
+pub type RecordVersion = u64;
+
+/// Namespace byte and record limits with an eviction policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamespaceQuota {
+    /// Maximum total payload bytes under the namespace prefix.
+    pub max_bytes: u64,
+    /// Maximum record count under the namespace prefix.
+    pub max_records: u64,
+    /// How to choose victims when limits are exceeded.
+    pub eviction_policy: EvictionPolicy,
+}
+
+/// Eviction strategy for namespace quota enforcement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvictionPolicy {
+    /// Evict the least recently touched record first.
+    Lru,
+    /// Evict the soonest-expiring TTL record first.
+    TtlFirst,
+}
+
+/// Observed usage for a namespace prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NamespaceStats {
+    /// Total bytes stored under the prefix.
+    pub bytes_used: u64,
+    /// Number of records under the prefix.
+    pub records_used: u64,
+}
+
+/// Upper bound for a single eviction pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvictBudget {
+    /// Maximum records to evict in one call.
+    pub max_records: usize,
+}
+
+/// Summary of keys removed by TTL or quota eviction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EvictReport {
+    /// Records removed.
+    pub evicted_records: u64,
+    /// Payload bytes removed.
+    pub evicted_bytes: u64,
 }
 
 /// How to release a lease after work finishes or fails.
