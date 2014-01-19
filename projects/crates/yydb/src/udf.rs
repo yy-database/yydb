@@ -44,4 +44,5 @@ impl ScalarUdf for ClosureUdf {
 
 pub(crate) struct RegisteredUdf {
     pub(crate) udf: Arc<dyn ScalarUdf>,
+    pub(crate) version: u32,
 }
