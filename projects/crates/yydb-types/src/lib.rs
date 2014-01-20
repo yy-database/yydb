@@ -166,6 +166,66 @@ pub struct EvictBudget {
     pub max_records: usize,
 }
 
+/// Severity for a [`DoctorIssue`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoctorSeverity {
+    /// Non-fatal inconsistency or lag.
+    Warn,
+    /// Data or contract violation.
+    Error,
+}
+
+/// One consistency finding from [`DoctorReport`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoctorIssue {
+    /// How severe the finding is.
+    pub severity: DoctorSeverity,
+    /// Stable diagnostic code such as `yydb.doctor.half_batch`.
+    pub code: String,
+    /// Human-readable detail.
+    pub message: String,
+    /// Optional record key hint.
+    pub key_hint: Option<String>,
+}
+
+/// Per-namespace usage included in [`DoctorReport`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoctorNamespaceStats {
+    /// Namespace prefix.
+    pub prefix: String,
+    /// Records under the prefix.
+    pub record_count: u64,
+    /// Payload bytes under the prefix.
+    pub bytes_used: u64,
+    /// Referenced CAS payload bytes.
+    pub object_bytes: u64,
+    /// Configured byte quota, if any.
+    pub quota_max_bytes: Option<u64>,
+    /// TTL records past expiry but not yet evicted.
+    pub ttl_expired_pending: u64,
+}
+
+/// Read-only consistency report from `Connection::doctor`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoctorReport {
+    /// Filesystem path when file-backed.
+    pub file_path: Option<String>,
+    /// Latest committed sequence number.
+    pub last_commit_sequence: u64,
+    /// Sequence folded into the main file at last checkpoint.
+    pub last_checkpoint_sequence: u64,
+    /// Commits not yet checkpointed.
+    pub checkpoint_lag_records: u64,
+    /// Uncheckpointed WAL bytes when in WAL mode.
+    pub wal_bytes_uncheckpointed: u64,
+    /// CAS objects without metadata references.
+    pub orphan_object_count: u64,
+    /// Namespace usage snapshots.
+    pub namespaces: Vec<DoctorNamespaceStats>,
+    /// Findings requiring attention.
+    pub issues: Vec<DoctorIssue>,
+}
+
 /// Summary of CAS objects removed by orphan reclamation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ReclaimReport {
