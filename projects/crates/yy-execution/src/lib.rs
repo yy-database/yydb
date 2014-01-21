@@ -91,6 +91,105 @@ pub struct Program {
     pub output_type: Type,
 }
 
+/// Effect declared by a UDF contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UdfEffect {
+    /// Reads database state without mutating it.
+    Read,
+    /// Mutates state and must run inside a write boundary.
+    Write,
+    /// Calls a capability outside the database state.
+    External,
+}
+
+/// Placement requested by a UDF contract before physical planning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UdfPlacement {
+    /// Execute in the local embedded database process.
+    Local,
+    /// Execute beside a distributed shard.
+    Shard,
+    /// Execute at a distributed coordinator.
+    Coordinator,
+    /// Execute at an edge service or worker.
+    Edge,
+}
+
+/// A typed UDF contract whose body is already lowered to this execution model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Udf {
+    /// Stable frontend-assigned function identity.
+    pub id: String,
+    /// Monotonic implementation version for registration and cache invalidation.
+    pub version: u32,
+    /// Whether evaluation is safe to repeat.
+    pub deterministic: bool,
+    /// Declared side effect.
+    pub effect: UdfEffect,
+    /// Preferred physical placement.
+    pub placement: UdfPlacement,
+    /// Typed function body.
+    pub program: Program,
+}
+
+impl Udf {
+    /// Validates the UDF metadata and its lowered body.
+    pub fn validate(self) -> Result<ValidatedUdf, UdfValidationError> {
+        if self.id.is_empty() {
+            return Err(UdfValidationError::EmptyId);
+        }
+        if self.version == 0 {
+            return Err(UdfValidationError::InvalidVersion);
+        }
+        let program = ValidatedProgram::validate(self.program.clone())?;
+        Ok(ValidatedUdf {
+            metadata: self,
+            program,
+        })
+    }
+}
+
+/// A UDF accepted by the execution runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedUdf {
+    metadata: Udf,
+    program: ValidatedProgram,
+}
+
+impl ValidatedUdf {
+    /// Returns the stable UDF identity.
+    pub fn id(&self) -> &str {
+        &self.metadata.id
+    }
+
+    /// Returns the UDF implementation version.
+    pub fn version(&self) -> u32 {
+        self.metadata.version
+    }
+
+    /// Evaluates the validated UDF body.
+    pub fn evaluate(&self, parameters: &[Value], inputs: &[Value]) -> Result<Value, EvalError> {
+        self.program.evaluate(parameters, inputs)
+    }
+}
+
+/// Contract error found before a UDF is registered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UdfValidationError {
+    /// The UDF identity is empty.
+    EmptyId,
+    /// Version zero is reserved for an absent implementation.
+    InvalidVersion,
+    /// The lowered body is invalid.
+    Program(ValidationError),
+}
+
+impl From<ValidationError> for UdfValidationError {
+    fn from(error: ValidationError) -> Self {
+        Self::Program(error)
+    }
+}
+
 /// A validated program ready for evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedProgram(Program);
@@ -118,6 +217,8 @@ impl ValidatedProgram {
 pub enum ValidationError {
     /// The program has no nodes.
     EmptyProgram,
+    /// The program exceeds the node identity range.
+    TooManyNodes,
     /// The output node is outside the node vector.
     OutputOutOfBounds {
         /// Requested output node.
@@ -190,99 +291,82 @@ pub enum EvalError {
     IntegerOverflow,
 }
 
-fn node_type(program: &Program, node: NodeId) -> Result<Type, ValidationError> {
-    let current =
-        usize::try_from(node).map_err(|_| ValidationError::OutputOutOfBounds { output: node })?;
-    let Some(value) = program.nodes.get(current) else {
-        return Err(ValidationError::OutputOutOfBounds { output: node });
-    };
-    match value {
-        Node::Literal(value) => Ok(value.ty()),
-        Node::Parameter { index, ty } => {
-            if usize::try_from(*index)
-                .ok()
-                .is_none_or(|index| index >= program.parameters.len())
-            {
-                return Err(ValidationError::ParameterOutOfBounds {
-                    node,
-                    index: *index,
-                });
-            }
-            Ok(*ty)
-        }
-        Node::Input { index, ty } => {
-            if usize::try_from(*index)
-                .ok()
-                .is_none_or(|index| index >= program.inputs.len())
-            {
-                return Err(ValidationError::InputOutOfBounds {
-                    node,
-                    index: *index,
-                });
-            }
-            Ok(*ty)
-        }
-        Node::AddI64 { left, right } => {
-            operand_type(program, node, *left, Type::I64)?;
-            operand_type(program, node, *right, Type::I64)?;
-            Ok(Type::I64)
-        }
-        Node::Equal { left, right } => {
-            let left_ty = checked_reference_type(program, node, *left)?;
-            let right_ty = checked_reference_type(program, node, *right)?;
-            if left_ty != right_ty {
-                return Err(ValidationError::TypeMismatch {
-                    node,
-                    expected: left_ty,
-                    found: right_ty,
-                });
-            }
-            Ok(Type::Bool)
-        }
-    }
-}
-
-fn checked_reference_type(
-    program: &Program,
+fn reference_type(
+    types: &[Type],
     node: NodeId,
     reference: NodeId,
 ) -> Result<Type, ValidationError> {
-    if reference >= node {
-        return Err(ValidationError::ReferenceOutOfOrder { node, reference });
-    }
-    node_type(program, reference)
+    types
+        .get(reference as usize)
+        .copied()
+        .ok_or(ValidationError::ReferenceOutOfOrder { node, reference })
 }
 
-fn operand_type(
-    program: &Program,
-    node: NodeId,
-    reference: NodeId,
-    expected: Type,
-) -> Result<Type, ValidationError> {
-    let found = checked_reference_type(program, node, reference)?;
-    if found != expected {
+fn require_type(node: NodeId, expected: Type, found: Type) -> Result<(), ValidationError> {
+    if expected != found {
         return Err(ValidationError::TypeMismatch {
             node,
             expected,
             found,
         });
     }
-    Ok(found)
+    Ok(())
 }
 
 fn validate_program(program: &Program) -> Result<(), ValidationError> {
     if program.nodes.is_empty() {
         return Err(ValidationError::EmptyProgram);
     }
-    if usize::try_from(program.output)
-        .ok()
-        .is_none_or(|output| output >= program.nodes.len())
-    {
+    if program.nodes.len() > u32::MAX as usize {
+        return Err(ValidationError::TooManyNodes);
+    }
+    if program.output as usize >= program.nodes.len() {
         return Err(ValidationError::OutputOutOfBounds {
             output: program.output,
         });
     }
-    let found = node_type(program, program.output)?;
+    let mut types = Vec::with_capacity(program.nodes.len());
+    for (position, expression) in program.nodes.iter().enumerate() {
+        let node = position as NodeId;
+        let inferred = match expression {
+            Node::Literal(value) => value.ty(),
+            Node::Parameter { index, ty } => {
+                let expected = program.parameters.get(*index as usize).copied().ok_or(
+                    ValidationError::ParameterOutOfBounds {
+                        node,
+                        index: *index,
+                    },
+                )?;
+                require_type(node, expected, *ty)?;
+                expected
+            }
+            Node::Input { index, ty } => {
+                let expected = program.inputs.get(*index as usize).copied().ok_or(
+                    ValidationError::InputOutOfBounds {
+                        node,
+                        index: *index,
+                    },
+                )?;
+                require_type(node, expected, *ty)?;
+                expected
+            }
+            Node::AddI64 { left, right } => {
+                require_type(node, Type::I64, reference_type(&types, node, *left)?)?;
+                require_type(node, Type::I64, reference_type(&types, node, *right)?)?;
+                Type::I64
+            }
+            Node::Equal { left, right } => {
+                require_type(
+                    node,
+                    reference_type(&types, node, *left)?,
+                    reference_type(&types, node, *right)?,
+                )?;
+                Type::Bool
+            }
+        };
+        types.push(inferred);
+    }
+    let found = types[program.output as usize];
     if found != program.output_type {
         return Err(ValidationError::OutputTypeMismatch {
             expected: program.output_type,
@@ -411,6 +495,30 @@ mod tests {
     }
 
     #[test]
+    fn validates_nodes_that_are_not_on_the_output_path() {
+        let error = ValidatedProgram::validate(Program {
+            parameters: vec![],
+            inputs: vec![],
+            nodes: vec![
+                Node::Literal(Value::I64(1)),
+                Node::AddI64 { left: 2, right: 2 },
+                Node::Literal(Value::I64(2)),
+            ],
+            output: 0,
+            output_type: Type::I64,
+        })
+        .expect_err("every node must be valid, even when unreachable");
+
+        assert_eq!(
+            error,
+            ValidationError::ReferenceOutOfOrder {
+                node: 1,
+                reference: 2
+            }
+        );
+    }
+
+    #[test]
     fn rejects_integer_overflow_at_runtime() {
         let program = ValidatedProgram::validate(Program {
             parameters: vec![],
@@ -426,5 +534,41 @@ mod tests {
         .expect("program is valid");
 
         assert_eq!(program.evaluate(&[], &[]), Err(EvalError::IntegerOverflow));
+    }
+
+    #[test]
+    fn validates_and_evaluates_a_typed_udf() {
+        let udf = Udf {
+            id: "score.add".into(),
+            version: 1,
+            deterministic: true,
+            effect: UdfEffect::Read,
+            placement: UdfPlacement::Local,
+            program: Program {
+                parameters: vec![],
+                inputs: vec![Type::I64, Type::I64],
+                nodes: vec![
+                    Node::Input {
+                        index: 0,
+                        ty: Type::I64,
+                    },
+                    Node::Input {
+                        index: 1,
+                        ty: Type::I64,
+                    },
+                    Node::AddI64 { left: 0, right: 1 },
+                ],
+                output: 2,
+                output_type: Type::I64,
+            },
+        }
+        .validate()
+        .expect("udf is valid");
+
+        assert_eq!(udf.id(), "score.add");
+        assert_eq!(
+            udf.evaluate(&[], &[Value::I64(4), Value::I64(6)]),
+            Ok(Value::I64(10))
+        );
     }
 }
