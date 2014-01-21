@@ -4,7 +4,7 @@
 mod common;
 
 use common::{cleanup, open_temp_db, reopen};
-use yydb::{journal::wal_path, OpenFlags};
+use yydb::{journal::wal_path, DoctorSeverity, OpenFlags};
 
 #[test]
 fn g_yydb_wal_reopen_doctor() {
@@ -19,6 +19,15 @@ fn g_yydb_wal_reopen_doctor() {
     let reopened = reopen(&path);
     assert_eq!(reopened.get("wal/a").unwrap(), Some(b"1".to_vec()));
     assert_eq!(reopened.get("wal/b").unwrap(), Some(b"2".to_vec()));
+    let report = reopened.doctor().unwrap();
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|issue| issue.severity == DoctorSeverity::Error),
+        "gate G-YYDB-7 fixture yydb.wal.reopen_doctor doctor reported errors: {:?}",
+        report.issues
+    );
     reopened.checkpoint().unwrap();
     cleanup(&path);
 }
