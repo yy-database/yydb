@@ -141,11 +141,8 @@ impl Udf {
         if self.version == 0 {
             return Err(UdfValidationError::InvalidVersion);
         }
-        let program = ValidatedProgram::validate(self.program.clone())?;
-        Ok(ValidatedUdf {
-            metadata: self,
-            program,
-        })
+        validate_program(&self.program)?;
+        Ok(ValidatedUdf { metadata: self })
     }
 }
 
@@ -153,7 +150,6 @@ impl Udf {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedUdf {
     metadata: Udf,
-    program: ValidatedProgram,
 }
 
 impl ValidatedUdf {
@@ -169,7 +165,7 @@ impl ValidatedUdf {
 
     /// Evaluates the validated UDF body.
     pub fn evaluate(&self, parameters: &[Value], inputs: &[Value]) -> Result<Value, EvalError> {
-        self.program.evaluate(parameters, inputs)
+        evaluate_program(&self.metadata.program, parameters, inputs)
     }
 }
 
