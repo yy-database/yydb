@@ -18,3 +18,4 @@ path = "src/lib.rs"
 blake3 = { workspace = true }
 vos = { workspace = true }
 yydb-types = { workspace = true }
+yy-execution = { workspace = true }
