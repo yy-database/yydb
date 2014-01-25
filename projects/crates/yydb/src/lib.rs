@@ -908,7 +908,7 @@ mod tests {
     fn stores_schema_and_records_in_one_reopenable_file() {
         let path = temp_db("reopen");
         let conn = Connection::open(&path).unwrap();
-        conn.ensure_schema(1, "table Project { id: uuid }").unwrap();
+        conn.ensure_schema(1, "table Project { @@id: uuid }").unwrap();
         conn.put("project/meta", b"Spark").unwrap();
         drop(conn);
 
