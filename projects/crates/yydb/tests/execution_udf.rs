@@ -31,7 +31,7 @@ fn sum_body() -> Udf {
 }
 
 #[test]
-fn registers_and_evaluates_shared_execution_in_a_real_connection() {
+fn registers_and_evaluates_yydb_local_execution_in_a_real_connection() {
     let conn = Connection::open_in_memory().unwrap();
     conn.register_execution_udf(sum_body().validate().unwrap())
         .unwrap();
