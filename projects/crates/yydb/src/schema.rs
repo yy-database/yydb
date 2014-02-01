@@ -74,12 +74,17 @@ pub fn execution_catalog(document: &str) -> Result<ExecutionCatalog> {
     })?;
     let catalog =
         vos::catalog_from_document(&document).map_err(|message| Error::Schema { message })?;
+    execution_catalog_from_snapshot(&catalog)
+}
+
+/// Project persisted identities into the YYDB local execution model.
+pub fn execution_catalog_from_snapshot(catalog: &vos::ast::CatalogSnapshot) -> Result<ExecutionCatalog> {
     let mut types = Vec::with_capacity(catalog.types.len());
 
-    for entry in catalog.types {
+    for entry in &catalog.types {
         let schema_id = entry.type_id.0;
         let mut fields = Vec::with_capacity(entry.fields.len());
-        for field in entry.fields {
+        for field in &entry.fields {
             let ty = execution_type(&field.ty)?;
             let handle = FieldHandle::new(schema_id, field.field_id.0, field.virtual_field, ty)
                 .map_err(|_| Error::Schema {
@@ -88,18 +93,55 @@ pub fn execution_catalog(document: &str) -> Result<ExecutionCatalog> {
             fields.push(ExecutionField {
                 field_id: field.field_id.0,
                 virtual_field: field.virtual_field,
-                name: field.current_name,
+                name: field.current_name.clone(),
                 handle,
             });
         }
         types.push(ExecutionType {
             schema_id,
-            name: entry.name,
+            name: entry.name.clone(),
             kind: entry.kind,
             fields,
         });
     }
     Ok(ExecutionCatalog { types })
+}
+
+pub(crate) fn validate_snapshot(document: &str, catalog: &vos::ast::CatalogSnapshot) -> Result<()> {
+    use std::collections::BTreeSet;
+    let fail = || Error::Corrupt("catalog identity ledger does not match schema");
+    if catalog.revisions.ddl == 0 || catalog.revisions.semantic == 0 { return Err(fail()); }
+    let parsed = vos::parser::parse_document(document).map_err(|_| fail())?;
+    let fresh = vos::catalog_from_document(&parsed).map_err(|_| fail())?;
+    if fresh.types.len() != catalog.types.len() { return Err(fail()); }
+    let mut type_ids = BTreeSet::new();
+    let mut field_ids = BTreeSet::new();
+    let mut slots = BTreeSet::new();
+    for (expected, actual) in fresh.types.iter().zip(&catalog.types) {
+        if actual.type_id.0 == 0 || !type_ids.insert(actual.type_id) || expected.name != actual.name
+            || expected.kind != actual.kind || expected.fields.len() != actual.fields.len() {
+            return Err(fail());
+        }
+        for expected_field in &expected.fields {
+            let actual_field = actual.fields.iter().find(|field| field.current_name == expected_field.current_name)
+                .ok_or_else(fail)?;
+            if actual_field.field_id.0 == 0 || !field_ids.insert(actual_field.field_id)
+                || !slots.insert((actual.type_id, actual_field.virtual_field))
+                || actual_field.source_order != expected_field.source_order
+                || actual_field.ty != expected_field.ty || actual_field.attrs != expected_field.attrs {
+                return Err(fail());
+            }
+        }
+    }
+    for retired in &catalog.retired_types {
+        if retired.type_id.0 == 0 || !type_ids.insert(retired.type_id) { return Err(fail()); }
+    }
+    for retired in &catalog.retired_fields {
+        if retired.field_id.0 == 0 || !type_ids.contains(&retired.type_id)
+            || !field_ids.insert(retired.field_id)
+            || !slots.insert((retired.type_id, retired.virtual_field)) { return Err(fail()); }
+    }
+    Ok(())
 }
 
 fn execution_type(ty: &vos::ast::TypeExpr) -> Result<Type> {

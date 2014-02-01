@@ -19,3 +19,4 @@ blake3 = { workspace = true }
 vos = { workspace = true }
 yydb-types = { workspace = true }
 yydb-execution = { workspace = true }
+serde_json = { workspace = true }
