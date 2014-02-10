@@ -33,8 +33,8 @@ pub use registry::{
     SessionUdfEntry, SessionUdfRegistry, UdfRegistry,
 };
 pub use typescript::{
-    TypeScriptFunctionHandle, TypeScriptHostAdapter, TypeScriptImplementation,
-    TypeScriptUdfDefinition,
+    TypeScriptFunctionHandle, TypeScriptHostAdapter, TypeScriptMicroDefinition,
+    TypeScriptMicroImplementation,
 };
 pub use value::UdfValue;
-pub use vos::{LoweredUdf, VosProgramImplementation, lower_micro_scalar};
+pub use vos::{LoweredUdf, VosProgramImplementation, lower_micro_scalar, lower_vos_macro};

@@ -7,14 +7,14 @@ use yydb_execution::ValidatedUdf;
 
 use crate::capability::Placement;
 use crate::capability::UdfPolicy;
-use crate::contract::Signature;
+use crate::contract::{ImplementationKind, Signature, UdfDefinition};
 use crate::error::{Result, UdfError};
 use crate::identity::UdfIdentity;
 use crate::implementation::UdfImplementation;
 use crate::invocation::UdfContext;
 use crate::value::UdfValue;
 
-pub use lower::lower_micro_scalar;
+pub use lower::{lower_micro_scalar, lower_vos_macro};
 
 /// YYDB-internal product of lowering a VOS macro or session micro.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +42,23 @@ impl LoweredUdf {
     /// Returns the execution identity string stored in `yydb-execution`.
     pub fn execution_id(&self) -> &str {
         self.program.id()
+    }
+
+    /// Builds session metadata for a lowered VOS `micro`.
+    pub fn session_definition(&self) -> UdfDefinition {
+        UdfDefinition {
+            identity: self.identity.clone(),
+            signature: self.signature.clone(),
+            policy: self.policy,
+            placement: self.placement,
+            implementation_kind: ImplementationKind::VosProgram,
+            fingerprint: self.source_fingerprint,
+        }
+    }
+
+    /// Builds catalog metadata for a lowered VOS `macro`.
+    pub fn catalog_definition(&self) -> UdfDefinition {
+        self.session_definition()
     }
 }
 

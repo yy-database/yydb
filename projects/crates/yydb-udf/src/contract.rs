@@ -54,8 +54,8 @@ pub enum ImplementationKind {
     VosProgram,
     /// Rust native handler in the embedded process.
     Native,
-    /// TypeScript host callback.
-    TypeScript,
+    /// TypeScript session micro host callback.
+    TypeScriptMicro,
 }
 
 /// Catalog-visible UDF metadata without host callbacks.

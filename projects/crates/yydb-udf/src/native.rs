@@ -30,8 +30,8 @@ pub struct NativeUdfDefinition {
 }
 
 impl NativeUdfDefinition {
-    /// Builds the catalog metadata for this native UDF.
-    pub fn catalog_definition(&self) -> UdfDefinition {
+    /// Builds session metadata for this embedded native micro.
+    pub fn session_definition(&self) -> UdfDefinition {
         UdfDefinition {
             identity: self.identity.clone(),
             signature: self.signature.clone(),
@@ -44,7 +44,7 @@ impl NativeUdfDefinition {
 
     /// Validates the definition before registration.
     pub fn validate(&self) -> Result<()> {
-        self.catalog_definition().validate()?;
+        self.session_definition().validate()?;
         if self.policy.effect != crate::capability::Effect::Pure {
             return Err(UdfError::UnsupportedEffect);
         }

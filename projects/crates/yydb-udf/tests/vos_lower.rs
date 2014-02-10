@@ -1,5 +1,5 @@
 use yydb_udf::{
-    lower_micro_scalar, Budget, UdfContext, UdfImplementation, UdfType, UdfValue,
+    lower_micro_scalar, lower_vos_macro, Budget, UdfContext, UdfImplementation, UdfType, UdfValue,
     VosProgramImplementation,
 };
 
@@ -19,6 +19,19 @@ fn lowers_vos_micro_scalar_into_validated_program() {
         .invoke(&mut context, &[UdfValue::I64(21)])
         .expect("invoke");
     assert_eq!(result, UdfValue::I64(42));
+}
+
+#[test]
+fn lowers_vos_macro_via_micro_rewrite() {
+    let lowered = lower_vos_macro(
+        "macro catalog_double(value: i64) -> i64 { value + value }",
+        2,
+    )
+    .expect("lower macro");
+    assert_eq!(lowered.identity.name(), "catalog_double");
+    assert_eq!(lowered.identity.version, 2);
+    assert_eq!(lowered.signature.args, vec![UdfType::I64]);
+    assert_eq!(lowered.signature.returns, UdfType::I64);
 }
 
 #[test]
