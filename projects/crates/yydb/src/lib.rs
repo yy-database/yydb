@@ -699,6 +699,13 @@ impl Connection {
         F: Fn(&[Value]) -> Result<Value> + Send + Sync + 'static,
     {
         let boxed: Arc<ScalarFn> = Arc::new(func);
+        if matches!(arity, Some(1) | Some(2)) {
+            return self
+                .udfs
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .register_closure_scalar(name, version, arity, boxed);
+        }
         let udf: Arc<dyn ScalarUdf> = Arc::new(ClosureUdf::new(arity, boxed));
         self.register_scalar_versioned(name, version, udf)
     }
@@ -731,6 +738,22 @@ impl Connection {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .register_vos_scalar(source, version)
+    }
+
+    /// Parse and register a VOS-authored catalog macro UDF.
+    ///
+    /// The lowered body is registered in the connection catalog layer. Persistence
+    /// into the `.yydb` file is not implemented yet.
+    pub fn register_vos_macro(&self, source: &str) -> Result<()> {
+        self.register_vos_macro_versioned(source, 1)
+    }
+
+    /// Parse and register a versioned VOS-authored catalog macro UDF.
+    pub fn register_vos_macro_versioned(&self, source: &str, version: u32) -> Result<()> {
+        self.udfs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .register_vos_macro(source, version)
     }
 
     /// Register an object-safe [`ScalarUdf`] at an explicit version.
