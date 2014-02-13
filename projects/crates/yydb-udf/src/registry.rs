@@ -143,6 +143,20 @@ impl SessionUdfRegistry {
                 .then_some(entry.definition.identity.version)
         })
     }
+
+    /// Removes a session entry by logical function name.
+    pub fn remove_by_name(&mut self, name: &str) -> Result<UdfIdentity> {
+        let key = self
+            .entries
+            .iter()
+            .find(|(_, entry)| entry.definition.identity.name() == name)
+            .map(|(key, _)| key.clone())
+            .ok_or(UdfError::NotFound)?;
+        self.entries
+            .remove(&key)
+            .map(|entry| entry.definition.identity)
+            .ok_or(UdfError::NotFound)
+    }
 }
 
 /// Process-local host registry for native and TypeScript implementations.
@@ -171,6 +185,11 @@ impl HostUdfRegistry {
     /// Returns a host implementation by logical id.
     pub fn get(&self, identity: &UdfIdentity) -> Option<&HostUdfEntry> {
         self.entries.get(&logical_key(identity))
+    }
+
+    /// Removes a host binding by logical id.
+    pub fn remove(&mut self, identity: &UdfIdentity) {
+        self.entries.remove(&logical_key(identity));
     }
 }
 
@@ -282,6 +301,13 @@ impl UdfRegistry {
             .version_for_name(name)
             .or_else(|| self.catalog.version_for_name(name))
             .or_else(|| self.builtins.version_for_name(name))
+    }
+
+    /// Removes a session-local UDF and any bound host implementation.
+    pub fn remove_session_by_name(&mut self, name: &str) -> Result<()> {
+        let identity = self.session.remove_by_name(name)?;
+        self.host.remove(&identity);
+        Ok(())
     }
 
     /// Invokes a UDF through the host registry.
