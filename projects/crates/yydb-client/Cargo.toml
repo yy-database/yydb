@@ -11,3 +11,4 @@ path = "src/lib.rs"
 [dependencies]
 yydb = { workspace = true }
 yydb-types = { workspace = true }
+yydb-udf = { workspace = true }

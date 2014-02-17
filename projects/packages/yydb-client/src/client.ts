@@ -3,8 +3,10 @@ import {
     decodeSchemaGetOk,
     encodeKvGet,
     encodeKvPut,
+    encodeMicroRegister,
     encodeSchemaEnsure,
     Frame,
+    MicroRegisterPayload,
     MsgType,
     SchemaVersion,
 } from "./wire.js";
@@ -13,8 +15,10 @@ import { openWebSocketTransport } from "./ws.js";
 
 export type {
     Frame,
+    MicroRegisterPayload,
     MsgTypeCode,
     SchemaVersion,
+    WireUdfScalarKind,
 } from "./wire.js";
 export { MsgType, encodeFrame, decodeFrame } from "./wire.js";
 
@@ -92,6 +96,11 @@ export class Client {
         await this.roundtrip(MsgType.KvPut, encodeKvPut(key, bytes));
     }
 
+    /** Register a session-local TypeScript micro contract on the remote engine. */
+    async registerMicro(payload: MicroRegisterPayload): Promise<void> {
+        await this.roundtrip(MsgType.MicroRegister, encodeMicroRegister(payload));
+    }
+
     private async roundtrip(msgType: number, body: Uint8Array): Promise<Frame> {
         const requestId = this.nextId++;
         const response = await this.transport.send({
@@ -113,6 +122,7 @@ export class Client {
             [MsgType.SchemaEnsure]: MsgType.SchemaEnsureOk,
             [MsgType.KvGet]: MsgType.KvGetOk,
             [MsgType.KvPut]: MsgType.KvPutOk,
+            [MsgType.MicroRegister]: MsgType.MicroRegisterOk,
         };
         const want = expectedOk[msgType];
         if (want !== undefined && response.msgType !== want) {

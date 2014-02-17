@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decodeFrame, encodeFrame, encodeKvPut, decodeKvGetOk, MsgType } from "./wire.ts";
+import {
+    decodeFrame,
+    encodeFrame,
+    encodeKvPut,
+    decodeKvGetOk,
+    encodeMicroRegister,
+    MsgType,
+} from "./wire.ts";
 
 test("frame roundtrip", () => {
     const encoded = encodeFrame({
@@ -21,6 +28,20 @@ test("frame roundtrip", () => {
 test("kv put body encodes lengths", () => {
     const body = encodeKvPut("a", new TextEncoder().encode("bc"));
     assert.ok(body.byteLength >= 4 + 1 + 4 + 2);
+});
+
+test("micro register body encodes contract fields", () => {
+    const body = encodeMicroRegister({
+        hostId: 9,
+        handleVersion: 1,
+        udfVersion: 2,
+        name: "text.normalize",
+        functionId: "3",
+        args: ["text"],
+        returns: "text",
+        fingerprint: Uint8Array.from({ length: 32 }, (_, index) => index),
+    });
+    assert.equal(body.byteLength, 8 + 4 + 4 + (4 + 14) + (4 + 1) + 1 + 1 + 1 + 32);
 });
 
 test("kv get ok decode", () => {

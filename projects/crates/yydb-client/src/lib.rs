@@ -19,8 +19,10 @@ pub use yydb_types::{Error, Result, SchemaVersion};
 
 use yydb::wire::{
     self, decode_error_message, decode_kv_get_ok, decode_schema_get_ok, encode_kv_get,
-    encode_kv_put, encode_schema_ensure, read_frame, write_frame, Frame, MsgType,
+    encode_kv_put, encode_micro_register, encode_schema_ensure, read_frame, write_frame, Frame,
+    MsgType,
 };
+use yydb_udf::TypeScriptMicroDefinition;
 
 /// Handle to a remote YYDB server started with `yydb serve`.
 pub struct Client {
@@ -91,6 +93,16 @@ impl Client {
     pub fn put(&self, key: &str, value: impl AsRef<[u8]>) -> Result<()> {
         let response = self.roundtrip(MsgType::KvPut, encode_kv_put(key, value.as_ref()))?;
         expect_type(&response, MsgType::KvPutOk)?;
+        Ok(())
+    }
+
+    /// Register a session-local TypeScript micro contract on the remote engine.
+    pub fn register_ts_micro(&self, definition: &TypeScriptMicroDefinition) -> Result<()> {
+        let response = self.roundtrip(
+            MsgType::MicroRegister,
+            encode_micro_register(definition),
+        )?;
+        expect_type(&response, MsgType::MicroRegisterOk)?;
         Ok(())
     }
 
