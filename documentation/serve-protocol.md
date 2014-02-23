@@ -78,6 +78,10 @@ lands), must be rejected.
 | 12   | `KvPutOk`        | S→C       | empty                                                               |
 | 13   | `MicroRegister`  | C→S       | session TS micro metadata (see below)                               |
 | 14   | `MicroRegisterOk`| S→C       | empty                                                               |
+| 15   | `MicroHostInvoke`| S→C       | host micro callback while serving another request (see below)         |
+| 16   | `MicroHostInvokeOk`| C→S     | host micro scalar result                                            |
+| 17   | `ScalarCall`     | C→S       | invoke a registered scalar UDF (see below)                          |
+| 18   | `ScalarCallOk`   | S→C       | scalar UDF result                                                   |
 | 255  | `Error`          | S→C       | UTF-8 error message                                                 |
 
 ### `MicroRegister` body (`0000`)
@@ -99,9 +103,32 @@ carries metadata and opaque host handles only — never a JS closure.
 
 Type tags: `0=null`, `1=bool`, `2=i64`, `3=text`.
 
-Invocation still requires a host adapter in the engine process. Remote `yydb
-serve` peers accept registration metadata in `0000`; callback invocation over
-the same socket is not part of `0000` yet.
+### `MicroHostInvoke` body (`0000`)
+
+While handling another client request, the engine may push a host callback to
+the wire peer that owns the JS registry:
+
+| Field            | Type                                      |
+|------------------|-------------------------------------------|
+| `host_id`        | `u64` LE                                  |
+| `handle_version` | `u32` LE                                  |
+| `function_id`    | `u32 len` + UTF-8                         |
+| `args`           | `u8 count` + tagged scalar values         |
+
+The peer answers with `MicroHostInvokeOk` using the same `request_id` and a
+single tagged scalar return value. TCP clients must handle server pushes before
+the response to their own in-flight request.
+
+### `ScalarCall` body (`0000`)
+
+| Field         | Type                                      |
+|---------------|-------------------------------------------|
+| `udf_version` | `u32` LE                                  |
+| `name`        | `u32 len` + UTF-8                         |
+| `args`        | `u8 count` + tagged scalar values         |
+
+`ScalarCallOk` returns one tagged scalar value. TypeScript host micros require
+the peer to answer `MicroHostInvoke` callbacks during the same connection.
 
 Unknown `msg_type` → `Error` with the same `request_id`.
 

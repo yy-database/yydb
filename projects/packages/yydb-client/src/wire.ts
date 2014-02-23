@@ -33,11 +33,29 @@ export const MsgType = {
     KvPutOk: 12,
     MicroRegister: 13,
     MicroRegisterOk: 14,
+    MicroHostInvoke: 15,
+    MicroHostInvokeOk: 16,
+    ScalarCall: 17,
+    ScalarCallOk: 18,
     Error: 255,
 } as const;
 
 /** Phase-1 scalar kinds on the YY wire micro register path. */
 export type WireUdfScalarKind = "null" | "bool" | "i64" | "text";
+
+/** Phase-1 scalar value on the YY wire host invoke path. */
+export type WireUdfScalarValue =
+    | null
+    | boolean
+    | number
+    | string;
+
+export interface MicroHostInvokePayload {
+    hostId: number;
+    handleVersion: number;
+    functionId: string;
+    args: readonly WireUdfScalarValue[];
+}
 
 export type MsgTypeCode = (typeof MsgType)[keyof typeof MsgType];
 
@@ -187,6 +205,136 @@ function pushU64(out: number[], value: number) {
 }
 
 /** Encode a `MicroRegister` body. */
+function encodeUdfValue(out: number[], value: WireUdfScalarValue): void {
+    if (value === null) {
+        out.push(0);
+        return;
+    }
+    if (typeof value === "boolean") {
+        out.push(1, value ? 1 : 0);
+        return;
+    }
+    if (typeof value === "number") {
+        out.push(2);
+        const view = new DataView(new ArrayBuffer(8));
+        view.setBigInt64(0, BigInt(value), true);
+        out.push(...new Uint8Array(view.buffer));
+        return;
+    }
+    if (typeof value === "string") {
+        out.push(3);
+        pushBytes(out, new TextEncoder().encode(value));
+        return;
+    }
+    throw new Error("unsupported wire udf value");
+}
+
+function decodeUdfValue(body: Uint8Array, offset: { n: number }): WireUdfScalarValue {
+    if (offset.n >= body.byteLength) {
+        throw new Error("wire scalar value missing tag");
+    }
+    const tag = body[offset.n]!;
+    offset.n += 1;
+    switch (tag) {
+        case 0:
+            return null;
+        case 1: {
+            if (offset.n >= body.byteLength) {
+                throw new Error("wire bool value truncated");
+            }
+            const value = body[offset.n]! !== 0;
+            offset.n += 1;
+            return value;
+        }
+        case 2: {
+            if (offset.n + 8 > body.byteLength) {
+                throw new Error("wire i64 value truncated");
+            }
+            const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+            const value = Number(view.getBigInt64(offset.n, true));
+            offset.n += 8;
+            return value;
+        }
+        case 3: {
+            const len = readU32At(body, offset);
+            const bytes = readBytesAt(body, offset, len);
+            return new TextDecoder().decode(bytes);
+        }
+        default:
+            throw new Error("wire scalar value has invalid type tag");
+    }
+}
+
+function encodeUdfValues(values: readonly WireUdfScalarValue[]): number[] {
+    if (values.length > 255) {
+        throw new Error("wire scalar arg count exceeds u8");
+    }
+    const out: number[] = [values.length];
+    for (const value of values) {
+        encodeUdfValue(out, value);
+    }
+    return out;
+}
+
+function decodeUdfValues(body: Uint8Array, offset: { n: number }): WireUdfScalarValue[] {
+    if (offset.n >= body.byteLength) {
+        throw new Error("wire scalar args missing count");
+    }
+    const count = body[offset.n]!;
+    offset.n += 1;
+    const values: WireUdfScalarValue[] = [];
+    for (let index = 0; index < count; index += 1) {
+        values.push(decodeUdfValue(body, offset));
+    }
+    return values;
+}
+
+/** Decode a `MicroHostInvoke` body. */
+export function decodeMicroHostInvoke(body: Uint8Array): MicroHostInvokePayload {
+    const offset = { n: 0 };
+    const hostId = Number(readU64At(body, offset));
+    const handleVersion = readU32At(body, offset);
+    const functionIdLen = readU32At(body, offset);
+    const functionId = new TextDecoder().decode(readBytesAt(body, offset, functionIdLen));
+    const args = decodeUdfValues(body, offset);
+    return { hostId, handleVersion, functionId, args };
+}
+
+/** Encode a `MicroHostInvokeOk` body. */
+export function encodeMicroHostInvokeOk(value: WireUdfScalarValue): Uint8Array {
+    const out: number[] = [];
+    encodeUdfValue(out, value);
+    return Uint8Array.from(out);
+}
+
+/** Encode a `ScalarCall` body. */
+export function encodeScalarCall(
+    name: string,
+    version: number,
+    args: readonly WireUdfScalarValue[],
+): Uint8Array {
+    const out: number[] = [];
+    pushU32(out, version >>> 0);
+    pushBytes(out, new TextEncoder().encode(name));
+    out.push(...encodeUdfValues(args));
+    return Uint8Array.from(out);
+}
+
+/** Decode a `ScalarCallOk` body. */
+export function decodeScalarCallOk(body: Uint8Array): WireUdfScalarValue {
+    return decodeUdfValue(body, { n: 0 });
+}
+
+function readU64At(body: Uint8Array, offset: { n: number }): bigint {
+    if (offset.n + 8 > body.byteLength) {
+        throw new Error("wire body truncated u64");
+    }
+    const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+    const value = view.getBigUint64(offset.n, true);
+    offset.n += 8;
+    return value;
+}
+
 export function encodeMicroRegister(payload: MicroRegisterPayload): Uint8Array {
     if (payload.fingerprint.byteLength !== 32) {
         throw new Error("micro register fingerprint must be 32 bytes");

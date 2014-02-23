@@ -1,8 +1,13 @@
-import type { Frame } from "./wire.js";
+import type { Frame, MicroHostInvokePayload, WireUdfScalarValue } from "./wire.js";
+
+export type MicroHostHandler = (
+    payload: MicroHostInvokePayload,
+) => WireUdfScalarValue | Promise<WireUdfScalarValue>;
 
 export type Transport = {
     send(frame: Frame): Promise<Frame>;
     close(): void;
+    setMicroHostHandler?(handler: MicroHostHandler | undefined): void;
 };
 
 export function normalizeWsUrl(endpoint: string): string {

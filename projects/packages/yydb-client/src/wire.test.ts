@@ -30,6 +30,24 @@ test("kv put body encodes lengths", () => {
     assert.ok(body.byteLength >= 4 + 1 + 4 + 2);
 });
 
+test("micro host invoke roundtrip codec", async () => {
+    const { decodeMicroHostInvoke, encodeMicroHostInvokeOk } = await import("./wire.ts");
+    // use inline encode via scalar call helper - import decode only tested via manual body
+    const body = new Uint8Array([
+        9, 0, 0, 0, 0, 0, 0, 0, // host_id
+        1, 0, 0, 0, // handle_version
+        1, 0, 0, 0, 49, // function_id "1"
+        1, // arg count
+        3, 3, 0, 0, 0, 72, 105, 33, // text "Hi!"
+    ]);
+    const payload = decodeMicroHostInvoke(body);
+    assert.equal(payload.hostId, 9);
+    assert.equal(payload.functionId, "1");
+    assert.equal(payload.args[0], "Hi!");
+    const ok = encodeMicroHostInvokeOk("hi");
+    assert.equal(ok.byteLength, 1 + 4 + 2);
+});
+
 test("micro register body encodes contract fields", () => {
     const body = encodeMicroRegister({
         hostId: 9,
