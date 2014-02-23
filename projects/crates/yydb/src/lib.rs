@@ -2,8 +2,8 @@
 //! query language**.
 //!
 //! **Embedded host:** Rust only. Register native [UDFs](udf) on
-//! [`Connection`]. Other languages should use the `yydb-client` crate against
-//! `yydb serve`, not this embeddable library.
+//! [`Connection`]. Other languages should use `@yydb/yydb-client` against the
+//! TypeScript `yydb serve` CLI, not this embeddable library.
 //!
 //! Durable layout is still **one primary `.yydb` file**. Optional journal
 //! sidecars `{path}-wal` / `{path}-shm` appear when
@@ -53,6 +53,11 @@ mod lease;
 mod refs;
 mod ttl;
 mod udf_bridge;
+/// TCP wire peer adapter for TypeScript host micros.
+pub mod ts_wire_host;
+
+/// Loopback-first `serve` transport for out-of-process clients.
+pub mod serve;
 
 /// YY wire protocol (`YYDB`|`YYDS` + version digits `0000`…).
 pub mod wire;
