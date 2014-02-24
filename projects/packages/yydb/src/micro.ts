@@ -103,6 +103,27 @@ export class MicroSessionRegistry {
         return this.byFunctionId.get(handle.functionId)?.definition;
     }
 
+    /** Invokes a registered micro from a wire `MicroHostInvoke` payload. */
+    invokeFromWire(payload: {
+        hostId: number;
+        handleVersion: number;
+        functionId: string;
+        args: readonly unknown[];
+    }): string | number | boolean | null {
+        const handle: MicroHandle = {
+            hostId: payload.hostId,
+            functionId: payload.functionId,
+            implementationVersion: payload.handleVersion,
+            name: "",
+            version: 0,
+        };
+        return this.invokeScalar(handle, [...payload.args]) as
+            | string
+            | number
+            | boolean
+            | null;
+    }
+
     /** Invokes a registered scalar micro (host adapter entry point). */
     invokeScalar(handle: MicroHandle, args: unknown[]): unknown {
         const definition = this.resolve(handle);
