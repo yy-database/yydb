@@ -1,7 +1,7 @@
 # Rust
 target/
 
-# Node 
+# Node
 node_modules/
 dist/
 
@@ -15,11 +15,11 @@ target/
 # IDEs
 .idea/
 .vscode/
-*.iml
 .settings/
 .classpath
 .project
 .factorypath
+*.iml
 
 # Rust
 .cargo/config.toml
