@@ -1,13 +1,13 @@
-# GitHub Actions / npm / Docker publish for YYDB
+# GitHub Actions / npm publish for YYDB
 
 ## Workflow split
 
 | Workflow                                          | Trigger                              | Purpose                                    |
 |---------------------------------------------------|--------------------------------------|--------------------------------------------|
-| **CI** (`.github/workflows/ci.yml`)               | push/PR to `dev` / `main` / `master` | fmt, test, frontend build ? **no publish** |
-| **Release** (`.github/workflows/release-npm.yml`) | push tag `v*.*.*` only               | npm + GitHub Release zips + GHCR docker    |
+| **CI** (`.github/workflows/ci.yml`)               | push/PR to `dev` / `main` / `master` | fmt, test, frontend build — **no publish** |
+| **Release** (`.github/workflows/release-npm.yml`) | push tag `v*.*.*` only               | npm + GitHub Release native-binding zips   |
 
-Release does **not** depend on CI. Tag `vX.Y.Z` ? package/image version `X.Y.Z`.
+Release does **not** depend on CI. Tag `vX.Y.Z` → package version `X.Y.Z`.
 
 ```text
 git tag v0.1.0
@@ -16,30 +16,13 @@ git push origin v0.1.0
 
 Jobs after `build-engine` run independently:
 
-- `publish-npm` ? Trusted Publishing (OIDC)
-- `github-release` ? create Release (if needed) and upload zips
-- `docker` ? push `ghcr.io/<owner>/yydb` (`:vX.Y.Z`, `:X.Y.Z`, `:latest`)
+- `publish-npm` → Trusted Publishing (OIDC)
+- `github-release` → create Release (if needed) and upload zips
 
 Retry-safe:
 
-- npm: version already on the registry ? skipped
-- GitHub: release/asset already exists ? skipped
-- Docker: same tags are overwritten (retry OK)
-
-## Docker
-
-Image: **`ghcr.io/yy-database/yydb`** (linux/amd64, from Release `yydb-linux-x64` artifact)
-
-```bash
-docker run --rm -p 7700:7700 -v yydb-data:/data \
-  ghcr.io/yy-database/yydb:latest \
-  serve /data/app.yydb --bind 0.0.0.0:7700 --insecure-bind
-```
-
-First publish may create a private GHCR package; set visibility under GitHub ? Packages if you want public pulls. No
-extra secret: uses `GITHUB_TOKEN` + `packages: write`.
-
-Details: [`docker/yydb/README.md`](../docker/yydb/README.md)
+- npm: version already on the registry → skipped
+- GitHub: release/asset already exists → skipped
 
 ## Auth: Trusted Publishing (OIDC)
 
@@ -76,6 +59,5 @@ CLI helper (needs working web OTP): `node scripts/configure-trusted-publishers.m
 
 ## Release job requirements
 
-- `publish-npm`: `environment: NPM_PUBLISH`, `id-token: write`, Node ? 22.14, npm ? 11.5.1, no `NODE_AUTH_TOKEN`
+- `publish-npm`: `environment: NPM_PUBLISH`, `id-token: write`, Node ≥ 22.14, npm ≥ 11.5.1, no `NODE_AUTH_TOKEN`
 - `github-release`: `contents: write`
-- `docker`: `packages: write`
