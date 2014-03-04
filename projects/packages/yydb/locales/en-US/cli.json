@@ -1,0 +1,14 @@
+{
+    "cli.intro": "yydb — YYDB TypeScript CLI",
+    "cli.cmd.version": "Print the engine version",
+    "cli.cmd.init": "Initialize a new YYDB database file",
+    "cli.cmd.info": "Show database metadata",
+    "cli.cmd.serve": "Start the HTTP API server",
+    "cli.cmd.generate": "Generate TypeScript types from a VOS schema document",
+    "cli.opt.schema-version": "Schema version number (default: 1)",
+    "cli.opt.schema-file": "VOS schema document to embed at init time",
+    "cli.opt.bind": "Listen address (default: 127.0.0.1:7700)",
+    "cli.opt.insecure-bind": "Allow binding to non-loopback addresses",
+    "cli.opt.output": "Output TypeScript file path",
+    "cli.env.native": "Override the platform .node binding path (YYDB_NATIVE)"
+}
