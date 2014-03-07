@@ -118,7 +118,7 @@ fn missing_host_implementation_returns_unavailable() {
         signature: Signature::new(vec![UdfType::Text], UdfType::Text),
         policy: UdfPolicy::pure_embedded(),
         placement: Placement::Host,
-        implementation_kind: ImplementationKind::TypeScriptMicro,
+        implementation_kind: ImplementationKind::HostMicro,
         fingerprint: [3u8; 32],
     };
     let mut registry = UdfRegistry::default();

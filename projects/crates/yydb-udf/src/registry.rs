@@ -159,7 +159,7 @@ impl SessionUdfRegistry {
     }
 }
 
-/// Process-local host registry for native and TypeScript implementations.
+/// Process-local host registry for native and host-runtime implementations.
 #[derive(Default)]
 pub struct HostUdfRegistry {
     entries: HashMap<String, HostUdfEntry>,

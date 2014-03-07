@@ -1,17 +1,16 @@
 use std::sync::Arc;
 
 use yydb_udf::{
-    Budget, TypeScriptFunctionHandle, TypeScriptHostAdapter, TypeScriptMicroDefinition,
-    TypeScriptMicroImplementation, UdfContext, UdfImplementation, UdfInvocation, UdfType,
-    UdfValue,
+    Budget, HostFunctionHandle, HostMicroDefinition, HostMicroImplementation, HostRuntimeAdapter,
+    UdfContext, UdfImplementation, UdfInvocation, UdfType, UdfValue,
 };
 
 struct TrimAdapter;
 
-impl TypeScriptHostAdapter for TrimAdapter {
+impl HostRuntimeAdapter for TrimAdapter {
     fn invoke_scalar(
         &self,
-        handle: &TypeScriptFunctionHandle,
+        handle: &HostFunctionHandle,
         args: &[UdfValue],
     ) -> yydb_udf::Result<UdfValue> {
         assert_eq!(handle.function_id, "1");
@@ -24,7 +23,7 @@ impl TypeScriptHostAdapter for TrimAdapter {
 
     fn invoke_batch(
         &self,
-        _handle: &TypeScriptFunctionHandle,
+        _handle: &HostFunctionHandle,
         _batches: &[Vec<UdfValue>],
     ) -> yydb_udf::Result<Vec<UdfValue>> {
         Err(yydb_udf::UdfError::UnsupportedType)
@@ -32,8 +31,8 @@ impl TypeScriptHostAdapter for TrimAdapter {
 }
 
 #[test]
-fn typescript_micro_registers_and_invokes_through_host_adapter() {
-    let definition = TypeScriptMicroDefinition::from_scalar(
+fn host_micro_registers_and_invokes_through_runtime_adapter() {
+    let definition = HostMicroDefinition::from_scalar(
         "text.normalize",
         1,
         vec![UdfType::Text],
@@ -48,8 +47,8 @@ fn typescript_micro_registers_and_invokes_through_host_adapter() {
 
     let session = definition.session_definition();
     let identity = session.identity.clone();
-    let adapter: Arc<dyn TypeScriptHostAdapter> = Arc::new(TrimAdapter);
-    let implementation = Arc::new(TypeScriptMicroImplementation::new(definition, adapter));
+    let adapter: Arc<dyn HostRuntimeAdapter> = Arc::new(TrimAdapter);
+    let implementation = Arc::new(HostMicroImplementation::new(definition, adapter));
 
     let mut context = UdfContext::new(Budget::new(4));
     let result = implementation
