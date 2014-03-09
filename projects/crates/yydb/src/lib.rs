@@ -53,8 +53,8 @@ mod lease;
 mod refs;
 mod ttl;
 mod udf_bridge;
-/// TCP wire peer adapter for TypeScript host micros.
-pub mod ts_wire_host;
+/// TCP wire peer adapter for session host micros.
+pub mod host_wire;
 
 /// Loopback-first `serve` transport for out-of-process clients.
 pub mod serve;
@@ -68,7 +68,7 @@ pub use udf::ScalarUdf;
 /// Language-neutral execution programs accepted by the embedded host.
 pub use yydb_execution as execution;
 pub use yydb_udf::{
-    TypeScriptFunctionHandle, TypeScriptHostAdapter, TypeScriptMicroDefinition, UdfType,
+    HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, UdfType,
 };
 pub use yydb_types::{
     ChunkManifest, CommitSequence, DoctorIssue, DoctorReport, DoctorSeverity, Error, EvictBudget,
@@ -764,20 +764,20 @@ impl Connection {
             .register_vos_macro(source, version)
     }
 
-    /// Install the process-local TypeScript host adapter used by [`register_ts_micro`].
-    pub fn set_ts_host_adapter(&self, adapter: Arc<dyn TypeScriptHostAdapter>) {
+    /// Install the process-local host runtime adapter used by [`register_host_micro`].
+    pub fn set_host_adapter(&self, adapter: Arc<dyn HostRuntimeAdapter>) {
         self.udfs
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .set_ts_host_adapter(adapter);
+            .set_host_adapter(adapter);
     }
 
-    /// Register a session-local TypeScript micro through the host adapter.
-    pub fn register_ts_micro(&self, definition: TypeScriptMicroDefinition) -> Result<()> {
+    /// Register a session-local host micro through the host runtime adapter.
+    pub fn register_host_micro(&self, definition: HostMicroDefinition) -> Result<()> {
         self.udfs
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .register_ts_micro(definition)
+            .register_host_micro(definition)
     }
 
     /// Register an object-safe [`ScalarUdf`] at an explicit version.

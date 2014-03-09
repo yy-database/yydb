@@ -86,8 +86,8 @@ lands), must be rejected.
 
 ### `MicroRegister` body (`0000`)
 
-Registers a **session-local** TypeScript micro contract on the engine. The wire
-carries metadata and opaque host handles only — never a JS closure.
+Registers a **session-local** host micro contract on the engine. The wire
+carries metadata and opaque host handles only — never a host-runtime callback.
 
 | Field              | Type                                      |
 |--------------------|-------------------------------------------|
@@ -106,7 +106,7 @@ Type tags: `0=null`, `1=bool`, `2=i64`, `3=text`.
 ### `MicroHostInvoke` body (`0000`)
 
 While handling another client request, the engine may push a host callback to
-the wire peer that owns the JS registry:
+the wire peer that owns the host registry:
 
 | Field            | Type                                      |
 |------------------|-------------------------------------------|
@@ -127,7 +127,7 @@ the response to their own in-flight request.
 | `name`        | `u32 len` + UTF-8                         |
 | `args`        | `u8 count` + tagged scalar values         |
 
-`ScalarCallOk` returns one tagged scalar value. TypeScript host micros require
+`ScalarCallOk` returns one tagged scalar value. Session host micros require
 the peer to answer `MicroHostInvoke` callbacks during the same connection.
 
 Unknown `msg_type` → `Error` with the same `request_id`.
