@@ -48,7 +48,7 @@ pub mod schema;
 /// Rust scalar UDF traits and registration helpers.
 pub mod udf;
 
-/// Phase 1 VOS read query executor.
+/// Phase 1 VOS query executor (read pipelines + insert writes).
 pub mod query;
 
 mod doctor;
@@ -408,6 +408,17 @@ impl Connection {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let state = self.read_state()?;
         query::execute(source, &state.records)
+    }
+
+    /// Execute unit-valued VOS write programs (for example `User { … }.insert()`).
+    pub fn execute(&self, source: &str) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut state = self.read_state()?;
+        let catalog = state.catalog.as_ref().ok_or_else(|| Error::Schema {
+            message: "call ensure_schema before execute".into(),
+        })?;
+        query::execute_write(source, catalog, &mut state.records)?;
+        self.write_state(&state)
     }
 
     /// Upsert one logical table row used by the Phase 1 query executor.
