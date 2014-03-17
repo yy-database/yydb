@@ -9,12 +9,10 @@ use std::{
 };
 
 use sha1::{Digest, Sha1};
+use yydb::wire::{self, dispatch, read_frame, write_frame, Frame};
+use yydb::{Connection, Error};
 
-use crate::{
-    host_wire::TcpWireHostAdapter,
-    wire::{self, dispatch, read_frame, write_frame, Frame},
-    Connection, Error,
-};
+use crate::host_wire::TcpWireHostAdapter;
 
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 

@@ -13,7 +13,7 @@ pub fn version() -> String {
 
 #[napi]
 pub fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> Result<()> {
-    yydb::serve::run_serve(
+    yydb_server::run_serve(
         Path::new(&db_path),
         &bind,
         insecure_bind.unwrap_or(false),
