@@ -1,7 +1,7 @@
 {
     "name": "@yydb/yydb",
     "version": "0.1.0",
-    "description": "Single-file YYDB database for TypeScript and Node.js; manages the local engine for you",
+    "description": "YYDB all-in-one for Node: embedded engine, CLI, and local serve",
     "license": "MPL-2.0",
     "private": true,
     "type": "module",
