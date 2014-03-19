@@ -6,7 +6,7 @@ use vos::ast::catalog::CatalogSnapshot;
 use yydb_types::{Error, Result, Value};
 
 use super::lower;
-use super::ops::{CmpOp, LiteralKind, Pred, QueryOp, QueryRow};
+use super::ops::{CmpOp, LiteralKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow};
 use super::resolve;
 use super::store;
 
@@ -46,18 +46,12 @@ pub fn execute_ops(
                 rows.retain(|row| eval_pred(predicate, row, table, catalog, records));
             }
             QueryOp::Project { fields } => {
+                let table = current_table.as_deref().ok_or_else(|| Error::Schema {
+                    message: "project without a preceding table scan".into(),
+                })?;
                 rows = rows
                     .into_iter()
-                    .map(|row| {
-                        let mut out = QueryRow::new();
-                        for field in fields {
-                            let src = field.from.as_deref().unwrap_or(field.name.as_str());
-                            if let Some(value) = row.get(src) {
-                                out.insert(field.name.clone(), value.clone());
-                            }
-                        }
-                        out
-                    })
+                    .map(|row| project_row(fields, &row, table, catalog, records))
                     .collect();
             }
             QueryOp::Sort { keys } => {
@@ -85,6 +79,42 @@ pub fn execute_ops(
         }
     }
     Ok(rows)
+}
+
+fn project_row(
+    fields: &[ProjectField],
+    row: &QueryRow,
+    table: &str,
+    catalog: Option<&CatalogSnapshot>,
+    records: &BTreeMap<String, Vec<u8>>,
+) -> QueryRow {
+    let mut out = QueryRow::new();
+    for field in fields {
+        match &field.expr {
+            ProjectExpr::Scalar { path } => {
+                let value = read_path(path, row, table, catalog, records);
+                out.insert(field.name.clone(), value);
+            }
+            ProjectExpr::Nested { path, fields: nested } => {
+                let nested_value = match catalog {
+                    Some(catalog) => resolve::resolve_row_at_path(path, row, table, catalog, records)
+                        .map(|(nested_row, nested_table)| {
+                            Value::Row(project_row(
+                                nested,
+                                &nested_row,
+                                &nested_table,
+                                Some(catalog),
+                                records,
+                            ))
+                        })
+                        .unwrap_or(Value::Null),
+                    None => Value::Null,
+                };
+                out.insert(field.name.clone(), nested_value);
+            }
+        }
+    }
+    out
 }
 
 fn eval_pred(
