@@ -2,13 +2,19 @@
 
 use std::collections::BTreeMap;
 
+use vos::ast::catalog::CatalogSnapshot;
 use yydb_types::{Error, Result, Value};
 
 use super::lower;
 use super::ops::{CmpOp, LiteralKind, Pred, QueryOp, QueryRow};
+use super::resolve;
 use super::store;
 
-pub fn execute(source: &str, records: &BTreeMap<String, Vec<u8>>) -> Result<Vec<QueryRow>> {
+pub fn execute(
+    source: &str,
+    catalog: Option<&CatalogSnapshot>,
+    records: &BTreeMap<String, Vec<u8>>,
+) -> Result<Vec<QueryRow>> {
     let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema {
         message: diagnostics
             .errors
@@ -17,18 +23,27 @@ pub fn execute(source: &str, records: &BTreeMap<String, Vec<u8>>) -> Result<Vec<
             .unwrap_or_else(|| "VOS query parse failed".into()),
     })?;
     let ops = lower::lower_program(&program)?;
-    execute_ops(&ops, records)
+    execute_ops(&ops, catalog, records)
 }
 
-pub fn execute_ops(ops: &[QueryOp], records: &BTreeMap<String, Vec<u8>>) -> Result<Vec<QueryRow>> {
+pub fn execute_ops(
+    ops: &[QueryOp],
+    catalog: Option<&CatalogSnapshot>,
+    records: &BTreeMap<String, Vec<u8>>,
+) -> Result<Vec<QueryRow>> {
     let mut rows: Vec<QueryRow> = Vec::new();
+    let mut current_table: Option<String> = None;
     for op in ops {
         match op {
             QueryOp::Scan { table } => {
+                current_table = Some(table.clone());
                 rows = store::load_table(records, table)?;
             }
             QueryOp::Filter { predicate } => {
-                rows.retain(|row| eval_pred(predicate, row));
+                let table = current_table.as_deref().ok_or_else(|| Error::Schema {
+                    message: "filter without a preceding table scan".into(),
+                })?;
+                rows.retain(|row| eval_pred(predicate, row, table, catalog, records));
             }
             QueryOp::Project { fields } => {
                 rows = rows
@@ -72,24 +87,56 @@ pub fn execute_ops(ops: &[QueryOp], records: &BTreeMap<String, Vec<u8>>) -> Resu
     Ok(rows)
 }
 
-fn eval_pred(pred: &Pred, row: &QueryRow) -> bool {
+fn eval_pred(
+    pred: &Pred,
+    row: &QueryRow,
+    table: &str,
+    catalog: Option<&CatalogSnapshot>,
+    records: &BTreeMap<String, Vec<u8>>,
+) -> bool {
     match pred {
         Pred::True => true,
         Pred::False => false,
-        Pred::FieldBool { field, value } => matches!(row.get(field), Some(Value::Bool(b)) if b == value),
+        Pred::FieldBool { path, value } => {
+            let left = read_path(path, row, table, catalog, records);
+            matches!(left, Value::Bool(b) if b == *value)
+        }
         Pred::FieldCmp {
-            field,
+            path,
             op,
             literal,
             kind,
         } => {
-            let left = row.get(field).cloned().unwrap_or(Value::Null);
+            let left = read_path(path, row, table, catalog, records);
             let right = decode_literal(literal, *kind);
             cmp_values(&left, *op, &right)
         }
-        Pred::And(left, right) => eval_pred(left, row) && eval_pred(right, row),
-        Pred::Or(left, right) => eval_pred(left, row) || eval_pred(right, row),
+        Pred::And(left, right) => {
+            eval_pred(left, row, table, catalog, records)
+                && eval_pred(right, row, table, catalog, records)
+        }
+        Pred::Or(left, right) => {
+            eval_pred(left, row, table, catalog, records)
+                || eval_pred(right, row, table, catalog, records)
+        }
     }
+}
+
+fn read_path(
+    path: &[String],
+    row: &QueryRow,
+    table: &str,
+    catalog: Option<&CatalogSnapshot>,
+    records: &BTreeMap<String, Vec<u8>>,
+) -> Value {
+    if path.len() == 1 {
+        return row.get(&path[0]).cloned().unwrap_or(Value::Null);
+    }
+    if let Some(catalog) = catalog {
+        return resolve::resolve_field_path(path, row, table, catalog, records)
+            .unwrap_or(Value::Null);
+    }
+    Value::Null
 }
 
 fn decode_literal(text: &str, kind: LiteralKind) -> Value {

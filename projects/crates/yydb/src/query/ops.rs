@@ -33,11 +33,11 @@ pub enum Pred {
     True,
     False,
     FieldBool {
-        field: String,
+        path: Vec<String>,
         value: bool,
     },
     FieldCmp {
-        field: String,
+        path: Vec<String>,
         op: CmpOp,
         literal: String,
         kind: LiteralKind,
