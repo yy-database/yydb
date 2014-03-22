@@ -1,10 +1,13 @@
-[workspace]
+﻿[workspace]
 resolver = "2"
 members = ["projects/crates/*"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+authors = ["Yggdrasill Team <192607617@qq.com>"]
+license = "MPL-2.0"
+repository = "https://github.com/yy-database/yydb.rs"
 
 [workspace.dependencies]
 blake3 = "1"
@@ -19,4 +22,5 @@ yydb-server = { path = "projects/crates/yydb-server" }
 yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }
 yydb-execution = { version = "0.1.0", path = "projects/crates/yydb-execution" }
 yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }
+yydb-query = { version = "0.1.0", path = "projects/crates/yydb-query" }
 windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Storage_FileSystem"] }
