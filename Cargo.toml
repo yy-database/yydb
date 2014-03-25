@@ -10,17 +10,32 @@ license = "MPL-2.0"
 repository = "https://github.com/yy-database/yydb.rs"
 
 [workspace.dependencies]
+# third-party
 blake3 = "1"
 sha1 = "0.10"
 base64 = "0.22"
 uuid = { version = "1", features = ["serde", "v4"] }
 serde_json = "1"
 vos = { version = "0.1.0", git = "https://github.com/voml/vos-language.git", branch = "dev" }
-yydb = { path = "projects/crates/yydb" }
-yydb-client = { path = "projects/crates/yydb-client" }
-yydb-server = { path = "projects/crates/yydb-server" }
+windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Storage_FileSystem"] }
+napi = { version = "2.16", default-features = false, features = ["napi4"] }
+napi-derive = "2.16"
+napi-build = "2.6"
+pyo3 = { version = "0.23", features = ["extension-module"] }
+
+# engine (bottom → mid; depend on yydb facade in apps)
 yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }
 yydb-execution = { version = "0.1.0", path = "projects/crates/yydb-execution" }
 yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }
 yydb-query = { version = "0.1.0", path = "projects/crates/yydb-query" }
-windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Storage_FileSystem"] }
+
+# facade
+yydb = { path = "projects/crates/yydb" }
+
+# transport (siblings of the facade — no cycle back into yydb)
+yydb-client = { path = "projects/crates/yydb-client" }
+yydb-server = { path = "projects/crates/yydb-server" }
+
+# language bindings (thin; yydb + yydb-server only)
+yydb-napi = { path = "projects/crates/yydb-napi" }
+yydb-pyo3 = { path = "projects/crates/yydb-pyo3" }

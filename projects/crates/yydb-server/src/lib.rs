@@ -1,9 +1,9 @@
 //! YYDB wire server — loopback-first TCP/WebSocket serve for out-of-process clients.
 //!
-//! Embedded Rust hosts use the [`yydb`] embed facade directly. Browser and lightweight
-//! TypeScript hosts use [`@yydb/yydb-client`](../../packages/yydb-client) against a
-//! process running this server (typically started by [`@yydb/yydb`](../../packages/yydb)
-//! `yydb serve` or `Database.open()`).
+//! Depends on the [`yydb`] facade only. Embedded Rust hosts use `yydb::Connection`
+//! directly. Remote hosts connect through `yydb-client` / `@yydb/yydb-client`.
+//! Language bindings (`yydb-napi`, `yydb-pyo3`) start this loop for `serve` /
+//! `Database.open()`-style products.
 
 #![deny(missing_docs)]
 

@@ -1,8 +1,9 @@
 //! Stable local execution model owned by YYDB.
 //!
-//! VOS frontends lower into this model through YYDB's local binder. This crate
-//! deliberately has no dependency on Oak, VOS, YYDS, or a remote execution
-//! protocol.
+//! VOS frontends lower into this model through the [`yydb`] facade binder. This
+//! crate deliberately has no dependency on Oak, VOS, YYDS, or a remote execution
+//! protocol. Applications should use `yydb::execution` instead of depending here
+//! directly.
 
 #![deny(missing_docs)]
 

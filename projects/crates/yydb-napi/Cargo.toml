@@ -2,8 +2,11 @@
 name = "yydb-napi"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Node-API bindings for YYDB serve and embedded engine access"
-license = "MPL-2.0"
+readme = "readme.md"
 publish = false
 
 [lib]
@@ -11,10 +14,10 @@ crate-type = ["cdylib"]
 name = "yydb_napi"
 
 [dependencies]
-napi = { version = "2.16", default-features = false, features = ["napi4"] }
-napi-derive = "2.16"
-yydb = { path = "../yydb" }
-yydb-server = { path = "../yydb-server" }
+napi = { workspace = true }
+napi-derive = { workspace = true }
+yydb = { workspace = true }
+yydb-server = { workspace = true }
 
 [build-dependencies]
-napi-build = "2.6"
+napi-build = { workspace = true }

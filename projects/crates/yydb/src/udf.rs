@@ -1,8 +1,10 @@
-//! Rust scalar UDF registration for the embedded YYDB host.
+//! UDF surface for the embedded YYDB host.
 //!
-//! YYDB’s supported embedded host is **Rust**. Register native closures or
-//! [`ScalarUdf`] implementations on a [`crate::Connection`]. Other languages
-//! should use [`yydb-client`](https://github.com/yy-database/yydb) against
+//! - **Simple path:** [`ScalarUdf`] + [`crate::Connection::create_scalar`].
+//! - **Advanced path:** [`UdfRegistry`] and related types re-exported from
+//!   `yydb-udf` below (`use yydb::udf::UdfRegistry`).
+//!
+//! Other languages should use `yydb-client` / `@yydb/yydb-client` against
 //! `yydb serve` rather than embedding this crate.
 
 use std::sync::Arc;
@@ -108,3 +110,11 @@ pub(crate) struct RegisteredUdf {
     pub(crate) udf: Arc<dyn ScalarUdf>,
     pub(crate) version: u32,
 }
+
+/// Registry, host adapters, and contract types from `yydb-udf`.
+pub use yydb_udf::{
+    CatalogUdfEntry, CatalogUdfRegistry, HostFunctionHandle, HostMicroDefinition,
+    HostMicroImplementation, HostRuntimeAdapter, HostUdfEntry, HostUdfRegistry, RegisterOptions,
+    SessionUdfEntry, SessionUdfRegistry, Signature, UdfDefinition, UdfError, UdfIdentity,
+    UdfRegistry, UdfType, UdfValue,
+};
