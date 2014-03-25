@@ -1,4 +1,6 @@
-//! Node-API surface for the TypeScript `yydb` CLI and `@yydb/yydb` package.
+//! Thin Node-API binding — delegates to the [`yydb`] facade and [`yydb-server`].
+
+#![warn(missing_docs)]
 
 use std::fs;
 use std::path::Path;
@@ -6,11 +8,13 @@ use std::path::Path;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+/// Embedded `yydb` engine version string.
 #[napi]
 pub fn version() -> String {
     yydb::version().to_string()
 }
 
+/// Run `yydb-server` on `bind` for the database at `db_path`.
 #[napi]
 pub fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> Result<()> {
     yydb_server::run_serve(
@@ -22,12 +26,9 @@ pub fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> Resu
     Ok(())
 }
 
+/// Open `db_path` and ensure the VOS schema when needed.
 #[napi]
-pub fn init_db(
-    db_path: String,
-    schema_version: u32,
-    schema_document: Option<String>,
-) -> Result<()> {
+pub fn init_db(db_path: String, schema_document: Option<String>) -> Result<()> {
     let conn = yydb::Connection::open(&db_path)
         .map_err(|error| Error::from_reason(error.to_string()))?;
     let schema = conn
@@ -38,11 +39,12 @@ pub fn init_db(
         None if schema.is_none() => String::new(),
         None => return Ok(()),
     };
-    conn.ensure_schema(schema_version, &document)
+    conn.ensure_schema(&document)
         .map_err(|error| Error::from_reason(error.to_string()))?;
     Ok(())
 }
 
+/// Return multi-line database diagnostics for `db_path`.
 #[napi]
 pub fn info_text(db_path: String) -> Result<String> {
     let conn = yydb::Connection::open(&db_path)
@@ -83,6 +85,7 @@ pub fn info_text(db_path: String) -> Result<String> {
     Ok(lines.join("\n"))
 }
 
+/// Read a VOS schema document from disk.
 #[napi]
 pub fn read_schema_file(schema_path: String) -> Result<String> {
     fs::read_to_string(&schema_path).map_err(|error| Error::from_reason(error.to_string()))

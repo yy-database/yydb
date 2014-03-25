@@ -10,9 +10,9 @@ const REORDERED: &str = "table User { active: bool, name: utf8, @@id: i64 }";
 #[test]
 fn persists_reorder_rename_and_tombstones_across_reopen() {
     let (connection, path) = common::open_temp_db("catalog-ledger");
-    connection.ensure_schema(1, INITIAL).unwrap();
+    connection.ensure_schema(INITIAL).unwrap();
     let initial = connection.catalog_snapshot().unwrap().unwrap();
-    connection.migrate_schema(1, 2, REORDERED, &RenameMap::default()).unwrap();
+    connection.migrate_schema(REORDERED, &RenameMap::default()).unwrap();
     drop(connection);
     let connection = common::reopen(&path);
     let reordered = connection.catalog_snapshot().unwrap().unwrap();
@@ -28,8 +28,15 @@ fn persists_reorder_rename_and_tombstones_across_reopen() {
         )]),
         ..RenameMap::default()
     };
-    connection.migrate_schema(2, 3, "table User { @@id: i64, label: utf8 }", &renames).unwrap();
-    connection.migrate_schema(3, 4, "table User { @@id: i64, label: utf8, status: bool }", &RenameMap::default()).unwrap();
+    connection
+        .migrate_schema("table User { @@id: i64, label: utf8 }", &renames)
+        .unwrap();
+    connection
+        .migrate_schema(
+            "table User { @@id: i64, label: utf8, status: bool }",
+            &RenameMap::default(),
+        )
+        .unwrap();
     drop(connection);
     let connection = common::reopen(&path);
     let snapshot = connection.catalog_snapshot().unwrap().unwrap();
@@ -41,7 +48,7 @@ fn persists_reorder_rename_and_tombstones_across_reopen() {
     let execution = connection.execution_catalog().unwrap().unwrap();
     assert_eq!(execution.types[0].fields[2].handle.field_id(), 4);
     assert_eq!(execution.types[0].fields[2].handle.index(), 3);
-    assert_eq!(connection.schema().unwrap().unwrap().version, 4);
+    assert_eq!(connection.schema_version().unwrap(), Some(4));
     drop(connection);
     common::cleanup(&path);
 }
@@ -49,32 +56,44 @@ fn persists_reorder_rename_and_tombstones_across_reopen() {
 #[test]
 fn failed_migrations_leave_schema_and_ledger_unchanged() {
     let connection = Connection::open_in_memory().unwrap();
-    connection.ensure_schema(1, INITIAL).unwrap();
+    connection.ensure_schema(INITIAL).unwrap();
     let initial = connection.catalog_snapshot().unwrap();
-    assert!(matches!(connection.ensure_schema(2, REORDERED), Err(Error::SchemaConflict { .. })));
-    assert!(connection.ensure_schema(1, REORDERED).is_err());
-    assert!(connection.migrate_schema(0, 2, REORDERED, &RenameMap::default()).is_err());
-    assert!(connection.migrate_schema(1, 1, REORDERED, &RenameMap::default()).is_err());
+    assert!(matches!(
+        connection.ensure_schema(REORDERED),
+        Err(Error::Schema { .. })
+    ));
+    assert!(connection.ensure_schema(REORDERED).is_err());
+    let empty = Connection::open_in_memory().unwrap();
+    assert!(empty
+        .migrate_schema(REORDERED, &RenameMap::default())
+        .is_err());
+    let bad_pragma = format!("// @yydb-schema-version: 9\n{REORDERED}");
+    assert!(connection
+        .migrate_schema(&bad_pragma, &RenameMap::default())
+        .is_err());
     let invalid = RenameMap {
         types: BTreeMap::from([("Missing".into(), "User".into())]),
         ..RenameMap::default()
     };
-    assert!(connection.migrate_schema(1, 2, REORDERED, &invalid).is_err());
+    assert!(connection
+        .migrate_schema(REORDERED, &invalid)
+        .is_err());
     assert_eq!(connection.schema().unwrap().unwrap().document, INITIAL);
     assert_eq!(connection.catalog_snapshot().unwrap(), initial);
+    assert_eq!(connection.schema_version().unwrap(), Some(1));
 }
 
 #[test]
 fn recovers_the_same_ledger_from_wal_before_checkpoint() {
     let (_, path) = common::open_temp_db("catalog-wal");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
-    connection.ensure_schema(1, INITIAL).unwrap();
-    connection.migrate_schema(1, 2, REORDERED, &RenameMap::default()).unwrap();
+    connection.ensure_schema(INITIAL).unwrap();
+    connection.migrate_schema(REORDERED, &RenameMap::default()).unwrap();
     let expected = connection.catalog_snapshot().unwrap();
     drop(connection);
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     assert_eq!(connection.catalog_snapshot().unwrap(), expected);
-    assert_eq!(connection.schema().unwrap().unwrap().version, 2);
+    assert_eq!(connection.schema_version().unwrap(), Some(2));
     connection.checkpoint().unwrap();
     drop(connection);
     let connection = common::reopen(&path);
@@ -98,8 +117,10 @@ fn legacy_source_requires_explicit_ledger_initialization() {
     assert!(connection.catalog_snapshot().unwrap().is_none());
     connection.put("plain", b"value").unwrap();
     assert!(std::fs::read(&path).unwrap().starts_with(b"YYDB\x01"));
-    assert!(connection.migrate_schema(1, 2, REORDERED, &RenameMap::default()).is_err());
-    connection.ensure_schema(1, INITIAL).unwrap();
+    assert!(connection
+        .migrate_schema(REORDERED, &RenameMap::default())
+        .is_err());
+    connection.ensure_schema(INITIAL).unwrap();
     assert!(std::fs::read(&path).unwrap().starts_with(b"YYDB\x02"));
     drop(connection);
     let connection = common::reopen(&path);
@@ -112,7 +133,7 @@ fn legacy_source_requires_explicit_ledger_initialization() {
 #[test]
 fn rejects_persisted_ledger_with_duplicate_identity() {
     let (connection, path) = common::open_temp_db("catalog-corrupt");
-    connection.ensure_schema(1, INITIAL).unwrap();
+    connection.ensure_schema(INITIAL).unwrap();
     let mut snapshot = connection.catalog_snapshot().unwrap().unwrap();
     drop(connection);
     let mut bytes = std::fs::read(&path).unwrap();
@@ -132,14 +153,14 @@ fn rejects_persisted_ledger_with_duplicate_identity() {
 fn ignores_an_incomplete_wal_tail_after_the_last_complete_snapshot() {
     let (_, path) = common::open_temp_db("wal-tail");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
-    connection.ensure_schema(1, INITIAL).unwrap();
+    connection.ensure_schema(INITIAL).unwrap();
     connection.put("value", b"complete").unwrap();
     drop(connection);
     let mut bytes = std::fs::read(yydb::journal::wal_path(&path)).unwrap();
     bytes.truncate(bytes.len() - 3);
     std::fs::write(yydb::journal::wal_path(&path), bytes).unwrap();
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
-    assert_eq!(connection.schema().unwrap().unwrap().version, 1);
+    assert_eq!(connection.schema_version().unwrap(), Some(1));
     assert_eq!(connection.get("value").unwrap(), None);
     drop(connection);
     common::cleanup(&path);
@@ -149,7 +170,7 @@ fn ignores_an_incomplete_wal_tail_after_the_last_complete_snapshot() {
 fn rejects_a_complete_wal_frame_with_a_bad_checksum() {
     let (_, path) = common::open_temp_db("wal-checksum");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
-    connection.ensure_schema(1, INITIAL).unwrap();
+    connection.ensure_schema(INITIAL).unwrap();
     drop(connection);
     let wal = yydb::journal::wal_path(&path);
     let mut bytes = std::fs::read(&wal).unwrap();

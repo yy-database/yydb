@@ -169,6 +169,43 @@ fn execution_type(ty: &vos::ast::TypeExpr) -> Result<Type> {
     }
 }
 
+const VERSION_PRAGMA: &str = "// @yydb-schema-version:";
+
+/// Optional schema version declared in leading `//` comments.
+///
+/// Format: `// @yydb-schema-version: <u32>` before the first non-comment line.
+pub fn document_version(document: &str) -> Option<u32> {
+    for line in document.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix(VERSION_PRAGMA) {
+            return rest.trim().parse().ok();
+        }
+        if !line.is_empty() && !line.starts_with("//") {
+            break;
+        }
+    }
+    None
+}
+
+/// Version used when a schema is first persisted (`1` unless [`document_version`] is set).
+pub fn initial_version(document: &str) -> u32 {
+    document_version(document).unwrap_or(1)
+}
+
+/// Validate that an optional document pragma matches the expected migration target.
+pub fn validate_migration_version(document: &str, expected: u32) -> Result<()> {
+    if let Some(declared) = document_version(document) {
+        if declared != expected {
+            return Err(Error::Schema {
+                message: format!(
+                    "document declares schema version {declared}, migration expects {expected}"
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Validate a schema document before it becomes database truth.
 ///
 /// Uses the Oak-backed VOS parser and semantic checker before persistence.
@@ -183,4 +220,21 @@ pub fn validate_document(document: &str) -> Result<()> {
         .map_err(|diagnostics| Error::Schema {
             message: diagnostics.to_string(),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_optional_schema_version_pragma() {
+        let document = "// @yydb-schema-version: 3\n\ntable User { @@id: uuid }";
+        assert_eq!(document_version(document), Some(3));
+        assert_eq!(initial_version(document), 3);
+    }
+
+    #[test]
+    fn defaults_initial_version_to_one() {
+        assert_eq!(initial_version("table User { @@id: uuid }"), 1);
+    }
 }
