@@ -13,7 +13,7 @@ import path from "path";
 import https from "https";
 import { spawnSync } from "node:child_process";
 
-const repo = "yy-database/yydb.rs";
+const repo = "yy-database/yydb";
 const workflowFile = "release-npm.yml";
 const environment = "NPM_PUBLISH";
 const packages = [

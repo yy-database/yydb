@@ -36,7 +36,7 @@ jobs:
             pkg: yydb-linux-x64
             node_file: yydb.linux-x64.node
             lib: libyydb_napi.so
-          - os: macos-latest
+          - os: macos-13
             target: x86_64-apple-darwin
             pkg: yydb-darwin-x64
             node_file: yydb.darwin-x64.node
