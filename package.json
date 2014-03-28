@@ -1,4 +1,6 @@
 {
+    "name": "yydb-workspace",
+    "version": "0.0.2",
     "private": true,
     "type": "module",
     "scripts": {
@@ -8,10 +10,13 @@
         "regenerate": "$env:REGENERATE_TESTS=1; cargo test --release --all-features",
         "test": "cargo test --release --workspace",
         "p": "cargo workspace publish --resume",
-        "u": "cargo upgrade --pinned"
+        "u": "cargo upgrade --pinned",
+        "placeholder": "nifty publish --placeholder --dry-run",
+        "placeholder:publish": "nifty publish --placeholder",
+        "placeholder:trust": "nifty trust"
     },
     "packageManager": "pnpm@10.18.3",
     "devDependencies": {
-        "@biomejs/biome": "^2.4.8"
+        "@doki-land/nifty": "^0.0.12"
     }
 }
