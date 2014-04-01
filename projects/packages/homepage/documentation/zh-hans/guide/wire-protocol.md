@@ -13,6 +13,7 @@ Rust（本仓库）：
 - `projects/crates/yydb`：YYDB 嵌入式门面
 - `projects/crates/yydb-client`：YYDB 远程 TCP 客户端
 
-完整说明：[`../../../../../documentation/serve-protocol.md`](../../../../../documentation/serve-protocol.md)。
+完整说明（Agent skill）：[`yydb-serve-protocol`](../../../../yydb-skills/skills/yydb-serve-protocol/SKILL.md)（
+`@yydb/yydb-skills`）。
 
 v1：Hello、Info、SchemaGet / SchemaEnsure、KvGet / KvPut。

@@ -7,7 +7,8 @@ surface — browser, WebUI, Electron renderer, or a thin Node process.
 
 [![npm](https://img.shields.io/npm/v/@yydb/yydb-client)](https://www.npmjs.com/package/@yydb/yydb-client)
 [![Node.js](https://img.shields.io/node/v/@yydb/yydb-client)](https://www.npmjs.com/package/@yydb/yydb-client)
-[![CI](https://github.com/yy-database/yydb.rs/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb.rs/actions/workflows/ci.yml)
+[![Check Rust](https://github.com/yy-database/yydb/actions/workflows/check-rust.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb/actions/workflows/check-rust.yml)
+[![Check TypeScript](https://github.com/yy-database/yydb/actions/workflows/check-typescript.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb/actions/workflows/check-typescript.yml)
 
 ## Install
 
@@ -68,7 +69,7 @@ The client accepts hosts that announce either `YYDB` or `YYDS` on the shared wir
 has no authentication, so connect only to a host you control, normally `127.0.0.1` or `localhost`.
 
 Protocol details for implementers are in the
-[serve protocol reference](https://github.com/yy-database/yydb.rs/blob/dev/documentation/serve-protocol.md).
+[`yydb-serve-protocol` skill](../yydb-skills/skills/yydb-serve-protocol/SKILL.md) (`@yydb/yydb-skills`).
 
 ## Links
 
