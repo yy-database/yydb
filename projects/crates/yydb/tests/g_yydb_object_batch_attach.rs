@@ -18,10 +18,7 @@ fn g_yydb_object_batch_attach() {
         conn.get("pages/live").unwrap(),
         Some(format!("yydb:object:{}", live.hash_hex()).into_bytes())
     );
-    assert_eq!(
-        conn.get_object(&live).unwrap().as_ref(),
-        b"live-payload"
-    );
+    assert_eq!(conn.get_object(&live).unwrap().as_ref(), b"live-payload");
 
     let orphan = conn.put_chunk(ObjectKind::Blob, b"orphan-payload").unwrap();
     let mut aborted = Batch::new();

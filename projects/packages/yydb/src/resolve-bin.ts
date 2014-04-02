@@ -1,15 +1,15 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export type PlatformKey = "win32-x64" | "linux-x64" | "darwin-x64" | "darwin-arm64";
+export type PlatformKey = 'win32-x64' | 'linux-x64' | 'darwin-x64' | 'darwin-arm64';
 
 /** Map Node platform/arch to optionalDependency package suffix. */
 export function platformKey(platform = process.platform, arch = process.arch): PlatformKey | null {
-    if (platform === "win32" && arch === "x64") return "win32-x64";
-    if (platform === "linux" && arch === "x64") return "linux-x64";
-    if (platform === "darwin" && arch === "x64") return "darwin-x64";
-    if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
+    if (platform === 'win32' && arch === 'x64') return 'win32-x64';
+    if (platform === 'linux' && arch === 'x64') return 'linux-x64';
+    if (platform === 'darwin' && arch === 'x64') return 'darwin-x64';
+    if (platform === 'darwin' && arch === 'arm64') return 'darwin-arm64';
     return null;
 }
 
@@ -40,11 +40,9 @@ export function resolveYydbCli(): string {
         return path.resolve(fromEnv);
     }
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const candidate = path.join(here, "cli.js");
+    const candidate = path.join(here, 'cli.js');
     if (!existsFile(candidate)) {
-        throw new Error(
-            "YYDB CLI script not found. Build `@yydb/yydb` (`pnpm --filter @yydb/yydb build`) or set YYDB_CLI.",
-        );
+        throw new Error('YYDB CLI script not found. Build `@yydb/yydb` (`pnpm --filter @yydb/yydb build`) or set YYDB_CLI.');
     }
     return candidate;
 }

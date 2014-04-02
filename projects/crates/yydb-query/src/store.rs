@@ -47,17 +47,16 @@ fn encode_row(row: &QueryRow) -> Result<Vec<u8>> {
     for (key, value) in row {
         map.insert(key.clone(), encode_value(value)?);
     }
-    serde_json::to_vec(&JsonValue::Object(map)).map_err(|_| Error::Corrupt("row json encode failed"))
+    serde_json::to_vec(&JsonValue::Object(map))
+        .map_err(|_| Error::Corrupt("row json encode failed"))
 }
 
 /// Load one row by primary key.
 pub fn load_row(records: &BTreeMap<String, Vec<u8>>, table: &str, pk: &str) -> Result<QueryRow> {
     let key = row_key(table, pk);
-    let bytes = records
-        .get(&key)
-        .ok_or_else(|| Error::Schema {
-            message: format!("missing row `{table}` pk `{pk}`"),
-        })?;
+    let bytes = records.get(&key).ok_or_else(|| Error::Schema {
+        message: format!("missing row `{table}` pk `{pk}`"),
+    })?;
     decode_row(bytes)
 }
 

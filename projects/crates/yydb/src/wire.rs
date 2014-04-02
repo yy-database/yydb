@@ -880,7 +880,11 @@ mod tests {
         .unwrap();
         let response = dispatch(
             &conn,
-            &Frame::new(MsgType::MicroRegister, 4, encode_micro_register(&definition)),
+            &Frame::new(
+                MsgType::MicroRegister,
+                4,
+                encode_micro_register(&definition),
+            ),
         );
         assert_eq!(response.msg_type, MsgType::MicroRegisterOk);
         assert!(conn.list_scalars().contains(&"text.normalize".to_owned()));

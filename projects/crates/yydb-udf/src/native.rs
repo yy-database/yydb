@@ -53,9 +53,7 @@ impl NativeUdfDefinition {
 
     /// Wraps the handler as a [`UdfImplementation`].
     pub fn into_implementation(self) -> NativeImplementation {
-        NativeImplementation {
-            definition: self,
-        }
+        NativeImplementation { definition: self }
     }
 }
 
@@ -75,7 +73,9 @@ impl UdfImplementation for NativeImplementation {
     }
 
     fn invoke(&self, context: &mut UdfContext, args: &[UdfValue]) -> Result<UdfValue> {
-        self.definition.signature.ensure_args(&UdfValue::argument_types(args))?;
+        self.definition
+            .signature
+            .ensure_args(&UdfValue::argument_types(args))?;
         context.check_cancelled()?;
         context.charge(1)?;
         (self.definition.handler)(context, args)

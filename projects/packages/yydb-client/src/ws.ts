@@ -1,22 +1,15 @@
-import {
-    decodeFrame,
-    decodeMicroHostInvoke,
-    encodeFrame,
-    encodeMicroHostInvokeOk,
-    MsgType,
-    type Frame,
-} from "./wire.js";
-import { normalizeWsUrl, type MicroHostHandler, type Transport } from "./transport.js";
+import { decodeFrame, decodeMicroHostInvoke, encodeFrame, encodeMicroHostInvokeOk, MsgType, type Frame } from './wire.js';
+import { normalizeWsUrl, type MicroHostHandler, type Transport } from './transport.js';
 
 /** Browser / any host with WebSocket — path `/wire`, binary frames. */
 export async function openWebSocketTransport(endpoint: string): Promise<Transport> {
     const url = normalizeWsUrl(endpoint);
     const ws = new WebSocket(url);
-    ws.binaryType = "arraybuffer";
+    ws.binaryType = 'arraybuffer';
 
     await new Promise<void>((resolve, reject) => {
-        ws.addEventListener("open", () => resolve(), { once: true });
-        ws.addEventListener("error", () => reject(new Error(`websocket failed: ${url}`)), {
+        ws.addEventListener('open', () => resolve(), { once: true });
+        ws.addEventListener('error', () => reject(new Error(`websocket failed: ${url}`)), {
             once: true,
         });
     });
@@ -25,11 +18,8 @@ export async function openWebSocketTransport(endpoint: string): Promise<Transpor
     const buffer: Frame[] = [];
     const waiters: Array<() => void> = [];
 
-    ws.addEventListener("message", (event) => {
-        const data =
-            event.data instanceof ArrayBuffer
-                ? new Uint8Array(event.data)
-                : new Uint8Array(event.data as ArrayBuffer);
+    ws.addEventListener('message', (event) => {
+        const data = event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : new Uint8Array(event.data as ArrayBuffer);
         buffer.push(decodeFrame(data));
         for (const wake of waiters.splice(0)) {
             wake();
@@ -52,7 +42,7 @@ export async function openWebSocketTransport(endpoint: string): Promise<Transpor
             return false;
         }
         if (!microHostHandler) {
-            throw new Error("received MicroHostInvoke without a micro host handler");
+            throw new Error('received MicroHostInvoke without a micro host handler');
         }
         const payload = decodeMicroHostInvoke(frame.body);
         const result = await microHostHandler(payload);

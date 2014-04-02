@@ -21,9 +21,7 @@ fn g_yydb_scan_bounded_10k() {
     );
 
     let cursor = page.last().map(|(key, _)| key.clone());
-    let next = conn
-        .scan_prefix("scan/", cursor.as_deref(), 100)
-        .unwrap();
+    let next = conn.scan_prefix("scan/", cursor.as_deref(), 100).unwrap();
     assert_eq!(next.len(), 100);
     assert_ne!(page[0].0, next[0].0);
     cleanup(&path);

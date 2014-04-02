@@ -1,7 +1,7 @@
 /** Browser-safe entry (WebSocket). For Node TCP use `@yydb/yydb-client/node`. */
 
-export { Client } from "./client.js";
-export type { ConnectOptions } from "./client.js";
+export { Client } from './client.js';
+export type { ConnectOptions } from './client.js';
 export {
     MAGIC,
     MAGIC_YYDB,
@@ -17,5 +17,5 @@ export {
     encodeKvPut,
     decodeSchemaGetOk,
     decodeKvGetOk,
-} from "./wire.js";
-export type { Frame, MsgTypeCode, ProductMagic, SchemaVersion } from "./wire.js";
+} from './wire.js';
+export type { Frame, MsgTypeCode, ProductMagic, SchemaVersion } from './wire.js';

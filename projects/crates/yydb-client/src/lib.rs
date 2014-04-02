@@ -66,10 +66,7 @@ impl Client {
 
     /// Ensure the remote schema (VOS document).
     pub fn ensure_schema(&self, document: &str) -> Result<()> {
-        let response = self.roundtrip(
-            MsgType::SchemaEnsure,
-            encode_schema_ensure(0, document),
-        )?;
+        let response = self.roundtrip(MsgType::SchemaEnsure, encode_schema_ensure(0, document))?;
         expect_type(&response, MsgType::SchemaEnsureOk)?;
         Ok(())
     }
@@ -97,21 +94,13 @@ impl Client {
 
     /// Register a session-local host micro contract on the remote engine.
     pub fn register_host_micro(&self, definition: &HostMicroDefinition) -> Result<()> {
-        let response = self.roundtrip(
-            MsgType::MicroRegister,
-            encode_micro_register(definition),
-        )?;
+        let response = self.roundtrip(MsgType::MicroRegister, encode_micro_register(definition))?;
         expect_type(&response, MsgType::MicroRegisterOk)?;
         Ok(())
     }
 
     /// Invoke a registered scalar UDF on the remote engine.
-    pub fn call_scalar_version(
-        &self,
-        name: &str,
-        version: u32,
-        args: &[Value],
-    ) -> Result<Value> {
+    pub fn call_scalar_version(&self, name: &str, version: u32, args: &[Value]) -> Result<Value> {
         let response = self.roundtrip(
             MsgType::ScalarCall,
             encode_scalar_call(name, version, args)?,

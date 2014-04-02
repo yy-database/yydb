@@ -1,32 +1,27 @@
 // Nifty project configuration for yydb (hybrid cargo + pnpm).
-import {defineConfig} from "@doki-land/nifty";
+import { defineConfig } from '@doki-land/nifty';
 
 export default defineConfig({
     format: {
-        preset: "nifty",
+        preset: 'nifty',
         style: {
-            indentStyle: "space",
+            indentStyle: 'space',
             indentWidth: 4,
             lineWidth: 144,
-            quoteStyle: "single",
+            quoteStyle: 'single',
         },
-        includes: [
-            "package.json",
-            "nifty.config.ts",
-            "scripts/**",
-            "projects/packages/**",
-        ],
+        includes: ['package.json', 'nifty.config.ts', 'scripts/**', 'projects/packages/**'],
         excludes: [
-            "**/node_modules/**",
-            "**/dist/**",
-            "**/target/**",
-            "**/.vite/**",
-            "**/pnpm-lock.yaml",
-            "**/fixtures/**",
-            "**/*.generated.ts",
-            "**/*.md",
-            "**/*.css",
-            "**/*.vue",
+            '**/node_modules/**',
+            '**/dist/**',
+            '**/target/**',
+            '**/.vite/**',
+            '**/pnpm-lock.yaml',
+            '**/fixtures/**',
+            '**/*.generated.ts',
+            '**/*.md',
+            '**/*.css',
+            '**/*.vue',
         ],
     },
     publish: {

@@ -95,19 +95,24 @@ fn project_row(
                 let value = read_path(path, row, table, catalog, records);
                 out.insert(field.name.clone(), value);
             }
-            ProjectExpr::Nested { path, fields: nested } => {
+            ProjectExpr::Nested {
+                path,
+                fields: nested,
+            } => {
                 let nested_value = match catalog {
-                    Some(catalog) => resolve::resolve_row_at_path(path, row, table, catalog, records)
-                        .map(|(nested_row, nested_table)| {
-                            Value::Row(project_row(
-                                nested,
-                                &nested_row,
-                                &nested_table,
-                                Some(catalog),
-                                records,
-                            ))
-                        })
-                        .unwrap_or(Value::Null),
+                    Some(catalog) => {
+                        resolve::resolve_row_at_path(path, row, table, catalog, records)
+                            .map(|(nested_row, nested_table)| {
+                                Value::Row(project_row(
+                                    nested,
+                                    &nested_row,
+                                    &nested_table,
+                                    Some(catalog),
+                                    records,
+                                ))
+                            })
+                            .unwrap_or(Value::Null)
+                    }
                     None => Value::Null,
                 };
                 out.insert(field.name.clone(), nested_value);

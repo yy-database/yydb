@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use yydb_udf::{
-    ImplementationKind, InvocationMode, NativeUdfDefinition, NativeHandler, Placement,
+    Budget, ImplementationKind, InvocationMode, NativeHandler, NativeUdfDefinition, Placement,
     RegisterOptions, Signature, UdfDefinition, UdfIdentity, UdfInvocation, UdfPolicy, UdfRegistry,
-    UdfType, UdfValue, Budget,
+    UdfType, UdfValue,
 };
 
 fn double_native() -> NativeUdfDefinition {
@@ -33,7 +33,10 @@ fn native_udf_registers_and_invokes_through_host_registry() {
     let identity = definition.identity.clone();
 
     let mut registry = UdfRegistry::default();
-    registry.catalog_mut().register(definition).expect("catalog");
+    registry
+        .catalog_mut()
+        .register(definition)
+        .expect("catalog");
     registry
         .bind_host(Arc::new(native.into_implementation()))
         .expect("bind host");

@@ -20,8 +20,7 @@ fn g_yydb_ttl_robots_expiry() {
         .evict_expired("robots.txt/", EvictBudget { max_records: 10 })
         .unwrap();
     assert_eq!(
-        report.evicted_records,
-        1,
+        report.evicted_records, 1,
         "gate G-YYDB-5 fixture yydb.ttl.robots_expiry expected one eviction"
     );
     assert_eq!(conn.get("robots.txt/alpha").unwrap(), None);

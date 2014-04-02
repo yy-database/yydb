@@ -8,9 +8,7 @@ use yydb::wire::{
     self, decode_micro_host_invoke_ok, encode_micro_host_invoke, read_frame, write_frame, Frame,
     MsgType,
 };
-use yydb::{
-    HostFunctionHandle, HostRuntimeAdapter, UdfError, UdfResult, UdfValue,
-};
+use yydb::{HostFunctionHandle, HostRuntimeAdapter, UdfError, UdfResult, UdfValue};
 
 /// Invokes host micros on the wire peer that owns the host registry.
 pub struct TcpWireHostAdapter {
@@ -56,7 +54,10 @@ impl TcpWireHostAdapter {
         }
         if response.msg_type != MsgType::MicroHostInvokeOk {
             return Err(UdfError::ExecutionFailed {
-                message: format!("unexpected wire response type {}", response.msg_type.as_u16()),
+                message: format!(
+                    "unexpected wire response type {}",
+                    response.msg_type.as_u16()
+                ),
             });
         }
         decode_micro_host_invoke_ok(&response.body).map_err(map_wire_error)
@@ -64,11 +65,7 @@ impl TcpWireHostAdapter {
 }
 
 impl HostRuntimeAdapter for TcpWireHostAdapter {
-    fn invoke_scalar(
-        &self,
-        handle: &HostFunctionHandle,
-        args: &[UdfValue],
-    ) -> UdfResult<UdfValue> {
+    fn invoke_scalar(&self, handle: &HostFunctionHandle, args: &[UdfValue]) -> UdfResult<UdfValue> {
         self.roundtrip_invoke(handle, args)
     }
 

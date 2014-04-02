@@ -1,9 +1,9 @@
-import type { Cli } from "@vmz/commander";
+import type { Cli } from '@vmz/commander';
 
-import { loadNative } from "../native.js";
+import { loadNative } from '../native.js';
 
 export function registerVersionCommand(cli: Cli): void {
-    cli.command("version", "cli.cmd.version").action(() => cmdVersion());
+    cli.command('version', 'cli.cmd.version').action(() => cmdVersion());
 }
 
 export function cmdVersion(): number {

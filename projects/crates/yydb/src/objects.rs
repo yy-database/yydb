@@ -311,12 +311,11 @@ impl ObjectStore {
                 if path.extension().and_then(|ext| ext.to_str()) != Some("bytes") {
                     continue;
                 }
-                let hash_hex = path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .ok_or(Error::ObjectCorrupt {
+                let hash_hex = path.file_stem().and_then(|stem| stem.to_str()).ok_or(
+                    Error::ObjectCorrupt {
                         message: "object file name is not UTF-8".into(),
-                    })?;
+                    },
+                )?;
                 if hash_hex.len() != 64 {
                     continue;
                 }
@@ -359,12 +358,10 @@ fn decode_hash_hex(hash_hex: &str) -> Result<[u8; 32]> {
                 message: "hash hex has odd length".into(),
             });
         }
-        let byte = u8::from_str_radix(
-            &String::from_utf8_lossy(chunk),
-            16,
-        )
-        .map_err(|_| Error::ObjectCorrupt {
-            message: "hash hex is not valid".into(),
+        let byte = u8::from_str_radix(&String::from_utf8_lossy(chunk), 16).map_err(|_| {
+            Error::ObjectCorrupt {
+                message: "hash hex is not valid".into(),
+            }
         })?;
         hash[index] = byte;
     }
