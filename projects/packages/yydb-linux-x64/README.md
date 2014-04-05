@@ -23,7 +23,7 @@ npx yydb serve app.yydb --bind 127.0.0.1:7700
 | Platform    | Linux x64 with glibc (`linux/x64`) |
 | Binding     | `yydb.linux-x64.node`              |
 
-The same binding is also available in the [release archives](https://github.com/yy-database/yydb.rs/releases).
+Install via `@yydb/yydb` optionalDependencies or add `@yydb/yydb-linux-x64` directly.
 
 [YYDB overview](https://github.com/yy-database/yydb.rs) ·
 [License](https://github.com/yy-database/yydb.rs/blob/dev/License.md)

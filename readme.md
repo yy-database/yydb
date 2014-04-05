@@ -106,7 +106,7 @@ YYDB into a hosted cluster control plane.
 | TypeScript or Node.js                    | [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb)                                                                                                  |
 | Rust                                     | [`yydb`](https://crates.io/crates/yydb) and its [API docs](https://docs.rs/yydb)                                                                          |
 | Browser or an existing `yydb serve` host | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client)                                                                                    |
-| CLI                                      | `npx @yydb/yydb` / [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) or [release native bindings](https://github.com/yy-database/yydb.rs/releases) |
+| CLI                                      | `npx @yydb/yydb` / [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) (platform `.node` via optionalDependencies) |
 
 ### Node.js
 
