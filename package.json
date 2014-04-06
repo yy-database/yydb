@@ -13,7 +13,7 @@
         "u": "cargo upgrade --pinned",
         "placeholder": "nifty publish --placeholder --dry-run",
         "placeholder:publish": "nifty publish --placeholder",
-        "placeholder:trust": "node scripts/configure-trusted-publishers.mjs"
+        "placeholder:trust": "nifty trust"
     },
     "packageManager": "pnpm@10.18.3",
     "devDependencies": {
