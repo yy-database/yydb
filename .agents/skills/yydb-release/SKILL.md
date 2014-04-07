@@ -27,7 +27,14 @@ release assets are skipped.
 
 ## `nifty.config.ts`
 
-Set `publish.packages` to every `@yydb/*` name for **`nifty trust`**.
+| Key | Purpose |
+|-----|---------|
+| `trust.repo` | `yy-database/yydb` |
+| `trust.file` | `release-npm.yml` |
+| `trust.environment` | `NPM_PUBLISH` |
+| `publish.packages` | Every `@yydb/*` name for **`nifty trust`** |
+
+Trust wiring lives in config, not `NIFTY_TRUST_*` env vars. `nifty trust` still shells to npm CLI today — registry API trust is the next Nifty milestone.
 
 ## Placeholder bootstrap
 
