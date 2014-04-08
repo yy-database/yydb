@@ -4,8 +4,8 @@
 //! YYDB uses **VOS for DDL and query**. It does **not** invent a private schema
 //! dialect. Database-truth documents stored by
 //! [`crate::Connection::ensure_schema`] are VOS source text; semantic checking
-//! goes through the `vos` facade so YYDB / YYDS / tooling stay aligned as
-//! `vos-parser` grows.
+//! goes through the `vos` facade so YYDB / YYDS / tooling stay aligned with
+//! Oak's parser and VOS semantic contract.
 
 use yydb_execution::{FieldHandle, LayoutField, RecordLayout, RecordLayoutError, Type};
 use yydb_types::{Error, Result};
@@ -69,6 +69,8 @@ impl ExecutionType {
 /// Rebuilding after source reordering must not be used to replace deployed identities.
 pub fn execution_catalog(document: &str) -> Result<ExecutionCatalog> {
     validate_document(document)?;
+    // Compatibility adapter: the persisted catalog model still consumes the
+    // legacy catalog shape until the durable ResolvedContract ledger lands.
     let document = vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
         message: diagnostics.to_string(),
     })?;
@@ -230,17 +232,19 @@ pub fn validate_migration_version(document: &str, expected: u32) -> Result<()> {
 
 /// Validate a schema document before it becomes database truth.
 ///
-/// Uses the Oak-backed VOS parser and semantic checker before persistence.
+/// Uses Oak parsing and VOS semantic projection before persistence.
 pub fn validate_document(document: &str) -> Result<()> {
     if document.contains('\0') {
         return Err(Error::Schema {
             message: "VOS schema document must not contain NUL bytes".into(),
         });
     }
-    vos::parser::parse_document(document)
+    let input = vos::parse_oak(document).map_err(|message| Error::Schema { message })?;
+    input
+        .project_schema()
         .map(|_| ())
         .map_err(|diagnostics| Error::Schema {
-            message: diagnostics.to_string(),
+            message: format!("VOS semantic projection failed: {diagnostics:?}"),
         })
 }
 
@@ -258,5 +262,11 @@ mod tests {
     #[test]
     fn defaults_initial_version_to_one() {
         assert_eq!(initial_version("table User { @@id: uuid }"), 1);
+    }
+
+    #[test]
+    fn validates_schema_through_oak_projection() {
+        assert!(validate_document("table User { id: uuid }").is_ok());
+        assert!(validate_document("table User {").is_err());
     }
 }
