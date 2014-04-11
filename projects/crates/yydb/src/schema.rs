@@ -69,8 +69,6 @@ impl ExecutionType {
 /// Rebuilding after source reordering must not be used to replace deployed identities.
 pub fn execution_catalog(document: &str) -> Result<ExecutionCatalog> {
     validate_document(document)?;
-    // Compatibility adapter: the persisted catalog model still consumes the
-    // legacy catalog shape until the durable ResolvedContract ledger lands.
     let document = vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
         message: diagnostics.to_string(),
     })?;
@@ -262,7 +260,8 @@ mod tests {
 
     #[test]
     fn validates_schema_through_oak_projection() {
-        assert!(validate_document("table User { id: uuid }").is_ok());
+        assert!(validate_document("table User { @@id: uuid }").is_ok());
+        assert!(validate_document("table User { id: uuid }").is_err());
         assert!(validate_document("table User {").is_err());
     }
 }
