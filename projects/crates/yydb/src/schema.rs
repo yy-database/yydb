@@ -28,9 +28,18 @@ pub struct ExecutionType {
     /// Current VOS type name.
     pub name: String,
     /// Catalog kind.
-    pub kind: vos::ast::TypeKind,
+    pub kind: ExecutionTypeKind,
     /// Fields in stable virtual-slot order.
     pub fields: Vec<ExecutionField>,
+}
+
+/// Type declaration kind used by the YYDB execution catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionTypeKind {
+    /// Persistent table declaration.
+    Table,
+    /// Inline value/class declaration.
+    Class,
 }
 
 /// One VOS field projected into a typed execution handle.
@@ -102,7 +111,59 @@ pub fn execution_catalog_from_snapshot(
         types.push(ExecutionType {
             schema_id,
             name: entry.name.clone(),
-            kind: entry.kind,
+            kind: match entry.kind {
+                vos::ast::TypeKind::Table => ExecutionTypeKind::Table,
+                vos::ast::TypeKind::Class => ExecutionTypeKind::Class,
+            },
+            fields,
+        });
+    }
+    Ok(ExecutionCatalog { types })
+}
+
+/// Lower a strict Oak-backed VOS contract into the YYDB execution catalog.
+///
+/// This is the downstream path for new integrations. It does not parse source,
+/// inspect a VOS syntax AST, or infer identities from declaration order.
+pub fn execution_catalog_from_resolved_contract(
+    contract: &vos::ResolvedContract,
+) -> Result<ExecutionCatalog> {
+    let mut types = Vec::with_capacity(contract.types.len());
+    for item in &contract.types {
+        let kind = match item.kind {
+            vos::contract::TypeContractKind::Table => ExecutionTypeKind::Table,
+            vos::contract::TypeContractKind::Class => ExecutionTypeKind::Class,
+        };
+        let name = item
+            .canonical_path
+            .last()
+            .cloned()
+            .ok_or_else(|| Error::Schema {
+                message: "resolved VOS type has an empty canonical path".into(),
+            })?;
+        let mut fields = Vec::with_capacity(item.fields.len());
+        for field in &item.fields {
+            let ty = resolved_execution_type(&field.canonical_type)?;
+            let handle = FieldHandle::new(
+                item.type_id,
+                field.field_id,
+                field.virtual_field_index,
+                ty,
+            )
+            .map_err(|_| Error::Schema {
+                message: "resolved VOS contract emitted an invalid field identity".into(),
+            })?;
+            fields.push(ExecutionField {
+                field_id: field.field_id,
+                virtual_field: field.virtual_field_index,
+                name: field.canonical_name.clone(),
+                handle,
+            });
+        }
+        types.push(ExecutionType {
+            schema_id: item.type_id,
+            name,
+            kind,
             fields,
         });
     }
@@ -187,6 +248,27 @@ fn execution_type(ty: &vos::ast::TypeExpr) -> Result<Type> {
         }
         _ => Err(Error::Unsupported(
             "VOS field type is not in the execution slice",
+        )),
+    }
+}
+
+fn resolved_execution_type(ty: &vos::contract::ResolvedCanonicalType) -> Result<Type> {
+    use vos::contract::ResolvedCanonicalType;
+    match ty {
+        ResolvedCanonicalType::Builtin(path) if path == &["i64"] => Ok(Type::I64),
+        ResolvedCanonicalType::Builtin(path) if path == &["bool"] => Ok(Type::Bool),
+        ResolvedCanonicalType::Builtin(path) if path == &["utf8"] => Ok(Type::Text),
+        ResolvedCanonicalType::Builtin(path) if path == &["bytes"] => Ok(Type::Bytes),
+        ResolvedCanonicalType::Builtin(path) if path == &["file"] => Ok(Type::File),
+        ResolvedCanonicalType::Builtin(_) => Err(Error::Unsupported(
+            "resolved VOS scalar type is not in the execution slice",
+        )),
+        ResolvedCanonicalType::Optional(_)
+        | ResolvedCanonicalType::Reference(_)
+        | ResolvedCanonicalType::List(_)
+        | ResolvedCanonicalType::User { .. }
+        | ResolvedCanonicalType::Generic { .. } => Err(Error::Unsupported(
+            "resolved VOS composite type is not in the execution slice",
         )),
     }
 }
