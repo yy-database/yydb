@@ -128,6 +128,9 @@ pub fn execution_catalog_from_snapshot(
 pub fn execution_catalog_from_resolved_contract(
     contract: &vos::ResolvedContract,
 ) -> Result<ExecutionCatalog> {
+    contract.validate().map_err(|error| Error::Schema {
+        message: format!("invalid resolved VOS contract {}: {}", error.code, error.message),
+    })?;
     let mut types = Vec::with_capacity(contract.types.len());
     for item in &contract.types {
         let kind = match item.kind {
