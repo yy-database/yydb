@@ -238,19 +238,29 @@ pub(crate) fn validate_snapshot(document: &str, catalog: &vos::ast::CatalogSnaps
     if catalog.revisions.ddl == 0 || catalog.revisions.semantic == 0 {
         return Err(fail());
     }
-    let parsed = vos::parser::parse_document(document).map_err(|_| fail())?;
-    let fresh = vos::catalog_from_document(&parsed).map_err(|_| fail())?;
-    if fresh.types.len() != catalog.types.len() {
+    let projection = vos::parse_oak(document)
+        .map_err(|_| fail())?
+        .project_schema()
+        .map_err(|_| fail())?;
+    if projection.types.len() != catalog.types.len() {
         return Err(fail());
     }
     let mut type_ids = BTreeSet::new();
     let mut field_ids = BTreeSet::new();
     let mut slots = BTreeSet::new();
-    for (expected, actual) in fresh.types.iter().zip(&catalog.types) {
+    for actual in &catalog.types {
+        let expected = projection
+            .types
+            .iter()
+            .find(|item| item.canonical_path.last() == Some(&actual.name))
+            .ok_or_else(fail)?;
+        let expected_kind = match expected.kind {
+            vos::contract::TypeContractKind::Table => vos::ast::TypeKind::Table,
+            vos::contract::TypeContractKind::Class => vos::ast::TypeKind::Class,
+        };
         if actual.type_id.0 == 0
             || !type_ids.insert(actual.type_id)
-            || expected.name != actual.name
-            || expected.kind != actual.kind
+            || expected_kind != actual.kind
             || expected.fields.len() != actual.fields.len()
         {
             return Err(fail());
@@ -264,14 +274,12 @@ pub(crate) fn validate_snapshot(document: &str, catalog: &vos::ast::CatalogSnaps
             if actual_field.field_id.0 == 0
                 || !field_ids.insert(actual_field.field_id)
                 || !slots.insert((actual.type_id, actual_field.virtual_field))
-                || actual_field.source_order != expected_field.source_order
-                || actual_field.ty != expected_field.ty
-                || actual_field.attrs != expected_field.attrs
             {
                 return Err(fail());
             }
         }
     }
+    resolved_contract_for_catalog(document, catalog).map_err(|_| fail())?;
     for retired in &catalog.retired_types {
         if retired.type_id.0 == 0 || !type_ids.insert(retired.type_id) {
             return Err(fail());
