@@ -269,7 +269,7 @@ pub(crate) fn validate_snapshot(document: &str, catalog: &vos::ast::CatalogSnaps
             let actual_field = actual
                 .fields
                 .iter()
-                .find(|field| field.current_name == expected_field.current_name)
+                .find(|field| field.current_name == expected_field.canonical_name)
                 .ok_or_else(fail)?;
             if actual_field.field_id.0 == 0
                 || !field_ids.insert(actual_field.field_id)
