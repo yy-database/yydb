@@ -236,11 +236,6 @@ impl Connection {
 
     /// Open a private in-memory database (useful for tests).
     pub fn open_in_memory() -> Result<Self> {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let root = std::env::temp_dir().join(format!("yydb-mem-objects-{nonce}"));
         Ok(Self {
             operation_lock: Mutex::new(()),
             txn: Mutex::new(None),
@@ -248,7 +243,7 @@ impl Connection {
                 state: Mutex::new(State::default()),
             },
             udfs: Mutex::new(UdfSubsystem::default()),
-            objects: ObjectStore::open_in_memory_root(root)?,
+            objects: ObjectStore::open_ephemeral(),
         })
     }
 

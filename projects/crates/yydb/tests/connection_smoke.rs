@@ -176,6 +176,28 @@ fn set_journal_mode_wal_to_delete_removes_sidecars() {
 }
 
 #[test]
+fn open_in_memory_does_not_create_temp_object_dirs() {
+    let temp = std::env::temp_dir();
+    let count_yydb_mem_dirs = || {
+        std::fs::read_dir(&temp)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("yydb-mem-objects-")
+            })
+            .count()
+    };
+    let before = count_yydb_mem_dirs();
+    let conn = Connection::open_in_memory().unwrap();
+    let object = conn.put_chunk(ObjectKind::Blob, b"ephemeral-only").unwrap();
+    assert_eq!(&*conn.get_object(&object).unwrap(), b"ephemeral-only");
+    assert_eq!(count_yydb_mem_dirs(), before);
+}
+
+#[test]
 fn cas_objects_hash2_path_and_hot_cold() {
     let conn = Connection::open_in_memory().unwrap();
     let object = conn.put_chunk(ObjectKind::Blob, b"hello-cas").unwrap();
