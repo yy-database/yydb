@@ -25,9 +25,11 @@ export default defineConfig({
         ],
     },
     trust: {
-        repo: 'yy-database/yydb',
-        file: 'release-npm.yml',
-        environment: 'NPM_PUBLISH',
+        npm: {
+            repo: 'yy-database/yydb',
+            file: 'release-npm.yml',
+            environment: 'NPM_PUBLISH',
+        },
     },
     publish: {
         packages: [

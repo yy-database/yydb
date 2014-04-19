@@ -25,5 +25,5 @@ pnpm install
 pnpm test
 pnpm fmt:check
 pnpm placeholder:publish   # nifty publish --placeholder
-pnpm placeholder:trust     # nifty trust (reads trust.* from nifty.config.ts)
+pnpm placeholder:trust     # nifty trust (reads trust.npm from nifty.config.ts)
 ```
