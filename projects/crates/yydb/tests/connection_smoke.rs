@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use yydb::{
     journal::{shm_path, wal_path},
-    Connection, JournalMode, ObjectKind, OpenFlags, Tier, Value, Vector,
+    Connection, Error, JournalMode, ObjectKind, OpenFlags, Tier, Value, Vector, INLINE_BYTES_MAX,
 };
 
 fn temp_db(label: &str) -> PathBuf {
@@ -19,6 +19,15 @@ fn cleanup(path: &Path) {
     let _ = fs::remove_file(path);
     let _ = fs::remove_file(wal_path(path));
     let _ = fs::remove_file(shm_path(path));
+    let mut sidecar = path.as_os_str().to_owned();
+    sidecar.push(".objects");
+    let _ = fs::remove_dir_all(PathBuf::from(sidecar));
+}
+
+fn objects_sidecar(path: &Path) -> PathBuf {
+    let mut sidecar = path.as_os_str().to_owned();
+    sidecar.push(".objects");
+    PathBuf::from(sidecar)
 }
 
 #[test]
@@ -172,6 +181,38 @@ fn set_journal_mode_wal_to_delete_removes_sidecars() {
     assert!(!wal_path(&path).exists());
     assert!(!shm_path(&path).exists());
     assert_eq!(conn.get("k").unwrap(), Some(b"v".to_vec()));
+    cleanup(&path);
+}
+
+#[test]
+fn open_yydb_does_not_create_objects_sidecar() {
+    let path = temp_db("no-sidecar");
+    let conn = Connection::open(&path).unwrap();
+    let object = conn.put_chunk(ObjectKind::Blob, b"small").unwrap();
+    assert_eq!(&*conn.get_object(&object).unwrap(), b"small");
+    assert!(!objects_sidecar(&path).exists());
+    cleanup(&path);
+}
+
+#[test]
+fn open_yydb_rejects_chunked_files() {
+    let path = temp_db("no-chunk");
+    let conn = Connection::open(&path).unwrap();
+    let payload = vec![0_u8; 2000];
+    let err = conn
+        .put_file_chunked(std::io::Cursor::new(payload), 500)
+        .unwrap_err();
+    assert!(matches!(err, Error::Unsupported(_)));
+    cleanup(&path);
+}
+
+#[test]
+fn open_yydb_rejects_large_cas_payloads() {
+    let path = temp_db("no-large-cas");
+    let conn = Connection::open(&path).unwrap();
+    let payload = vec![7_u8; INLINE_BYTES_MAX + 1];
+    let err = conn.put_chunk(ObjectKind::Blob, &payload).unwrap_err();
+    assert!(matches!(err, Error::Unsupported(_)));
     cleanup(&path);
 }
 
