@@ -35,6 +35,6 @@ Vectors prefer CAS; ANN graphs are `ObjectKind::AnnSegment` objects.
 
 Hot/cold tiering is runtime cache on the same CAS (`pin_object`, `evict_object`).
 
-Full backup needs `.yydb` (+ wal/shm) and `<db>.objects/` tree.
+Full backup for `.yydb` is the main file plus wal/shm companions only. Blob trees belong to `.yydx` layouts.
 
 YYDS multi-file layout should align ObjectRef/chunk semantics with this model where applicable.
