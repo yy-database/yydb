@@ -2,14 +2,13 @@
 //!
 //! Same semantic entry points as `yydb-napi` where applicable; no parallel TS parser.
 
+#![warn(missing_docs)]
 #![deny(clippy::all)]
 
 mod core;
 mod session;
 
-pub use core::{
-    SchemaCheck, check_schema_source, introspect_schema_json, yydb_version,
-};
+pub use core::{check_schema_source, introspect_schema_json, yydb_version, SchemaCheck};
 pub use session::query_memory;
 
 use wasm_bindgen::prelude::*;

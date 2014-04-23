@@ -16,3 +16,6 @@ path = "src/lib.rs"
 serde_json = { workspace = true }
 vos = { workspace = true }
 yydb-types = { workspace = true }
+
+[dev-dependencies]
+vos = { workspace = true }

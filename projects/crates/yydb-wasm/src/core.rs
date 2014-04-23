@@ -2,8 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use serde_json::{Map, Value as JsonValue, json};
-use yydb::{Error, Result, Value, schema::{self, ExecutionTypeKind}};
+use serde_json::{json, Map, Value as JsonValue};
+use yydb::{
+    schema::{self, ExecutionTypeKind},
+    Result, Value,
+};
 
 /// Outcome of validating a VOS schema document.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +117,7 @@ pub(crate) fn rows_to_json(rows: Vec<BTreeMap<String, Value>>) -> Vec<JsonValue>
         .collect()
 }
 
+#[allow(clippy::wildcard_enum_match_arm)]
 pub(crate) fn value_to_json(value: &Value) -> JsonValue {
     match value {
         Value::Null => JsonValue::Null,
@@ -171,26 +175,5 @@ pub(crate) fn unit_result_json(result: Result<()>) -> String {
     match result {
         Ok(()) => json!({ "ok": true, "rows": [], "error": JsonValue::Null }).to_string(),
         Err(err) => json!({ "ok": false, "rows": [], "error": err.to_string() }).to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::session::query_memory;
-
-    #[test]
-    fn check_schema_source_counts_tables() {
-        let check = check_schema_source("table User { @@id: i64, name: utf8 }");
-        assert!(check.ok);
-        assert_eq!(check.table_count, 1);
-        assert!(!check.schema_fingerprint.is_empty());
-    }
-
-    #[test]
-    fn query_memory_returns_json_envelope() {
-        let payload = query_memory("table User { @@id: i64, name: utf8 }");
-        let parsed: JsonValue = serde_json::from_str(&payload).expect("json");
-        assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(false)));
     }
 }
