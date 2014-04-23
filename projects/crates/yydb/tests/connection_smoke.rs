@@ -4,15 +4,24 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use yydb::{
     journal::{shm_path, wal_path},
-    Connection, Error, JournalMode, ObjectKind, OpenFlags, Tier, Value, Vector, INLINE_BYTES_MAX,
+    Connection, Error, JournalMode, ObjectKind, ObjectStore, OpenFlags, Tier, Value, Vector,
+    INLINE_BYTES_MAX,
 };
 
 fn temp_db(label: &str) -> PathBuf {
+    temp_db_with_ext(label, "yydb")
+}
+
+fn temp_yydx(label: &str) -> PathBuf {
+    temp_db_with_ext(label, "yydx")
+}
+
+fn temp_db_with_ext(label: &str, ext: &str) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("yydb-{label}-{nonce}.yydb"))
+    std::env::temp_dir().join(format!("yydb-{label}-{nonce}.{ext}"))
 }
 
 fn cleanup(path: &Path) {
@@ -22,6 +31,7 @@ fn cleanup(path: &Path) {
     let mut sidecar = path.as_os_str().to_owned();
     sidecar.push(".objects");
     let _ = fs::remove_dir_all(PathBuf::from(sidecar));
+    let _ = fs::remove_dir_all(ObjectStore::yydx_objects_root(path));
 }
 
 fn objects_sidecar(path: &Path) -> PathBuf {
@@ -203,6 +213,21 @@ fn open_yydb_rejects_chunked_files() {
         .put_file_chunked(std::io::Cursor::new(payload), 500)
         .unwrap_err();
     assert!(matches!(err, Error::Unsupported(_)));
+    cleanup(&path);
+}
+
+#[test]
+fn open_yydx_uses_objects_root_and_allows_chunked_files() {
+    let path = temp_yydx("layout");
+    let blob_root = ObjectStore::yydx_objects_root(&path);
+    let conn = Connection::open_yydx(&path).unwrap();
+    let payload: Vec<u8> = (0..2000u16).map(|v| (v % 256) as u8).collect();
+    let manifest = conn
+        .put_file_chunked(std::io::Cursor::new(payload.clone()), 500)
+        .unwrap();
+    assert!(manifest.chunks.len() >= 4);
+    assert!(blob_root.join("objects").is_dir());
+    assert!(!objects_sidecar(&path).exists());
     cleanup(&path);
 }
 

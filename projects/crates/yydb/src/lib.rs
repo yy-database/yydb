@@ -142,6 +142,10 @@ enum Backend {
     },
 }
 
+fn is_yydx_main_path(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("yydx")
+}
+
 /// Pending record mutations applied atomically by [`Batch::commit`].
 #[derive(Debug, Default)]
 pub struct Batch {
@@ -198,6 +202,17 @@ impl Connection {
         Self::open_with_flags(path, OpenFlags::new())
     }
 
+    /// Open (or create) a `.yydx` main file with sibling `<stem>-objects/` blob root.
+    pub fn open_yydx(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("yydx") {
+            return Err(Error::Unsupported(
+                "open_yydx requires a .yydx main file path",
+            ));
+        }
+        Self::open(path)
+    }
+
     /// Open (or create) a database with explicit [`OpenFlags`].
     pub fn open_with_flags(path: impl AsRef<Path>, flags: OpenFlags) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
@@ -226,7 +241,11 @@ impl Connection {
                 journal_mode: Mutex::new(flags.journal_mode),
             },
             udfs: Mutex::new(UdfSubsystem::default()),
-            objects: ObjectStore::open_ephemeral(),
+            objects: if is_yydx_main_path(&path) {
+                ObjectStore::open_yydx_blob_root(ObjectStore::yydx_objects_root(&path))?
+            } else {
+                ObjectStore::open_ephemeral()
+            },
         };
         // Force recovery path once so a leftover WAL is applied.
         let _ = connection.read_state()?;
@@ -270,8 +289,12 @@ impl Connection {
         self.path().map(shm_path)
     }
 
+    fn is_single_file_yydb(&self) -> bool {
+        self.path().is_some_and(|path| !is_yydx_main_path(path))
+    }
+
     fn guard_yydb_cas_payload(&self, len: usize) -> Result<()> {
-        if self.path().is_some() && len > INLINE_BYTES_MAX {
+        if self.is_single_file_yydb() && len > INLINE_BYTES_MAX {
             return Err(Error::Unsupported(
                 "CAS payloads larger than INLINE_BYTES_MAX require a .yydx layout in single-file .yydb mode",
             ));
@@ -908,7 +931,7 @@ impl Connection {
         reader: impl std::io::Read,
         chunk_size: usize,
     ) -> Result<ChunkManifest> {
-        if self.path().is_some() {
+        if self.is_single_file_yydb() {
             return Err(Error::Unsupported(
                 "chunked file objects require a .yydx layout; .yydb single-file mode rejects them",
             ));
