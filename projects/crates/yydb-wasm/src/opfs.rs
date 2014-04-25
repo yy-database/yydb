@@ -154,3 +154,45 @@ pub fn open_persistent(path: &str, caps: &OpfsCapabilities) -> Result<()> {
     let _lease = claim_opfs_writer(path, caps)?;
     Err(Error::Unsupported("OPFS host adapter I/O not implemented"))
 }
+
+/// In-memory committed-generation stub for OPFS gate tests (Living `08` §5).
+///
+/// Models atomic publish with quota accounting. Production OPFS I/O will replace this
+/// surface without changing error semantics.
+#[derive(Debug, Clone)]
+pub struct OpfsCommittedVolume {
+    path: String,
+    committed: Vec<u8>,
+    quota_limit: u64,
+    quota_used: u64,
+}
+
+impl OpfsCommittedVolume {
+    /// Open a logical OPFS volume with an initial committed generation and byte quota.
+    pub fn new(path: &str, initial_generation: &[u8], quota_limit: u64) -> Self {
+        Self {
+            path: path.to_string(),
+            committed: initial_generation.to_vec(),
+            quota_limit,
+            quota_used: initial_generation.len() as u64,
+        }
+    }
+
+    /// Read the last successfully published generation.
+    pub fn read_committed(&self) -> &[u8] {
+        &self.committed
+    }
+
+    /// Atomically publish `body` as the next generation, or abort without mutation.
+    pub fn publish_generation(&mut self, body: &[u8]) -> Result<()> {
+        let next_used = self.quota_used + body.len() as u64;
+        if next_used > self.quota_limit {
+            return Err(Error::QuotaExceeded {
+                namespace: format!("opfs:{path}", path = self.path),
+            });
+        }
+        self.quota_used = next_used;
+        self.committed = body.to_vec();
+        Ok(())
+    }
+}
