@@ -196,3 +196,73 @@ impl OpfsCommittedVolume {
         Ok(())
     }
 }
+
+/// Models `.yydx` blob publish then catalog commit (Living `07` §13 steps 2–4).
+#[derive(Debug, Clone)]
+pub struct OpfsBlobPublication {
+    /// Blobs published to the object store (immutable once visible on disk).
+    published_blobs: HashSet<String>,
+    /// Blob hashes referenced by the committed catalog generation.
+    committed_refs: HashSet<String>,
+}
+
+impl OpfsBlobPublication {
+    /// Open a logical `.yydx` volume with an initial committed blob set.
+    pub fn new(_path: &str, initial_committed_refs: &[&str]) -> Self {
+        let committed_refs: HashSet<String> = initial_committed_refs
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        Self {
+            published_blobs: committed_refs.clone(),
+            committed_refs,
+        }
+    }
+
+    /// Publish a blob chunk (step 2). Does not advance the committed catalog.
+    pub fn publish_blob(&mut self, blob_hash: &str) {
+        self.published_blobs.insert(blob_hash.to_string());
+    }
+
+    /// Commit catalog references (steps 3–4). Refuses unpublished blob hashes.
+    pub fn commit_catalog(&mut self, refs: &[&str]) -> Result<()> {
+        for hash in refs {
+            if !self.published_blobs.contains(*hash) {
+                return Err(Error::ObjectNotFound {
+                    hash_hex: (*hash).to_string(),
+                });
+            }
+        }
+        self.committed_refs = refs.iter().map(|s| (*s).to_string()).collect();
+        Ok(())
+    }
+
+    /// Query-visible references (committed catalog only).
+    pub fn visible_references(&self) -> Vec<String> {
+        let mut refs = self.committed_refs.iter().cloned().collect::<Vec<_>>();
+        refs.sort();
+        refs
+    }
+
+    /// Published blobs not yet referenced by the committed catalog (orphans after crash).
+    pub fn orphan_blobs(&self) -> Vec<String> {
+        let mut orphans = self
+            .published_blobs
+            .difference(&self.committed_refs)
+            .cloned()
+            .collect::<Vec<_>>();
+        orphans.sort();
+        orphans
+    }
+
+    /// Committed references without a published blob (forbidden dangling state).
+    pub fn dangling_references(&self) -> Vec<String> {
+        let mut dangling = self
+            .committed_refs
+            .difference(&self.published_blobs)
+            .cloned()
+            .collect::<Vec<_>>();
+        dangling.sort();
+        dangling
+    }
+}
