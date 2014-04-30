@@ -7,13 +7,15 @@
 
 mod core;
 mod opfs;
+mod opfs_io;
 mod session;
 
 pub use core::{check_schema_source, introspect_schema_json, yydb_version, SchemaCheck};
 pub use opfs::{
     claim_opfs_writer, open_persistent, opfs_commit_and_sync, opfs_doctor, opfs_evict_blob,
     opfs_reopen, validate_opfs_capabilities, OpfsBlobPublication, OpfsCapabilities,
-    OpfsCommittedVolume, OpfsDurableSnapshot, OpfsWriterLease, PersistentStorageMode,
+    OpfsCommittedVolume, OpfsDurableSnapshot, OpfsPersistentVolume, OpfsWriterLease,
+    PersistentStorageMode,
 };
 pub use session::query_memory;
 
