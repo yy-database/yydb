@@ -17,7 +17,7 @@ pub use opfs::{
     OpfsCommittedVolume, OpfsDurableSnapshot, OpfsPersistentVolume, OpfsWriterLease,
     PersistentStorageMode,
 };
-pub use session::query_memory;
+pub use session::{open_persistent_session, query_memory};
 
 use wasm_bindgen::prelude::*;
 
@@ -95,4 +95,4 @@ pub fn query_memory_js(source: &str) -> String {
     query_memory(source)
 }
 
-pub use session::MemorySession;
+pub use session::{MemorySession, PersistentSession};
