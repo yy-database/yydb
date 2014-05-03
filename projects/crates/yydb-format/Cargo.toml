@@ -1,0 +1,19 @@
+[package]
+name = "yydb-format"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YYDB page file format v1 parsing and validation"
+readme = "readme.md"
+keywords = ["yydb", "storage", "format"]
+categories = ["database-implementations"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+yydb-types = { workspace = true }
+
+[dev-dependencies]
