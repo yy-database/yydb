@@ -35,6 +35,15 @@ impl TreeKey {
         out
     }
 
+    /// Lower-bound separator for the first child in an internal page.
+    pub fn min_separator(tree_id: u8) -> Self {
+        Self {
+            tree_id,
+            key_kind: 0,
+            encoded: Vec::new(),
+        }
+    }
+
     /// Parse cell key bytes.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < 2 {

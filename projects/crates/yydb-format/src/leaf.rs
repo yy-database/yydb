@@ -185,6 +185,23 @@ impl LeafPage {
     pub fn len(&self) -> usize {
         self.cells.len()
     }
+
+    /// Split into left (retained) and right leaf. Separator is the first key in `right`.
+    pub fn split(&mut self) -> Result<(TreeKey, LeafPage)> {
+        if self.cells.len() < 2 {
+            return Err(Error::Corrupt("leaf too small to split"));
+        }
+        let split_at = self.cells.len() / 2;
+        let right_cells = self.cells.split_off(split_at);
+        let separator = right_cells[0].key.clone();
+        let right = LeafPage {
+            page_id: 0,
+            page_generation: self.page_generation,
+            tree_id: self.tree_id,
+            cells: right_cells,
+        };
+        Ok((separator, right))
+    }
 }
 
 fn encode_cell(key: &TreeKey, value: &[u8]) -> Result<Vec<u8>> {

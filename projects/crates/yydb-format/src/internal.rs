@@ -22,6 +22,24 @@ pub struct InternalPage {
 }
 
 impl InternalPage {
+    /// Create an internal page with at least two children.
+    pub fn new(
+        page_id: u32,
+        page_generation: u64,
+        tree_id: u8,
+        entries: Vec<InternalEntry>,
+    ) -> Result<Self> {
+        if entries.len() < 2 {
+            return Err(Error::Corrupt("internal page needs two children"));
+        }
+        Ok(Self {
+            page_id,
+            page_generation,
+            tree_id,
+            entries,
+        })
+    }
+
     /// Parse an internal page image.
     pub fn decode(page_id: u32, page: &[u8]) -> Result<Self> {
         let header = PageHeader::parse(page)?;
@@ -108,5 +126,49 @@ impl InternalPage {
 
     pub fn child_page_id(&self, index: usize) -> u32 {
         self.entries[index].child_page_id
+    }
+
+    /// Insert a new child after `child_idx`. Returns `false` when the page is full.
+    pub fn insert_child(
+        &mut self,
+        child_idx: usize,
+        separator: TreeKey,
+        child_page_id: u32,
+    ) -> Result<bool> {
+        if child_idx >= self.entries.len() {
+            return Err(Error::Corrupt("internal child index out of range"));
+        }
+        self.entries.insert(
+            child_idx + 1,
+            InternalEntry {
+                separator,
+                child_page_id,
+            },
+        );
+        match self.encode() {
+            Ok(_) => Ok(true),
+            Err(Error::Corrupt("internal page too large")) => {
+                self.entries.remove(child_idx + 1);
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Split into left (retained) and right internal pages.
+    pub fn split(&mut self) -> Result<(TreeKey, InternalPage)> {
+        if self.entries.len() < 4 {
+            return Err(Error::Corrupt("internal page too small to split"));
+        }
+        let split_at = self.entries.len() / 2;
+        let right_entries = self.entries.split_off(split_at);
+        let separator = right_entries[0].separator.clone();
+        let right = InternalPage {
+            page_id: 0,
+            page_generation: self.page_generation,
+            tree_id: self.tree_id,
+            entries: right_entries,
+        };
+        Ok((separator, right))
     }
 }
