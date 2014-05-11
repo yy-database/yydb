@@ -186,6 +186,11 @@ impl LeafPage {
         self.cells.len()
     }
 
+    /// Iterate cells in key order.
+    pub fn cells(&self) -> &[LeafCell] {
+        &self.cells
+    }
+
     /// Split into left (retained) and right leaf. Separator is the first key in `right`.
     pub fn split(&mut self) -> Result<(TreeKey, LeafPage)> {
         if self.cells.len() < 2 {
