@@ -25,6 +25,7 @@ yydb-execution = { workspace = true }
 yydb-udf = { workspace = true }
 yydb-query = { workspace = true }
 serde_json = { workspace = true }
+yydb-format = { workspace = true }
 
 [dev-dependencies]
 yydb-format = { workspace = true }

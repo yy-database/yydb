@@ -70,6 +70,7 @@ pub mod prelude {
 }
 
 mod doctor;
+mod format_v1;
 mod lease;
 mod refs;
 mod ttl;
@@ -119,6 +120,7 @@ use journal::{
 };
 use udf::{ClosureUdf, ScalarFn};
 use udf_bridge::UdfSubsystem;
+use yydb_format::FilePager;
 
 const MAGIC: &[u8] = b"YYDB\x03";
 const LEGACY_MAGIC: &[u8] = b"YYDB\x01";
@@ -135,6 +137,11 @@ struct State {
 enum Backend {
     File {
         path: PathBuf,
+        journal_mode: Mutex<JournalMode>,
+    },
+    FormatV1 {
+        path: PathBuf,
+        pager: Mutex<FilePager>,
         journal_mode: Mutex<JournalMode>,
     },
     Memory {
@@ -219,6 +226,34 @@ impl Connection {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
+        let use_format_v1 = flags.format_v1 || format_v1::file_is_ydpg(&path)?;
+        if flags.format_v1 && path.exists() && !format_v1::file_is_ydpg(&path)? {
+            return Err(Error::Unsupported(
+                "OpenFlags::format_v1 cannot open a legacy YYDB main file",
+            ));
+        }
+        if use_format_v1 {
+            let enable_wal = flags.journal_mode == JournalMode::Wal;
+            let pager = FilePager::open(&path, enable_wal)?;
+            let connection = Self {
+                operation_lock: Mutex::new(()),
+                txn: Mutex::new(None),
+                backend: Backend::FormatV1 {
+                    path: path.clone(),
+                    pager: Mutex::new(pager),
+                    journal_mode: Mutex::new(flags.journal_mode),
+                },
+                udfs: Mutex::new(UdfSubsystem::default()),
+                objects: if is_yydx_main_path(&path) {
+                    ObjectStore::open_yydx_blob_root(ObjectStore::yydx_objects_root(&path))?
+                } else {
+                    ObjectStore::open_ephemeral()
+                },
+            };
+            let _ = connection.read_state()?;
+            connection.reconcile_leases_on_open()?;
+            return Ok(connection);
+        }
         if !path.exists() {
             write_main(&path, &State::default())?;
         }
@@ -274,7 +309,7 @@ impl Connection {
     /// Filesystem path for file-backed connections; `None` for in-memory.
     pub fn path(&self) -> Option<&Path> {
         match &self.backend {
-            Backend::File { path, .. } => Some(path.as_path()),
+            Backend::File { path, .. } | Backend::FormatV1 { path, .. } => Some(path.as_path()),
             Backend::Memory { .. } => None,
         }
     }
@@ -305,9 +340,11 @@ impl Connection {
     /// Current journal mode (`delete` or `wal`). In-memory is always `delete`.
     pub fn journal_mode(&self) -> JournalMode {
         match &self.backend {
-            Backend::File { journal_mode, .. } => *journal_mode
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Backend::File { journal_mode, .. } | Backend::FormatV1 { journal_mode, .. } => {
+                *journal_mode
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+            }
             Backend::Memory { .. } => JournalMode::Delete,
         }
     }
@@ -315,26 +352,44 @@ impl Connection {
     /// Switch journal mode. Enabling WAL creates sidecars; disabling WAL
     /// checkpoints then removes `{db}-wal` / `{db}-shm`.
     pub fn set_journal_mode(&self, mode: JournalMode) -> Result<()> {
-        let Backend::File { path, journal_mode } = &self.backend else {
-            return Ok(());
-        };
-        let mut slot = journal_mode
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if *slot == mode {
-            return Ok(());
-        }
-        match mode {
-            JournalMode::Wal => {
-                ensure_wal_sidecars(path)?;
+        match &self.backend {
+            Backend::Memory { .. } => return Ok(()),
+            Backend::File { path, journal_mode } => {
+                let mut slot = journal_mode
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if *slot == mode {
+                    return Ok(());
+                }
+                match mode {
+                    JournalMode::Wal => {
+                        ensure_wal_sidecars(path)?;
+                    }
+                    JournalMode::Delete => {
+                        let state = load_file_state(path)?;
+                        write_main(path, &state)?;
+                        remove_wal_sidecars(path)?;
+                    }
+                }
+                *slot = mode;
             }
-            JournalMode::Delete => {
-                let state = load_file_state(path)?;
-                write_main(path, &state)?;
-                remove_wal_sidecars(path)?;
+            Backend::FormatV1 { pager, journal_mode, .. } => {
+                let mut slot = journal_mode
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if *slot == mode {
+                    return Ok(());
+                }
+                let mut pager = pager
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                match mode {
+                    JournalMode::Wal => pager.enable_wal()?,
+                    JournalMode::Delete => pager.disable_wal()?,
+                }
+                *slot = mode;
             }
         }
-        *slot = mode;
         Ok(())
     }
 
@@ -346,26 +401,45 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let Backend::File { path, journal_mode } = &self.backend else {
-            return Ok(());
-        };
-        let mode = *journal_mode
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if mode != JournalMode::Wal {
-            return Ok(());
+        match &self.backend {
+            Backend::Memory { .. } => Ok(()),
+            Backend::File { path, journal_mode } => {
+                let mode = *journal_mode
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if mode != JournalMode::Wal {
+                    return Ok(());
+                }
+                let mut state = load_file_state(path)?;
+                doctor::record_checkpoint(&mut state.records);
+                write_main(path, &state)?;
+                truncate_wal(path)?;
+                Ok(())
+            }
+            Backend::FormatV1 { pager, journal_mode, .. } => {
+                let mode = *journal_mode
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if mode != JournalMode::Wal {
+                    return Ok(());
+                }
+                let mut pager = pager
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut state = format_v1::read_state(&mut pager)?;
+                doctor::record_checkpoint(&mut state.records);
+                format_v1::write_state(&mut pager, &state)?;
+                pager.checkpoint()?;
+                Ok(())
+            }
         }
-        let mut state = load_file_state(path)?;
-        doctor::record_checkpoint(&mut state.records);
-        write_main(path, &state)?;
-        truncate_wal(path)?;
-        Ok(())
     }
 
     /// Number of committed frames recorded in `-shm` (0 if absent).
     pub fn wal_frame_count(&self) -> Result<u32> {
         match &self.backend {
             Backend::File { path, .. } => wal_frame_count(path),
+            Backend::FormatV1 { .. } => Ok(0),
             Backend::Memory { .. } => Ok(0),
         }
     }
@@ -1174,6 +1248,12 @@ impl Connection {
     fn read_state(&self) -> Result<State> {
         match &self.backend {
             Backend::File { path, .. } => load_file_state(path),
+            Backend::FormatV1 { pager, .. } => {
+                let mut pager = pager
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                format_v1::read_state(&mut pager)
+            }
             Backend::Memory { state } => Ok(state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1194,6 +1274,12 @@ impl Connection {
                         append_snapshot_frame(path, &payload)
                     }
                 }
+            }
+            Backend::FormatV1 { pager, .. } => {
+                let mut pager = pager
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                format_v1::write_state(&mut pager, state)
             }
             Backend::Memory { state: slot } => {
                 *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = state.clone();
