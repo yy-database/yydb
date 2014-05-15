@@ -17,7 +17,7 @@ base64 = "0.22"
 uuid = { version = "1", features = ["serde", "v4"] }
 serde_json = "1"
 vos = { version = "0.1.0", git = "https://github.com/voml/vos-language.git", branch = "dev" }
-windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Storage_FileSystem", "Win32_System_IO"] }
 napi = { version = "2.16", default-features = false, features = ["napi4"] }
 napi-derive = "2.16"
 napi-build = "2.6"

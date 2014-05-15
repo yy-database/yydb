@@ -1457,6 +1457,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "blake3",
+ "libc",
  "serde_json",
  "sha1",
  "vos",

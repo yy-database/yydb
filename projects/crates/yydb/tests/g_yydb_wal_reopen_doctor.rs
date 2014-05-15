@@ -3,12 +3,12 @@
 
 mod common;
 
-use common::{cleanup, open_temp_db, reopen};
+use common::{cleanup, reopen, temp_db_path};
 use yydb::{journal::wal_path, DoctorSeverity, OpenFlags};
 
 #[test]
 fn g_yydb_wal_reopen_doctor() {
-    let (_unused, path) = open_temp_db("wal-reopen");
+    let path = temp_db_path("wal-reopen");
     cleanup(&path);
     let conn = yydb::Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     conn.put("wal/a", b"1").unwrap();
