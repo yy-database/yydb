@@ -20,10 +20,7 @@ fn g_yydb_format_v1_file_roundtrip() {
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(&bytes[0..5], PAGE_MAGIC);
     let mut reopened = FilePager::open(&path, true).unwrap();
-    assert_eq!(
-        reopened.get_kv("gate/key").unwrap(),
-        Some(b"ok".to_vec())
-    );
+    assert_eq!(reopened.get_kv("gate/key").unwrap(), Some(b"ok".to_vec()));
     let _ = std::fs::remove_file(&path);
     let wal = PathBuf::from(format!("{}-wal", path.display()));
     let _ = std::fs::remove_file(wal);

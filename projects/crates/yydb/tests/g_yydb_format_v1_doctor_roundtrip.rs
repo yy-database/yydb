@@ -49,9 +49,9 @@ fn g_yydb_format_v1_doctor_corrupt_header_fixture() {
     fs::copy(fixture("page0_bad_checksum.bin"), &path).unwrap();
 
     let issues = diagnose_file(&path).unwrap();
-    let slot_a = issues
-        .iter()
-        .find(|issue| issue.code == "yydb.doctor.corrupt_header" && issue.key_hint.as_deref() == Some("slot_a"));
+    let slot_a = issues.iter().find(|issue| {
+        issue.code == "yydb.doctor.corrupt_header" && issue.key_hint.as_deref() == Some("slot_a")
+    });
     assert!(
         slot_a.is_some(),
         "expected slot_a corrupt_header issue, got {:?}",

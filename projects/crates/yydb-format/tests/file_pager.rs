@@ -16,10 +16,7 @@ fn file_pager_create_and_reopen() {
         assert_eq!(pager.get_kv("hello").unwrap(), Some(b"world".to_vec()));
     }
     let mut reopened = FilePager::open(&path, false).unwrap();
-    assert_eq!(
-        reopened.get_kv("hello").unwrap(),
-        Some(b"world".to_vec())
-    );
+    assert_eq!(reopened.get_kv("hello").unwrap(), Some(b"world".to_vec()));
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(&bytes[0..5], PAGE_MAGIC);
     assert!(bytes.len() >= PAGE_SIZE * 2);
@@ -43,10 +40,7 @@ fn file_pager_wal_reopen() {
         assert!(wal_path.exists());
     }
     let mut reopened = FilePager::open(&path, true).unwrap();
-    assert_eq!(
-        reopened.get_kv("durable").unwrap(),
-        Some(b"value".to_vec())
-    );
+    assert_eq!(reopened.get_kv("durable").unwrap(), Some(b"value".to_vec()));
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(&wal_path);
 }

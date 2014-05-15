@@ -56,8 +56,10 @@ impl LeafPage {
         let mut cells = Vec::with_capacity(slot_count);
         for idx in 0..slot_count {
             let base = DIRECTORY_BYTES + idx * 4;
-            let cell_offset = u16::from_le_bytes(payload[base..base + 2].try_into().unwrap()) as usize;
-            let cell_len = u16::from_le_bytes(payload[base + 2..base + 4].try_into().unwrap()) as usize;
+            let cell_offset =
+                u16::from_le_bytes(payload[base..base + 2].try_into().unwrap()) as usize;
+            let cell_len =
+                u16::from_le_bytes(payload[base + 2..base + 4].try_into().unwrap()) as usize;
             let start = cell_offset;
             let end = start + cell_len;
             if end > free_start || start < directory_end {
@@ -79,8 +81,8 @@ impl LeafPage {
             if value_end != cell.len() {
                 return Err(Error::Corrupt("leaf cell length mismatch"));
             }
-            let key = TreeKey::from_bytes(&cell[8..key_end])
-                .ok_or(Error::Corrupt("leaf key invalid"))?;
+            let key =
+                TreeKey::from_bytes(&cell[8..key_end]).ok_or(Error::Corrupt("leaf key invalid"))?;
             if key.key_kind != key_kind {
                 return Err(Error::Corrupt("leaf key kind mismatch"));
             }

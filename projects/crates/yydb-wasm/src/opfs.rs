@@ -6,9 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
-use yydb::{
-    DoctorIssue, DoctorReport, DoctorSeverity, Error, Result,
-};
+use yydb::{DoctorIssue, DoctorReport, DoctorSeverity, Error, Result};
 
 fn writer_locks() -> &'static Mutex<HashSet<String>> {
     static LOCKS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -425,9 +423,7 @@ pub fn opfs_evict_blob(path: &str, blob_hash: &str) {
 /// Read-only OPFS consistency probe for committed catalog vs blob inventory (Living `08` `G-OPFS-6`).
 pub fn opfs_doctor(path: &str) -> Result<DoctorReport> {
     let snapshot = opfs_reopen(path)?;
-    let inventory = blob_inventory()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
+    let inventory = blob_inventory().lock().unwrap_or_else(|p| p.into_inner());
     let present = inventory.get(path);
     let mut issues = Vec::new();
     for hash in snapshot.visible_references() {

@@ -66,7 +66,10 @@ impl WalWriter {
     pub fn append_commit(&mut self, pages: &[(u32, Vec<u8>)]) -> Result<u64> {
         let txid = self.next_txid;
         self.next_txid += 1;
-        let mut file = OpenOptions::new().append(true).write(true).open(&self.path)?;
+        let mut file = OpenOptions::new()
+            .append(true)
+            .write(true)
+            .open(&self.path)?;
         file.write_all(&encode_frame(
             FRAME_TXN_BEGIN,
             self.next_lsn,

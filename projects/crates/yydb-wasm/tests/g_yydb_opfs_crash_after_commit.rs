@@ -11,8 +11,9 @@ fn g_yydb_opfs_crash_after_commit() {
     let mut publication = OpfsBlobPublication::new(path, &["blob-a"]);
     publication.publish_blob("blob-b");
 
-    let committed = opfs_commit_and_sync(path, &mut publication, &["blob-a", "blob-b"], b"catalog-v2")
-        .expect("durable commit");
+    let committed =
+        opfs_commit_and_sync(path, &mut publication, &["blob-a", "blob-b"], b"catalog-v2")
+            .expect("durable commit");
     // Crash after `TxnCommit` sync: durable snapshot must already be complete.
 
     let reopened = opfs_reopen(path).expect("reopen after crash");

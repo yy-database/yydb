@@ -1,11 +1,6 @@
 //! `YDPG` format v1 persistence bridge for [`Connection`].
 
-use std::{
-    collections::BTreeMap,
-    fs::File,
-    io::Read,
-    path::Path,
-};
+use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
 
 use yydb_format::{FilePager, KEY_KIND_USER, PAGE_MAGIC, TREE_RECORD};
 use yydb_types::{Error, Result};
@@ -152,10 +147,9 @@ fn decode_catalog(bytes: Option<Vec<u8>>) -> Result<Option<vos::ast::CatalogSnap
             if bytes.len() != end {
                 return Err(Error::Corrupt("catalog meta length mismatch"));
             }
-            Ok(Some(
-                serde_json::from_slice(&bytes[5..end])
-                    .map_err(|_| Error::Corrupt("catalog meta is invalid JSON"))?,
-            ))
+            Ok(Some(serde_json::from_slice(&bytes[5..end]).map_err(
+                |_| Error::Corrupt("catalog meta is invalid JSON"),
+            )?))
         }
         _ => Err(Error::Corrupt("unknown catalog meta marker")),
     }

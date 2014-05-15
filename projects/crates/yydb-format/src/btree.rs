@@ -5,8 +5,8 @@ use yydb_types::{Error, Result};
 use crate::internal::{InternalEntry, InternalPage};
 use crate::key::{TreeKey, TREE_RECORD};
 use crate::leaf::LeafPage;
-use crate::pager::PageStore;
 use crate::page::{PageHeader, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF};
+use crate::pager::PageStore;
 
 /// Result of inserting into a leaf that may have split.
 struct LeafInsert {
@@ -94,7 +94,9 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
             .load_page(page_id)?
             .ok_or(Error::Corrupt("missing tree page"))?;
         match page.0.page_type {
-            PAGE_TYPE_LEAF => Ok(LeafPage::decode(page_id, &page.1)?.get(key).map(|v| v.to_vec())),
+            PAGE_TYPE_LEAF => Ok(LeafPage::decode(page_id, &page.1)?
+                .get(key)
+                .map(|v| v.to_vec())),
             PAGE_TYPE_INTERNAL => {
                 let node = InternalPage::decode(page_id, &page.1)?;
                 let child = node.child_page_id(node.child_index_for(key));
@@ -116,7 +118,9 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
         match page.0.page_type {
             PAGE_TYPE_LEAF => {
                 let leaf = self.insert_leaf(page_id, key, value)?;
-                Ok(leaf.split.map(|(separator, right_id)| (separator, right_id)))
+                Ok(leaf
+                    .split
+                    .map(|(separator, right_id)| (separator, right_id)))
             }
             PAGE_TYPE_INTERNAL => {
                 let node = InternalPage::decode(page_id, &page.1)?;

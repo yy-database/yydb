@@ -26,9 +26,7 @@ impl MemoryPager {
 
     /// Load page 0 and return the active database header.
     pub fn header(&self) -> Result<DatabaseHeader> {
-        let page0 = self
-            .get_page(0)?
-            .ok_or(Error::Corrupt("missing page0"))?;
+        let page0 = self.get_page(0)?.ok_or(Error::Corrupt("missing page0"))?;
         parse_page0(&page0)
     }
 

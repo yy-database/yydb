@@ -65,7 +65,8 @@ impl InternalPage {
             }
             let separator_len =
                 u16::from_le_bytes(payload[cursor..cursor + 2].try_into().unwrap()) as usize;
-            let child_page_id = u32::from_le_bytes(payload[cursor + 2..cursor + 6].try_into().unwrap());
+            let child_page_id =
+                u32::from_le_bytes(payload[cursor + 2..cursor + 6].try_into().unwrap());
             cursor += 6;
             let end = cursor + separator_len;
             if end > payload.len() {

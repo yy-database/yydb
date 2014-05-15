@@ -43,7 +43,9 @@ fn probe_main_bytes(bytes: &[u8]) -> Vec<DoctorIssue> {
         return issues;
     }
     issues.extend(probe_header_slots(bytes));
-    if issues.iter().any(|issue| issue.code == "yydb.doctor.corrupt_header" && issue.severity == DoctorSeverity::Error) {
+    if issues.iter().any(|issue| {
+        issue.code == "yydb.doctor.corrupt_header" && issue.severity == DoctorSeverity::Error
+    }) {
         return issues;
     }
     let header = match parse_page0(bytes) {
@@ -249,11 +251,7 @@ fn visit_tree_page(
 fn probe_wal_bytes(bytes: &[u8]) -> Vec<DoctorIssue> {
     match parse_wal(bytes) {
         Ok(_) => Vec::new(),
-        Err(Error::Corrupt(message)) => vec![issue_error(
-            "yydb.doctor.corrupt_wal",
-            message,
-            None,
-        )],
+        Err(Error::Corrupt(message)) => vec![issue_error("yydb.doctor.corrupt_wal", message, None)],
         Err(error) => vec![issue_error(
             "yydb.doctor.corrupt_wal",
             error.to_string(),
