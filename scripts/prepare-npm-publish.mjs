@@ -72,17 +72,14 @@ function preparePackageJson(pkgDir, { workspaceClientToVersion = false } = {}) {
     writeJson(pkgPath, j);
 }
 
-const platforms = [
-    ['yydb-win32-x64', 'yydb.win32-x64.node'],
-    ['yydb-linux-x64', 'yydb.linux-x64.node'],
-    ['yydb-darwin-x64', 'yydb.darwin-x64.node'],
-    ['yydb-darwin-arm64', 'yydb.darwin-arm64.node'],
-];
+import { NATIVE_ARTIFACTS } from './native-artifacts.mjs';
 
-for (const [pkg, binding] of platforms) {
+for (const { pkg, fileName } of NATIVE_ARTIFACTS) {
     const destDir = path.join(root, 'projects', 'packages', pkg);
-    const dest = path.join(destDir, binding);
-    fs.copyFileSync(findNativeBinding(binding), dest);
+    const libDir = path.join(destDir, 'lib');
+    const dest = path.join(libDir, fileName);
+    fs.mkdirSync(libDir, { recursive: true });
+    fs.copyFileSync(findNativeBinding(fileName), dest);
     try {
         fs.chmodSync(dest, 0o755);
     } catch {

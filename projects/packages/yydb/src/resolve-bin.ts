@@ -13,9 +13,18 @@ export function platformKey(platform = process.platform, arch = process.arch): P
     return null;
 }
 
-/** Native binding filename inside each `@yydb/yydb-<platform>` package. */
+/** Native binding filename inside each `@yydb/yydb-<platform>` package `lib/`. */
 export function nativeBindingName(key: PlatformKey): string {
-    return `yydb.${key}.node`;
+    switch (key) {
+        case 'win32-x64':
+            return 'yydb-win32-x64-msvc.node';
+        case 'linux-x64':
+            return 'yydb-linux-x64-gnu.node';
+        case 'darwin-x64':
+            return 'yydb-darwin-x64.node';
+        case 'darwin-arm64':
+            return 'yydb-darwin-arm64.node';
+    }
 }
 
 function existsFile(filePath: string): boolean {

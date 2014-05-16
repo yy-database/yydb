@@ -1,8 +1,7 @@
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { nativeBindingName, platformKey, type PlatformKey } from './resolve-bin.js';
+import { platformKey } from './resolve-bin.js';
 
 export interface YydbNative {
     version(): string;
@@ -12,70 +11,35 @@ export interface YydbNative {
     readSchemaFile(schemaPath: string): string;
 }
 
-function existsFile(filePath: string): boolean {
-    try {
-        fs.accessSync(filePath, fs.constants.F_OK);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-function loadFromPath(bindingPath: string): YydbNative {
+function loadModule(specifier: string): YydbNative {
     const require = createRequire(import.meta.url);
-    return require(bindingPath) as YydbNative;
-}
-
-function monorepoBindingPath(key: PlatformKey): string | null {
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const repoRoot = path.resolve(here, '../../..');
-    const profile = process.env.YYDB_NATIVE_PROFILE === 'debug' ? 'debug' : 'release';
-    const base = path.join(repoRoot, 'target', profile);
-    const candidates =
-        process.platform === 'win32'
-            ? [path.join(base, 'yydb_napi.dll'), path.join(base, 'yydb_napi.node')]
-            : [path.join(base, 'libyydb_napi.so'), path.join(base, 'libyydb_napi.dylib'), path.join(base, 'yydb_napi.node')];
-    for (const candidate of candidates) {
-        if (existsFile(candidate)) {
-            return candidate;
-        }
-    }
-    const staged = path.join(repoRoot, 'projects', 'packages', `yydb-${key}`, nativeBindingName(key));
-    return existsFile(staged) ? staged : null;
+    const loaded = require(specifier) as Record<string, unknown> & { default?: YydbNative };
+    return (loaded.default ?? loaded) as YydbNative;
 }
 
 /** Load the platform native binding used by the `yydb` CLI. */
 export function loadNative(): YydbNative {
     const fromEnv = process.env.YYDB_NATIVE?.trim();
     if (fromEnv) {
-        if (!existsFile(fromEnv)) {
+        const bindingPath = path.resolve(fromEnv);
+        if (!fs.existsSync(bindingPath)) {
             throw new Error(`YYDB_NATIVE points to missing binding: ${fromEnv}`);
         }
-        return loadFromPath(path.resolve(fromEnv));
+        return loadModule(bindingPath);
     }
 
     const key = platformKey();
-    if (key) {
-        const pkg = `@yydb/yydb-${key}`;
-        const require = createRequire(import.meta.url);
-        try {
-            const pkgJson = require.resolve(`${pkg}/package.json`);
-            const candidate = path.join(path.dirname(pkgJson), nativeBindingName(key));
-            if (existsFile(candidate)) {
-                return loadFromPath(candidate);
-            }
-        } catch {
-            // optionalDependency not installed for this platform
-        }
-        const local = monorepoBindingPath(key);
-        if (local) {
-            return loadFromPath(local);
-        }
+    if (!key) {
+        throw new Error(`YYDB native binding not available for ${process.platform}-${process.arch}`);
     }
 
-    throw new Error(
-        'YYDB native binding not found. Install the matching optionalDependency ' +
-            `(@yydb/yydb-${key ?? '<platform>'}), set YYDB_NATIVE, or build ` +
-            '`cargo build -p yydb-napi --release` in this repo.',
-    );
+    const pkg = `@yydb/yydb-${key}`;
+    try {
+        return loadModule(pkg);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+            `YYDB native binding not found. Reinstall @yydb/yydb with optional dependencies, set YYDB_NATIVE, or stage ${pkg}. ${message}`,
+        );
+    }
 }
