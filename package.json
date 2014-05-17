@@ -6,6 +6,7 @@
     "scripts": {
         "check": "cargo check --workspace",
         "build:napi": "node scripts/build-napi.mjs",
+        "build:wasm": "node scripts/build-wasm.mjs",
         "fmt": "node scripts/format.mjs",
         "fmt:check": "node scripts/format.mjs --check",
         "regenerate": "$env:REGENERATE_TESTS=1; cargo test --release --all-features",
