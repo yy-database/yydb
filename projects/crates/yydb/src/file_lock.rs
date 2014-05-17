@@ -43,7 +43,7 @@ fn lock_exclusive(file: &File) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::io::AsRawFd;
-        let rc = libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB);
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
         if rc == 0 {
             return Ok(());
         }
@@ -96,7 +96,7 @@ fn unlock_exclusive(file: &File) {
     #[cfg(unix)]
     {
         use std::os::unix::io::AsRawFd;
-        let _ = libc::flock(file.as_raw_fd(), libc::LOCK_UN);
+        let _ = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
     }
     #[cfg(windows)]
     {
