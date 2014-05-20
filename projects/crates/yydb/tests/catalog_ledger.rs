@@ -118,84 +118,15 @@ fn recovers_the_same_ledger_from_wal_before_checkpoint() {
 }
 
 #[test]
-fn legacy_source_requires_explicit_ledger_initialization() {
-    let (connection, path) = common::open_temp_db("catalog-legacy");
-    drop(connection);
-    let mut legacy = b"YYDB\x01".to_vec();
-    legacy.push(1);
-    legacy.extend(1u32.to_le_bytes());
-    legacy.extend((INITIAL.len() as u32).to_le_bytes());
-    legacy.extend(INITIAL.as_bytes());
-    legacy.extend(0u32.to_le_bytes());
-    std::fs::write(&path, legacy).unwrap();
-    let connection = common::reopen(&path);
-    assert!(connection.catalog_snapshot().unwrap().is_none());
-    connection.put("plain", b"value").unwrap();
-    assert!(std::fs::read(&path).unwrap().starts_with(b"YYDB\x01"));
-    assert!(connection
-        .migrate_schema(REORDERED, &RenameMap::default())
-        .is_err());
-    connection.ensure_schema(INITIAL).unwrap();
-    assert!(std::fs::read(&path).unwrap().starts_with(b"YYDB\x03"));
-    drop(connection);
-    let connection = common::reopen(&path);
-    assert!(connection.catalog_snapshot().unwrap().is_some());
-    assert_eq!(connection.get("plain").unwrap(), Some(b"value".to_vec()));
-    drop(connection);
-    common::cleanup(&path);
-}
-
-#[test]
-fn upgrades_v2_catalog_without_reassigning_identity() {
-    let (connection, path) = common::open_temp_db("catalog-v2-upgrade");
-    connection.ensure_schema(INITIAL).unwrap();
-    let expected = connection.catalog_snapshot().unwrap().unwrap();
-    let resolved = connection.resolved_contract().unwrap().unwrap();
-    drop(connection);
-
-    let mut bytes = std::fs::read(&path).unwrap();
-    let resolved_bytes = serde_json::to_vec(&resolved).unwrap();
-    assert!(bytes.ends_with(&resolved_bytes));
-    bytes.truncate(bytes.len() - resolved_bytes.len() - 5);
-    bytes[4] = 2;
-    std::fs::write(&path, bytes).unwrap();
-
-    let connection = common::reopen(&path);
-    assert!(connection.resolved_contract().unwrap().is_none());
-    let execution = connection.execution_catalog().unwrap().unwrap();
-    assert_eq!(execution.types[0].schema_id, expected.types[0].type_id.0);
-    assert_eq!(connection.catalog_snapshot().unwrap().unwrap(), expected);
-    assert!(connection.resolved_contract().unwrap().is_some());
-    assert!(std::fs::read(&path).unwrap().starts_with(b"YYDB\x03"));
-    drop(connection);
-    common::cleanup(&path);
-}
-
-#[test]
-fn rejects_persisted_ledger_with_duplicate_identity() {
-    let (connection, path) = common::open_temp_db("catalog-corrupt");
-    connection.ensure_schema(INITIAL).unwrap();
-    let mut snapshot = connection.catalog_snapshot().unwrap().unwrap();
-    let contract = connection.resolved_contract().unwrap().unwrap();
-    drop(connection);
-    let mut bytes = std::fs::read(&path).unwrap();
-    let original = serde_json::to_vec(&snapshot).unwrap();
-    let resolved = serde_json::to_vec(&contract).unwrap();
-    assert!(bytes.ends_with(&resolved));
-    bytes.truncate(bytes.len() - resolved.len() - 5);
-    assert!(bytes.ends_with(&original));
-    bytes.truncate(bytes.len() - original.len() - 4);
-    snapshot.types[0].fields[1].field_id = snapshot.types[0].fields[0].field_id;
-    let malformed = serde_json::to_vec(&snapshot).unwrap();
-    bytes.extend((malformed.len() as u32).to_le_bytes());
-    bytes.extend(malformed);
-    std::fs::write(&path, bytes).unwrap();
+fn rejects_whole_state_database_magic() {
+    let path = common::temp_db_path("reject-whole-state");
+    std::fs::write(&path, b"YYDB\x01").unwrap();
     assert!(matches!(Connection::open(&path), Err(Error::Corrupt(_))));
     common::cleanup(&path);
 }
 
 #[test]
-fn ignores_an_incomplete_wal_tail_after_the_last_complete_snapshot() {
+fn rejects_an_incomplete_wal_tail() {
     let path = common::temp_db_path("wal-tail");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     connection.ensure_schema(INITIAL).unwrap();
@@ -204,10 +135,10 @@ fn ignores_an_incomplete_wal_tail_after_the_last_complete_snapshot() {
     let mut bytes = std::fs::read(yydb::journal::wal_path(&path)).unwrap();
     bytes.truncate(bytes.len() - 3);
     std::fs::write(yydb::journal::wal_path(&path), bytes).unwrap();
-    let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
-    assert_eq!(connection.schema_version().unwrap(), Some(1));
-    assert_eq!(connection.get("value").unwrap(), None);
-    drop(connection);
+    assert!(matches!(
+        Connection::open_with_flags(&path, OpenFlags::wal()),
+        Err(Error::Corrupt(_))
+    ));
     common::cleanup(&path);
 }
 

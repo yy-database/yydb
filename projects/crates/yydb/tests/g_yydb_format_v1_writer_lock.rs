@@ -23,10 +23,10 @@ fn g_yydb_format_v1_writer_lock_exclusive() {
     let _ = fs::remove_file(&path);
     let _ = fs::remove_file(lock_path(&path));
 
-    let first = Connection::open_with_flags(&path, OpenFlags::format_v1()).unwrap();
+    let first = Connection::open_with_flags(&path, OpenFlags::new()).unwrap();
     assert!(lock_path(&path).exists());
 
-    let second = Connection::open_with_flags(&path, OpenFlags::format_v1());
+    let second = Connection::open_with_flags(&path, OpenFlags::new());
     match second {
         Err(Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {}
         Ok(_) => panic!("expected writer lock contention, second open succeeded"),
@@ -34,7 +34,7 @@ fn g_yydb_format_v1_writer_lock_exclusive() {
     }
 
     drop(first);
-    Connection::open_with_flags(&path, OpenFlags::format_v1()).unwrap();
+    Connection::open_with_flags(&path, OpenFlags::new()).unwrap();
 
     let _ = fs::remove_file(&path);
     let _ = fs::remove_file(lock_path(&path));
