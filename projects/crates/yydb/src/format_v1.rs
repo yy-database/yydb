@@ -2,14 +2,29 @@
 
 use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
 
-use yydb_format::{FilePager, KEY_KIND_USER, PAGE_MAGIC, TREE_RECORD};
+use yydb_format::{wal_sidecar_path, FilePager, KEY_KIND_USER, PAGE_MAGIC, TREE_RECORD};
 use yydb_types::{Error, Result};
 
+use crate::journal::JournalMode;
 use crate::State;
 
 const META_SCHEMA: &[u8] = b"__yydb/meta/schema";
 const META_CATALOG: &[u8] = b"__yydb/meta/catalog";
 const META_CONTRACT: &[u8] = b"__yydb/meta/contract";
+
+/// Open a `YDPG` pager, folding any leftover `YYWL` v3 sidecar when not in WAL mode.
+pub fn open_pager(path: &Path, journal_mode: JournalMode) -> Result<FilePager> {
+    let enable_wal = journal_mode == JournalMode::Wal;
+    if path.exists() && wal_sidecar_path(path).exists() {
+        let mut pager = FilePager::open(path, true)?;
+        if !enable_wal {
+            pager.checkpoint()?;
+            pager.disable_wal()?;
+        }
+        return Ok(pager);
+    }
+    FilePager::open(path, enable_wal)
+}
 
 /// True when `path` exists and begins with `YDPG` page magic.
 pub fn file_is_ydpg(path: &Path) -> Result<bool> {
