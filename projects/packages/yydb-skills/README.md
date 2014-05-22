@@ -1,28 +1,1 @@
-# `@yydb/yydb-skills`
-
-Agent Skills for integrators: wire protocol, VOS codegen, and historical bytes layout notes. Install a skill when you need an agent to implement or review YY-family clients, servers, or schema tooling.
-
-## Install
-
-```bash
-npx skills add @yydb/yydb-skills --skill yydb-serve-protocol -y
-```
-
-List skills or install from the monorepo path before npm publish:
-
-```bash
-npx skills add @yydb/yydb-skills --list
-npx skills add ./projects/packages/yydb-skills --skill yydb-serve-protocol -y
-```
-
-Requires Node.js 18+ for the installer. Skills are docs-only and do not replace `@yydb/yydb` or `@yydb/yydb-client`.
-
-## Skills
-
-| Skill                 | Use when                                                     |
-|-----------------------|--------------------------------------------------------------|
-| `yydb-serve-protocol` | TCP/WebSocket wire frames, `yydb serve`, `@yydb/yydb-client` |
-| `yydb-generator`      | `yydb generate`, `@yydb/yydb/generator`, VOS → TypeScript    |
-| `yydb-bytes-storage`  | Legacy per-object CAS layout (not current `.yydb` contract)  |
-
-Human-readable guides also live in [`@yydb/yydb-homepage`](../homepage/documentation/zh-hans/).
+# `@yydb/yydb-skills`Docs-only Agent Skills for YYDB integrators: wire protocol and legacy bytes notes. Install when an agent must implementor review clients or `yydb serve` — not when you only need the runtime (`@yydb/yydb`).YYDB is an embedded database with VOS schema stored in the `.yydb` file. It is **not** a generative ORM and does notrequire code generation to run.## Install```bashnpx skills add @yydb/yydb-skills --skill yydb-serve-protocol -y```List available skills:```bashnpx skills add @yydb/yydb-skills --list```Requires Node.js 18+. Skills do not ship `@yydb/yydb` or `@yydb/yydb-client`.## Skills| Skill | Load when ||-------|-----------|| [`yydb-serve-protocol`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md) |Wire frames, TCP/WebSocket, `yydb serve`, `@yydb/yydb-client` codec || [`yydb-bytes-storage`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-skills/skills/yydb-bytes-storage/SKILL.md) |Legacy per-object CAS layout only — **not** current `.yydb` |[`yydb-generator`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-skills/skills/yydb-generator/SKILL.md)documents an **optional** TypeScript typing helper (`yydb generate` / `@yydb/yydb/generator`) for maintainers only — notpart of the database product surface.Humanguides: [YYDB user documentation](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans).## Example prompts```textLoad yydb-serve-protocol. Review this WebSocket client against YY wire 0000 framing and loopback threat model.``````textLoad yydb-bytes-storage. Compare this draft CAS layout to current single-file .yydb — flag anything obsolete.```

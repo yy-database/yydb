@@ -1,30 +1,30 @@
 # `@yydb/yydb-client`
 
-**Lightweight TypeScript client for the YY wire protocol (WebSocket or TCP).**
-
-Use this when you already run `yydb serve` (from [`@yydb/yydb`](../yydb) CLI or another host) and only need the client
-surface — browser, WebUI, Electron renderer, or a thin Node process.
+TypeScript client for the YY wire protocol over WebSocket or TCP. Use when `yydb serve` already runs (from [
+`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) CLI or another host) and you only need the client surface —
+browser, WebUI, Electron renderer, or a thin Node process.
 
 [![npm](https://img.shields.io/npm/v/@yydb/yydb-client)](https://www.npmjs.com/package/@yydb/yydb-client)
 [![Node.js](https://img.shields.io/node/v/@yydb/yydb-client)](https://www.npmjs.com/package/@yydb/yydb-client)
-[![Check Rust](https://github.com/yy-database/yydb/actions/workflows/check-rust.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb/actions/workflows/check-rust.yml)
-[![Check TypeScript](https://github.com/yy-database/yydb/actions/workflows/check-typescript.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb/actions/workflows/check-typescript.yml)
 
-## Install
+## Exports
 
-```bash
-npm install @yydb/yydb-client
-```
+| Import                   | Transport         | Typical use        |
+|--------------------------|-------------------|--------------------|
+| `@yydb/yydb-client`      | WebSocket `/wire` | Browsers and WebUI |
+| `@yydb/yydb-client/node` | TCP or WebSocket  | Node and Electron  |
 
-## Browser or WebSocket
+Frame helpers (`encodeFrame`, `MsgType`, …) are exported for tools and tests.
 
-Start a local host first:
+## Example
+
+Start a host (from `@yydb/yydb` or the `yydb` CLI):
 
 ```text
 yydb serve app.yydb --bind 127.0.0.1:7700
 ```
 
-Then connect from browser-compatible code:
+**Browser / WebSocket**
 
 ```ts
 import {Client} from "@yydb/yydb-client";
@@ -36,9 +36,7 @@ console.log(await db.get("theme"));
 db.close();
 ```
 
-## Node TCP
-
-The `/node` entry point supports a TCP endpoint and `ws://` URLs:
+**Node TCP**
 
 ```ts
 import {connect} from "@yydb/yydb-client/node";
@@ -48,32 +46,14 @@ console.log(await db.info());
 db.close();
 ```
 
-If a Node application only needs to open a local `.yydb` file, use
-[`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb). It manages the local engine for you; this package is for an
-existing host or a custom transport integration.
+To open a local `.yydb` file without managing a server, use [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb)
+instead.
 
-## Exports
+The client accepts hosts that announce `YYDB` or `YYDS` on the shared wire. Connect only to hosts you control — normally
+`127.0.0.1` or `localhost`.
 
-| Import                   | Transport         | Typical use        |
-|--------------------------|-------------------|--------------------|
-| `@yydb/yydb-client`      | WebSocket `/wire` | Browsers and WebUI |
-| `@yydb/yydb-client/node` | TCP or WebSocket  | Node and Electron  |
+Protocol details: [
+`yydb-serve-protocol`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md)
+in [`@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills).
 
-The high-level client includes `info`, schema ensure/get, key/value get/put, server version, and close operations. Frame
-helpers such as `encodeFrame` and
-`MsgType` are exported for tools and tests.
-
-## Compatibility and security
-
-The client accepts hosts that announce either `YYDB` or `YYDS` on the shared wire. The reference `yydb serve` endpoint
-has no authentication, so connect only to a host you control, normally `127.0.0.1` or `localhost`.
-
-Protocol details for implementers are in the
-[`yydb-serve-protocol` skill](../yydb-skills/skills/yydb-serve-protocol/SKILL.md) (`@yydb/yydb-skills`).
-
-## Links
-
-- [Node file API](https://www.npmjs.com/package/@yydb/yydb)
-- [Local WebUI](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-webui)
-- [YYDB user guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
-- [License](https://github.com/yy-database/yydb.rs/blob/dev/License.md)
+[YYDB overview](https://github.com/yy-database/yydb.rs) · [User guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)

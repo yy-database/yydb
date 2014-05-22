@@ -1,13 +1,27 @@
 ---
 name: yydb-serve-protocol
 description: >-
-    YY wire protocol for yydb serve: frame layout, message types, threat model, TCP/WebSocket.
-    Load when changing yydb-server, @yydb/yydb-client wire codec, or serve security.
+  Documents YY wire protocol 0000 for yydb serve: frame layout, message types,
+  TCP/WebSocket transport, and loopback threat model. Use when implementing or
+  reviewing yydb-server, @yydb/yydb-client wire codec, serve security, or WebUI
+  wire clients.
 ---
 
 # YY wire protocol (VOS-native serve)
 
 Binary request/response framing for **YY-family** servers that speak VOS-native serve semantics.
+
+## When to load
+
+- Implementing or reviewing `@yydb/yydb-client`, browser WebUI wire code, or `yydb-server`
+- Debugging frame encode/decode, `msg_type` handling, or `MicroHostInvoke` callbacks
+- Reviewing `yydb serve` bind address and security assumptions
+
+## Do not load
+
+- Embedded `.yydb` file format, WAL, or YDPG page layout (not on the wire)
+- YYDS distributed permissions/RBAC (product layer — do not add to reference YYDB serve)
+- HTTP/REST or SQL database protocols
 
 ## Prefix: product magic + version digits
 
@@ -16,11 +30,10 @@ Binary request/response framing for **YY-family** servers that speak VOS-native 
 | 0–3   | product magic | ASCII `YYDB` or `YYDS`                                      |
 | 4–7   | wire version  | four ASCII digits: **`0000`** (current), then **`0001`**, … |
 
-`YYDB` / `YYDS` are a **backend self-claim** only. Wire semantics are the same; frontends accept either. Version digits
+`YYDB` / `YYDS` are a **backend self-claim** only. Wire semantics are the same; clients accept either. Version digits
 gate compatibility.
 
-Reference host: `yydb serve` (`yydb-server`, `@yydb/yydb` CLI) encodes `YYDB` + `0000`. `@yydb/yydb-client` and WebUI
-use the same layout. **Not** HTTP JSON or SQL.
+Reference host: `yydb serve` (`yydb-server`, `@yydb/yydb` CLI) encodes `YYDB` + `0000`.
 
 ## Threat model (no ACL)
 
@@ -31,8 +44,6 @@ database.
 - Non-loopback requires `--insecure-bind` with loud warning
 - Trust boundary = process placement + OS permissions on `.yydb`
 - Public homepage must not open a live serve socket
-
-**YYDS** is the distributed product with permissions/audit. Do not implement that stack inside YYDB.
 
 ## Transport
 
@@ -86,3 +97,9 @@ TCP clients must handle server-pushed `MicroHostInvoke` before their own respons
 ## Out of scope for `0000`
 
 Authentication/RBAC, full VOS query RPC, CAS object streaming, TLS as product surface, `0001` layout (when shipped).
+
+## Example prompt
+
+```text
+Load yydb-serve-protocol. This client sends KvPut without Hello — list spec violations and fix the frame sequence.
+```

@@ -1,7 +1,8 @@
-# yydb-execution
+# `yydb-execution`
 
-Stable local execution IR owned by YYDB. VOS frontends lower into this model
-through the [`yydb`](../yydb/readme.md) binder.
+Stable local execution IR owned by YYDB. VOS frontends lower into this model through the [
+`yydb`](https://crates.io/crates/yydb) binder.
 
-Applications should depend on **`yydb`** (`yydb::execution`). Take a direct
-`yydb-execution` dependency only when extending the execution layer.
+Depend on **`yydb`** (`yydb::execution`) unless you extend the execution layer directly.
+
+[docs.rs](https://docs.rs/yydb-execution) · [YYDB overview](https://github.com/yy-database/yydb.rs)
