@@ -17,8 +17,6 @@ export default defineConfig({
             '**/target/**',
             '**/.vite/**',
             '**/pnpm-lock.yaml',
-            '**/fixtures/**',
-            '**/*.generated.ts',
             '**/*.md',
             '**/*.css',
             '**/*.vue',

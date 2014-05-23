@@ -1,4 +1,3 @@
 # Keep text fixtures byte-stable across Windows checkouts (autocrlf).
 projects/crates/yydb/** text eol=lf
 *.vos text eol=lf
-*.generated.ts text eol=lf

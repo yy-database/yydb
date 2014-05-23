@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url';
 
 import { createCli } from '@vmz/commander';
 
-import { registerGenerateCommand } from './generate-cmd.js';
 import { registerInfoCommand } from './info-cmd.js';
 import { registerInitCommand } from './init-cmd.js';
 import { registerServeCommand } from './serve-cmd.js';
@@ -17,7 +16,6 @@ function buildYydbCli() {
     registerInitCommand(cli);
     registerInfoCommand(cli);
     registerServeCommand(cli);
-    registerGenerateCommand(cli);
 
     return cli;
 }

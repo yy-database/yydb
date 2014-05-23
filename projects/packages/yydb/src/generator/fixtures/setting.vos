@@ -1,5 +1,0 @@
-table Setting {
-    @@id: uuid,
-    key: utf8,
-    value: utf8,
-}

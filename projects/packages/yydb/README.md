@@ -16,8 +16,7 @@ already runs `yydb serve`), use [`@yydb/yydb-client`](https://www.npmjs.com/pack
 
 Node.js 18+. The matching platform `.node` binding installs via optional dependencies.
 
-YYDB is an embedded database — not an ORM. Schema truth lives in the `.yydb` file via `ensureSchema` and VOS documents.
-There is no query or migration codegen on the critical path.
+Schema truth lives in the `.yydb` file via `ensureSchema` and VOS documents.
 
 ## Example
 

@@ -18,10 +18,6 @@
         "./cli": {
             "types": "./dist/cli.d.ts",
             "import": "./dist/cli.js"
-        },
-        "./generator": {
-            "types": "./dist/generator/index.d.ts",
-            "import": "./dist/generator/index.js"
         }
     },
     "files": [
