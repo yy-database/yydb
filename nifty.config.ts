@@ -11,16 +11,7 @@ export default defineConfig({
             quoteStyle: 'single',
         },
         includes: ['package.json', 'nifty.config.ts', 'scripts/**', 'projects/packages/**'],
-        excludes: [
-            '**/node_modules/**',
-            '**/dist/**',
-            '**/target/**',
-            '**/.vite/**',
-            '**/pnpm-lock.yaml',
-            '**/*.md',
-            '**/*.css',
-            '**/*.vue',
-        ],
+        excludes: ['**/node_modules/**', '**/dist/**', '**/target/**', '**/.vite/**', '**/pnpm-lock.yaml', '**/*.md', '**/*.css', '**/*.vue'],
     },
     trust: {
         npm: {
