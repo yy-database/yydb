@@ -9,7 +9,7 @@ import { registerServeCommand } from './serve-cmd.js';
 import { registerVersionCommand } from './version-cmd.js';
 
 function buildYydbCli() {
-    const localesRoot = join(dirname(fileURLToPath(import.meta.url)), '../../locales');
+    const localesRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../locales');
     const cli = createCli('yydb').locales(localesRoot).intro('cli.intro');
 
     registerVersionCommand(cli);
