@@ -42,6 +42,9 @@ importers:
       '@yydb/yydb-client':
         specifier: workspace:*
         version: link:../yydb-client
+      '@yydb/yydb-unknown-wasm32':
+        specifier: workspace:*
+        version: link:../yydb-unknown-wasm32
     devDependencies:
       '@types/node':
         specifier: ^20.10.0
