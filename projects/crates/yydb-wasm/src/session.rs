@@ -3,7 +3,7 @@
 use wasm_bindgen::prelude::*;
 use yydb::{Connection, Error};
 
-use crate::core::{execute_result_json, unit_result_json};
+use crate::core::{execute_result_json, kv_get_json, schema_get_json, unit_result_json};
 use crate::opfs::{open_persistent, OpfsCapabilities, OpfsPersistentVolume};
 
 fn closed_session_error() -> Error {
@@ -76,6 +76,33 @@ impl MemorySession {
         run_execute(&self.conn, self.closed, source)
     }
 
+    /// Fetch a raw byte record by key. Returns JSON `{ ok, value, error }`.
+    #[wasm_bindgen(js_name = get)]
+    pub fn get(&self, key: &str) -> String {
+        if self.closed {
+            return kv_get_json(Err(closed_session_error()));
+        }
+        kv_get_json(self.conn.get(key))
+    }
+
+    /// Insert or replace a raw byte record. Returns JSON `{ ok, rows, error }`.
+    #[wasm_bindgen(js_name = put)]
+    pub fn put(&self, key: &str, value: &[u8]) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.put(key, value))
+    }
+
+    /// Current persisted schema, if any. Returns JSON `{ ok, schema, error }`.
+    #[wasm_bindgen(js_name = getSchema)]
+    pub fn get_schema(&self) -> String {
+        if self.closed {
+            return schema_get_json(Err(closed_session_error()));
+        }
+        schema_get_json(self.conn.schema())
+    }
+
     #[wasm_bindgen]
     pub fn close(&mut self) {
         self.closed = true;
@@ -140,6 +167,33 @@ impl PersistentSession {
     #[wasm_bindgen]
     pub fn execute(&self, source: &str) -> String {
         run_execute(&self.conn, self.closed, source)
+    }
+
+    /// Fetch a raw byte record by key. Returns JSON `{ ok, value, error }`.
+    #[wasm_bindgen(js_name = get)]
+    pub fn get(&self, key: &str) -> String {
+        if self.closed {
+            return kv_get_json(Err(closed_session_error()));
+        }
+        kv_get_json(self.conn.get(key))
+    }
+
+    /// Insert or replace a raw byte record. Returns JSON `{ ok, rows, error }`.
+    #[wasm_bindgen(js_name = put)]
+    pub fn put(&self, key: &str, value: &[u8]) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.put(key, value))
+    }
+
+    /// Current persisted schema, if any. Returns JSON `{ ok, schema, error }`.
+    #[wasm_bindgen(js_name = getSchema)]
+    pub fn get_schema(&self) -> String {
+        if self.closed {
+            return schema_get_json(Err(closed_session_error()));
+        }
+        schema_get_json(self.conn.schema())
     }
 
     #[wasm_bindgen]
