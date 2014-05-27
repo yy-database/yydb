@@ -15,9 +15,25 @@ export type CheckSchemaResult = {
     error?: string;
 };
 
+/** Stateful wasm session (memory or OPFS-backed). */
+export type WasmSession = {
+    ensureSchema(document: string): string;
+    query(source: string): string;
+    execute(source: string): string;
+    get(key: string): string;
+    put(key: string, value: Uint8Array): string;
+    getSchema(): string;
+    close(): void;
+    readonly path?: string;
+};
+
 const glueApi = glue as {
     yydbVersion?: () => string;
     checkSchema?: (source: string) => CheckSchemaResult;
+    introspectSchema?: (source: string) => string;
+    queryMemory?: (source: string) => string;
+    MemorySession?: new () => WasmSession;
+    PersistentSession?: new (path: string) => WasmSession;
 };
 
 let ready = false;
@@ -81,6 +97,42 @@ export function checkSchema(source: string): CheckSchemaResult {
         throw new Error('@yydb/yydb-unknown-wasm32: checkSchema export missing, rebuild wasm artifacts');
     }
     return glueApi.checkSchema(source);
+}
+
+/** Read-only schema introspection JSON. */
+export function introspectSchema(source: string): string {
+    assertReady();
+    if (!glueApi.introspectSchema) {
+        throw new Error('@yydb/yydb-unknown-wasm32: introspectSchema export missing, rebuild wasm artifacts');
+    }
+    return glueApi.introspectSchema(source);
+}
+
+/** Execute a VOS query on a fresh in-memory database. Returns JSON `{ ok, rows, error }`. */
+export function queryMemory(source: string): string {
+    assertReady();
+    if (!glueApi.queryMemory) {
+        throw new Error('@yydb/yydb-unknown-wasm32: queryMemory export missing, rebuild wasm artifacts');
+    }
+    return glueApi.queryMemory(source);
+}
+
+/** Open a stateful in-memory session. */
+export function createMemorySession(): WasmSession {
+    assertReady();
+    if (!glueApi.MemorySession) {
+        throw new Error('@yydb/yydb-unknown-wasm32: MemorySession export missing, rebuild wasm artifacts');
+    }
+    return new glueApi.MemorySession();
+}
+
+/** Open a stateful OPFS-backed session at `path`. */
+export function openPersistentSession(path: string): WasmSession {
+    assertReady();
+    if (!glueApi.PersistentSession) {
+        throw new Error('@yydb/yydb-unknown-wasm32: PersistentSession export missing, rebuild wasm artifacts');
+    }
+    return new glueApi.PersistentSession(path);
 }
 
 /** @internal Reset init gate (binding tests only). */

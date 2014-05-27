@@ -1,12 +1,17 @@
 export { Database, type WasmOpenOptions } from './database.js';
 export {
     checkSchema,
+    createMemorySession,
     initWasm,
+    introspectSchema,
+    openPersistentSession,
+    queryMemory,
     resetWasmBindingForTests,
     yydbVersion,
     type CheckSchemaResult,
     type InitWasmOptions,
     type WasmInitInput,
+    type WasmSession,
 } from './binding.js';
 export { defineMicro, type DefinedMicro, type MicroHandle, type TsMicroDefinitionInput, MicroSessionRegistry } from '../shared/micro.js';
 export {
@@ -21,3 +26,4 @@ export {
     type UdfScalarKind,
     type UdfTypeDescriptor,
 } from '../shared/udf-types.js';
+export type { SchemaVersion } from '../shared/wasm-envelope.js';
