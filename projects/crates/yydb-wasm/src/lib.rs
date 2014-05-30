@@ -6,6 +6,7 @@
 #![deny(clippy::all)]
 
 mod core;
+mod host_js;
 mod opfs;
 mod opfs_io;
 mod session;

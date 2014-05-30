@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Map, Value as JsonValue};
 use yydb::{
     schema::{self, ExecutionTypeKind},
-    Result, SchemaVersion, Value,
+    Connection, Result, SchemaVersion, Value,
 };
 
 /// Outcome of validating a VOS schema document.
@@ -223,6 +223,61 @@ mod json_tests {
         let parsed: JsonValue = serde_json::from_str(&payload).expect("json");
         assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(true)));
         assert!(parsed.get("schema").unwrap().is_null());
+    }
+}
+
+/// Build the same info text as the YY wire `Info` handler.
+pub(crate) fn connection_info(conn: &Connection, path: Option<&str>) -> String {
+    let path = path
+        .map(str::to_owned)
+        .or_else(|| conn.path().map(|entry| entry.display().to_string()))
+        .unwrap_or_else(|| "<memory>".to_owned());
+    let schema_line = match conn.schema() {
+        Ok(Some(schema)) => format!("schema.version={}", schema.version),
+        Ok(None) => "schema.version=".to_owned(),
+        Err(_) => "schema.version=".to_owned(),
+    };
+    let records = conn.record_count().unwrap_or(0);
+    format!(
+        "path={path}\n{schema_line}\nrecords={records}\njournal_mode={}\n",
+        conn.journal_mode().as_str()
+    )
+}
+
+pub(crate) fn scalar_call_json(result: Result<Value>) -> String {
+    match result {
+        Ok(value) => match scalar_value_json(&value) {
+            Ok(scalar) => json!({
+                "ok": true,
+                "value": scalar,
+                "error": JsonValue::Null,
+            })
+            .to_string(),
+            Err(err) => json!({
+                "ok": false,
+                "value": JsonValue::Null,
+                "error": err.to_string(),
+            })
+            .to_string(),
+        },
+        Err(err) => json!({
+            "ok": false,
+            "value": JsonValue::Null,
+            "error": err.to_string(),
+        })
+        .to_string(),
+    }
+}
+
+fn scalar_value_json(value: &Value) -> Result<JsonValue> {
+    match value {
+        Value::Null => Ok(JsonValue::Null),
+        Value::Bool(value) => Ok(json!(value)),
+        Value::I64(value) => Ok(json!(value)),
+        Value::Text(value) => Ok(json!(value)),
+        _ => Err(yydb::Error::Unsupported(
+            "scalar call value type is outside the Phase-1 wire subset",
+        )),
     }
 }
 
