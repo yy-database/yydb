@@ -19,6 +19,15 @@ export type WasmKvGetResult = {
     error: string | null;
 };
 
+/** Parsed `{ ok, value, error }` envelope from wasm `callScalar`. */
+export type WasmScalarResult = {
+    ok: boolean;
+    value: string | number | boolean | null;
+    error: string | null;
+};
+
+export type WireScalarValue = string | number | boolean | null;
+
 export type SchemaVersion = {
     version: number;
     document: string;
@@ -54,6 +63,14 @@ export function parseWasmSchemaResult(payload: string): SchemaVersion | null {
         throw new Error(parsed.error ?? 'wasm getSchema failed');
     }
     return parsed.schema;
+}
+
+export function parseWasmScalarResult(payload: string): WireScalarValue {
+    const parsed = parseJson<WasmScalarResult>(payload, 'wasm callScalar');
+    if (!parsed.ok) {
+        throw new Error(parsed.error ?? 'wasm callScalar failed');
+    }
+    return parsed.value;
 }
 
 export function parseWasmKvGetResult(payload: string): Uint8Array | null {

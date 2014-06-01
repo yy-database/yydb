@@ -6,7 +6,7 @@ use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::JsValue;
 use yydb::{
     yydb_udf::{Result as UdfResult, UdfError, UdfValue},
-    HostFunctionHandle, HostRuntimeAdapter, Value,
+    HostFunctionHandle, HostRuntimeAdapter,
 };
 
 /// Adapter that forwards scalar host micro calls into a JS invoker function.
@@ -75,18 +75,6 @@ impl HostRuntimeAdapter for JsHostAdapter {
     }
 }
 
-pub(crate) fn runtime_values_to_js_array(values: &[Value]) -> UdfResult<Array> {
-    let mut udf_values = Vec::with_capacity(values.len());
-    for value in values {
-        udf_values.push(runtime_value_to_udf(value)?);
-    }
-    udf_values_to_js_array(&udf_values)
-}
-
-pub(crate) fn runtime_value_to_js(value: &Value) -> UdfResult<JsValue> {
-    Ok(udf_value_to_js(&runtime_value_to_udf(value)?))
-}
-
 fn udf_values_to_js_array(values: &[UdfValue]) -> UdfResult<Array> {
     let array = Array::new();
     for value in values {
@@ -121,16 +109,6 @@ fn js_scalar_to_udf(value: JsValue) -> UdfResult<UdfValue> {
         return Ok(UdfValue::Text(value));
     }
     Err(UdfError::UnsupportedType)
-}
-
-fn runtime_value_to_udf(value: &Value) -> UdfResult<UdfValue> {
-    match value {
-        Value::Null => Ok(UdfValue::Null),
-        Value::Bool(value) => Ok(UdfValue::Bool(*value)),
-        Value::I64(value) => Ok(UdfValue::I64(*value)),
-        Value::Text(value) => Ok(UdfValue::Text(value.clone())),
-        _ => Err(UdfError::UnsupportedType),
-    }
 }
 
 fn map_js_error(error: JsValue) -> UdfError {

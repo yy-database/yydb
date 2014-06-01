@@ -164,6 +164,16 @@ export function defineMicro<TArgs extends readonly UdfTypeDescriptor[], TReturn 
     };
 }
 
+/** Stable 32-byte fingerprint for a logical micro name and version. */
+export function microFingerprint(name: string, version: number): Uint8Array {
+    const bytes = new Uint8Array(32);
+    const seed = `${name}@${version}`;
+    for (let index = 0; index < bytes.byteLength; index += 1) {
+        bytes[index] = seed.charCodeAt(index % seed.length) & 0xff;
+    }
+    return bytes;
+}
+
 function logicalKey(name: string, version: number): string {
     return `${name}@${version}`;
 }
