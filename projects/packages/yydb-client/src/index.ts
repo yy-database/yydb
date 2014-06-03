@@ -21,12 +21,4 @@ export {
     decodeSchemaGetOk,
     decodeKvGetOk,
 } from './wire.js';
-export type {
-    Frame,
-    MicroRegisterPayload,
-    MsgTypeCode,
-    ProductMagic,
-    SchemaVersion,
-    WireUdfScalarKind,
-    WireUdfScalarValue,
-} from './wire.js';
+export type { Frame, MicroRegisterPayload, MsgTypeCode, ProductMagic, SchemaVersion, WireUdfScalarKind, WireUdfScalarValue } from './wire.js';
