@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::JsValue;
-use yydb::{HostFunctionHandle, HostRuntimeAdapter};
 use yydb::yydb_udf::{Result as UdfResult, UdfError, UdfValue};
+use yydb::{HostFunctionHandle, HostRuntimeAdapter};
 
 /// Invokes session-local host micros through a JS callback.
 pub struct JsHostAdapter {
@@ -25,11 +25,7 @@ impl JsHostAdapter {
 }
 
 impl HostRuntimeAdapter for JsHostAdapter {
-    fn invoke_scalar(
-        &self,
-        handle: &HostFunctionHandle,
-        args: &[UdfValue],
-    ) -> UdfResult<UdfValue> {
+    fn invoke_scalar(&self, handle: &HostFunctionHandle, args: &[UdfValue]) -> UdfResult<UdfValue> {
         let payload = Object::new();
         Reflect::set(
             &payload,
