@@ -218,8 +218,35 @@ impl PageStore for FilePager {
     }
 }
 
+/// Load a `MemoryPager` from a contiguous `YDPG` main-file byte image.
+pub fn memory_pager_from_main_bytes(bytes: &[u8]) -> Result<MemoryPager> {
+    load_main_bytes(bytes)
+}
+
+/// Serialize a `MemoryPager` into a contiguous `YDPG` main-file byte image.
+pub fn main_bytes_from_memory_pager(pager: &MemoryPager) -> Result<Vec<u8>> {
+    let snapshot = pager.pages_snapshot();
+    if snapshot.is_empty() {
+        return Err(Error::Corrupt("memory pager has no pages"));
+    }
+    let max_id = snapshot.keys().max().copied().unwrap_or(0);
+    let page_count = max_id as usize + 1;
+    let mut out = vec![0_u8; page_count * PAGE_SIZE];
+    for page_id in 0..=max_id {
+        let image = snapshot
+            .get(&page_id)
+            .ok_or(Error::Corrupt("memory pager page gap"))?;
+        let start = page_id as usize * PAGE_SIZE;
+        out[start..start + PAGE_SIZE].copy_from_slice(image);
+    }
+    Ok(out)
+}
+
 fn load_main_file(path: &Path) -> Result<MemoryPager> {
-    let bytes = std::fs::read(path)?;
+    load_main_bytes(&std::fs::read(path)?)
+}
+
+fn load_main_bytes(bytes: &[u8]) -> Result<MemoryPager> {
     if bytes.len() < PAGE_SIZE {
         return Err(Error::Corrupt("main file too short"));
     }

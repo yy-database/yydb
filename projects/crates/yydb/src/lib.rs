@@ -117,7 +117,10 @@ use file_lock::WriterLock;
 use journal::{shm_path, wal_path};
 use udf::{ClosureUdf, ScalarFn};
 use udf_bridge::UdfSubsystem;
-use yydb_format::{parse_wal, FilePager, WAL_MAGIC};
+use yydb_format::{
+    main_bytes_from_memory_pager, memory_pager_from_main_bytes, parse_wal, FilePager, MemoryPager,
+    WAL_MAGIC,
+};
 
 #[derive(Debug, Default, Clone)]
 struct State {
@@ -255,6 +258,35 @@ impl Connection {
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: ObjectStore::open_ephemeral(),
         })
+    }
+
+    /// Serialize the current in-memory database as a `YDPG` main-file byte image.
+    pub fn main_snapshot(&self) -> Result<Vec<u8>> {
+        match &self.backend {
+            Backend::Memory { .. } => {
+                let state = self.read_state()?;
+                let mut pager = MemoryPager::new_empty(main_snapshot_database_id(), 0x01);
+                format_v1::write_state_to_memory_pager(&mut pager, &state)?;
+                main_bytes_from_memory_pager(&pager)
+            }
+            Backend::File { .. } => Err(Error::Unsupported(
+                "main_snapshot is only supported on in-memory connections",
+            )),
+        }
+    }
+
+    /// Replace the in-memory database from a `YDPG` main-file byte image.
+    pub fn load_main_snapshot(&self, bytes: &[u8]) -> Result<()> {
+        match &self.backend {
+            Backend::Memory { .. } => {
+                let mut pager = memory_pager_from_main_bytes(bytes)?;
+                let state = format_v1::read_state_from_memory_pager(&mut pager)?;
+                self.write_state(&state)
+            }
+            Backend::File { .. } => Err(Error::Unsupported(
+                "load_main_snapshot is only supported on in-memory connections",
+            )),
+        }
     }
 
     /// Content-addressed object store (in-process for `.yydb`; `.yydx` blob roots later).
@@ -1223,4 +1255,10 @@ impl Connection {
 /// Library version string (Cargo package version).
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+fn main_snapshot_database_id() -> [u8; 16] {
+    [
+        0xAA, 0xBB, 0xCC, 0xDD, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1,
+    ]
 }

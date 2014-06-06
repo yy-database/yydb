@@ -90,6 +90,11 @@ impl MemoryPager {
     pub fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
         RecordTree::open(self).delete(&TreeKey::user_record(key))
     }
+
+    /// Enumerate every record-tree cell.
+    pub fn scan_kv(&mut self) -> Result<Vec<(TreeKey, Vec<u8>)>> {
+        RecordTree::open(self).scan_all()
+    }
 }
 
 impl PageStore for MemoryPager {
