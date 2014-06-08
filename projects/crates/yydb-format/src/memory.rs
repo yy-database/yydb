@@ -1,4 +1,4 @@
-//! In-memory page map backend for format v1 engine development.
+//! In-memory page map backend for format v0 engine development.
 
 use std::collections::BTreeMap;
 

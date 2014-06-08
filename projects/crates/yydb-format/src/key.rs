@@ -5,7 +5,7 @@ pub const TREE_CATALOG: u8 = 0x01;
 /// Application / system KV records.
 pub const TREE_RECORD: u8 = 0x02;
 
-/// Key kind values from format v1.
+/// Key kind values from format v0.
 pub const KEY_KIND_USER: u8 = 0x02;
 
 /// Sortable database key: `tree_id` + `key_kind` + encoded bytes.

@@ -1,13 +1,13 @@
-//! `YYSH` v2 shared-memory coordination block.
+//! `YYSH` v0 shared-memory coordination block.
 
 use yydb_types::{Error, Result};
 
 use crate::crc32c::crc32c;
 
-pub const SHM_MAGIC: &[u8; 5] = b"YYSH\x02";
+pub const SHM_MAGIC: &[u8; 5] = b"YYSH\x00";
 pub const SHM_BYTES: usize = 4096;
 
-/// Parsed SHM v2 block.
+/// Parsed SHM v0 block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShmBlock {
     pub format_version: u32,
@@ -40,7 +40,7 @@ pub fn parse_shm(bytes: &[u8]) -> Result<ShmBlock> {
 pub fn encode_empty_shm() -> Vec<u8> {
     let mut buf = vec![0_u8; SHM_BYTES];
     buf[0..5].copy_from_slice(SHM_MAGIC);
-    buf[5..9].copy_from_slice(&1u32.to_le_bytes());
+    buf[5..9].copy_from_slice(&0u32.to_le_bytes());
     let checksum = crc32c(&buf[..4092]);
     buf[4092..4096].copy_from_slice(&checksum.to_le_bytes());
     buf

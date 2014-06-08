@@ -1,4 +1,4 @@
-//! `YDPG` file-backed pager with optional `YYWL` v3 sidecar.
+//! `YDPG` file-backed pager with optional `YYWL` v0 sidecar.
 
 use std::{
     collections::BTreeMap,
@@ -104,7 +104,7 @@ impl FilePager {
         Ok(())
     }
 
-    /// Enable `YYWL` v3 journaling for subsequent mutations.
+    /// Enable `YYWL` v0 journaling for subsequent mutations.
     pub fn enable_wal(&mut self) -> Result<()> {
         self.wal_enabled = true;
         self.ensure_wal()?;
@@ -251,7 +251,7 @@ fn load_main_bytes(bytes: &[u8]) -> Result<MemoryPager> {
         return Err(Error::Corrupt("main file too short"));
     }
     if bytes.get(0..5) != Some(PAGE_MAGIC.as_slice()) {
-        return Err(Error::Unsupported("main file is not YDPG format v1"));
+        return Err(Error::Unsupported("main file is not YDPG format v0"));
     }
     parse_page0(&bytes[0..PAGE_SIZE])?;
     let page_count = bytes.len() / PAGE_SIZE;

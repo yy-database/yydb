@@ -1,4 +1,4 @@
-//! Connection facade over `YDPG` format v1.
+//! Connection facade over `YDPG` format v0.
 
 use std::fs;
 
@@ -7,14 +7,14 @@ use yydb_format::PAGE_MAGIC;
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "g-yydb-format-v1-connection-{}-{}.yydb",
+        "g-yydb-format-v0-connection-{}-{}.yydb",
         std::process::id(),
         label
     ))
 }
 
 #[test]
-fn g_yydb_format_v1_connection_put_get_reopen() {
+fn g_yydb_format_v0_connection_put_get_reopen() {
     let path = temp_path("roundtrip");
     let _ = fs::remove_file(&path);
 
@@ -33,7 +33,7 @@ fn g_yydb_format_v1_connection_put_get_reopen() {
 }
 
 #[test]
-fn g_yydb_format_v1_connection_wal_checkpoint() {
+fn g_yydb_format_v0_connection_wal_checkpoint() {
     let path = temp_path("wal");
     let _ = fs::remove_file(&path);
     let wal = std::path::PathBuf::from(format!("{}-wal", path.display()));

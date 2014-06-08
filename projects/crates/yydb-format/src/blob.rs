@@ -1,8 +1,8 @@
-//! `YBLO` v1 immutable chunk header.
+//! `YBLO` v0 immutable chunk header.
 
 use yydb_types::{Error, Result};
 
-pub const BLOB_MAGIC: &[u8; 5] = b"YBLO\x01";
+pub const BLOB_MAGIC: &[u8; 5] = b"YBLO\x00";
 pub const BLOB_HEADER_BYTES: usize = 82;
 
 /// Parsed blob chunk header (payload follows in file).

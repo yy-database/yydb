@@ -1,6 +1,6 @@
 //! Castagnoli CRC32C used by page and WAL checksums.
 
-const POLY: u32 = 0x1EDC6F41;
+const POLY: u32 = 0x82F63B78;
 
 /// Compute CRC32C over `data`.
 pub fn crc32c(data: &[u8]) -> u32 {

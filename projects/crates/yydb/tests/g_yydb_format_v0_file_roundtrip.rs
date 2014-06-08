@@ -1,14 +1,14 @@
-// gate: format-v1 (Living 09)
-// fixture: format_v1.file_roundtrip
+// gate: format-v0 (Living 09)
+// fixture: format_v0.file_roundtrip
 
 use std::path::PathBuf;
 
 use yydb_format::{FilePager, PAGE_MAGIC};
 
 #[test]
-fn g_yydb_format_v1_file_roundtrip() {
+fn g_yydb_format_v0_file_roundtrip() {
     let path = std::env::temp_dir().join(format!(
-        "g-yydb-format-v1-file-{}-{}.yydb",
+        "g-yydb-format-v0-file-{}-{}.yydb",
         std::process::id(),
         "roundtrip"
     ));

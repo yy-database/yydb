@@ -1,4 +1,4 @@
-//! format v1 doctor probes on a real `Connection`.
+//! format v0 doctor probes on a real `Connection`.
 
 use std::fs;
 
@@ -7,7 +7,7 @@ use yydb_format::diagnose_file;
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "g-yydb-format-v1-doctor-{}-{}.yydb",
+        "g-yydb-format-v0-doctor-{}-{}.yydb",
         std::process::id(),
         label
     ))
@@ -15,12 +15,12 @@ fn temp_path(label: &str) -> std::path::PathBuf {
 
 fn fixture(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../yydb-format/tests/fixtures/format-v1")
+        .join("../yydb-format/tests/fixtures/format-v0")
         .join(name)
 }
 
 #[test]
-fn g_yydb_format_v1_doctor_roundtrip_clean() {
+fn g_yydb_format_v0_doctor_roundtrip_clean() {
     let path = temp_path("clean");
     let _ = fs::remove_file(&path);
 
@@ -43,7 +43,7 @@ fn g_yydb_format_v1_doctor_roundtrip_clean() {
 }
 
 #[test]
-fn g_yydb_format_v1_doctor_corrupt_header_fixture() {
+fn g_yydb_format_v0_doctor_corrupt_header_fixture() {
     let path = temp_path("bad-header");
     let _ = fs::remove_file(&path);
     fs::copy(fixture("page0_bad_checksum.bin"), &path).unwrap();
