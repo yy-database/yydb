@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use yydb_format::{
     committed_transactions, crc32c, parse_blob_header, parse_page0, parse_shm, parse_wal,
-    BLOB_HEADER_BYTES,
+    strip_trailing_txn_commit, BLOB_HEADER_BYTES,
 };
 
 fn fixture(name: &str) -> PathBuf {
@@ -65,6 +65,20 @@ fn format_v0_blob_header_min() {
     let header = parse_blob_header(&bytes).unwrap();
     assert_eq!(header.chunk_kind, 0x01);
     assert_eq!(header.chunk_len, 0);
+}
+
+#[test]
+fn format_v0_strip_trailing_commit() {
+    let bytes = std::fs::read(fixture("wal_txn_commit_minimal.bin")).unwrap();
+    assert_eq!(committed_transactions(&parse_wal(&bytes).unwrap()), 1);
+    let stripped = strip_trailing_txn_commit(&bytes).unwrap();
+    let wal = parse_wal(&stripped).unwrap();
+    assert!(
+        wal.frames.iter().all(|frame| frame.frame_type != 0x04),
+        "stripped wal still has commit frames: {:?}",
+        wal.frames
+    );
+    assert_eq!(wal.frames.len(), 2);
 }
 
 #[test]
