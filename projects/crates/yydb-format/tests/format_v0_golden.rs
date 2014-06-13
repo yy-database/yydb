@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use yydb_format::{
-    committed_transactions, crc32c, parse_blob_header, parse_page0, parse_shm, parse_wal,
-    strip_trailing_txn_commit, BLOB_HEADER_BYTES,
+    committed_tail_lsn, committed_transactions, crc32c, parse_blob_header, parse_page0, parse_shm,
+    parse_wal, parse_wal_recover, strip_trailing_txn_commit, BLOB_HEADER_BYTES,
 };
 
 fn fixture(name: &str) -> PathBuf {
@@ -65,6 +65,23 @@ fn format_v0_blob_header_min() {
     let header = parse_blob_header(&bytes).unwrap();
     assert_eq!(header.chunk_kind, 0x01);
     assert_eq!(header.chunk_len, 0);
+}
+
+#[test]
+fn format_v0_wal_recover_truncated_tail() {
+    let bytes = std::fs::read(fixture("wal_txn_commit_minimal.bin")).unwrap();
+    let truncated = &bytes[..bytes.len() - 10];
+    assert!(parse_wal(truncated).is_err());
+    let wal = parse_wal_recover(truncated).unwrap();
+    assert_eq!(wal.frames.len(), 2);
+    assert_eq!(committed_transactions(&wal), 0);
+}
+
+#[test]
+fn format_v0_committed_tail_lsn() {
+    let bytes = std::fs::read(fixture("wal_txn_commit_minimal.bin")).unwrap();
+    let wal = parse_wal(&bytes).unwrap();
+    assert_eq!(committed_tail_lsn(&wal), wal.frames[2].frame_lsn);
 }
 
 #[test]

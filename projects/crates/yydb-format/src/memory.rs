@@ -60,6 +60,25 @@ impl MemoryPager {
         self.pages.clone()
     }
 
+    /// Bump header `generation` and set `checkpoint_lsn` in both page 0 slots.
+    pub fn bump_checkpoint_slot(&mut self, checkpoint_lsn: u64) -> Result<()> {
+        let header = self.header()?;
+        let next_generation = header.slot.generation.saturating_add(1);
+        let page0 = self
+            .get_page(0)?
+            .ok_or(Error::Corrupt("missing page0"))?
+            .clone();
+        let mut updated = page0;
+        for offset in [0, SLOT_BYTES] {
+            updated[offset + 6..offset + 14].copy_from_slice(&next_generation.to_le_bytes());
+            updated[offset + 14..offset + 22].copy_from_slice(&checkpoint_lsn.to_le_bytes());
+            let checksum = crc32c(&updated[offset..offset + 2044]);
+            updated[offset + 2044..offset + 2048].copy_from_slice(&checksum.to_le_bytes());
+        }
+        self.put_page(0, updated)?;
+        Ok(())
+    }
+
     /// Update `record_root` in both header slots on page 0.
     pub fn set_record_root(&mut self, page_id: u32) -> Result<()> {
         let page0 = self

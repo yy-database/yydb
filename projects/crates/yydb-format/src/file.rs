@@ -14,6 +14,7 @@ use crate::header::{parse_page0, DatabaseHeader, PAGE_MAGIC, PAGE_SIZE};
 use crate::key::TreeKey;
 use crate::memory::MemoryPager;
 use crate::pager::PageStore;
+use crate::wal::committed_tail_lsn;
 use crate::wal_append::{read_wal_file, replay_wal_pages, wal_sidecar_path, WalWriter};
 
 /// Persistent page store backed by a single `YDPG` main file.
@@ -102,6 +103,8 @@ impl FilePager {
 
     /// Fold WAL into the main file and truncate the sidecar.
     pub fn checkpoint(&mut self) -> Result<()> {
+        let checkpoint_lsn = self.committed_wal_tail_lsn()?;
+        self.inner.bump_checkpoint_slot(checkpoint_lsn)?;
         self.persist_all()?;
         if self.wal_enabled {
             let wal_path = wal_sidecar_path(&self.path);
@@ -165,6 +168,16 @@ impl FilePager {
             }
         }
         Ok(())
+    }
+
+    fn committed_wal_tail_lsn(&self) -> Result<u64> {
+        let Some(wal_path) = self.wal_path() else {
+            return Ok(0);
+        };
+        if !wal_path.exists() {
+            return Ok(0);
+        }
+        Ok(committed_tail_lsn(&read_wal_file(&wal_path)?))
     }
 
     fn replay_wal_if_present(&mut self) -> Result<()> {

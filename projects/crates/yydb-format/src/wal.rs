@@ -95,6 +95,32 @@ pub fn parse_wal(bytes: &[u8]) -> Result<WalFile> {
     Ok(WalFile { header, frames })
 }
 
+/// Parse WAL bytes for recovery, dropping an incomplete trailing frame.
+pub fn parse_wal_recover(bytes: &[u8]) -> Result<WalFile> {
+    let (header, mut offset) = parse_header(bytes)?;
+    let mut frames = Vec::new();
+    while offset < bytes.len() {
+        match parse_frame(bytes, offset) {
+            Ok((frame, consumed)) => {
+                frames.push(frame);
+                offset += consumed;
+            }
+            Err(_) => break,
+        }
+    }
+    Ok(WalFile { header, frames })
+}
+
+/// Highest `frame_lsn` among committed transactions in `wal`.
+pub fn committed_tail_lsn(wal: &WalFile) -> u64 {
+    wal.frames
+        .iter()
+        .filter(|frame| frame.frame_type == 0x04)
+        .map(|frame| frame.frame_lsn)
+        .max()
+        .unwrap_or(0)
+}
+
 /// Byte offsets of each frame start after the WAL header.
 pub fn wal_frame_offsets(bytes: &[u8]) -> Result<Vec<usize>> {
     let (_, mut offset) = parse_header(bytes)?;
