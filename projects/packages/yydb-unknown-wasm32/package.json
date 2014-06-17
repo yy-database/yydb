@@ -1,38 +1,43 @@
 {
-    "name": "@yydb/yydb-unknown-wasm32",
-    "version": "0.1.0",
-    "description": "Browser WebAssembly binary for `@yydb/yydb`",
-    "license": "MPL-2.0",
-    "private": true,
-    "type": "module",
-    "sideEffects": ["./lib/yydb_wasm.js"],
-    "exports": {
-        ".": {
-            "types": "./src/index.ts",
-            "import": "./src/index.ts",
-            "default": "./src/index.ts"
-        },
-        "./wasm": "./lib/yydb_wasm_bg.wasm"
-    },
-    "files": ["src", "lib", "README.md"],
-    "scripts": {
-        "typecheck": "tsc --noEmit -p tsconfig.json",
-        "test": "pnpm run typecheck"
-    },
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/yy-database/yydb.rs.git",
-        "directory": "projects/packages/yydb-unknown-wasm32"
-    },
-    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-unknown-wasm32#readme",
     "bugs": {
         "url": "https://github.com/yy-database/yydb.rs/issues"
     },
-    "publishConfig": {
-        "access": "public"
-    },
+    "description": "Browser WebAssembly binary for `@yydb/yydb`",
     "devDependencies": {
         "@types/node": "^20.10.0",
         "typescript": "~5.3.0"
-    }
+    },
+    "exports": {
+        ".": {
+            "default": "./src/index.ts",
+            "import": "./src/index.ts",
+            "types": "./src/index.ts"
+        },
+        "./wasm": "./lib/yydb_wasm_bg.wasm"
+    },
+    "files": [
+        "src",
+        "lib",
+        "README.md"
+    ],
+    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-unknown-wasm32#readme",
+    "license": "MPL-2.0",
+    "name": "@yydb/yydb-unknown-wasm32",
+    "publishConfig": {
+        "access": "public"
+    },
+    "repository": {
+        "directory": "projects/packages/yydb-unknown-wasm32",
+        "type": "git",
+        "url": "git+https://github.com/yy-database/yydb.rs.git"
+    },
+    "scripts": {
+        "test": "pnpm run typecheck",
+        "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "sideEffects": [
+        "./lib/yydb_wasm.js"
+    ],
+    "type": "module",
+    "version": "0.0.0"
 }

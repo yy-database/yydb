@@ -56,6 +56,9 @@ function preparePackageJson(pkgDir, { workspaceClientToVersion = false } = {}) {
     if (workspaceClientToVersion && j.dependencies?.['@yydb/yydb-client'] === 'workspace:*') {
         j.dependencies['@yydb/yydb-client'] = version || j.version;
     }
+    if (workspaceClientToVersion && j.dependencies?.['@yydb/yydb-unknown-wasm32'] === 'workspace:*') {
+        j.dependencies['@yydb/yydb-unknown-wasm32'] = version || j.version;
+    }
     // Provenance: repository.url must match the publishing GitHub repo.
     // Keep monorepo `directory` so npm links to projects/packages/<pkg>.
     const ghRepo = (process.env.GITHUB_REPOSITORY || '').trim() || 'yy-database/yydb';
@@ -89,6 +92,7 @@ for (const { pkg, fileName } of NATIVE_ARTIFACTS) {
 }
 
 preparePackageJson(path.join(root, 'projects', 'packages', 'yydb-client'));
+preparePackageJson(path.join(root, 'projects', 'packages', 'yydb-unknown-wasm32'));
 preparePackageJson(path.join(root, 'projects', 'packages', 'yydb'), {
     workspaceClientToVersion: true,
 });

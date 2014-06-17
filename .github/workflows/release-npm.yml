@@ -96,6 +96,12 @@ jobs:
           node -v
           npm -v
       - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      - run: pnpm run build:wasm
 
       - name: Download engine artifacts
         uses: actions/download-artifact@v8
