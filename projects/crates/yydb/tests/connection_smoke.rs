@@ -227,7 +227,14 @@ fn open_yydx_uses_objects_root_and_allows_chunked_files() {
         .put_file_chunked(std::io::Cursor::new(payload.clone()), 500)
         .unwrap();
     assert!(manifest.chunks.len() >= 4);
-    assert!(blob_root.join("objects").is_dir());
+    assert!(blob_root.is_dir());
+    assert!(
+        conn.objects()
+            .path_for(&manifest.chunks[0])
+            .extension()
+            .and_then(|ext| ext.to_str())
+            == Some("blob")
+    );
     assert!(!objects_sidecar(&path).exists());
     cleanup(&path);
 }
@@ -270,8 +277,7 @@ fn cas_objects_hash2_path_and_hot_cold() {
     let object = conn.put_chunk(ObjectKind::Blob, b"hello-cas").unwrap();
     let path = conn.objects().path_for(&object);
     let path_s = path.to_string_lossy().replace('\\', "/");
-    assert!(path_s.contains("/objects/"));
-    assert!(path_s.ends_with(".bytes"));
+    assert!(path_s.ends_with(".blob"));
     let hex = object.hash_hex();
     assert!(path_s.contains(&format!("/{}/{}", &hex[..2], hex)));
     assert_eq!(&*conn.get_object(&object).unwrap(), b"hello-cas");

@@ -18,7 +18,7 @@
 //! Durable layout is still **one primary `.yydb` file**. Optional journal
 //! sidecars `{path}-wal` / `{path}-shm` appear when
 //! [`JournalMode::Wal`](journal::JournalMode::Wal) is enabled. Binary payloads
-//! use the unified [`objects`] CAS (`objects/hash-2/*.bytes`) with optional
+//! use the unified [`objects`] CAS (`<hash-prefix>/<chunk_hash>.blob`) with optional
 //! runtime hot/cold tiering — not a `.yydb-vec` sidecar.
 //!
 //! ```rust,no_run
@@ -49,7 +49,7 @@ pub mod types {
 /// Journal modes and `-wal` / `-shm` sidecar helpers.
 pub mod journal;
 
-/// Unified `objects/hash-2/*.bytes` CAS + hot/cold tiering.
+/// Unified `<hash-prefix>/<chunk_hash>.blob` CAS + hot/cold tiering.
 pub mod objects;
 
 /// Shared VOS schema contract (`vos` git @ `dev`).
@@ -188,7 +188,7 @@ impl Batch {
 ///
 /// Embedded `Connection` handle. DDL and query language are **VOS**.
 /// UDFs are process-local and are **not** persisted in the `.yydb` file.
-/// Binary payloads use [`ObjectStore`] (`objects/hash-2/*.bytes`).
+/// Binary payloads use [`ObjectStore`] (`YBLO` `.blob` segments).
 pub struct Connection {
     backend: Backend,
     operation_lock: Mutex<()>,
@@ -953,7 +953,7 @@ impl Connection {
         Ok(report)
     }
 
-    /// Store one CAS object at `objects/hash-2/<hash>.bytes`.
+    /// Store one CAS object at `<hash-prefix>/<chunk_hash>.blob`.
     pub fn put_chunk(&self, kind: ObjectKind, bytes: &[u8]) -> Result<ObjectRef> {
         self.guard_yydb_cas_payload(bytes.len())?;
         self.objects.put_chunk(kind, bytes)

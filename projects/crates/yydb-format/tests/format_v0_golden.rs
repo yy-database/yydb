@@ -68,6 +68,14 @@ fn format_v0_blob_header_min() {
 }
 
 #[test]
+fn format_v0_blob_chunk_roundtrip() {
+    use yydb_format::{encode_blob_chunk, read_blob_payload};
+    let payload = b"hello-yblo";
+    let file = encode_blob_chunk(payload, 0);
+    assert_eq!(read_blob_payload(&file).unwrap(), payload);
+}
+
+#[test]
 fn format_v0_wal_recover_truncated_tail() {
     let bytes = std::fs::read(fixture("wal_txn_commit_minimal.bin")).unwrap();
     let truncated = &bytes[..bytes.len() - 10];
