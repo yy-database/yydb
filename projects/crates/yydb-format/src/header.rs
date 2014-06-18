@@ -4,32 +4,50 @@ use yydb_types::{Error, Result};
 
 use crate::crc32c::crc32c;
 
+/// Five-byte magic prefix for v0 page files.
 pub const PAGE_MAGIC: &[u8; 5] = b"YDPG\x00";
+/// Fixed page size for v0 on-disk layout.
 pub const PAGE_SIZE: usize = 4096;
+/// Bytes per header slot on page 0.
 pub const SLOT_BYTES: usize = 2048;
 
 /// Parsed database header slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DatabaseHeaderSlot {
+    /// Active slot marker (`0x01` primary, `0x02` alternate).
     pub slot_kind: u8,
+    /// Monotonic header generation.
     pub generation: u64,
+    /// Last checkpoint LSN reflected in this slot.
     pub checkpoint_lsn: u64,
+    /// Stable database identifier.
     pub database_id: [u8; 16],
+    /// Storage layout discriminator.
     pub storage_layout: u8,
+    /// `log2(page_size)` (12 for 4096-byte pages).
     pub page_size_log2: u8,
+    /// Format version (`0` for v0).
     pub format_version: u32,
+    /// Root page id for the catalog tree.
     pub catalog_root: u32,
+    /// Root page id for the record tree.
     pub record_root: u32,
+    /// Root page id for primary indexes.
     pub primary_index_root: u32,
+    /// Root page id for secondary indexes.
     pub secondary_index_root: u32,
+    /// Root page id for the expiry index.
     pub expiry_index_root: u32,
+    /// Root page id for quota metadata.
     pub quota_index_root: u32,
+    /// Root page id for the object manifest tree.
     pub manifest_root: u32,
 }
 
 /// Best header slot chosen from page 0.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DatabaseHeader {
+    /// Winning header slot from page 0.
     pub slot: DatabaseHeaderSlot,
 }
 

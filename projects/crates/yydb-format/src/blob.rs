@@ -1,22 +1,32 @@
-//! `YBLO` v0 immutable chunk header.
+//! `YYBB` v0 immutable chunk header.
 
 use yydb_types::{Error, Result};
 
-pub const BLOB_MAGIC: &[u8; 5] = b"YBLO\x00";
+/// Five-byte magic prefix for `.blob` segment files.
+pub const BLOB_MAGIC: &[u8; 5] = b"YYBB\x00";
+/// On-disk header size in bytes (payload follows).
 pub const BLOB_HEADER_BYTES: usize = 82;
+/// Data chunk kind (`0x01`).
 pub const BLOB_CHUNK_KIND_DATA: u8 = 0x01;
+/// Domain separator for [`blob_chunk_hash`].
 pub const BLOB_CHUNK_DOMAIN: &[u8] = b"yydb.blob.chunk.v0";
 
 /// Parsed blob chunk header (payload follows in file).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlobChunkHeader {
+    /// Chunk kind byte from the header.
     pub chunk_kind: u8,
+    /// Domain-separated BLAKE3 digest (file name identity).
     pub chunk_hash: [u8; 32],
+    /// Offset of this chunk inside the logical whole object.
     pub logical_offset: u64,
+    /// Payload length in bytes.
     pub chunk_len: u32,
+    /// Plain BLAKE3 digest of the payload bytes.
     pub payload_hash: [u8; 32],
 }
 
+/// Parse a `.blob` header without reading the payload.
 pub fn parse_blob_header(bytes: &[u8]) -> Result<BlobChunkHeader> {
     if bytes.len() < BLOB_HEADER_BYTES {
         return Err(Error::Corrupt("blob header truncated"));

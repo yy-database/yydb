@@ -4,19 +4,27 @@ use yydb_types::{Error, Result};
 
 use crate::crc32c::crc32c;
 
+/// Five-byte magic prefix for SHM sidecar files.
 pub const SHM_MAGIC: &[u8; 5] = b"YYSH\x00";
+/// Fixed SHM block size for v0.
 pub const SHM_BYTES: usize = 4096;
 
 /// Parsed SHM v0 block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShmBlock {
+    /// SHM format version (`0` for v0).
     pub format_version: u32,
+    /// Writer epoch for lock coordination.
     pub writer_epoch: u64,
+    /// Active reader count.
     pub active_readers: u32,
+    /// Tail LSN mirrored from WAL.
     pub wal_tail_lsn: u64,
+    /// WAL file length in bytes.
     pub wal_file_bytes: u64,
 }
 
+/// Parse and validate a v0 SHM block.
 pub fn parse_shm(bytes: &[u8]) -> Result<ShmBlock> {
     if bytes.len() < SHM_BYTES {
         return Err(Error::Corrupt("shm truncated"));
@@ -37,6 +45,7 @@ pub fn parse_shm(bytes: &[u8]) -> Result<ShmBlock> {
     })
 }
 
+/// Encode an empty, checksum-valid SHM block for golden fixtures.
 pub fn encode_empty_shm() -> Vec<u8> {
     let mut buf = vec![0_u8; SHM_BYTES];
     buf[0..5].copy_from_slice(SHM_MAGIC);

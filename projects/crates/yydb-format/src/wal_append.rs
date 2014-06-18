@@ -107,6 +107,7 @@ impl WalWriter {
     }
 }
 
+/// Encode a v0 WAL file header with checksum.
 pub fn encode_wal_header(database_id: [u8; 16], base_checkpoint_lsn: u64) -> Vec<u8> {
     let mut header = Vec::with_capacity(37);
     header.extend_from_slice(WAL_MAGIC);
@@ -117,6 +118,7 @@ pub fn encode_wal_header(database_id: [u8; 16], base_checkpoint_lsn: u64) -> Vec
     header
 }
 
+/// Encode one WAL frame with checksum trailer.
 pub fn encode_frame(frame_type: u8, frame_lsn: u64, body: &[u8]) -> Result<Vec<u8>> {
     let frame_len = 1 + 8 + body.len();
     if frame_len < 9 {
@@ -161,10 +163,12 @@ pub fn replay_wal_pages(wal: &WalFile, pages: &mut BTreeMap<u32, Vec<u8>>) -> Re
     Ok(())
 }
 
+/// Read a WAL sidecar from disk, tolerating a truncated tail frame.
 pub fn read_wal_file(path: &Path) -> Result<WalFile> {
     crate::wal::parse_wal_recover(&std::fs::read(path)?)
 }
 
+/// Resolve `<main>-wal` for a database main file path.
 pub fn wal_sidecar_path(main: &Path) -> PathBuf {
     let mut sidecar = main.as_os_str().to_owned();
     sidecar.push("-wal");

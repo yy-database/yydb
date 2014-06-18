@@ -4,31 +4,41 @@ use yydb_types::{Error, Result};
 
 use crate::crc32c::crc32c;
 
+/// Five-byte magic prefix for WAL sidecar files.
 pub const WAL_MAGIC: &[u8; 5] = b"YYWL\x00";
 
 /// Parsed WAL file header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalHeader {
+    /// Database id copied from the main file header.
     pub database_id: [u8; 16],
+    /// Checkpoint LSN this WAL file continues from.
     pub base_checkpoint_lsn: u64,
+    /// WAL format version (`0` for v0).
     pub format_version: u32,
 }
 
 /// One validated WAL frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalFrame {
+    /// Frame type discriminator.
     pub frame_type: u8,
+    /// Monotonic frame LSN.
     pub frame_lsn: u64,
+    /// Frame body bytes (type-specific).
     pub body: Vec<u8>,
 }
 
 /// Full WAL scan result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalFile {
+    /// Parsed file header.
     pub header: WalHeader,
+    /// Frames in file order.
     pub frames: Vec<WalFrame>,
 }
 
+/// Parse and validate the WAL file header; returns header and byte length consumed.
 pub fn parse_header(bytes: &[u8]) -> Result<(WalHeader, usize)> {
     if bytes.len() < 37 {
         return Err(Error::Corrupt("wal header truncated"));
