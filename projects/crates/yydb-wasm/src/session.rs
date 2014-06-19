@@ -138,6 +138,7 @@ pub struct MemorySession {
 
 #[wasm_bindgen]
 impl MemorySession {
+    /// Open a fresh in-memory database session.
     #[wasm_bindgen(constructor)]
     pub fn new() -> std::result::Result<MemorySession, JsValue> {
         Connection::open_in_memory()
@@ -229,6 +230,7 @@ impl MemorySession {
         yydb::version().to_string()
     }
 
+    /// Mark the session closed; further calls return closed-session errors.
     #[wasm_bindgen]
     pub fn close(&mut self) {
         self.closed = true;
@@ -377,6 +379,7 @@ impl PersistentSession {
         yydb::version().to_string()
     }
 
+    /// Flush pending durable state, then mark the session closed.
     #[wasm_bindgen]
     pub fn close(&mut self) {
         if !self.closed {

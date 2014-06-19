@@ -3,7 +3,7 @@
 //! Applications should normally depend on the [`yydb`](https://docs.rs/yydb)
 //! facade, which re-exports these types.
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 
 use std::collections::BTreeMap;
 use std::{error, fmt, io, result, sync::Arc};
@@ -25,43 +25,89 @@ pub enum Error {
     /// File contents do not match the expected layout.
     Corrupt(&'static str),
     /// Stored schema version does not match the caller’s expectation.
-    SchemaConflict { expected: u32, found: u32 },
+    SchemaConflict {
+        /// Expected schema version.
+        expected: u32,
+        /// Stored schema version.
+        found: u32,
+    },
     /// No scalar UDF is registered under this name.
-    UdfNotFound { name: String },
+    UdfNotFound {
+        /// Missing UDF name.
+        name: String,
+    },
     /// UDF called with the wrong number of arguments.
     UdfArity {
+        /// UDF name.
         name: String,
+        /// Expected argument count.
         expected: usize,
+        /// Supplied argument count.
         got: usize,
     },
     /// UDF body failed or rejected its arguments.
-    Udf { name: String, message: String },
+    Udf {
+        /// UDF name.
+        name: String,
+        /// Failure message from the UDF host.
+        message: String,
+    },
     /// Schema document failed VOS validation (shared language contract).
-    Schema { message: String },
+    Schema {
+        /// Validation failure message.
+        message: String,
+    },
     /// CAS object missing on disk / hot cache.
-    ObjectNotFound { hash_hex: String },
+    ObjectNotFound {
+        /// Lowercase hex digest of the missing object.
+        hash_hex: String,
+    },
     /// Chunked read or manifest is inconsistent.
-    ObjectCorrupt { message: String },
+    ObjectCorrupt {
+        /// Corruption detail message.
+        message: String,
+    },
     /// Feature exists as a product surface but is not implemented yet.
     Unsupported(&'static str),
     /// Wire protocol / serve client failure.
-    Protocol { message: String },
+    Protocol {
+        /// Protocol error message.
+        message: String,
+    },
     /// Independent compare-and-set failed.
-    CasConflict { key: String },
+    CasConflict {
+        /// Key that failed the compare.
+        key: String,
+    },
     /// Lease cannot be claimed under the given expectation.
-    LeaseUnavailable { key: String },
+    LeaseUnavailable {
+        /// Lease key.
+        key: String,
+    },
     /// Lease token does not match the active claim.
-    FencingMismatch { key: String },
+    FencingMismatch {
+        /// Lease key.
+        key: String,
+    },
     /// Lease has expired.
-    LeaseExpired { key: String },
+    LeaseExpired {
+        /// Lease key.
+        key: String,
+    },
     /// Registered UDF version does not match the invocation.
     UdfVersionMismatch {
+        /// UDF name.
         name: String,
+        /// Expected registered version.
         expected: u32,
+        /// Supplied invocation version.
         got: u32,
     },
     /// Namespace quota cannot admit another record.
-    QuotaExceeded { namespace: String },
+    QuotaExceeded {
+        /// Namespace that exceeded quota.
+        namespace: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -288,7 +334,9 @@ impl From<io::Error> for Error {
 /// Database-owned VOS schema document and version (database truth).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaVersion {
+    /// Monotonic schema generation stored in the database.
     pub version: u32,
+    /// Canonical VOS schema document text.
     pub document: String,
 }
 
@@ -413,18 +461,25 @@ impl Vector {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Value {
+    /// SQL-style null.
     Null,
+    /// Boolean scalar.
     Bool(bool),
+    /// Signed 64-bit integer.
     I64(i64),
+    /// Unsigned 64-bit integer.
     U64(u64),
+    /// IEEE-754 double.
     F64(f64),
     /// Small inline bytes (allowed; prefer CAS when large).
     Bytes(Vec<u8>),
+    /// UTF-8 text scalar.
     Text(String),
+    /// UUID scalar.
     Uuid(uuid::Uuid),
     /// Logical vector (often materialized via [`ObjectRef`]).
     Vector(Vector),
-    /// CAS handle under `objects/hash-2/*.bytes`.
+    /// CAS handle under `<hash-prefix>/<chunk_hash>.blob`.
     Object(ObjectRef),
     /// Chunked logical file.
     File(ChunkManifest),

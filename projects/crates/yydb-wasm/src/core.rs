@@ -201,31 +201,6 @@ pub(crate) fn kv_get_json(result: Result<Option<Vec<u8>>>) -> String {
     }
 }
 
-#[cfg(test)]
-mod json_tests {
-    use super::*;
-    use yydb::Connection;
-
-    #[test]
-    fn kv_get_json_returns_bytes() {
-        let conn = Connection::open_in_memory().expect("memory");
-        conn.put("theme", b"dark").expect("put");
-        let payload = kv_get_json(conn.get("theme"));
-        let parsed: JsonValue = serde_json::from_str(&payload).expect("json");
-        assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(true)));
-        assert_eq!(parsed.get("value"), Some(&json!([100, 97, 114, 107])));
-    }
-
-    #[test]
-    fn schema_get_json_empty() {
-        let conn = Connection::open_in_memory().expect("memory");
-        let payload = schema_get_json(conn.schema());
-        let parsed: JsonValue = serde_json::from_str(&payload).expect("json");
-        assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(true)));
-        assert!(parsed.get("schema").unwrap().is_null());
-    }
-}
-
 /// Build the same info text as the YY wire `Info` handler.
 pub(crate) fn connection_info(conn: &Connection, path: Option<&str>) -> String {
     let path = path

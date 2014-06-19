@@ -2,7 +2,7 @@
 //!
 //! Same semantic entry points as `yydb-napi` where applicable; no parallel TS parser.
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 #![deny(clippy::all)]
 
 mod core;
@@ -52,26 +52,31 @@ impl From<SchemaCheck> for CheckSchemaResult {
 
 #[wasm_bindgen]
 impl CheckSchemaResult {
+    /// Whether the schema document parsed and validated.
     #[wasm_bindgen(getter)]
     pub fn ok(&self) -> bool {
         self.ok
     }
 
+    /// Number of tables declared in the schema.
     #[wasm_bindgen(getter, js_name = tableCount)]
     pub fn table_count(&self) -> u32 {
         self.table_count
     }
 
+    /// Stable fingerprint of the validated schema.
     #[wasm_bindgen(getter, js_name = schemaFingerprint)]
     pub fn schema_fingerprint(&self) -> String {
         self.schema_fingerprint.clone()
     }
 
+    /// Engine build version that performed validation.
     #[wasm_bindgen(getter, js_name = engineVersion)]
     pub fn engine_version(&self) -> String {
         self.engine_version.clone()
     }
 
+    /// Validation error message when [`Self::ok`] is false.
     #[wasm_bindgen(getter)]
     pub fn error(&self) -> Option<String> {
         self.error.clone()

@@ -4,7 +4,7 @@
 //! should use `yydb::udf` (`UdfRegistry`, `HostMicroDefinition`, …) instead of
 //! depending here directly. Not shared with YYDS.
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 
 mod capability;
 mod contract;
