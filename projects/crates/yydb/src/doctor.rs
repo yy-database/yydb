@@ -66,10 +66,7 @@ pub(crate) fn diagnose(
                     issues.push(DoctorIssue {
                         severity: DoctorSeverity::Error,
                         code: "yydb.doctor.missing_blob".into(),
-                        message: format!(
-                            "committed reference points to missing blob {}",
-                            hash_hex
-                        ),
+                        message: format!("committed reference points to missing blob {}", hash_hex),
                         key_hint: Some(key.clone()),
                     });
                 }

@@ -155,10 +155,7 @@ impl ObjectStore {
                 let existing = fs::read(&path)?;
                 if existing != encoded {
                     return Err(Error::ObjectCorrupt {
-                        message: format!(
-                            "blob chunk hash collision at {}",
-                            object.hash_hex()
-                        ),
+                        message: format!("blob chunk hash collision at {}", object.hash_hex()),
                     });
                 }
             } else {
@@ -436,10 +433,7 @@ impl ObjectStore {
                 let hash = decode_hash_hex(hash_hex)?;
                 if hash != blob_chunk_hash(&payload) {
                     return Err(Error::ObjectCorrupt {
-                        message: format!(
-                            "blob file name does not match chunk_hash {}",
-                            hash_hex
-                        ),
+                        message: format!("blob file name does not match chunk_hash {}", hash_hex),
                     });
                 }
                 objects.push(ObjectRef {
