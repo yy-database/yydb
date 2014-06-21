@@ -40,7 +40,10 @@ pub use page::{
     encode_page, PageHeader, PAGE_HEADER_LEN, PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF,
 };
 pub use pager::PageStore;
-pub use shm::{encode_empty_shm, parse_shm, ShmBlock, SHM_BYTES, SHM_MAGIC};
+pub use shm::{
+    encode_empty_shm, encode_shm, parse_shm, shm_sidecar_path, sync_shm_from_wal, ShmBlock,
+    SHM_BYTES, SHM_MAGIC,
+};
 pub use wal::{
     committed_tail_lsn, committed_transactions, parse_header, parse_wal, parse_wal_recover,
     wal_frame_offsets, WalFile, WalFrame, WalHeader, WAL_MAGIC,

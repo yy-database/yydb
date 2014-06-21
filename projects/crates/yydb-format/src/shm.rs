@@ -1,8 +1,11 @@
 //! `YYSH` v0 shared-memory coordination block.
 
+use std::path::{Path, PathBuf};
+
 use yydb_types::{Error, Result};
 
 use crate::crc32c::crc32c;
+use crate::wal::{committed_tail_lsn, parse_wal_recover};
 
 /// Five-byte magic prefix for SHM sidecar files.
 pub const SHM_MAGIC: &[u8; 5] = b"YYSH\x00";
@@ -45,12 +48,49 @@ pub fn parse_shm(bytes: &[u8]) -> Result<ShmBlock> {
     })
 }
 
-/// Encode an empty, checksum-valid SHM block for golden fixtures.
-pub fn encode_empty_shm() -> Vec<u8> {
+/// Encode a checksum-valid SHM block.
+pub fn encode_shm(block: &ShmBlock) -> Vec<u8> {
     let mut buf = vec![0_u8; SHM_BYTES];
     buf[0..5].copy_from_slice(SHM_MAGIC);
-    buf[5..9].copy_from_slice(&0u32.to_le_bytes());
+    buf[5..9].copy_from_slice(&block.format_version.to_le_bytes());
+    buf[9..17].copy_from_slice(&block.writer_epoch.to_le_bytes());
+    buf[17..21].copy_from_slice(&block.active_readers.to_le_bytes());
+    buf[21..29].copy_from_slice(&block.wal_tail_lsn.to_le_bytes());
+    buf[29..37].copy_from_slice(&block.wal_file_bytes.to_le_bytes());
     let checksum = crc32c(&buf[..4092]);
     buf[4092..4096].copy_from_slice(&checksum.to_le_bytes());
     buf
+}
+
+/// Encode an empty, checksum-valid SHM block for golden fixtures.
+pub fn encode_empty_shm() -> Vec<u8> {
+    encode_shm(&ShmBlock {
+        format_version: 0,
+        writer_epoch: 0,
+        active_readers: 0,
+        wal_tail_lsn: 0,
+        wal_file_bytes: 0,
+    })
+}
+
+/// Resolve `<main>-shm` for a database main file path.
+pub fn shm_sidecar_path(main: &Path) -> PathBuf {
+    let mut sidecar = main.as_os_str().to_owned();
+    sidecar.push("-shm");
+    PathBuf::from(sidecar)
+}
+
+/// Mirror committed WAL tail metadata into the `-shm` sidecar.
+pub fn sync_shm_from_wal(main: &Path, wal: &Path) -> Result<()> {
+    let wal_bytes = std::fs::read(wal)?;
+    let parsed = parse_wal_recover(&wal_bytes)?;
+    let block = ShmBlock {
+        format_version: 0,
+        writer_epoch: 0,
+        active_readers: 0,
+        wal_tail_lsn: committed_tail_lsn(&parsed),
+        wal_file_bytes: wal_bytes.len() as u64,
+    };
+    std::fs::write(shm_sidecar_path(main), encode_shm(&block))?;
+    Ok(())
 }
