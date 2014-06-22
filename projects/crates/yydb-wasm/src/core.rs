@@ -17,8 +17,6 @@ pub struct SchemaCheck {
     pub table_count: u32,
     /// Stable document fingerprint (BLAKE3 hex, first 16 chars).
     pub schema_fingerprint: String,
-    /// Engine version string (`yydb::version()` / workspace semver).
-    pub engine_version: String,
     /// Structured error when [`Self::ok`] is false.
     pub error: Option<String>,
 }
@@ -49,7 +47,6 @@ pub fn check_schema_source(source: &str) -> SchemaCheck {
                 ok: true,
                 table_count,
                 schema_fingerprint: schema_fingerprint(source),
-                engine_version: yydb_version(),
                 error: None,
             }
         }
@@ -57,7 +54,6 @@ pub fn check_schema_source(source: &str) -> SchemaCheck {
             ok: false,
             table_count: 0,
             schema_fingerprint: String::new(),
-            engine_version: yydb_version(),
             error: Some(err.to_string()),
         },
     }
@@ -87,7 +83,6 @@ pub fn introspect_schema_json(source: &str) -> String {
                 .collect::<Vec<JsonValue>>();
             json!({
                 "ok": true,
-                "engineVersion": yydb_version(),
                 "schemaFingerprint": schema_fingerprint(source),
                 "tables": tables,
                 "error": JsonValue::Null,
@@ -96,7 +91,6 @@ pub fn introspect_schema_json(source: &str) -> String {
         }
         Err(err) => json!({
             "ok": false,
-            "engineVersion": yydb_version(),
             "schemaFingerprint": "",
             "tables": [],
             "error": err.to_string(),

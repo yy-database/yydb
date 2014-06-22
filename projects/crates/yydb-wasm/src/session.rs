@@ -224,12 +224,6 @@ impl MemorySession {
         run_call_scalar(&self.conn, self.closed, body)
     }
 
-    /// Engine version string (wire `HelloOk` parity).
-    #[wasm_bindgen(js_name = serverVersion)]
-    pub fn server_version(&self) -> String {
-        yydb::version().to_string()
-    }
-
     /// Mark the session closed; further calls return closed-session errors.
     #[wasm_bindgen]
     pub fn close(&mut self) {
@@ -371,12 +365,6 @@ impl PersistentSession {
     #[wasm_bindgen(js_name = callScalar)]
     pub fn call_scalar(&self, body: &[u8]) -> String {
         run_call_scalar(&self.conn, self.closed, body)
-    }
-
-    /// Engine version string (wire `HelloOk` parity).
-    #[wasm_bindgen(js_name = serverVersion)]
-    pub fn server_version(&self) -> String {
-        yydb::version().to_string()
     }
 
     /// Flush pending durable state, then mark the session closed.
