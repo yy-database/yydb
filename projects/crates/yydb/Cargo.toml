@@ -125,6 +125,12 @@ path = "tests/acceptance/format_v0/shm_sidecar.rs"
 name = "yydb_format_v0_wal_crash"
 path = "tests/acceptance/format_v0/wal_crash.rs"
 [[test]]
+name = "yydb_format_v0_wal_blob_refs"
+path = "tests/acceptance/format_v0/wal_blob_refs.rs"
+[[test]]
+name = "yydb_format_v0_wal_blob_refs_crash"
+path = "tests/acceptance/format_v0/wal_blob_refs_crash.rs"
+[[test]]
 name = "yydb_format_v0_writer_lock"
 path = "tests/acceptance/format_v0/writer_lock.rs"
 [[test]]

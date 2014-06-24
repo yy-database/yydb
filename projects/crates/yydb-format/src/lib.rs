@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 
 pub mod blob;
+pub mod blob_refs;
 pub mod btree;
 pub mod crc32c;
 pub mod doctor;
@@ -22,6 +23,10 @@ pub use blob::{
     blob_chunk_hash, blob_payload_hash, encode_blob_chunk, parse_blob_chunk, parse_blob_header,
     read_blob_payload, BlobChunkHeader, BLOB_CHUNK_DOMAIN, BLOB_CHUNK_KIND_DATA, BLOB_HEADER_BYTES,
     BLOB_MAGIC,
+};
+pub use blob_refs::{
+    canonical_blob_refs_bytes, commit_digest, encode_blob_refs_body, BlobChunkRef,
+    BlobManifestDelta, BLOB_REF_OP_DELETE, BLOB_REF_OP_PUT, FRAME_BLOB_REFS,
 };
 pub use btree::RecordTree;
 pub use crc32c::crc32c;
