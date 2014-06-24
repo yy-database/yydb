@@ -12,7 +12,9 @@ use yydb_types::{Error, Result};
 use crate::blob_refs::{commit_digest, encode_blob_refs_body, BlobManifestDelta, FRAME_BLOB_REFS};
 use crate::crc32c::crc32c;
 use crate::header::PAGE_SIZE;
-use crate::wal::{parse_wal, wal_frame_offsets, WalFile, WAL_MAGIC};
+use crate::wal::{
+    parse_frame, parse_header, parse_wal, wal_frame_offsets, WalFile, WAL_MAGIC,
+};
 
 const FRAME_TXN_BEGIN: u8 = 0x01;
 const FRAME_PAGE_IMAGE: u8 = 0x02;
@@ -204,4 +206,56 @@ pub fn strip_trailing_txn_commit(bytes: &[u8]) -> Result<Vec<u8>> {
         .copied()
         .ok_or_else(|| Error::Corrupt("wal missing trailing commit frame"))?;
     Ok(bytes[0..last_start].to_vec())
+}
+
+/// Byte length of the recoverable WAL prefix (header plus complete frames).
+pub fn wal_recoverable_byte_len(bytes: &[u8]) -> Result<usize> {
+    let (_, mut offset) = parse_header(bytes)?;
+    while offset < bytes.len() {
+        match parse_frame(bytes, offset) {
+            Ok((_, consumed)) => offset += consumed,
+            Err(_) => break,
+        }
+    }
+    Ok(offset)
+}
+
+/// Truncate WAL bytes to the recoverable prefix, dropping a torn tail frame.
+pub fn truncate_wal_to_recoverable_prefix(bytes: &[u8]) -> Result<Vec<u8>> {
+    let end = wal_recoverable_byte_len(bytes)?;
+    Ok(bytes[0..end].to_vec())
+}
+
+/// Truncate WAL bytes immediately after `frame_index` (inclusive).
+pub fn truncate_wal_after_frame(bytes: &[u8], frame_index: usize) -> Result<Vec<u8>> {
+    let offsets = wal_frame_offsets(bytes)?;
+    let start = offsets
+        .get(frame_index)
+        .copied()
+        .ok_or_else(|| Error::Corrupt("wal frame index out of range"))?;
+    let (_, consumed) = parse_frame(bytes, start)?;
+    Ok(bytes[0..start + consumed].to_vec())
+}
+
+/// Drop frames after the last `PageImage` in the final open transaction.
+///
+/// Simulates a crash after catalog page images were appended but before
+/// `.yydx` `BlobRefs` or `TxnCommit`.
+pub fn strip_incomplete_txn_after_last_page_image(bytes: &[u8]) -> Result<Vec<u8>> {
+    let wal = parse_wal(bytes)?;
+    let begin_index = wal
+        .frames
+        .iter()
+        .rposition(|frame| frame.frame_type == FRAME_TXN_BEGIN)
+        .ok_or_else(|| Error::Corrupt("wal missing txn begin"))?;
+    let mut last_page_index = None;
+    for (index, frame) in wal.frames.iter().enumerate().skip(begin_index) {
+        match frame.frame_type {
+            FRAME_PAGE_IMAGE => last_page_index = Some(index),
+            FRAME_TXN_COMMIT => break,
+            _ => {}
+        }
+    }
+    let page_index = last_page_index.ok_or_else(|| Error::Corrupt("wal txn missing page image"))?;
+    truncate_wal_after_frame(bytes, page_index)
 }
