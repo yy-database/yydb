@@ -10,7 +10,10 @@ use std::{
 use yydb_types::{Error, Result};
 
 use crate::btree::RecordTree;
-use crate::header::{parse_page0, DatabaseHeader, PAGE_MAGIC, PAGE_SIZE};
+use crate::header::{
+    corrupt_header_slot_checksum, inactive_slot_offset, parse_page0, slot_offset_for_kind,
+    DatabaseHeader, PAGE_MAGIC, PAGE_SIZE,
+};
 use crate::key::TreeKey;
 use crate::memory::MemoryPager;
 use crate::pager::PageStore;
@@ -105,8 +108,9 @@ impl FilePager {
     /// Fold WAL into the main file and truncate the sidecar.
     pub fn checkpoint(&mut self) -> Result<()> {
         let checkpoint_lsn = self.committed_wal_tail_lsn()?;
+        self.persist_data_pages()?;
         self.inner.bump_checkpoint_slot(checkpoint_lsn)?;
-        self.persist_all()?;
+        self.persist_page0()?;
         if self.wal_enabled {
             let wal_path = wal_sidecar_path(&self.path);
             if wal_path.exists() {
@@ -210,9 +214,56 @@ impl FilePager {
     }
 
     fn persist_all(&self) -> Result<()> {
+        self.persist_data_pages()?;
+        self.persist_page0()?;
+        Ok(())
+    }
+
+    fn persist_data_pages(&self) -> Result<()> {
         for (page_id, image) in self.inner.pages_snapshot() {
+            if page_id == 0 {
+                continue;
+            }
             self.write_page_to_file(page_id, &image)?;
         }
+        Ok(())
+    }
+
+    fn persist_page0(&self) -> Result<()> {
+        let page0 = self
+            .inner
+            .get_page(0)?
+            .ok_or(Error::Corrupt("missing page0"))?;
+        self.write_page_to_file(0, &page0)?;
+        Ok(())
+    }
+
+    /// Persist data pages and bump the in-memory header without writing page 0.
+    #[doc(hidden)]
+    pub fn simulate_checkpoint_crash_before_header_commit(&mut self) -> Result<()> {
+        let checkpoint_lsn = self.committed_wal_tail_lsn()?;
+        self.persist_data_pages()?;
+        self.inner.bump_checkpoint_slot(checkpoint_lsn)?;
+        Ok(())
+    }
+
+    /// Write page 0 with a torn inactive header slot checksum.
+    #[doc(hidden)]
+    pub fn simulate_checkpoint_crash_corrupt_inactive_header(&mut self) -> Result<()> {
+        let checkpoint_lsn = self.committed_wal_tail_lsn()?;
+        let header_before = self.inner.header()?;
+        let inactive_offset =
+            inactive_slot_offset(slot_offset_for_kind(header_before.slot.slot_kind));
+        self.persist_data_pages()?;
+        self.inner.bump_checkpoint_slot(checkpoint_lsn)?;
+        let page0 = self
+            .inner
+            .get_page(0)?
+            .ok_or(Error::Corrupt("missing page0"))?
+            .clone();
+        let mut image = page0;
+        corrupt_header_slot_checksum(&mut image, inactive_offset)?;
+        self.write_page_to_file(0, &image)?;
         Ok(())
     }
 
