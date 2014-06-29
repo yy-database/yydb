@@ -14,7 +14,7 @@ fn yydb_lease_renew_extends() {
         .claim_lease(
             "frontier/item-2",
             "worker-a",
-            Duration::from_millis(50),
+            Duration::from_secs(2),
             LeaseExpectation::Queued,
         )
         .unwrap();
