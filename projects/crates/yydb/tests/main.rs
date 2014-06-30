@@ -66,6 +66,8 @@ mod yydb_wal_reopen_doctor;
 
 #[path = "acceptance/format_v0/blob_publish_orphan.rs"]
 mod yydb_format_v0_blob_publish_orphan;
+#[path = "acceptance/format_v0/blob_publish_orphan_wal.rs"]
+mod yydb_format_v0_blob_publish_orphan_wal;
 #[path = "acceptance/format_v0/checkpoint_header.rs"]
 mod yydb_format_v0_checkpoint_header;
 #[path = "acceptance/format_v0/checkpoint_header_crash.rs"]
