@@ -1,8 +1,6 @@
 // fixture: yydb.cas.race_two_writers
 
-#[path = "../../fixtures/yydb/mod.rs"]
-mod harness;
-use harness::{cleanup, open_temp_db};
+use crate::fixtures::yydb::{cleanup, open_temp_db};
 
 #[test]
 fn yydb_cas_race_two_writers() {

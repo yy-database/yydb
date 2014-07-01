@@ -1,8 +1,6 @@
 // fixture: yydb.udf.version_mismatch
 
-#[path = "../../fixtures/yydb/mod.rs"]
-mod harness;
-use harness::{cleanup, open_temp_db};
+use crate::fixtures::yydb::{cleanup, open_temp_db};
 use yydb::{Error, Value};
 
 #[test]

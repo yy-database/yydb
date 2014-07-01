@@ -1,8 +1,6 @@
 // fixture: yydb.cas.create_if_absent
 
-#[path = "../../fixtures/yydb/mod.rs"]
-mod harness;
-use harness::{cleanup, open_temp_db};
+use crate::fixtures::yydb::{cleanup, open_temp_db};
 
 #[test]
 fn yydb_cas_create_if_absent() {

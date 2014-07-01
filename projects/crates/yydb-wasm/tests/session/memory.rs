@@ -1,9 +1,7 @@
 //! Stateful [`MemorySession`] JSON envelopes and VOS roundtrips.
 
-#[path = "../fixtures/mod.rs"]
-mod harness;
 use serde_json::{json, Value as JsonValue};
-use harness::{assert_ok_true, parse_json, USER_SCHEMA};
+use crate::fixtures::{assert_ok_true, parse_json, USER_SCHEMA};
 use yydb_wasm::MemorySession;
 
 #[test]

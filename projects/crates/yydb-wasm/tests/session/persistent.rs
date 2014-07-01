@@ -1,7 +1,5 @@
-#[path = "../fixtures/mod.rs"]
-mod harness;
 use serde_json::{json, Value as JsonValue};
-use harness::{assert_ok_true, full_yydb_caps, parse_json, USER_SCHEMA};
+use crate::fixtures::{assert_ok_true, full_yydb_caps, parse_json, USER_SCHEMA};
 use yydb_wasm::open_persistent_session;
 
 #[test]

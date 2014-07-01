@@ -2,9 +2,7 @@
 
 use yydb_wasm::open_persistent;
 
-#[path = "../../fixtures/mod.rs"]
-mod harness;
-use harness::{full_yydb_caps, full_yydx_caps};
+use crate::fixtures::{full_yydb_caps, full_yydx_caps};
 
 #[test]
 fn yydb_opfs_persistent_open_main_roundtrip() {

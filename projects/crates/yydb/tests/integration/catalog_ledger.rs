@@ -1,5 +1,3 @@
-#[path = "../fixtures/yydb/mod.rs"]
-mod harness;
 use std::collections::BTreeMap;
 use yydb::vos::ast::{FieldId, FieldPath, RenameMap};
 use yydb::{Connection, Error, OpenFlags};
@@ -9,14 +7,14 @@ const REORDERED: &str = "table User { active: bool, name: utf8, @@id: i64 }";
 
 #[test]
 fn persists_reorder_rename_and_tombstones_across_reopen() {
-    let (connection, path) = harness::open_temp_db("catalog-ledger");
+    let (connection, path) = crate::fixtures::yydb::open_temp_db("catalog-ledger");
     connection.ensure_schema(INITIAL).unwrap();
     let initial = connection.catalog_snapshot().unwrap().unwrap();
     connection
         .migrate_schema(REORDERED, &RenameMap::default())
         .unwrap();
     drop(connection);
-    let connection = harness::reopen(&path);
+    let connection = crate::fixtures::yydb::reopen(&path);
     let reordered = connection.catalog_snapshot().unwrap().unwrap();
     assert_eq!(reordered.types[0].type_id, initial.types[0].type_id);
     for (before, after) in initial.types[0]
@@ -47,7 +45,7 @@ fn persists_reorder_rename_and_tombstones_across_reopen() {
         )
         .unwrap();
     drop(connection);
-    let connection = harness::reopen(&path);
+    let connection = crate::fixtures::yydb::reopen(&path);
     let snapshot = connection.catalog_snapshot().unwrap().unwrap();
     let contract = connection.resolved_contract().unwrap().unwrap();
     assert_eq!(contract.types[0].type_id, snapshot.types[0].type_id.0);
@@ -65,7 +63,7 @@ fn persists_reorder_rename_and_tombstones_across_reopen() {
     assert_eq!(execution.types[0].fields[2].handle.index(), 3);
     assert_eq!(connection.schema_version().unwrap(), Some(4));
     drop(connection);
-    harness::cleanup(&path);
+    crate::fixtures::yydb::cleanup(&path);
 }
 
 #[test]
@@ -98,7 +96,7 @@ fn failed_migrations_leave_schema_and_ledger_unchanged() {
 
 #[test]
 fn recovers_the_same_ledger_from_wal_before_checkpoint() {
-    let path = harness::temp_db_path("catalog-wal");
+    let path = crate::fixtures::yydb::temp_db_path("catalog-wal");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     connection.ensure_schema(INITIAL).unwrap();
     connection
@@ -111,23 +109,23 @@ fn recovers_the_same_ledger_from_wal_before_checkpoint() {
     assert_eq!(connection.schema_version().unwrap(), Some(2));
     connection.checkpoint().unwrap();
     drop(connection);
-    let connection = harness::reopen(&path);
+    let connection = crate::fixtures::yydb::reopen(&path);
     assert_eq!(connection.catalog_snapshot().unwrap(), expected);
     drop(connection);
-    harness::cleanup(&path);
+    crate::fixtures::yydb::cleanup(&path);
 }
 
 #[test]
 fn rejects_whole_state_database_magic() {
-    let path = harness::temp_db_path("reject-whole-state");
+    let path = crate::fixtures::yydb::temp_db_path("reject-whole-state");
     std::fs::write(&path, b"YYDB\x01").unwrap();
     assert!(matches!(Connection::open(&path), Err(Error::Corrupt(_))));
-    harness::cleanup(&path);
+    crate::fixtures::yydb::cleanup(&path);
 }
 
 #[test]
 fn rejects_an_incomplete_wal_tail() {
-    let path = harness::temp_db_path("wal-tail");
+    let path = crate::fixtures::yydb::temp_db_path("wal-tail");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     connection.ensure_schema(INITIAL).unwrap();
     connection.put("value", b"complete").unwrap();
@@ -139,12 +137,12 @@ fn rejects_an_incomplete_wal_tail() {
         Connection::open_with_flags(&path, OpenFlags::wal()),
         Err(Error::Corrupt(_))
     ));
-    harness::cleanup(&path);
+    crate::fixtures::yydb::cleanup(&path);
 }
 
 #[test]
 fn rejects_a_complete_wal_frame_with_a_bad_checksum() {
-    let path = harness::temp_db_path("wal-checksum");
+    let path = crate::fixtures::yydb::temp_db_path("wal-checksum");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     connection.ensure_schema(INITIAL).unwrap();
     drop(connection);
@@ -157,5 +155,5 @@ fn rejects_a_complete_wal_frame_with_a_bad_checksum() {
         Connection::open_with_flags(&path, OpenFlags::wal()),
         Err(Error::Corrupt(_))
     ));
-    harness::cleanup(&path);
+    crate::fixtures::yydb::cleanup(&path);
 }

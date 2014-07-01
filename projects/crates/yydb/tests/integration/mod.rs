@@ -1,0 +1,12 @@
+mod catalog_ledger;
+mod connection_smoke;
+mod execution_catalog;
+mod execution_udf;
+mod host_micro_udf;
+mod main_snapshot;
+mod query_dml;
+mod schema_pragma;
+mod vos_execute;
+mod vos_query;
+mod vos_transaction;
+mod wire_dispatch;

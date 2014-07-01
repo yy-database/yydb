@@ -1,8 +1,6 @@
-#[path = "../fixtures/yydb/mod.rs"]
-mod harness;
 use std::fs;
 
-use harness::{cleanup, objects_sidecar, temp_db, temp_yydx};
+use crate::fixtures::yydb::{cleanup, objects_sidecar, temp_db, temp_yydx};
 
 use yydb::{
     journal::{shm_path, wal_path},
