@@ -1,3 +1,4 @@
+mod backup_checkpoint_copy;
 mod blob_publish_orphan;
 mod blob_publish_orphan_wal;
 mod checkpoint_header;
