@@ -258,11 +258,7 @@ impl ObjectStore {
 
     /// Current tier hint for an object.
     pub fn tier_of(&self, object: &ObjectRef) -> Tier {
-        let pinned = self
-            .pinned
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .contains(&object.hash);
+        let pinned = self.is_pinned(object);
         if pinned {
             return Tier::Hot;
         }
@@ -276,6 +272,14 @@ impl ObjectStore {
         } else {
             Tier::Cold
         }
+    }
+
+    /// Whether an object is pinned against GC reclaim.
+    pub fn is_pinned(&self, object: &ObjectRef) -> bool {
+        self.pinned
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains(&object.hash)
     }
 
     /// Write a vector payload into CAS.

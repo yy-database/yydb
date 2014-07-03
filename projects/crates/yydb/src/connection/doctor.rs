@@ -49,6 +49,9 @@ impl Connection {
             if referenced.contains(&object.hash) {
                 continue;
             }
+            if self.objects.is_pinned(object) {
+                continue;
+            }
             self.objects.remove_object(object)?;
             report.reclaimed_objects += 1;
         }
