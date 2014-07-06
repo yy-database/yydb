@@ -52,6 +52,9 @@ impl Connection {
             if self.objects.is_pinned(object) {
                 continue;
             }
+            if !self.objects.is_stored(object) {
+                continue;
+            }
             self.objects.remove_object(object)?;
             report.reclaimed_objects += 1;
         }

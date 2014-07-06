@@ -282,6 +282,33 @@ impl ObjectStore {
             .contains(&object.hash)
     }
 
+    /// Whether chunk bytes are still present in this store.
+    pub(crate) fn is_stored(&self, object: &ObjectRef) -> bool {
+        if self.persist_to_disk() {
+            return self.path_for(object).exists();
+        }
+        if self
+            .catalog
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(&object.hash)
+        {
+            return true;
+        }
+        if self
+            .hot
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(&object.hash)
+        {
+            return true;
+        }
+        self.cold
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(&object.hash)
+    }
+
     /// Write a vector payload into CAS.
     pub fn put_vector(&self, vector: &Vector) -> Result<ObjectRef> {
         self.put_chunk(ObjectKind::VectorPayload, &vector.to_le_bytes())
