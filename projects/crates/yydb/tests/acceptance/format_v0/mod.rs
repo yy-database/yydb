@@ -17,4 +17,5 @@ mod wal_blob_refs_crash;
 mod wal_crash;
 mod wal_truncate_reopen;
 mod writer_lock;
+mod yydx_compact_orphans;
 mod yydx_wal_pages_before_blob_refs_crash;

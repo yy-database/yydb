@@ -17,6 +17,7 @@ use yydb_format::{
 };
 
 mod backup;
+mod compact;
 mod doctor;
 mod journal;
 mod kv;

@@ -290,6 +290,15 @@ pub struct ReclaimReport {
     pub reclaimed_objects: u64,
 }
 
+/// Summary of a v0 `.yydx` compaction pass (checkpoint + safe orphan reclaim).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CompactReport {
+    /// Whether WAL was folded into the main file.
+    pub checkpointed: bool,
+    /// Orphan blobs removed during the pass.
+    pub orphans_reclaimed: u64,
+}
+
 /// Summary of keys removed by TTL or quota eviction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EvictReport {
