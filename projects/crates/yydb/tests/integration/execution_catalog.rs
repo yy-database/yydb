@@ -6,7 +6,7 @@ use yydb::{
 
 fn resolved_user_contract() -> yydb::vos::ResolvedContract {
     let mut contract = yydb::vos::ResolvedContract {
-        format_version: "vos-resolved-contract-v1".into(),
+        format_version: "vos-resolved-contract-v0".into(),
         identity_manifest_version: "vos-identity-manifest-v0".into(),
         schema_fingerprint: String::new(),
         types: vec![yydb::vos::contract::ResolvedTypeContract {
