@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decodeFrame, encodeFrame, encodeKvPut, decodeKvGetOk, encodeMicroRegister, MsgType } from './wire.ts';
+import {
+    decodeErrorBody,
+    decodeFrame,
+    decodeKvGetOk,
+    encodeErrorBody,
+    encodeFrame,
+    encodeKvPut,
+    encodeMicroRegister,
+    MsgType,
+} from './wire.ts';
 
 test('frame roundtrip', () => {
     const encoded = encodeFrame({
@@ -80,4 +89,16 @@ test('kv get ok decode', () => {
     const body = Uint8Array.from([1, 2, 0, 0, 0, 65, 66]);
     const value = decodeKvGetOk(body);
     assert.deepEqual(value, new Uint8Array([65, 66]));
+});
+
+test('error body roundtrip keeps code and message', () => {
+    const body = encodeErrorBody({ code: 'yydb.schema.invalid', message: 'VOS schema: boom' });
+    assert.deepEqual(decodeErrorBody(body), {
+        code: 'yydb.schema.invalid',
+        message: 'VOS schema: boom',
+    });
+});
+
+test('error body decode rejects a truncated frame', () => {
+    assert.throws(() => decodeErrorBody(Uint8Array.from([9, 0, 0, 0, 121])));
 });

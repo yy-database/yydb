@@ -58,6 +58,7 @@
     },
     "dependencies": {
         "@vmz/commander": "^0.2.0",
+        "@voml/vos": "^0.0.1",
         "@yydb/yydb-client": "workspace:*",
         "@yydb/yydb-unknown-wasm32": "workspace:*"
     },

@@ -17,8 +17,22 @@ export {
     encodeKvPut,
     encodeMicroRegister,
     encodeScalarCall,
+    encodeErrorBody,
+    decodeErrorBody,
     decodeScalarCallOk,
     decodeSchemaGetOk,
     decodeKvGetOk,
 } from './wire.js';
-export type { Frame, MicroRegisterPayload, MsgTypeCode, ProductMagic, SchemaVersion, WireUdfScalarKind, WireUdfScalarValue } from './wire.js';
+export type {
+    Frame,
+    MicroRegisterPayload,
+    MsgTypeCode,
+    ProductMagic,
+    SchemaVersion,
+    WireErrorBody,
+    WireUdfScalarKind,
+    WireUdfScalarValue,
+} from './wire.js';
+export { YydbError, YydbErrorCodes, isRetryableYydbCode, isYydbError } from './errors.js';
+export type { YydbErrorCode, YydbErrorOptions } from './errors.js';
+export type { MicroHostHandler, Transport } from './transport.js';

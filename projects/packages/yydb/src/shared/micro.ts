@@ -1,7 +1,43 @@
-import type { InferUdfArgs, InferUdfReturn, MicroEffect, MicroInvocationMode, UdfTypeDescriptor } from './udf-types.js';
+import type {
+    InferUdfArgs,
+    InferUdfReturn,
+    MicroEffect,
+    MicroInvocationMode,
+    UdfScalarDescriptor,
+} from './udf-types.js';
+import type { AnyTypeDescriptor } from '@voml/vos';
+
+/** Value shape accepted and produced on the wire micro path. */
+type MicroWireValue = string | number | boolean | null;
+
+/** Wire kinds a VOS descriptor can map onto (`UdfType::Null` is never a type here). */
+type UdfWireKind = 'i64' | 'bool' | 'text';
+
+/**
+ * Maps a VOS descriptor onto its wire `UdfType` tag.
+ *
+ * Accepts any VOS descriptor so the runtime layer can reject a kind that
+ * slipped past the type layer; throws for everything outside the Phase-1
+ * subset instead of letting it reach the engine.
+ */
+export function udfWireKind(descriptor: AnyTypeDescriptor): UdfWireKind {
+    switch (descriptor.kind) {
+        case 'i64':
+            return 'i64';
+        case 'bool':
+            return 'bool';
+        case 'utf8':
+            return 'text';
+        default:
+            throw new Error(`unsupported micro type descriptor: ${descriptor.kind}`);
+    }
+}
 
 /** Input accepted by [`Database.defineMicro`](./database.ts). */
-export interface TsMicroDefinitionInput<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor> {
+export interface TsMicroDefinitionInput<
+    TArgs extends readonly UdfScalarDescriptor[],
+    TReturn extends UdfScalarDescriptor,
+> {
     readonly name: string;
     readonly version: number;
     readonly args: TArgs;
@@ -14,8 +50,8 @@ export interface TsMicroDefinitionInput<TArgs extends readonly UdfTypeDescriptor
 
 /** Opaque definition produced by `defineMicro` before session registration. */
 export interface DefinedMicro<
-    TArgs extends readonly UdfTypeDescriptor[] = readonly UdfTypeDescriptor[],
-    TReturn extends UdfTypeDescriptor = UdfTypeDescriptor,
+    TArgs extends readonly UdfScalarDescriptor[] = readonly UdfScalarDescriptor[],
+    TReturn extends UdfScalarDescriptor = UdfScalarDescriptor,
 > {
     readonly name: string;
     readonly version: number;
@@ -38,7 +74,7 @@ export interface MicroHandle {
     readonly implementationVersion: number;
 }
 
-type AnyDefinedMicro = DefinedMicro<readonly UdfTypeDescriptor[], UdfTypeDescriptor>;
+type AnyDefinedMicro = DefinedMicro<readonly UdfScalarDescriptor[], UdfScalarDescriptor>;
 
 interface RegisteredMicro {
     readonly handle: MicroHandle;
@@ -62,7 +98,7 @@ export class MicroSessionRegistry {
     }
 
     /** Installs a defined micro into the current session registry. */
-    register<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor>(
+    register<TArgs extends readonly UdfScalarDescriptor[], TReturn extends UdfScalarDescriptor>(
         definition: DefinedMicro<TArgs, TReturn>,
     ): MicroHandle {
         const key = logicalKey(definition.name, definition.version);
@@ -97,7 +133,7 @@ export class MicroSessionRegistry {
         handleVersion: number;
         functionId: string;
         args: readonly unknown[];
-    }): string | number | boolean | null {
+    }): MicroWireValue {
         const handle: MicroHandle = {
             hostId: payload.hostId,
             functionId: payload.functionId,
@@ -105,7 +141,12 @@ export class MicroSessionRegistry {
             name: '',
             version: 0,
         };
-        return this.invokeScalar(handle, [...payload.args]) as string | number | boolean | null;
+        const definition = this.resolve(handle);
+        if (!definition) {
+            throw new Error(`micro not found: ${payload.functionId}`);
+        }
+        const args = definition.args.map((descriptor, index) => wireToBoundary(descriptor, payload.args[index]));
+        return boundaryToWire(definition.returns, this.invokeScalar(handle, args));
     }
 
     /** Invokes a registered scalar micro (host adapter entry point). */
@@ -120,9 +161,11 @@ export class MicroSessionRegistry {
         if (args.length !== definition.args.length) {
             throw new Error(`micro ${definition.name} arity mismatch: expected ${definition.args.length}, got ${args.length}`);
         }
-        validateArgTypes(definition, args);
+        definition.args.forEach((descriptor, index) => {
+            validateValue(descriptor, args[index], `micro ${definition.name} arg ${index}`);
+        });
         const result = definition.fn(...(args as []));
-        validateReturnType(definition.returns, result);
+        validateValue(definition.returns, result, `micro ${definition.name} return`);
         return result;
     }
 
@@ -133,7 +176,7 @@ export class MicroSessionRegistry {
 }
 
 /** Builds a session-local micro definition without registering it. */
-export function defineMicro<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor>(
+export function defineMicro<TArgs extends readonly UdfScalarDescriptor[], TReturn extends UdfScalarDescriptor>(
     input: TsMicroDefinitionInput<TArgs, TReturn>,
 ): DefinedMicro<TArgs, TReturn> {
     if (!input.name.trim()) {
@@ -151,6 +194,12 @@ export function defineMicro<TArgs extends readonly UdfTypeDescriptor[], TReturn 
     if (typeof input.fn !== 'function') {
         throw new Error('micro fn must be a function');
     }
+    // Reject descriptors outside the Phase-1 subset while the definition is
+    // still session-local, instead of at register time.
+    input.args.forEach((descriptor, index) => {
+        assertSupportedDescriptor(descriptor, `micro ${input.name} arg ${index}`);
+    });
+    assertSupportedDescriptor(input.returns, `micro ${input.name} return`);
     return {
         name: input.name,
         version: input.version,
@@ -178,60 +227,53 @@ function logicalKey(name: string, version: number): string {
     return `${name}@${version}`;
 }
 
-function validateArgTypes(definition: AnyDefinedMicro, args: unknown[]): void {
-    for (let index = 0; index < definition.args.length; index += 1) {
-        const kind = definition.args[index]?.kind;
-        const value = args[index];
-        switch (kind) {
-            case 'i64':
-                if (typeof value !== 'number' || !Number.isInteger(value)) {
-                    throw new Error(`micro ${definition.name} arg ${index} expects i64`);
-                }
-                break;
-            case 'bool':
-                if (typeof value !== 'boolean') {
-                    throw new Error(`micro ${definition.name} arg ${index} expects bool`);
-                }
-                break;
-            case 'text':
-                if (typeof value !== 'string') {
-                    throw new Error(`micro ${definition.name} arg ${index} expects text`);
-                }
-                break;
-            case 'null':
-                if (value !== null) {
-                    throw new Error(`micro ${definition.name} arg ${index} expects null`);
-                }
-                break;
-            default:
-                throw new Error(`unsupported micro arg kind: ${kind}`);
-        }
+function assertSupportedDescriptor(descriptor: UdfScalarDescriptor, label: string): void {
+    try {
+        udfWireKind(descriptor);
+    } catch {
+        throw new Error(`${label} uses a descriptor outside the Phase-1 micro subset`);
     }
 }
 
-function validateReturnType(descriptor: UdfTypeDescriptor, value: unknown): void {
-    switch (descriptor.kind) {
+/** Boundary value a VOS descriptor carries in the host runtime. */
+function validateValue(descriptor: UdfScalarDescriptor, value: unknown, label: string): void {
+    switch (udfWireKind(descriptor)) {
         case 'i64':
-            if (typeof value !== 'number' || !Number.isInteger(value)) {
-                throw new Error('micro return expects i64');
+            if (typeof value !== 'bigint') {
+                throw new Error(`${label} expects VOS \`i64\` (a bigint)`);
             }
             break;
         case 'bool':
             if (typeof value !== 'boolean') {
-                throw new Error('micro return expects bool');
+                throw new Error(`${label} expects VOS \`bool\``);
             }
             break;
         case 'text':
             if (typeof value !== 'string') {
-                throw new Error('micro return expects text');
+                throw new Error(`${label} expects VOS \`utf8\` (a string)`);
             }
             break;
-        case 'null':
-            if (value !== null) {
-                throw new Error('micro return expects null');
-            }
-            break;
-        default:
-            throw new Error(`unsupported micro return kind: ${descriptor.kind}`);
     }
+}
+
+/**
+ * Wire value to boundary value. The YY wire carries `i64` as a JS number, so
+ * it becomes the VOS `i64` boundary value here rather than in author code.
+ */
+function wireToBoundary(descriptor: UdfScalarDescriptor, value: unknown): unknown {
+    if (udfWireKind(descriptor) === 'i64' && typeof value === 'number' && Number.isSafeInteger(value)) {
+        return BigInt(value);
+    }
+    return value;
+}
+
+/** Boundary value back to the wire subset; `i64` must still fit a JS number. */
+function boundaryToWire(descriptor: UdfScalarDescriptor, value: unknown): MicroWireValue {
+    if (udfWireKind(descriptor) === 'i64' && typeof value === 'bigint') {
+        if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < BigInt(Number.MIN_SAFE_INTEGER)) {
+            throw new Error(`micro return i64 ${value} does not fit the wire number path`);
+        }
+        return Number(value);
+    }
+    return value as MicroWireValue;
 }

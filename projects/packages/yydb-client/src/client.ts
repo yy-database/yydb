@@ -1,4 +1,5 @@
 import {
+    decodeErrorBody,
     decodeKvGetOk,
     decodeScalarCallOk,
     decodeSchemaGetOk,
@@ -12,9 +13,11 @@ import {
     MsgType,
     SchemaVersion,
     WireUdfScalarValue,
+    type WireErrorBody,
 } from './wire.js';
 import type { MicroHostHandler, Transport } from './transport.js';
 import { openWebSocketTransport } from './ws.js';
+import { YydbError, YydbErrorCodes } from './errors.js';
 
 export type {
     Frame,
@@ -22,16 +25,31 @@ export type {
     MicroRegisterPayload,
     MsgTypeCode,
     SchemaVersion,
+    WireErrorBody,
     WireUdfScalarKind,
     WireUdfScalarValue,
 } from './wire.js';
 export type { MicroHostHandler } from './transport.js';
-export { MsgType, encodeFrame, decodeFrame } from './wire.js';
+export { MsgType, encodeFrame, decodeFrame, encodeErrorBody, decodeErrorBody } from './wire.js';
+export { YydbError, YydbErrorCodes, isRetryableYydbCode, isYydbError } from './errors.js';
+export type { YydbErrorCode, YydbErrorOptions } from './errors.js';
 
 export interface ConnectOptions {
     /** `ws://127.0.0.1:7700/wire` or `127.0.0.1:7700` (upgraded to `/wire`). */
     endpoint: string;
 }
+
+/** Expected reply type and operation label per request type. */
+const REQUESTS: Record<number, { operation: string; ok: number }> = {
+    [MsgType.Hello]: { operation: 'hello', ok: MsgType.HelloOk },
+    [MsgType.Info]: { operation: 'info', ok: MsgType.InfoOk },
+    [MsgType.SchemaGet]: { operation: 'schemaGet', ok: MsgType.SchemaGetOk },
+    [MsgType.SchemaEnsure]: { operation: 'schemaEnsure', ok: MsgType.SchemaEnsureOk },
+    [MsgType.KvGet]: { operation: 'kvGet', ok: MsgType.KvGetOk },
+    [MsgType.KvPut]: { operation: 'kvPut', ok: MsgType.KvPutOk },
+    [MsgType.MicroRegister]: { operation: 'microRegister', ok: MsgType.MicroRegisterOk },
+    [MsgType.ScalarCall]: { operation: 'scalarCall', ok: MsgType.ScalarCallOk },
+};
 
 /**
  * TypeScript client for YY wire (browser = WebSocket `/wire`).
@@ -42,6 +60,7 @@ export class Client {
     readonly endpoint: string;
     private transport: Transport;
     private nextId = 1;
+    private closed = false;
 
     private constructor(endpoint: string, transport: Transport) {
         this.endpoint = endpoint;
@@ -57,16 +76,37 @@ export class Client {
     static async connect(options: ConnectOptions | string): Promise<Client> {
         const endpoint = typeof options === 'string' ? options : options.endpoint;
         if (!endpoint.trim()) {
-            throw new Error('empty serve endpoint');
+            throw new YydbError(YydbErrorCodes.clientInvalidEndpoint, 'empty serve endpoint', {
+                operation: 'connect',
+            });
         }
-        const transport = await openWebSocketTransport(endpoint);
+        let transport: Transport;
+        try {
+            transport = await openWebSocketTransport(endpoint);
+        } catch (cause) {
+            throw new YydbError(
+                YydbErrorCodes.clientTransportFailure,
+                `connect ${endpoint}: transport failed`,
+                { operation: 'connect', cause },
+            );
+        }
         const client = new Client(endpoint, transport);
         await client.hello();
         return client;
     }
 
-    close() {
+    /** Close the transport. Idempotent — further calls fail with `yydb.session.closed`. */
+    close(): void {
+        if (this.closed) {
+            return;
+        }
+        this.closed = true;
         this.transport.close();
+    }
+
+    /** Whether {@link close} already ran. */
+    isClosed(): boolean {
+        return this.closed;
     }
 
     async hello(): Promise<string> {
@@ -119,33 +159,63 @@ export class Client {
     }
 
     private async roundtrip(msgType: number, body: Uint8Array): Promise<Frame> {
+        const request = REQUESTS[msgType];
+        const operation = request?.operation ?? `msgType(${msgType})`;
+        if (this.closed) {
+            throw new YydbError(
+                YydbErrorCodes.sessionClosed,
+                `${operation}: YYDB session is closed`,
+                { operation },
+            );
+        }
         const requestId = this.nextId++;
-        const response = await this.transport.send({
-            msgType,
-            flags: 0,
-            requestId,
-            body,
-        });
+        let response: Frame;
+        try {
+            response = await this.transport.send({
+                msgType,
+                flags: 0,
+                requestId,
+                body,
+            });
+        } catch (cause) {
+            throw new YydbError(
+                YydbErrorCodes.clientTransportFailure,
+                `${operation}: transport failed`,
+                { operation, cause },
+            );
+        }
         if (response.requestId !== requestId) {
-            throw new Error('wire response request_id mismatch');
+            throw new YydbError(
+                YydbErrorCodes.clientRequestIdMismatch,
+                `${operation}: wire response request_id mismatch (got ${response.requestId}, want ${requestId})`,
+                { operation },
+            );
         }
         if (response.msgType === MsgType.Error) {
-            throw new Error(new TextDecoder().decode(response.body));
+            throw remoteError(response.body, operation);
         }
-        const expectedOk: Record<number, number> = {
-            [MsgType.Hello]: MsgType.HelloOk,
-            [MsgType.Info]: MsgType.InfoOk,
-            [MsgType.SchemaGet]: MsgType.SchemaGetOk,
-            [MsgType.SchemaEnsure]: MsgType.SchemaEnsureOk,
-            [MsgType.KvGet]: MsgType.KvGetOk,
-            [MsgType.KvPut]: MsgType.KvPutOk,
-            [MsgType.MicroRegister]: MsgType.MicroRegisterOk,
-            [MsgType.ScalarCall]: MsgType.ScalarCallOk,
-        };
-        const want = expectedOk[msgType];
-        if (want !== undefined && response.msgType !== want) {
-            throw new Error(`unexpected wire response type ${response.msgType}`);
+        if (request && response.msgType !== request.ok) {
+            throw new YydbError(
+                YydbErrorCodes.clientUnexpectedResponse,
+                `${operation}: unexpected wire response type ${response.msgType}`,
+                { operation },
+            );
         }
         return response;
     }
+}
+
+/** Turn an `Error` frame into a {@link YydbError}, keeping the engine code. */
+function remoteError(body: Uint8Array, operation: string): YydbError {
+    let decoded: WireErrorBody;
+    try {
+        decoded = decodeErrorBody(body);
+    } catch (cause) {
+        return new YydbError(
+            YydbErrorCodes.clientDecodeFailure,
+            `${operation}: malformed wire error frame`,
+            { operation, cause },
+        );
+    }
+    return new YydbError(decoded.code, decoded.message, { operation });
 }

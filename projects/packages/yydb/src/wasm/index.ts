@@ -1,4 +1,6 @@
 export { Database, type WasmOpenOptions } from './database.js';
+export { YydbError, YydbErrorCodes, isRetryableYydbCode, isYydbError } from '@yydb/yydb-client';
+export type { YydbErrorCode, YydbErrorOptions } from '@yydb/yydb-client';
 export {
     checkSchema,
     createMemorySession,
@@ -15,15 +17,12 @@ export {
 } from './binding.js';
 export { defineMicro, type DefinedMicro, type MicroHandle, type TsMicroDefinitionInput, MicroSessionRegistry } from '../shared/micro.js';
 export {
-    bool,
-    i64,
-    nullType,
-    text,
     type InferUdfArgs,
     type InferUdfReturn,
     type MicroEffect,
     type MicroInvocationMode,
+    type UdfScalarDescriptor,
     type UdfScalarKind,
-    type UdfTypeDescriptor,
 } from '../shared/udf-types.js';
 export type { SchemaVersion } from '../shared/wasm-envelope.js';
+export * from '../shared/vos.js';

@@ -1,29 +1,35 @@
-/** Parsed `{ ok, rows, error }` envelope from wasm VOS calls. */
+import { YydbError, YydbErrorCodes } from '@yydb/yydb-client';
+
+/** Parsed `{ ok, rows, error, code }` envelope from wasm VOS calls. */
 export type WasmRowsResult = {
     ok: boolean;
     rows: Record<string, unknown>[];
     error: string | null;
+    code: string | null;
 };
 
-/** Parsed `{ ok, schema, error }` envelope from wasm `getSchema`. */
+/** Parsed `{ ok, schema, error, code }` envelope from wasm `getSchema`. */
 export type WasmSchemaResult = {
     ok: boolean;
     schema: { version: number; document: string } | null;
     error: string | null;
+    code: string | null;
 };
 
-/** Parsed `{ ok, value, error }` envelope from wasm `get`. */
+/** Parsed `{ ok, value, error, code }` envelope from wasm `get`. */
 export type WasmKvGetResult = {
     ok: boolean;
     value: number[] | null;
     error: string | null;
+    code: string | null;
 };
 
-/** Parsed `{ ok, value, error }` envelope from wasm `callScalar`. */
+/** Parsed `{ ok, value, error, code }` envelope from wasm `callScalar`. */
 export type WasmScalarResult = {
     ok: boolean;
     value: string | number | boolean | null;
     error: string | null;
+    code: string | null;
 };
 
 export type WireScalarValue = string | number | boolean | null;
@@ -33,50 +39,69 @@ export type SchemaVersion = {
     document: string;
 };
 
-function parseJson<T>(payload: string, label: string): T {
+type EnvelopeErrorFields = {
+    error: string | null;
+    code: string | null;
+};
+
+function parseJson<T>(payload: string, operation: string): T {
     try {
         return JSON.parse(payload) as T;
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`${label}: invalid JSON (${message})`);
+    } catch (cause) {
+        throw new YydbError(
+            YydbErrorCodes.clientDecodeFailure,
+            `${operation}: invalid JSON envelope`,
+            { operation, cause },
+        );
     }
 }
 
-export function parseWasmRowsResult(payload: string): WasmRowsResult {
-    const parsed = parseJson<WasmRowsResult>(payload, 'wasm query/execute');
+/**
+ * Build the error for a failed wasm envelope. The Rust core always sends a
+ * stable `code`; a missing one means the wasm artifact is stale, which is a
+ * decode failure rather than an engine failure.
+ */
+function envelopeError(envelope: EnvelopeErrorFields, operation: string): YydbError {
+    const code = envelope.code ?? YydbErrorCodes.clientDecodeFailure;
+    const message = envelope.error ?? `${operation}: wasm envelope carried no message`;
+    return new YydbError(code, message, { operation });
+}
+
+export function parseWasmRowsResult(payload: string, operation: string): WasmRowsResult {
+    const parsed = parseJson<WasmRowsResult>(payload, operation);
     if (!parsed.ok) {
-        throw new Error(parsed.error ?? 'wasm query/execute failed');
+        throw envelopeError(parsed, operation);
     }
     return parsed;
 }
 
-export function parseWasmUnitResult(payload: string): void {
-    const parsed = parseJson<WasmRowsResult>(payload, 'wasm unit call');
+export function parseWasmUnitResult(payload: string, operation: string): void {
+    const parsed = parseJson<WasmRowsResult>(payload, operation);
     if (!parsed.ok) {
-        throw new Error(parsed.error ?? 'wasm unit call failed');
+        throw envelopeError(parsed, operation);
     }
 }
 
-export function parseWasmSchemaResult(payload: string): SchemaVersion | null {
-    const parsed = parseJson<WasmSchemaResult>(payload, 'wasm getSchema');
+export function parseWasmSchemaResult(payload: string, operation: string): SchemaVersion | null {
+    const parsed = parseJson<WasmSchemaResult>(payload, operation);
     if (!parsed.ok) {
-        throw new Error(parsed.error ?? 'wasm getSchema failed');
+        throw envelopeError(parsed, operation);
     }
     return parsed.schema;
 }
 
-export function parseWasmScalarResult(payload: string): WireScalarValue {
-    const parsed = parseJson<WasmScalarResult>(payload, 'wasm callScalar');
+export function parseWasmScalarResult(payload: string, operation: string): WireScalarValue {
+    const parsed = parseJson<WasmScalarResult>(payload, operation);
     if (!parsed.ok) {
-        throw new Error(parsed.error ?? 'wasm callScalar failed');
+        throw envelopeError(parsed, operation);
     }
     return parsed.value;
 }
 
-export function parseWasmKvGetResult(payload: string): Uint8Array | null {
-    const parsed = parseJson<WasmKvGetResult>(payload, 'wasm get');
+export function parseWasmKvGetResult(payload: string, operation: string): Uint8Array | null {
+    const parsed = parseJson<WasmKvGetResult>(payload, operation);
     if (!parsed.ok) {
-        throw new Error(parsed.error ?? 'wasm get failed');
+        throw envelopeError(parsed, operation);
     }
     if (parsed.value === null) {
         return null;

@@ -1,6 +1,6 @@
-import { encodeMicroRegister, encodeScalarCall } from '@yydb/yydb-client';
-import { defineMicro as buildMicro, microFingerprint, type DefinedMicro, type MicroHandle, MicroSessionRegistry } from '../shared/micro.js';
-import type { UdfScalarKind, UdfTypeDescriptor } from '../shared/udf-types.js';
+import { encodeMicroRegister, encodeScalarCall, YydbError, YydbErrorCodes } from '@yydb/yydb-client';
+import { defineMicro as buildMicro, microFingerprint, udfWireKind, type DefinedMicro, type MicroHandle, MicroSessionRegistry } from '../shared/micro.js';
+import type { UdfScalarDescriptor } from '../shared/udf-types.js';
 import {
     parseWasmKvGetResult,
     parseWasmRowsResult,
@@ -68,7 +68,7 @@ export class Database {
 
     /** Database info text (`path=…\\n…`), matching the YY wire `Info` reply. */
     async info(): Promise<string> {
-        return this.requireSession().info();
+        return this.requireSession('info').info();
     }
 
     /** Parse and validate a VOS schema document without opening a session. */
@@ -78,37 +78,37 @@ export class Database {
 
     /** Persist schema document. `version` is accepted for Node API parity; wasm uses the document body. */
     async ensureSchema(_version: number, document: string): Promise<void> {
-        parseWasmUnitResult(this.requireSession().ensureSchema(document));
+        parseWasmUnitResult(this.requireSession('schemaEnsure').ensureSchema(document), 'schemaEnsure');
     }
 
     async getSchema(): Promise<SchemaVersion | null> {
-        return parseWasmSchemaResult(this.requireSession().getSchema());
+        return parseWasmSchemaResult(this.requireSession('schemaGet').getSchema(), 'schemaGet');
     }
 
     async get(key: string): Promise<Uint8Array | null> {
-        return parseWasmKvGetResult(this.requireSession().get(key));
+        return parseWasmKvGetResult(this.requireSession('kvGet').get(key), 'kvGet');
     }
 
     async put(key: string, value: Uint8Array | string): Promise<void> {
         const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
-        parseWasmUnitResult(this.requireSession().put(key, bytes));
+        parseWasmUnitResult(this.requireSession('kvPut').put(key, bytes), 'kvPut');
     }
 
     /** VOS read pipeline (for example `User.filter(x => x.active).collect()`). */
     query(source: string): Record<string, unknown>[] {
-        return parseWasmRowsResult(this.requireSession().query(source)).rows;
+        return parseWasmRowsResult(this.requireSession('query').query(source), 'query').rows;
     }
 
     /** Unit-valued VOS write programs (for example `User { … }.insert()`). */
     execute(source: string): void {
-        parseWasmUnitResult(this.requireSession().execute(source));
+        parseWasmUnitResult(this.requireSession('execute').execute(source), 'execute');
     }
 
     /**
      * Build a typed session-local micro definition. Does not register it with
      * the engine until `registerMicro` is called.
      */
-    defineMicro<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor>(
+    defineMicro<TArgs extends readonly UdfScalarDescriptor[], TReturn extends UdfScalarDescriptor>(
         definition: Parameters<typeof buildMicro<TArgs, TReturn>>[0],
     ): DefinedMicro<TArgs, TReturn> {
         return buildMicro(definition);
@@ -118,7 +118,7 @@ export class Database {
      * Install a `defineMicro` definition into the current session registry and
      * sync metadata to the embedded engine. Host micros are session-local.
      */
-    async registerMicro<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor>(
+    async registerMicro<TArgs extends readonly UdfScalarDescriptor[], TReturn extends UdfScalarDescriptor>(
         definition: DefinedMicro<TArgs, TReturn>,
     ): Promise<MicroHandle> {
         const handle = this.microRegistry.register(definition);
@@ -128,11 +128,11 @@ export class Database {
             udfVersion: definition.version,
             name: definition.name,
             functionId: handle.functionId,
-            args: definition.args.map((arg) => arg.kind as UdfScalarKind),
-            returns: definition.returns.kind as UdfScalarKind,
+            args: definition.args.map(udfWireKind),
+            returns: udfWireKind(definition.returns),
             fingerprint: microFingerprint(definition.name, definition.version),
         });
-        parseWasmUnitResult(this.requireSession().registerMicro(body));
+        parseWasmUnitResult(this.requireSession('microRegister').registerMicro(body), 'microRegister');
         return handle;
     }
 
@@ -143,7 +143,7 @@ export class Database {
         args: readonly (string | number | boolean | null)[],
     ): Promise<string | number | boolean | null> {
         const body = encodeScalarCall(name, version, args);
-        return parseWasmScalarResult(this.requireSession().callScalar(body));
+        return parseWasmScalarResult(this.requireSession('callScalar').callScalar(body), 'callScalar');
     }
 
     /** Whether this handle owns a persistent OPFS session. */
@@ -151,14 +151,20 @@ export class Database {
         return this.kind === 'persistent';
     }
 
-    close(): void {
-        this.session?.close();
+    /** Close the embedded session. Idempotent; further calls fail with `yydb.session.closed`. */
+    async close(): Promise<void> {
+        const session = this.session;
         this.session = null;
+        session?.close();
     }
 
-    private requireSession(): WasmSession {
+    private requireSession(operation: string): WasmSession {
         if (!this.session) {
-            throw new Error('@yydb/yydb/wasm: database session is closed');
+            throw new YydbError(
+                YydbErrorCodes.sessionClosed,
+                `${operation}: @yydb/yydb/wasm session is closed`,
+                { operation },
+            );
         }
         return this.session;
     }

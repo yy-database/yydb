@@ -405,3 +405,29 @@ export function decodeKvGetOk(body: Uint8Array): Uint8Array | null {
     const valLen = readU32At(body, offset);
     return readBytesAt(body, offset, valLen);
 }
+
+/** Structured `Error` frame body: stable code plus display message. */
+export interface WireErrorBody {
+    /** Stable error code (`yydb.schema.invalid`, …). */
+    code: string;
+    /** Display message; hosts must not branch on this text. */
+    message: string;
+}
+
+/** Encode an `Error` frame body. */
+export function encodeErrorBody(error: WireErrorBody): Uint8Array {
+    const out: number[] = [];
+    pushBytes(out, new TextEncoder().encode(error.code));
+    pushBytes(out, new TextEncoder().encode(error.message));
+    return Uint8Array.from(out);
+}
+
+/** Decode an `Error` frame body. */
+export function decodeErrorBody(body: Uint8Array): WireErrorBody {
+    const offset = { n: 0 };
+    const codeLen = readU32At(body, offset);
+    const code = new TextDecoder().decode(readBytesAt(body, offset, codeLen));
+    const messageLen = readU32At(body, offset);
+    const message = new TextDecoder().decode(readBytesAt(body, offset, messageLen));
+    return { code, message };
+}

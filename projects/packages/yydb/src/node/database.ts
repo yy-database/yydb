@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { connect, type Client } from '@yydb/yydb-client/node';
-import { defineMicro as buildMicro, microFingerprint, type DefinedMicro, type MicroHandle, MicroSessionRegistry } from '../shared/micro.js';
+import { defineMicro as buildMicro, microFingerprint, udfWireKind, type DefinedMicro, type MicroHandle, MicroSessionRegistry } from '../shared/micro.js';
 import { resolveYydbCli } from './resolve-bin.js';
-import type { UdfScalarKind, UdfTypeDescriptor } from '../shared/udf-types.js';
+import type { UdfScalarDescriptor } from '../shared/udf-types.js';
 
 export type { SchemaVersion } from '@yydb/yydb-client';
 
@@ -152,7 +152,7 @@ export class Database {
      * Build a typed session-local micro definition. Does not register it with
      * the engine until [`registerMicro`](./database.ts) is called.
      */
-    defineMicro<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor>(
+    defineMicro<TArgs extends readonly UdfScalarDescriptor[], TReturn extends UdfScalarDescriptor>(
         definition: Parameters<typeof buildMicro<TArgs, TReturn>>[0],
     ): DefinedMicro<TArgs, TReturn> {
         return buildMicro(definition);
@@ -163,7 +163,7 @@ export class Database {
      * session registry and sync metadata to the private engine. Host micros are
      * session-local and never written to `.yydb`.
      */
-    async registerMicro<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor>(
+    async registerMicro<TArgs extends readonly UdfScalarDescriptor[], TReturn extends UdfScalarDescriptor>(
         definition: DefinedMicro<TArgs, TReturn>,
     ): Promise<MicroHandle> {
         const handle = this.microRegistry.register(definition);
@@ -173,8 +173,8 @@ export class Database {
             udfVersion: definition.version,
             name: definition.name,
             functionId: handle.functionId,
-            args: definition.args.map((arg) => arg.kind as UdfScalarKind),
-            returns: definition.returns.kind as UdfScalarKind,
+            args: definition.args.map(udfWireKind),
+            returns: udfWireKind(definition.returns),
             fingerprint: microFingerprint(definition.name, definition.version),
         });
         return handle;
