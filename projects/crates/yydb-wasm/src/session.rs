@@ -12,7 +12,7 @@ use crate::host_js::JsHostAdapter;
 use crate::opfs::{open_persistent, OpfsCapabilities, OpfsPersistentVolume};
 
 fn closed_session_error() -> Error {
-    Error::Unsupported("session closed")
+    Error::SessionClosed
 }
 
 fn run_query(conn: &Connection, closed: bool, source: &str) -> String {

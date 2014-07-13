@@ -14,6 +14,45 @@ fn connect_rejects_empty_endpoint() {
 }
 
 #[test]
+fn remote_error_keeps_stable_code() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let conn = Arc::new(Connection::open_in_memory().unwrap());
+
+    let server_conn = Arc::clone(&conn);
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        loop {
+            let request = match yydb::wire::read_frame(&mut stream) {
+                Ok(frame) => frame,
+                Err(_) => break,
+            };
+            let response = dispatch(&server_conn, &request);
+            yydb::wire::write_frame(&mut stream, &response).unwrap();
+        }
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let client = loop {
+        match Client::connect(addr.to_string()) {
+            Ok(client) => break client,
+            Err(_) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("{error}"),
+        }
+    };
+
+    match client.ensure_schema("table {") {
+        Err(Error::Remote { code, message }) => {
+            assert_eq!(code, "yydb.schema.invalid");
+            assert!(!message.is_empty());
+        }
+        other => panic!("expected remote structured error, got {other:?}"),
+    }
+}
+
+#[test]
 fn tcp_roundtrip_against_local_dispatch_server() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();

@@ -90,9 +90,21 @@ Max body: **16 MiB**. Unknown magic or unsupported version → reject.
 | 16   | `MicroHostInvokeOk` | C→S       | scalar result                                       |
 | 17   | `ScalarCall`        | C→S       | scalar UDF invoke                                   |
 | 18   | `ScalarCallOk`      | S→C       | scalar result                                       |
-| 255  | `Error`             | S→C       | UTF-8 message                                       |
+| 255  | `Error`             | S→C       | stable code + UTF-8 message                         |
 
 TCP clients must handle server-pushed `MicroHostInvoke` before their own response completes.
+
+## `Error` body
+
+`Error` frames carry a **structured** body, not bare text: `u32 code_len` + code bytes + `u32 message_len` + message bytes
+(both UTF-8, length-prefixed like every other `push_bytes` field).
+
+- The **code** is the stable diagnostic (`yydb.schema.invalid`, `yydb.corrupt`, `yydb.protocol`, `yydb.udf.not_found`,
+  `yydb.session.closed`, …) and is the only thing clients may branch on.
+- The **message** is display text and may change between releases.
+
+The reference host mints codes from `yydb::Error::code()`; `@yydb/yydb-client` raises a `YydbError` carrying `code`,
+`operation`, `message` and `retryable`.
 
 ## Out of scope for `0000`
 

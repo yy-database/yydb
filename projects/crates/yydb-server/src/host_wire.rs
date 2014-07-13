@@ -43,8 +43,9 @@ impl TcpWireHostAdapter {
         write_frame(&mut *stream, &request).map_err(map_wire_error)?;
         let response = read_frame(&mut *stream).map_err(map_wire_error)?;
         if response.msg_type == MsgType::Error {
+            let error = wire::decode_error(&response.body).map_err(map_wire_error)?;
             return Err(UdfError::ExecutionFailed {
-                message: wire::decode_error_message(&response.body),
+                message: error.message,
             });
         }
         if response.request_id != request_id {

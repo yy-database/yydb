@@ -108,6 +108,15 @@ pub enum Error {
         /// Namespace that exceeded quota.
         namespace: String,
     },
+    /// Session handle is closed and can no longer serve operations.
+    SessionClosed,
+    /// Failure reported by a remote YY wire peer (code plus peer message).
+    Remote {
+        /// Stable code the peer reported (for example `yydb.schema.invalid`).
+        code: String,
+        /// Display message the peer reported.
+        message: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -155,6 +164,40 @@ impl fmt::Display for Error {
             Self::QuotaExceeded { namespace } => {
                 write!(f, "quota exceeded for namespace {namespace}")
             }
+            Self::SessionClosed => write!(f, "session closed"),
+            Self::Remote { code, message } => write!(f, "{code}: {message}"),
+        }
+    }
+}
+
+impl Error {
+    /// Stable diagnostic code for wire and host surfaces.
+    ///
+    /// Codes use dotted lowercase segments (`yydb.schema.invalid`) and stay
+    /// stable across releases. Hosts and tests must branch on these codes and
+    /// never on [`Display`](fmt::Display) text. A [`Self::Remote`] error reports
+    /// the code from the peer unchanged.
+    pub fn code(&self) -> &str {
+        match self {
+            Self::Io(_) => "yydb.io",
+            Self::Corrupt(_) => "yydb.corrupt",
+            Self::SchemaConflict { .. } => "yydb.schema.conflict",
+            Self::UdfNotFound { .. } => "yydb.udf.not_found",
+            Self::UdfArity { .. } => "yydb.udf.arity",
+            Self::Udf { .. } => "yydb.udf.failed",
+            Self::Schema { .. } => "yydb.schema.invalid",
+            Self::ObjectNotFound { .. } => "yydb.object.not_found",
+            Self::ObjectCorrupt { .. } => "yydb.object.corrupt",
+            Self::Unsupported(_) => "yydb.unsupported",
+            Self::Protocol { .. } => "yydb.protocol",
+            Self::CasConflict { .. } => "yydb.cas.conflict",
+            Self::LeaseUnavailable { .. } => "yydb.lease.unavailable",
+            Self::FencingMismatch { .. } => "yydb.fencing.mismatch",
+            Self::LeaseExpired { .. } => "yydb.lease.expired",
+            Self::UdfVersionMismatch { .. } => "yydb.udf.version_mismatch",
+            Self::QuotaExceeded { .. } => "yydb.quota.exceeded",
+            Self::SessionClosed => "yydb.session.closed",
+            Self::Remote { code, .. } => code,
         }
     }
 }

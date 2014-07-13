@@ -1,9 +1,10 @@
 use yydb::{
     wire::{
-        decode_kv_get_ok, decode_micro_host_invoke, decode_micro_host_invoke_ok,
+        decode_error, decode_kv_get_ok, decode_micro_host_invoke, decode_micro_host_invoke_ok,
         decode_scalar_call_ok, dispatch, encode_kv_get, encode_micro_host_invoke,
-        encode_micro_host_invoke_ok, encode_micro_register, encode_scalar_call, is_loopback_host,
-        Frame, MsgType, MAGIC_YYDB, MAGIC_YYDS, WIRE_VERSION,
+        encode_micro_host_invoke_ok, encode_micro_register, encode_scalar_call,
+        encode_schema_ensure, is_loopback_host, Frame, MsgType, MAGIC_YYDB, MAGIC_YYDS,
+        WIRE_VERSION,
     },
     Connection, HostFunctionHandle, UdfValue, Value,
 };
@@ -126,4 +127,50 @@ fn loopback_host_detection() {
     assert!(is_loopback_host("::1"));
     assert!(!is_loopback_host("0.0.0.0"));
     assert!(!is_loopback_host("192.168.1.1"));
+}
+
+#[test]
+fn error_frame_carries_structured_code_and_message() {
+    let conn = Connection::open_in_memory().unwrap();
+    let response = dispatch(
+        &conn,
+        &Frame::new(MsgType::SchemaEnsure, 6, encode_schema_ensure(1, "table {")),
+    );
+    assert_eq!(response.msg_type, MsgType::Error);
+    let error = decode_error(&response.body).expect("structured error body");
+    assert_eq!(error.code, "yydb.schema.invalid");
+    assert!(!error.message.is_empty());
+}
+
+#[test]
+fn error_frame_codes_cover_protocol_and_corrupt_paths() {
+    let conn = Connection::open_in_memory().unwrap();
+
+    let unknown = dispatch(&conn, &Frame::new(MsgType::Unknown(9999), 7, Vec::new()));
+    assert_eq!(unknown.msg_type, MsgType::Error);
+    assert_eq!(decode_error(&unknown.body).unwrap().code, "yydb.protocol");
+
+    let truncated = dispatch(&conn, &Frame::new(MsgType::KvGet, 8, vec![1, 0]));
+    assert_eq!(truncated.msg_type, MsgType::Error);
+    assert_eq!(decode_error(&truncated.body).unwrap().code, "yydb.corrupt");
+}
+
+#[test]
+fn error_code_taxonomy_is_stable() {
+    assert_eq!(yydb::Error::SessionClosed.code(), "yydb.session.closed");
+    assert_eq!(
+        yydb::Error::Schema {
+            message: "bad".into()
+        }
+        .code(),
+        "yydb.schema.invalid"
+    );
+    assert_eq!(
+        yydb::Error::Remote {
+            code: "yydb.remote.probe".into(),
+            message: "peer".into(),
+        }
+        .code(),
+        "yydb.remote.probe"
+    );
 }

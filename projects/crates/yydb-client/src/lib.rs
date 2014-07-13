@@ -18,7 +18,7 @@ use std::{
 pub use yydb::{Error, HostMicroDefinition, Result, SchemaVersion, Value};
 
 use yydb::wire::{
-    self, decode_error_message, decode_kv_get_ok, decode_scalar_call_ok, decode_schema_get_ok,
+    self, decode_error, decode_kv_get_ok, decode_scalar_call_ok, decode_schema_get_ok,
     encode_kv_get, encode_kv_put, encode_micro_register, encode_scalar_call, encode_schema_ensure,
     read_frame, write_frame, Frame, MsgType,
 };
@@ -128,8 +128,10 @@ impl Client {
             return Err(Error::Corrupt("wire response request_id mismatch"));
         }
         if response.msg_type == MsgType::Error {
-            return Err(Error::Protocol {
-                message: decode_error_message(&response.body),
+            let error = decode_error(&response.body)?;
+            return Err(Error::Remote {
+                code: error.code,
+                message: error.message,
             });
         }
         Ok(response)

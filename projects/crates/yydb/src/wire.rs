@@ -283,12 +283,8 @@ fn push_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
     out.extend_from_slice(bytes);
 }
 
-fn error_frame(request_id: u32, message: impl AsRef<str>) -> Frame {
-    Frame::new(
-        MsgType::Error,
-        request_id,
-        message.as_ref().as_bytes().to_vec(),
-    )
+fn error_frame(request_id: u32, error: &Error) -> Frame {
+    Frame::new(MsgType::Error, request_id, encode_error_body(error))
 }
 
 fn encode_schema_ok(schema: Option<SchemaVersion>) -> Vec<u8> {
@@ -370,46 +366,46 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
         MsgType::Hello => Frame::new(MsgType::HelloOk, id, crate::version().as_bytes().to_vec()),
         MsgType::Info => match info_body(conn) {
             Ok(body) => Frame::new(MsgType::InfoOk, id, body),
-            Err(error) => error_frame(id, error.to_string()),
+            Err(error) => error_frame(id, &error),
         },
         MsgType::SchemaGet => match conn.schema() {
             Ok(schema) => Frame::new(MsgType::SchemaGetOk, id, encode_schema_ok(schema)),
-            Err(error) => error_frame(id, error.to_string()),
+            Err(error) => error_frame(id, &error),
         },
         MsgType::SchemaEnsure => match decode_schema_ensure(&request.body) {
             Ok((_version, document)) => match conn.ensure_schema(&document) {
                 Ok(()) => Frame::new(MsgType::SchemaEnsureOk, id, Vec::new()),
-                Err(error) => error_frame(id, error.to_string()),
+                Err(error) => error_frame(id, &error),
             },
-            Err(error) => error_frame(id, error.to_string()),
+            Err(error) => error_frame(id, &error),
         },
         MsgType::KvGet => match decode_kv_get(&request.body) {
             Ok(key) => match conn.get(&key) {
                 Ok(value) => Frame::new(MsgType::KvGetOk, id, encode_kv_get_ok(value)),
-                Err(error) => error_frame(id, error.to_string()),
+                Err(error) => error_frame(id, &error),
             },
-            Err(error) => error_frame(id, error.to_string()),
+            Err(error) => error_frame(id, &error),
         },
         MsgType::KvPut => match decode_kv_put(&request.body) {
             Ok((key, value)) => match conn.put(key, value) {
                 Ok(()) => Frame::new(MsgType::KvPutOk, id, Vec::new()),
-                Err(error) => error_frame(id, error.to_string()),
+                Err(error) => error_frame(id, &error),
             },
-            Err(error) => error_frame(id, error.to_string()),
+            Err(error) => error_frame(id, &error),
         },
         MsgType::MicroRegister => match decode_micro_register(&request.body) {
             Ok(definition) => match conn.register_host_micro(definition) {
                 Ok(()) => Frame::new(MsgType::MicroRegisterOk, id, Vec::new()),
-                Err(error) => error_frame(id, error.to_string()),
+                Err(error) => error_frame(id, &error),
             },
-            Err(error) => error_frame(id, error.to_string()),
+            Err(error) => error_frame(id, &error),
         },
         MsgType::ScalarCall => match decode_scalar_call(&request.body) {
             Ok((name, version, args)) => match conn.call_scalar_version(&name, version, &args) {
                 Ok(value) => Frame::new(MsgType::ScalarCallOk, id, encode_scalar_call_ok(value)),
-                Err(error) => error_frame(id, error.to_string()),
+                Err(error) => error_frame(id, &error),
             },
-            Err(error) => error_frame(id, error.to_string()),
+            Err(error) => error_frame(id, &error),
         },
         MsgType::HelloOk
         | MsgType::InfoOk
@@ -421,8 +417,18 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
         | MsgType::MicroHostInvoke
         | MsgType::MicroHostInvokeOk
         | MsgType::ScalarCallOk
-        | MsgType::Error => error_frame(id, "unexpected client message type"),
-        MsgType::Unknown(code) => error_frame(id, format!("unknown msg_type {code}")),
+        | MsgType::Error => error_frame(
+            id,
+            &Error::Protocol {
+                message: "unexpected client message type".to_owned(),
+            },
+        ),
+        MsgType::Unknown(code) => error_frame(
+            id,
+            &Error::Protocol {
+                message: format!("unknown msg_type {code}"),
+            },
+        ),
     }
 }
 
@@ -785,9 +791,37 @@ pub fn decode_kv_get_ok(body: &[u8]) -> Result<Option<Vec<u8>>> {
     Ok(Some(read_bytes(body, &mut offset, val_len)?.to_vec()))
 }
 
-/// Decode an `Error` body as UTF-8.
-pub fn decode_error_message(body: &[u8]) -> String {
-    String::from_utf8_lossy(body).into_owned()
+/// One structured `Error` frame body: stable code plus display message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WireError {
+    /// Stable error code (`yydb.schema.invalid`, …); see [`Error::code`].
+    pub code: String,
+    /// Display message reported by the peer. Hosts must not branch on this text.
+    pub message: String,
+}
+
+/// Encode an [`Error`] into an `Error` frame body.
+pub fn encode_error_body(error: &Error) -> Vec<u8> {
+    let mut body = Vec::new();
+    push_bytes(&mut body, error.code().as_bytes());
+    push_bytes(&mut body, error.to_string().as_bytes());
+    body
+}
+
+/// Decode an `Error` frame body.
+pub fn decode_error(body: &[u8]) -> Result<WireError> {
+    let mut offset = 0;
+    let code_len = read_u32(body, &mut offset)?;
+    let code = read_bytes(body, &mut offset, code_len)?;
+    let message_len = read_u32(body, &mut offset)?;
+    let message = read_bytes(body, &mut offset, message_len)?;
+    let code = std::str::from_utf8(code)
+        .map_err(|_| Error::Corrupt("wire error code is not utf-8"))?
+        .to_owned();
+    let message = std::str::from_utf8(message)
+        .map_err(|_| Error::Corrupt("wire error message is not utf-8"))?
+        .to_owned();
+    Ok(WireError { code, message })
 }
 
 /// Whether a `--bind` host is loopback (product-safe default).

@@ -154,12 +154,14 @@ pub(crate) fn execute_result_json(result: Result<Vec<BTreeMap<String, Value>>>) 
             "ok": true,
             "rows": rows_to_json(rows),
             "error": JsonValue::Null,
+            "code": JsonValue::Null,
         })
         .to_string(),
         Err(err) => json!({
             "ok": false,
             "rows": [],
             "error": err.to_string(),
+            "code": err.code(),
         })
         .to_string(),
     }
@@ -167,8 +169,20 @@ pub(crate) fn execute_result_json(result: Result<Vec<BTreeMap<String, Value>>>) 
 
 pub(crate) fn unit_result_json(result: Result<()>) -> String {
     match result {
-        Ok(()) => json!({ "ok": true, "rows": [], "error": JsonValue::Null }).to_string(),
-        Err(err) => json!({ "ok": false, "rows": [], "error": err.to_string() }).to_string(),
+        Ok(()) => json!({
+            "ok": true,
+            "rows": [],
+            "error": JsonValue::Null,
+            "code": JsonValue::Null,
+        })
+        .to_string(),
+        Err(err) => json!({
+            "ok": false,
+            "rows": [],
+            "error": err.to_string(),
+            "code": err.code(),
+        })
+        .to_string(),
     }
 }
 
@@ -178,18 +192,21 @@ pub(crate) fn kv_get_json(result: Result<Option<Vec<u8>>>) -> String {
             "ok": true,
             "value": bytes,
             "error": JsonValue::Null,
+            "code": JsonValue::Null,
         })
         .to_string(),
         Ok(None) => json!({
             "ok": true,
             "value": JsonValue::Null,
             "error": JsonValue::Null,
+            "code": JsonValue::Null,
         })
         .to_string(),
         Err(err) => json!({
             "ok": false,
             "value": JsonValue::Null,
             "error": err.to_string(),
+            "code": err.code(),
         })
         .to_string(),
     }
@@ -220,12 +237,14 @@ pub(crate) fn scalar_call_json(result: Result<Value>) -> String {
                 "ok": true,
                 "value": scalar,
                 "error": JsonValue::Null,
+                "code": JsonValue::Null,
             })
             .to_string(),
             Err(err) => json!({
                 "ok": false,
                 "value": JsonValue::Null,
                 "error": err.to_string(),
+                "code": err.code(),
             })
             .to_string(),
         },
@@ -233,6 +252,7 @@ pub(crate) fn scalar_call_json(result: Result<Value>) -> String {
             "ok": false,
             "value": JsonValue::Null,
             "error": err.to_string(),
+            "code": err.code(),
         })
         .to_string(),
     }
@@ -259,18 +279,21 @@ pub(crate) fn schema_get_json(result: Result<Option<SchemaVersion>>) -> String {
                 "document": schema.document,
             },
             "error": JsonValue::Null,
+            "code": JsonValue::Null,
         })
         .to_string(),
         Ok(None) => json!({
             "ok": true,
             "schema": JsonValue::Null,
             "error": JsonValue::Null,
+            "code": JsonValue::Null,
         })
         .to_string(),
         Err(err) => json!({
             "ok": false,
             "schema": JsonValue::Null,
             "error": err.to_string(),
+            "code": err.code(),
         })
         .to_string(),
     }
