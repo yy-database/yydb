@@ -118,9 +118,7 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
         match page.0.page_type {
             PAGE_TYPE_LEAF => {
                 let leaf = self.insert_leaf(page_id, key, value)?;
-                Ok(leaf
-                    .split
-                    .map(|(separator, right_id)| (separator, right_id)))
+                Ok(leaf.split)
             }
             PAGE_TYPE_INTERNAL => {
                 let node = InternalPage::decode(page_id, &page.1)?;

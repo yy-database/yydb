@@ -71,10 +71,7 @@ impl WalWriter {
     ) -> Result<u64> {
         let txid = self.next_txid;
         self.next_txid += 1;
-        let mut file = OpenOptions::new()
-            .append(true)
-            .write(true)
-            .open(&self.path)?;
+        let mut file = OpenOptions::new().append(true).open(&self.path)?;
         file.write_all(&encode_frame(
             FRAME_TXN_BEGIN,
             self.next_lsn,
@@ -202,7 +199,7 @@ pub fn strip_trailing_txn_commit(bytes: &[u8]) -> Result<Vec<u8>> {
     let last_start = offsets
         .last()
         .copied()
-        .ok_or_else(|| Error::Corrupt("wal missing trailing commit frame"))?;
+        .ok_or(Error::Corrupt("wal missing trailing commit frame"))?;
     Ok(bytes[0..last_start].to_vec())
 }
 
@@ -230,7 +227,7 @@ pub fn truncate_wal_after_frame(bytes: &[u8], frame_index: usize) -> Result<Vec<
     let start = offsets
         .get(frame_index)
         .copied()
-        .ok_or_else(|| Error::Corrupt("wal frame index out of range"))?;
+        .ok_or(Error::Corrupt("wal frame index out of range"))?;
     let (_, consumed) = parse_frame(bytes, start)?;
     Ok(bytes[0..start + consumed].to_vec())
 }
@@ -245,7 +242,7 @@ pub fn strip_incomplete_txn_after_last_page_image(bytes: &[u8]) -> Result<Vec<u8
         .frames
         .iter()
         .rposition(|frame| frame.frame_type == FRAME_TXN_BEGIN)
-        .ok_or_else(|| Error::Corrupt("wal missing txn begin"))?;
+        .ok_or(Error::Corrupt("wal missing txn begin"))?;
     let mut last_page_index = None;
     for (index, frame) in wal.frames.iter().enumerate().skip(begin_index) {
         match frame.frame_type {
@@ -254,6 +251,6 @@ pub fn strip_incomplete_txn_after_last_page_image(bytes: &[u8]) -> Result<Vec<u8
             _ => {}
         }
     }
-    let page_index = last_page_index.ok_or_else(|| Error::Corrupt("wal txn missing page image"))?;
+    let page_index = last_page_index.ok_or(Error::Corrupt("wal txn missing page image"))?;
     truncate_wal_after_frame(bytes, page_index)
 }

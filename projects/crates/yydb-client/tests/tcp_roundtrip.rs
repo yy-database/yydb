@@ -22,11 +22,7 @@ fn remote_error_keeps_stable_code() {
     let server_conn = Arc::clone(&conn);
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        loop {
-            let request = match yydb::wire::read_frame(&mut stream) {
-                Ok(frame) => frame,
-                Err(_) => break,
-            };
+        while let Ok(request) = yydb::wire::read_frame(&mut stream) {
             let response = dispatch(&server_conn, &request);
             yydb::wire::write_frame(&mut stream, &response).unwrap();
         }
@@ -62,11 +58,7 @@ fn tcp_roundtrip_against_local_dispatch_server() {
     let server_conn = Arc::clone(&conn);
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        loop {
-            let request = match yydb::wire::read_frame(&mut stream) {
-                Ok(frame) => frame,
-                Err(_) => break,
-            };
+        while let Ok(request) = yydb::wire::read_frame(&mut stream) {
             let response = dispatch(&server_conn, &request);
             yydb::wire::write_frame(&mut stream, &response).unwrap();
         }

@@ -20,7 +20,7 @@ fn yydb_orphan_reclaim_safe() {
         "fixture yydb.orphan.reclaim_safe expected orphan object"
     );
 
-    let report = conn.reclaim_orphans(&[orphan.clone()]).unwrap();
+    let report = conn.reclaim_orphans(std::slice::from_ref(&orphan)).unwrap();
     assert_eq!(report.reclaimed_objects, 1);
     assert!(conn.get_object(&live).is_ok());
     assert!(conn.get_object(&orphan).is_err());

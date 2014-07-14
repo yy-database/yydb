@@ -5,7 +5,7 @@ use yydb_wasm::OpfsBlobPublication;
 
 #[test]
 fn yydb_opfs_crash_after_blob_publish() {
-    let mut volume = OpfsBlobPublication::new("app.yydx", &["blob-live"]);
+    let mut volume = OpfsBlobPublication::new("crash-after-blob-publish.yydx", &["blob-live"]);
     volume.publish_blob("blob-orphan");
     // Crash between blob publish (step 2) and catalog commit (steps 3–4).
 
@@ -19,7 +19,7 @@ fn yydb_opfs_crash_after_blob_publish() {
 
 #[test]
 fn yydb_opfs_commit_rejects_unpublished_blob_reference() {
-    let mut volume = OpfsBlobPublication::new("app.yydx", &[]);
+    let mut volume = OpfsBlobPublication::new("crash-after-blob-publish.yydx", &[]);
     let error = volume.commit_catalog(&["blob-missing"]).unwrap_err();
     assert!(matches!(error, Error::ObjectNotFound { .. }));
     assert!(volume.dangling_references().is_empty());

@@ -4,7 +4,7 @@ use yydb_wasm::{opfs_commit_and_sync, opfs_reopen, OpfsBlobPublication};
 
 #[test]
 fn yydb_opfs_crash_after_commit() {
-    let path = "app.yydx";
+    let path = "crash-after-commit.yydx";
     let mut publication = OpfsBlobPublication::new(path, &["blob-a"]);
     publication.publish_blob("blob-b");
 

@@ -5,7 +5,7 @@ use yydb_wasm::{opfs_commit_and_sync, opfs_doctor, opfs_evict_blob, OpfsBlobPubl
 
 #[test]
 fn yydb_opfs_doctor_missing_blob() {
-    let path = "app.yydx";
+    let path = "doctor-missing-blob.yydx";
     let mut publication = OpfsBlobPublication::new(path, &["blob-a", "blob-b"]);
     opfs_commit_and_sync(path, &mut publication, &["blob-a", "blob-b"], b"catalog-v1")
         .expect("durable commit");

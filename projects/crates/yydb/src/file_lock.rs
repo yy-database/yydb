@@ -21,6 +21,7 @@ impl WriterLock {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .open(&lock_path)?;
         lock_exclusive(&file)?;
         Ok(Self { file })
@@ -81,7 +82,7 @@ fn lock_exclusive(file: &File) -> Result<()> {
         if code == ERROR_LOCK_VIOLATION || code == ERROR_IO_PENDING {
             return Err(writer_locked());
         }
-        return Err(Error::Io(std::io::Error::from_raw_os_error(code as i32)));
+        Err(Error::Io(std::io::Error::from_raw_os_error(code as i32)))
     }
     #[cfg(not(any(unix, windows)))]
     {

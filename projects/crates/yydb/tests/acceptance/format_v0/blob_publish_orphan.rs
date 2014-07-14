@@ -73,7 +73,9 @@ fn yydb_format_v0_blob_publish_orphan() {
     );
     assert!(report.orphan_object_count >= 1);
 
-    let reclaim = reopened.reclaim_orphans(&[orphan.clone()]).unwrap();
+    let reclaim = reopened
+        .reclaim_orphans(std::slice::from_ref(&orphan))
+        .unwrap();
     assert_eq!(reclaim.reclaimed_objects, 1);
     assert!(reopened.get_object(&live).is_ok());
     assert!(!reopened.objects().path_for(&orphan).exists());

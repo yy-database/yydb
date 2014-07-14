@@ -496,14 +496,14 @@ impl Vector {
 
     /// Decode little-endian `f32` bytes.
     pub fn from_le_bytes(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() % 4 != 0 {
+        if !bytes.len().is_multiple_of(4) {
             return Err(Error::ObjectCorrupt {
                 message: "vector payload length not multiple of 4".into(),
             });
         }
         let mut data = Vec::with_capacity(bytes.len() / 4);
-        for chunk in bytes.chunks_exact(4) {
-            data.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+        for chunk in bytes.as_chunks::<4>().0 {
+            data.push(f32::from_le_bytes(*chunk));
         }
         Self::new(data)
     }

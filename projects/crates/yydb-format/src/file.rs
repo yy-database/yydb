@@ -293,6 +293,7 @@ impl FilePager {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .open(&self.path)?;
         let needed = offset + PAGE_SIZE as u64;
         if file.metadata()?.len() < needed {

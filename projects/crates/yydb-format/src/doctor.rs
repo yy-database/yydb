@@ -59,7 +59,7 @@ fn probe_main_bytes(bytes: &[u8]) -> Vec<DoctorIssue> {
             return issues;
         }
     };
-    if bytes.len() % PAGE_SIZE != 0 {
+    if !bytes.len().is_multiple_of(PAGE_SIZE) {
         issues.push(issue_error(
             "yydb.doctor.corrupt_page",
             "main file length is not a multiple of the page size",

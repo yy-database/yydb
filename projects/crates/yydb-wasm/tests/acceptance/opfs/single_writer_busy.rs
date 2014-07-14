@@ -6,14 +6,14 @@ use yydb_wasm::{claim_opfs_writer, OpfsCapabilities};
 #[test]
 fn yydb_opfs_single_writer_busy() {
     let caps = OpfsCapabilities::full_yydb_profile();
-    let first = claim_opfs_writer("app.yydb", &caps).expect("first writer");
-    let busy = claim_opfs_writer("app.yydb", &caps).unwrap_err();
+    let first = claim_opfs_writer("single-writer-busy.yydb", &caps).expect("first writer");
+    let busy = claim_opfs_writer("single-writer-busy.yydb", &caps).unwrap_err();
     assert!(
         matches!(busy, Error::LeaseUnavailable { .. }),
         "expected LeaseUnavailable, got {busy}"
     );
     drop(first);
-    claim_opfs_writer("app.yydb", &caps).expect("writer after release");
+    claim_opfs_writer("single-writer-busy.yydb", &caps).expect("writer after release");
 }
 
 #[test]

@@ -194,6 +194,11 @@ impl LeafPage {
         self.cells.len()
     }
 
+    /// Whether this leaf stores no cells.
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+
     /// Iterate cells in key order.
     pub fn cells(&self) -> &[LeafCell] {
         &self.cells
