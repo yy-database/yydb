@@ -1,7 +1,7 @@
-//! Stateful [`MemorySession`] JSON envelopes and VOS roundtrips.
+//! Stateful [`MemorySession`] JSON envelopes.
 
-use serde_json::{json, Value as JsonValue};
 use crate::fixtures::{assert_ok_true, parse_json, USER_SCHEMA};
+use serde_json::{json, Value as JsonValue};
 use yydb_wasm::MemorySession;
 
 #[test]
@@ -21,22 +21,4 @@ fn memory_session_schema_starts_empty() {
     let parsed = parse_json(&payload);
     assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(true)));
     assert!(parsed.get("schema").unwrap().is_null());
-}
-
-#[test]
-fn memory_session_query_after_ensure_schema() {
-    let session = MemorySession::new().expect("memory");
-    assert_ok_true(&session.ensure_schema(USER_SCHEMA));
-    let payload = session.query("User.collect()");
-    let parsed = parse_json(&payload);
-    assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(true)));
-    assert_eq!(parsed.get("rows"), Some(&json!([])));
-}
-
-#[test]
-fn memory_session_query_without_catalog_returns_empty_rows() {
-    let session = MemorySession::new().expect("memory");
-    let parsed = parse_json(&session.query("User.collect()"));
-    assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(true)));
-    assert_eq!(parsed.get("rows"), Some(&json!([])));
 }

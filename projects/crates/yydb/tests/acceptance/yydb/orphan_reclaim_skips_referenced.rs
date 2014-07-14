@@ -16,8 +16,7 @@ fn yydb_orphan_reclaim_skips_referenced() {
         .reclaim_orphans(&[live.clone(), orphan.clone()])
         .unwrap();
     assert_eq!(
-        report.reclaimed_objects,
-        1,
+        report.reclaimed_objects, 1,
         "reclaim must skip catalog-referenced objects"
     );
     assert!(conn.get_object(&live).is_ok());

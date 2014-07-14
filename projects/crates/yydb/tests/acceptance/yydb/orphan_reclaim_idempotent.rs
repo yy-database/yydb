@@ -13,8 +13,7 @@ fn yydb_orphan_reclaim_idempotent() {
 
     let second = conn.reclaim_orphans(&[orphan.clone()]).unwrap();
     assert_eq!(
-        second.reclaimed_objects,
-        0,
+        second.reclaimed_objects, 0,
         "reclaim must be idempotent when the chunk is already gone"
     );
 

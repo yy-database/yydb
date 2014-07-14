@@ -11,8 +11,7 @@ fn yydb_orphan_reclaim_skips_pinned() {
 
     let report = conn.reclaim_orphans(&[orphan.clone()]).unwrap();
     assert_eq!(
-        report.reclaimed_objects,
-        0,
+        report.reclaimed_objects, 0,
         "reclaim must skip pinned orphan objects"
     );
     assert!(conn.get_object(&orphan).is_ok());

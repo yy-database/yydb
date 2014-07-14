@@ -12,9 +12,7 @@ use yydb_types::{Error, Result};
 use crate::blob_refs::{commit_digest, encode_blob_refs_body, BlobManifestDelta, FRAME_BLOB_REFS};
 use crate::crc32c::crc32c;
 use crate::header::PAGE_SIZE;
-use crate::wal::{
-    parse_frame, parse_header, parse_wal, wal_frame_offsets, WalFile, WAL_MAGIC,
-};
+use crate::wal::{parse_frame, parse_header, parse_wal, wal_frame_offsets, WalFile, WAL_MAGIC};
 
 const FRAME_TXN_BEGIN: u8 = 0x01;
 const FRAME_PAGE_IMAGE: u8 = 0x02;

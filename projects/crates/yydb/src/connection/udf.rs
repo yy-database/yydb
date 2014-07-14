@@ -76,39 +76,6 @@ impl Connection {
             .register_execution_udf(body)
     }
 
-    /// Parse and register a VOS-authored local scalar UDF.
-    ///
-    /// The source is parsed through the VOS facade, which uses Oak for the
-    /// language surface. Only the validated local scalar subset is lowered by
-    /// this embedded binder. The body is not persisted in the `.yydb` file.
-    pub fn register_vos_scalar(&self, source: &str) -> Result<()> {
-        self.register_vos_scalar_versioned(source, 1)
-    }
-
-    /// Parse and register a versioned VOS-authored local scalar UDF.
-    pub fn register_vos_scalar_versioned(&self, source: &str, version: u32) -> Result<()> {
-        self.udfs
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .register_vos_scalar(source, version)
-    }
-
-    /// Parse and register a VOS-authored catalog macro UDF.
-    ///
-    /// The lowered body is registered in the connection catalog layer. Persistence
-    /// into the `.yydb` file is not implemented yet.
-    pub fn register_vos_macro(&self, source: &str) -> Result<()> {
-        self.register_vos_macro_versioned(source, 1)
-    }
-
-    /// Parse and register a versioned VOS-authored catalog macro UDF.
-    pub fn register_vos_macro_versioned(&self, source: &str, version: u32) -> Result<()> {
-        self.udfs
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .register_vos_macro(source, version)
-    }
-
     /// Install the process-local host runtime adapter used by [`register_host_micro`].
     pub fn set_host_adapter(&self, adapter: Arc<dyn HostRuntimeAdapter>) {
         self.udfs

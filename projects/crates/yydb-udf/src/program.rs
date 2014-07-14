@@ -1,8 +1,9 @@
-//! VOS macro and micro lowering products for YYDB UDF registration.
+//! Validated execution program products for YYDB UDF registration.
+//!
+//! These types wrap an already-validated [`ValidatedUdf`](yydb_execution::ValidatedUdf)
+//! body with the UDF identity, signature, and policy metadata needed by the
+//! registry. They carry no VOS source and perform no lowering.
 
-mod lower;
-
-use blake3::hash;
 use yydb_execution::ValidatedUdf;
 
 use crate::capability::Placement;
@@ -14,14 +15,12 @@ use crate::implementation::UdfImplementation;
 use crate::invocation::UdfContext;
 use crate::value::UdfValue;
 
-pub use lower::{lower_micro_scalar, lower_vos_macro};
-
-/// YYDB-internal product of lowering a VOS macro or session micro.
+/// YYDB-internal product wrapping a validated execution program for registration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredUdf {
-    /// Logical identity assigned during lowering.
+    /// Logical identity assigned during registration.
     pub identity: UdfIdentity,
-    /// Boundary signature derived from the lowered program.
+    /// Boundary signature derived from the program.
     pub signature: Signature,
     /// Registration policy.
     pub policy: UdfPolicy,
@@ -29,22 +28,17 @@ pub struct LoweredUdf {
     pub placement: Placement,
     /// Validated local execution body.
     pub program: ValidatedUdf,
-    /// Fingerprint of the original VOS source.
+    /// Fingerprint of the original authored source, when known.
     pub source_fingerprint: [u8; 32],
 }
 
 impl LoweredUdf {
-    /// Fingerprints VOS source for catalog metadata and cache keys.
-    pub fn fingerprint_source(source: &str) -> [u8; 32] {
-        hash(source.as_bytes()).into()
-    }
-
     /// Returns the execution identity string stored in `yydb-execution`.
     pub fn execution_id(&self) -> &str {
         self.program.id()
     }
 
-    /// Builds session metadata for a lowered VOS `micro`.
+    /// Builds session metadata for a registered execution program.
     pub fn session_definition(&self) -> UdfDefinition {
         UdfDefinition {
             identity: self.identity.clone(),
@@ -55,20 +49,15 @@ impl LoweredUdf {
             fingerprint: self.source_fingerprint,
         }
     }
-
-    /// Builds catalog metadata for a lowered VOS `macro`.
-    pub fn catalog_definition(&self) -> UdfDefinition {
-        self.session_definition()
-    }
 }
 
-/// Embedded VOS program implementation strategy.
+/// Embedded execution program implementation strategy.
 pub struct VosProgramImplementation {
     lowered: LoweredUdf,
 }
 
 impl VosProgramImplementation {
-    /// Creates an implementation from a lowered VOS UDF.
+    /// Creates an implementation from a validated execution program.
     pub fn new(lowered: LoweredUdf) -> Self {
         Self { lowered }
     }

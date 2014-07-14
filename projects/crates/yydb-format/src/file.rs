@@ -18,8 +18,8 @@ use crate::header::{
 use crate::key::TreeKey;
 use crate::memory::MemoryPager;
 use crate::pager::PageStore;
-use crate::wal::committed_tail_lsn;
 use crate::shm::{shm_sidecar_path, sync_shm_from_wal};
+use crate::wal::committed_tail_lsn;
 use crate::wal_append::{read_wal_file, replay_wal_pages, wal_sidecar_path, WalWriter};
 
 /// Persistent page store backed by a single `YDPG` main file.

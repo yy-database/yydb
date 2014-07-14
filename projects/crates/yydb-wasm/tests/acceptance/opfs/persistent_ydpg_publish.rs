@@ -22,8 +22,5 @@ fn yydb_opfs_persistent_session_publishes_ydpg_main() {
 
     let memory = yydb::Connection::open_in_memory().expect("memory");
     memory.load_main_snapshot(&bytes).expect("hydrate");
-    assert_eq!(
-        memory.get("theme").expect("get"),
-        Some(b"dark".to_vec())
-    );
+    assert_eq!(memory.get("theme").expect("get"), Some(b"dark".to_vec()));
 }

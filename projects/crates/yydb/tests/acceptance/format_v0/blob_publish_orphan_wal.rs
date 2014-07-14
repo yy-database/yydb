@@ -3,7 +3,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use yydb::{journal::wal_path, Batch, Connection, DoctorSeverity, ObjectKind, ObjectStore, OpenFlags};
+use yydb::{
+    journal::wal_path, Batch, Connection, DoctorSeverity, ObjectKind, ObjectStore, OpenFlags,
+};
 
 fn temp_yydx(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(

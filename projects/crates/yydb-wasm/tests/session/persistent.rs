@@ -1,11 +1,11 @@
-use serde_json::{json, Value as JsonValue};
 use crate::fixtures::{assert_ok_true, full_yydb_caps, parse_json, USER_SCHEMA};
+use serde_json::{json, Value as JsonValue};
 use yydb_wasm::open_persistent_session;
 
 #[test]
 fn persistent_session_opens_and_runs_schema_check() {
-    let session =
-        open_persistent_session("session-app.yydb", &full_yydb_caps()).expect("open persistent session");
+    let session = open_persistent_session("session-app.yydb", &full_yydb_caps())
+        .expect("open persistent session");
     assert_eq!(session.path(), "session-app.yydb");
 
     assert_ok_true(&session.ensure_schema(USER_SCHEMA));

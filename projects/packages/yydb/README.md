@@ -1,8 +1,8 @@
 # `@yydb/yydb`
 
 Node all-in-one and browser wasm core from one package. On Node.js, `Database.open` starts a private loopback `yydb serve`
-process and talks over the YY wire protocol. In browsers, `@yydb/yydb/wasm` loads an in-process wasm session with KV,
-schema, and VOS `query` / `execute` on memory or OPFS paths.
+process and talks over the YY wire protocol. In browsers, `@yydb/yydb/wasm` loads an in-process wasm session with KV
+and schema on memory or OPFS paths.
 
 For a wire client only (renderer or an app that already runs `yydb serve`), use
 [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client).
@@ -23,7 +23,7 @@ For a wire client only (renderer or an app that already runs `yydb serve`), use
 Node.js 18+. Platform `.node` bindings install via optional dependencies.
 
 Schema truth lives in the `.yydb` file via `ensureSchema` and VOS documents. Wasm sessions mirror KV and schema calls
-and add VOS pipelines directly on the embedded core.
+on the embedded core.
 
 ## Node example
 
@@ -85,8 +85,6 @@ await db.info();
 await db.serverVersion();
 await db.registerMicro(microDefinition);
 await db.callScalar('double', 1, [21]);
-db.query('User.filter(x => x.active).collect()');
-db.execute('User { name: "Ada" }.insert()');
 db.close();
 ```
 

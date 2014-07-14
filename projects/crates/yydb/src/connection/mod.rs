@@ -23,15 +23,15 @@ mod journal;
 mod kv;
 mod lease;
 mod objects_api;
-mod query;
 mod schema_api;
 mod state;
+mod transaction;
 mod udf;
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct State {
     pub(crate) schema: Option<SchemaVersion>,
-    pub(crate) catalog: Option<vos::ast::CatalogSnapshot>,
+    pub(crate) identity_history: Option<vos::types::IdentityHistory>,
     pub(crate) resolved_contract: Option<vos::ResolvedContract>,
     pub(crate) records: BTreeMap<String, Vec<u8>>,
 }

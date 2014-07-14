@@ -89,13 +89,12 @@ jobs:
         with:
           node-version: 22
           # Do not set registry-url: it writes _authToken into npmrc and blocks OIDC (npm E404 on PUT).
-          cache: pnpm
       - name: Ensure npm CLI supports OIDC
         run: |
           npm install -g npm@latest
           node -v
           npm -v
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown

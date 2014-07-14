@@ -36,6 +36,7 @@ pub struct HostMicroDefinition {
 
 impl HostMicroDefinition {
     /// Builds a Phase-1 pure deterministic scalar micro from contract fields.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_scalar(
         name: &str,
         version: u32,

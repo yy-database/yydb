@@ -4,13 +4,13 @@ use std::collections::BTreeMap;
 
 use yydb_types::{Error, Result};
 
+use crate::btree::RecordTree;
 use crate::header::{
-    encode_empty_page0, inactive_slot_offset, parse_page0, seal_header_slot,
-    slot_offset_for_kind, DatabaseHeader, PAGE_SIZE, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B,
+    encode_empty_page0, inactive_slot_offset, parse_page0, seal_header_slot, slot_offset_for_kind,
+    DatabaseHeader, PAGE_SIZE, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B,
 };
 use crate::key::TreeKey;
 use crate::pager::PageStore;
-use crate::btree::RecordTree;
 
 /// Process-local page store used by tests and the memory storage profile.
 #[derive(Debug, Clone, Default)]
@@ -100,8 +100,7 @@ impl MemoryPager {
             .ok_or(Error::Corrupt("missing page0"))?
             .clone();
         let mut updated = page0;
-        updated[active_offset + 48..active_offset + 52]
-            .copy_from_slice(&page_id.to_le_bytes());
+        updated[active_offset + 48..active_offset + 52].copy_from_slice(&page_id.to_le_bytes());
         seal_header_slot(&mut updated, active_offset)?;
         self.put_page(0, updated)?;
         Ok(())

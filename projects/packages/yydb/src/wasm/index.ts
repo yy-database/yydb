@@ -7,7 +7,6 @@ export {
     initWasm,
     introspectSchema,
     openPersistentSession,
-    queryMemory,
     resetWasmBindingForTests,
     yydbVersion,
     type CheckSchemaResult,

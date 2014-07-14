@@ -15,9 +15,9 @@ impl Connection {
     /// `-shm` sidecars (Living `07` §7).
     pub fn backup_to(&self, dest: impl AsRef<Path>) -> Result<()> {
         self.checkpoint()?;
-        let src = self
-            .path()
-            .ok_or(Error::Unsupported("backup_to requires a file-backed connection"))?;
+        let src = self.path().ok_or(Error::Unsupported(
+            "backup_to requires a file-backed connection",
+        ))?;
         let dest = dest.as_ref();
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
@@ -34,11 +34,9 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let src = self
-            .path()
-            .ok_or(Error::Unsupported(
-                "backup_with_wal_to requires a file-backed connection",
-            ))?;
+        let src = self.path().ok_or(Error::Unsupported(
+            "backup_with_wal_to requires a file-backed connection",
+        ))?;
         let dest = dest.as_ref();
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
@@ -54,9 +52,9 @@ impl Connection {
     /// `dest` must use the `.yydx` suffix. Sidecars are folded via checkpoint so the backup
     /// is self-contained (Living `07` §7–§8).
     pub fn backup_yydx_to(&self, dest: impl AsRef<Path>) -> Result<()> {
-        let src = self
-            .path()
-            .ok_or(Error::Unsupported("backup_yydx_to requires a file-backed connection"))?;
+        let src = self.path().ok_or(Error::Unsupported(
+            "backup_yydx_to requires a file-backed connection",
+        ))?;
         if !is_yydx_main_path(src) {
             return Err(Error::Unsupported(
                 "backup_yydx_to requires a .yydx main file path",

@@ -3,7 +3,7 @@
 use std::fs;
 
 use yydb::{journal::shm_path, Connection, OpenFlags};
-use yydb_format::{parse_shm, committed_tail_lsn, parse_wal};
+use yydb_format::{committed_tail_lsn, parse_shm, parse_wal};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(

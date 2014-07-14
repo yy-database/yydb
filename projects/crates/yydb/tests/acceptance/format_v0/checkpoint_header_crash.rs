@@ -35,7 +35,9 @@ fn yydb_format_v0_checkpoint_header_crash_before_commit() {
 
     {
         let mut pager = FilePager::open(&path, true).unwrap();
-        pager.simulate_checkpoint_crash_before_header_commit().unwrap();
+        pager
+            .simulate_checkpoint_crash_before_header_commit()
+            .unwrap();
     }
 
     assert!(
@@ -75,8 +77,7 @@ fn yydb_format_v0_checkpoint_header_crash_corrupt_inactive_slot() {
     let bytes = fs::read(&path).unwrap();
     let header = parse_page0(&bytes).unwrap();
     assert_eq!(
-        header.slot.slot_kind,
-        prior_kind,
+        header.slot.slot_kind, prior_kind,
         "fixture format_v0.checkpoint_header_crash must keep prior active header slot"
     );
     assert_eq!(
@@ -84,19 +85,18 @@ fn yydb_format_v0_checkpoint_header_crash_corrupt_inactive_slot() {
         prior_generation,
         "fixture format_v0.checkpoint_header_crash must not advance generation on torn header write"
     );
-    let inactive_offset =
-        inactive_slot_offset(slot_offset_for_kind(prior_kind));
-    let inactive_generation =
-        u64::from_le_bytes(bytes[inactive_offset + 6..inactive_offset + 14].try_into().unwrap());
+    let inactive_offset = inactive_slot_offset(slot_offset_for_kind(prior_kind));
+    let inactive_generation = u64::from_le_bytes(
+        bytes[inactive_offset + 6..inactive_offset + 14]
+            .try_into()
+            .unwrap(),
+    );
     assert!(
         inactive_generation > header.slot.generation,
         "inactive slot may carry a torn generation but must not win"
     );
 
-    assert!(
-        wal.exists(),
-        "corrupt header commit must not truncate WAL"
-    );
+    assert!(wal.exists(), "corrupt header commit must not truncate WAL");
 
     let reopened = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     assert_eq!(reopened.get("baseline").unwrap(), Some(b"ok".to_vec()));

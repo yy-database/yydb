@@ -15,10 +15,7 @@ fn yydb_format_v0_main_snapshot_file_roundtrip() {
 
     let memory = Connection::open_in_memory().expect("memory");
     memory.load_main_snapshot(&bytes).expect("hydrate");
-    assert_eq!(
-        memory.get("theme").expect("get"),
-        Some(b"dark".to_vec())
-    );
+    assert_eq!(memory.get("theme").expect("get"), Some(b"dark".to_vec()));
 
     cleanup(&path);
 }

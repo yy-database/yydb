@@ -19,7 +19,7 @@ use crate::objects::ObjectStore;
 use crate::refs::OBJECT_REF_PREFIX;
 
 const META_SCHEMA: &[u8] = b"__yydb/meta/schema";
-const META_CATALOG: &[u8] = b"__yydb/meta/catalog";
+const META_IDENTITY: &[u8] = b"__yydb/meta/identity";
 const META_CONTRACT: &[u8] = b"__yydb/meta/contract";
 
 /// Open a `YDPG` pager, folding any leftover `YYWL` v0 sidecar when not in WAL mode.
@@ -59,7 +59,7 @@ pub fn read_state_from_memory_pager(pager: &mut MemoryPager) -> Result<State> {
 
 fn read_state_from_kv<P: FormatKvPager>(pager: &mut P) -> Result<State> {
     let schema = decode_schema(pager.get_kv(META_SCHEMA)?)?;
-    let catalog = decode_catalog(pager.get_kv(META_CATALOG)?)?;
+    let identity_history = decode_identity(pager.get_kv(META_IDENTITY)?)?;
     let resolved_contract = decode_contract(pager.get_kv(META_CONTRACT)?)?;
     let mut records = BTreeMap::new();
     for (key, value) in pager.scan_kv()? {
@@ -75,7 +75,7 @@ fn read_state_from_kv<P: FormatKvPager>(pager: &mut P) -> Result<State> {
     }
     Ok(State {
         schema,
-        catalog,
+        identity_history,
         resolved_contract,
         records,
     })
@@ -155,10 +155,7 @@ fn collect_blob_manifest_deltas(
     objects: &ObjectStore,
 ) -> Result<Vec<BlobManifestDelta>> {
     let mut deltas = Vec::new();
-    let keys = before
-        .keys()
-        .chain(after.keys())
-        .collect::<BTreeSet<_>>();
+    let keys = before.keys().chain(after.keys()).collect::<BTreeSet<_>>();
     for key in keys {
         let before_ref = object_hash_from_record_value(before.get(key));
         let after_ref = object_hash_from_record_value(after.get(key));
@@ -232,7 +229,7 @@ fn chunk_ref_for_hash(objects: &ObjectStore, hash: &[u8; 32]) -> Result<BlobChun
 
 fn write_state_to_kv<P: FormatKvPager>(pager: &mut P, state: &State) -> Result<()> {
     pager.put_kv(META_SCHEMA, &encode_schema(&state.schema)?)?;
-    pager.put_kv(META_CATALOG, &encode_catalog(&state.catalog)?)?;
+    pager.put_kv(META_IDENTITY, &encode_identity(&state.identity_history)?)?;
     pager.put_kv(META_CONTRACT, &encode_contract(&state.resolved_contract)?)?;
 
     let mut existing = BTreeMap::new();
@@ -301,22 +298,23 @@ fn decode_schema(bytes: Option<Vec<u8>>) -> Result<Option<crate::SchemaVersion>>
     }
 }
 
-fn encode_catalog(catalog: &Option<vos::ast::CatalogSnapshot>) -> Result<Vec<u8>> {
-    match catalog {
+fn encode_identity(history: &Option<vos::types::IdentityHistory>) -> Result<Vec<u8>> {
+    match history {
         None => Ok(vec![0]),
-        Some(catalog) => {
-            let encoded = serde_json::to_vec(catalog)
+        Some(history) => {
+            let encoded = history
+                .to_json()
                 .map_err(|_| Error::Corrupt("catalog serialization failed"))?;
             let mut bytes = Vec::with_capacity(1 + 4 + encoded.len());
             bytes.push(1);
             bytes.extend((encoded.len() as u32).to_le_bytes());
-            bytes.extend(encoded);
+            bytes.extend(encoded.into_bytes());
             Ok(bytes)
         }
     }
 }
 
-fn decode_catalog(bytes: Option<Vec<u8>>) -> Result<Option<vos::ast::CatalogSnapshot>> {
+fn decode_identity(bytes: Option<Vec<u8>>) -> Result<Option<vos::types::IdentityHistory>> {
     let bytes = bytes.unwrap_or(vec![0]);
     match bytes.first() {
         None | Some(0) => Ok(None),
@@ -329,9 +327,13 @@ fn decode_catalog(bytes: Option<Vec<u8>>) -> Result<Option<vos::ast::CatalogSnap
             if bytes.len() != end {
                 return Err(Error::Corrupt("catalog meta length mismatch"));
             }
-            Ok(Some(serde_json::from_slice(&bytes[5..end]).map_err(
-                |_| Error::Corrupt("catalog meta is invalid JSON"),
-            )?))
+            Ok(Some(
+                vos::types::IdentityHistory::from_json(
+                    std::str::from_utf8(&bytes[5..end])
+                        .map_err(|_| Error::Corrupt("catalog meta is not UTF-8"))?,
+                )
+                .map_err(|_| Error::Corrupt("catalog meta is invalid"))?,
+            ))
         }
         _ => Err(Error::Corrupt("unknown catalog meta marker")),
     }

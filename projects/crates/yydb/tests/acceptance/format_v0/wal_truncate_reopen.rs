@@ -41,8 +41,7 @@ fn yydb_format_v0_wal_truncate_reopen() {
     );
     let recovered = truncate_wal_to_recoverable_prefix(&torn_raw).unwrap();
     assert_eq!(
-        recovered,
-        without_commit,
+        recovered, without_commit,
         "recoverable prefix must match the last committed WAL view"
     );
     fs::write(&wal, recovered).unwrap();

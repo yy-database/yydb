@@ -34,18 +34,17 @@ filesystem sidecars — useful for tests.
 
 ```rust
 use yydb::prelude::*;
-// query: yydb::query
 // UDF: yydb::udf::UdfRegistry
 // wire types: yydb::wire
 ```
 
-| Layer      | Crate                                      | When to depend                 |
-|------------|--------------------------------------------|--------------------------------|
-| Bottom     | `yydb-types`                               | Engine internals only          |
-| Engine     | `yydb-execution`, `yydb-udf`, `yydb-query` | Facade / query / UDF authors   |
-| **Facade** | **`yydb`**                                 | **Default — `Connection`**     |
-| Transport  | `yydb-client`, `yydb-server`               | Remote client or serve process |
-| Bindings   | `yydb-napi`, `yydb-pyo3`, `yydb-wasm`      | Language hosts only            |
+| Layer      | Crate                             | When to depend                 |
+|------------|-----------------------------------|--------------------------------|
+| Bottom     | `yydb-types`                      | Engine internals only          |
+| Engine     | `yydb-execution`, `yydb-udf`      | Execution IR and UDF           |
+| **Facade** | **`yydb`**                        | **Default — `Connection`**     |
+| Transport  | `yydb-client`, `yydb-server`      | Remote client or serve process |
+| Bindings   | `yydb-napi`, `yydb-pyo3`, `yydb-wasm` | Language hosts only        |
 
 ## Related surfaces
 

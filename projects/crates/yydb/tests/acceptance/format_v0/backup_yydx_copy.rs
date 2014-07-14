@@ -9,7 +9,9 @@ fn yydb_format_v0_backup_yydx_copy() {
     let backup = temp_yydx("backup-yydx-copy");
 
     let conn = Connection::open_yydx(&path).expect("open");
-    let live = conn.put_chunk(ObjectKind::Blob, b"payload").expect("put chunk");
+    let live = conn
+        .put_chunk(ObjectKind::Blob, b"payload")
+        .expect("put chunk");
     let mut batch = Batch::new();
     batch.attach_object(&live, "blobs/live");
     batch.commit(&conn).expect("commit");

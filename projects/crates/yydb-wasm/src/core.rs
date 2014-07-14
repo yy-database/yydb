@@ -1,8 +1,6 @@
 //! Host-testable WASM shared surface (no wasm-bindgen).
 
-use std::collections::BTreeMap;
-
-use serde_json::{json, Map, Value as JsonValue};
+use serde_json::{json, Value as JsonValue};
 use yydb::{
     schema::{self, ExecutionTypeKind},
     Connection, Result, SchemaVersion, Value,
@@ -94,74 +92,6 @@ pub fn introspect_schema_json(source: &str) -> String {
             "schemaFingerprint": "",
             "tables": [],
             "error": err.to_string(),
-        })
-        .to_string(),
-    }
-}
-
-pub(crate) fn rows_to_json(rows: Vec<BTreeMap<String, Value>>) -> Vec<JsonValue> {
-    rows.into_iter()
-        .map(|row| {
-            let mut obj = Map::new();
-            for (key, value) in row {
-                obj.insert(key, value_to_json(&value));
-            }
-            JsonValue::Object(obj)
-        })
-        .collect()
-}
-
-#[allow(clippy::wildcard_enum_match_arm)]
-pub(crate) fn value_to_json(value: &Value) -> JsonValue {
-    match value {
-        Value::Null => JsonValue::Null,
-        Value::Bool(b) => json!(b),
-        Value::I64(n) => json!(n),
-        Value::U64(n) => json!(n),
-        Value::F64(n) => json!(n),
-        Value::Text(s) => json!(s),
-        Value::Bytes(bytes) => json!(bytes),
-        Value::Uuid(id) => json!(id.to_string()),
-        Value::Row(fields) => {
-            let mut obj = Map::new();
-            for (key, nested) in fields {
-                obj.insert(key.clone(), value_to_json(nested));
-            }
-            JsonValue::Object(obj)
-        }
-        Value::Vector(vector) => json!({
-            "kind": "vector",
-            "dim": vector.dim,
-            "data": vector.data.as_ref(),
-        }),
-        Value::Object(object) => json!({
-            "kind": "object",
-            "hash": object.hash_hex(),
-            "size": object.size,
-        }),
-        Value::File(manifest) => json!({
-            "kind": "file",
-            "totalSize": manifest.total_size,
-            "chunks": manifest.chunks.len(),
-        }),
-        _ => json!({ "kind": "unsupported" }),
-    }
-}
-
-pub(crate) fn execute_result_json(result: Result<Vec<BTreeMap<String, Value>>>) -> String {
-    match result {
-        Ok(rows) => json!({
-            "ok": true,
-            "rows": rows_to_json(rows),
-            "error": JsonValue::Null,
-            "code": JsonValue::Null,
-        })
-        .to_string(),
-        Err(err) => json!({
-            "ok": false,
-            "rows": [],
-            "error": err.to_string(),
-            "code": err.code(),
         })
         .to_string(),
     }

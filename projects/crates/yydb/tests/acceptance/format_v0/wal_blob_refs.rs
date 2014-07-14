@@ -27,7 +27,9 @@ fn yydb_format_v0_wal_blob_refs() {
     cleanup(&path);
 
     let conn = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
-    let object = conn.put_chunk(ObjectKind::Blob, b"wal-blob-payload").unwrap();
+    let object = conn
+        .put_chunk(ObjectKind::Blob, b"wal-blob-payload")
+        .unwrap();
     let mut batch = Batch::new();
     batch.attach_object(&object, "blobs/wal-live");
     batch.commit(&conn).unwrap();

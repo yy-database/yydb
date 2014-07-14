@@ -7,8 +7,7 @@ use crate::fixtures::{full_yydb_caps, full_yydx_caps};
 #[test]
 fn yydb_opfs_persistent_open_main_roundtrip() {
     let path = "probe-app.yydb";
-    let volume =
-        open_persistent(path, &full_yydb_caps()).expect("persistent open");
+    let volume = open_persistent(path, &full_yydb_caps()).expect("persistent open");
     assert_eq!(volume.path(), path);
     assert!(volume.read_main().expect("read").is_none());
 
@@ -36,8 +35,7 @@ fn yydb_opfs_persistent_open_main_roundtrip() {
 #[test]
 fn yydb_opfs_persistent_open_yydx_blob_roundtrip() {
     let path = "probe-app.yydx";
-    let volume =
-        open_persistent(path, &full_yydx_caps()).expect("persistent open");
+    let volume = open_persistent(path, &full_yydx_caps()).expect("persistent open");
     volume
         .publish_blob("blob-a", b"chunk-a")
         .expect("publish blob");

@@ -5,28 +5,13 @@ use wasm_bindgen::prelude::*;
 use yydb::{wire, Connection, Error};
 
 use crate::core::{
-    connection_info, execute_result_json, kv_get_json, scalar_call_json, schema_get_json,
-    unit_result_json,
+    connection_info, kv_get_json, scalar_call_json, schema_get_json, unit_result_json,
 };
 use crate::host_js::JsHostAdapter;
 use crate::opfs::{open_persistent, OpfsCapabilities, OpfsPersistentVolume};
 
 fn closed_session_error() -> Error {
     Error::SessionClosed
-}
-
-fn run_query(conn: &Connection, closed: bool, source: &str) -> String {
-    if closed {
-        return execute_result_json(Err(closed_session_error()));
-    }
-    execute_result_json(conn.query(source))
-}
-
-fn run_execute(conn: &Connection, closed: bool, source: &str) -> String {
-    if closed {
-        return unit_result_json(Err(closed_session_error()));
-    }
-    unit_result_json(conn.execute(source))
 }
 
 fn run_ensure_schema(conn: &Connection, closed: bool, document: &str) -> String {
@@ -90,21 +75,6 @@ fn run_ensure_schema_persistent(
     }
 }
 
-fn run_execute_persistent(
-    conn: &Connection,
-    volume: &OpfsPersistentVolume,
-    closed: bool,
-    source: &str,
-) -> String {
-    if closed {
-        return unit_result_json(Err(closed_session_error()));
-    }
-    match conn.execute(source) {
-        Ok(()) => unit_result_json(persist_persistent_connection(conn, volume)),
-        Err(error) => unit_result_json(Err(error)),
-    }
-}
-
 fn run_put_persistent(
     conn: &Connection,
     volume: &OpfsPersistentVolume,
@@ -118,14 +88,6 @@ fn run_put_persistent(
     match conn.put(key, value) {
         Ok(()) => unit_result_json(persist_persistent_connection(conn, volume)),
         Err(error) => unit_result_json(Err(error)),
-    }
-}
-
-/// Execute a VOS query on a fresh in-memory database (stateless helper).
-pub fn query_memory(source: &str) -> String {
-    match Connection::open_in_memory() {
-        Ok(conn) => execute_result_json(conn.query(source)),
-        Err(err) => unit_result_json(Err(err)),
     }
 }
 
@@ -153,18 +115,6 @@ impl MemorySession {
     #[wasm_bindgen(js_name = ensureSchema)]
     pub fn ensure_schema(&self, document: &str) -> String {
         run_ensure_schema(&self.conn, self.closed, document)
-    }
-
-    /// VOS read pipeline (for example `User.filter(x => x.active).collect()`).
-    #[wasm_bindgen]
-    pub fn query(&self, source: &str) -> String {
-        run_query(&self.conn, self.closed, source)
-    }
-
-    /// Unit-valued VOS write programs (for example `User { … }.insert()`).
-    #[wasm_bindgen]
-    pub fn execute(&self, source: &str) -> String {
-        run_execute(&self.conn, self.closed, source)
     }
 
     /// Fetch a raw byte record by key. Returns JSON `{ ok, value, error }`.
@@ -279,21 +229,6 @@ impl PersistentSession {
     pub fn ensure_schema(&self, document: &str) -> String {
         match self.volume.as_ref() {
             Some(volume) => run_ensure_schema_persistent(&self.conn, volume, self.closed, document),
-            None => unit_result_json(Err(closed_session_error())),
-        }
-    }
-
-    /// VOS read pipeline.
-    #[wasm_bindgen]
-    pub fn query(&self, source: &str) -> String {
-        run_query(&self.conn, self.closed, source)
-    }
-
-    /// Unit-valued VOS write programs.
-    #[wasm_bindgen]
-    pub fn execute(&self, source: &str) -> String {
-        match self.volume.as_ref() {
-            Some(volume) => run_execute_persistent(&self.conn, volume, self.closed, source),
             None => unit_result_json(Err(closed_session_error())),
         }
     }

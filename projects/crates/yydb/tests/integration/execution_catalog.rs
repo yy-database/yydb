@@ -6,27 +6,27 @@ use yydb::{
 
 fn resolved_user_contract() -> yydb::vos::ResolvedContract {
     let mut contract = yydb::vos::ResolvedContract {
-        format_version: "vos-resolved-contract-v0".into(),
+        format_version: "vos-resolved-contract-v1".into(),
         identity_manifest_version: "vos-identity-manifest-v0".into(),
         schema_fingerprint: String::new(),
-        types: vec![yydb::vos::contract::ResolvedTypeContract {
+        types: vec![yydb::vos::types::ResolvedTypeContract {
             type_id: 7,
             canonical_path: vec!["demo".into(), "User".into()],
-            kind: yydb::vos::contract::TypeContractKind::Table,
-            fields: vec![yydb::vos::contract::ResolvedFieldContract {
+            kind: yydb::vos::types::TypeContractKind::Table,
+            fields: vec![yydb::vos::types::ResolvedFieldContract {
                 field_id: 11,
                 virtual_field_index: 3,
                 canonical_name: "id".into(),
-                canonical_type: yydb::vos::contract::ResolvedCanonicalType::Builtin(vec![
-                    "i64".into()
-                ]),
+                canonical_type: yydb::vos::types::ResolvedCanonicalType::Builtin(
+                    vec!["i64".into()],
+                ),
                 attributes: vec![],
                 default_value: None,
             }],
         }],
     };
-    contract.schema_fingerprint = yydb::vos::contract::resolved_schema_fingerprint(
-        &yydb::vos::contract::ResolvedIdentityProjection {
+    contract.schema_fingerprint = yydb::vos::types::resolved_schema_fingerprint(
+        &yydb::vos::types::ResolvedIdentityProjection {
             manifest_version: contract.identity_manifest_version.clone(),
             types: contract.types.clone(),
         },

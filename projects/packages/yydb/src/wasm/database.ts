@@ -3,7 +3,6 @@ import { defineMicro as buildMicro, microFingerprint, udfWireKind, type DefinedM
 import type { UdfScalarDescriptor } from '../shared/udf-types.js';
 import {
     parseWasmKvGetResult,
-    parseWasmRowsResult,
     parseWasmScalarResult,
     parseWasmSchemaResult,
     parseWasmUnitResult,
@@ -92,16 +91,6 @@ export class Database {
     async put(key: string, value: Uint8Array | string): Promise<void> {
         const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
         parseWasmUnitResult(this.requireSession('kvPut').put(key, bytes), 'kvPut');
-    }
-
-    /** VOS read pipeline (for example `User.filter(x => x.active).collect()`). */
-    query(source: string): Record<string, unknown>[] {
-        return parseWasmRowsResult(this.requireSession('query').query(source), 'query').rows;
-    }
-
-    /** Unit-valued VOS write programs (for example `User { … }.insert()`). */
-    execute(source: string): void {
-        parseWasmUnitResult(this.requireSession('execute').execute(source), 'execute');
     }
 
     /**

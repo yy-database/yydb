@@ -12,7 +12,10 @@ fn yydb_format_v0_backup_checkpoint_copy() {
     conn.ensure_schema("table Setting { @@id: uuid, key: utf8, value: utf8 }")
         .expect("schema");
     conn.put("theme", b"dark").expect("put");
-    assert!(wal_path(&path).exists(), "wal sidecar should exist before backup");
+    assert!(
+        wal_path(&path).exists(),
+        "wal sidecar should exist before backup"
+    );
 
     conn.backup_to(&backup).expect("backup");
     assert!(
@@ -22,10 +25,7 @@ fn yydb_format_v0_backup_checkpoint_copy() {
     drop(conn);
 
     let restored = Connection::open(&backup).expect("open backup");
-    assert_eq!(
-        restored.get("theme").expect("get"),
-        Some(b"dark".to_vec())
-    );
+    assert_eq!(restored.get("theme").expect("get"), Some(b"dark".to_vec()));
     let schema = restored.schema().expect("schema").expect("present");
     assert!(schema.document.contains("table Setting"));
 
@@ -50,10 +50,7 @@ fn yydb_format_v0_backup_with_wal_copy() {
     drop(conn);
 
     let restored = Connection::open(&backup).expect("open backup");
-    assert_eq!(
-        restored.get("counter").expect("get"),
-        Some(b"1".to_vec())
-    );
+    assert_eq!(restored.get("counter").expect("get"), Some(b"1".to_vec()));
 
     cleanup(&path);
     cleanup(&backup);

@@ -8,14 +8,21 @@ fn yydb_format_v0_yydx_compact_orphans() {
     let path = temp_yydx("yydx-compact");
     let conn = Connection::open_with_flags(&path, OpenFlags::wal()).expect("wal open");
 
-    let live = conn.put_chunk(ObjectKind::Blob, b"keep").expect("live chunk");
+    let live = conn
+        .put_chunk(ObjectKind::Blob, b"keep")
+        .expect("live chunk");
     let mut batch = Batch::new();
     batch.attach_object(&live, "pages/kept");
     batch.commit(&conn).expect("commit");
 
-    conn.put_chunk(ObjectKind::Blob, b"drop-a").expect("orphan a");
-    conn.put_chunk(ObjectKind::Blob, b"drop-b").expect("orphan b");
-    assert!(wal_path(&path).exists(), "wal sidecar should exist before compact");
+    conn.put_chunk(ObjectKind::Blob, b"drop-a")
+        .expect("orphan a");
+    conn.put_chunk(ObjectKind::Blob, b"drop-b")
+        .expect("orphan b");
+    assert!(
+        wal_path(&path).exists(),
+        "wal sidecar should exist before compact"
+    );
 
     let report = conn.compact_yydx().expect("compact");
     assert!(report.checkpointed);

@@ -42,7 +42,9 @@ fn yydb_opfs_yydx_wal_sidecar_independent_of_blob_root() {
     let path = "probe-wal-sidecar.yydx";
     let volume = open_persistent(path, &full_yydx_caps()).expect("persistent open");
 
-    volume.publish_blob("blob-a", b"chunk").expect("publish blob");
+    volume
+        .publish_blob("blob-a", b"chunk")
+        .expect("publish blob");
     volume.publish_wal(b"YYWL-yydx").expect("publish wal");
 
     assert_eq!(

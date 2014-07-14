@@ -15,15 +15,6 @@ pub fn assert_ok_true(payload: &str) {
     assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(true)));
 }
 
-pub fn assert_ok_false(payload: &str) {
-    let parsed = parse_json(payload);
-    assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(false)));
-    assert!(
-        parsed.get("error").and_then(JsonValue::as_str).is_some(),
-        "expected error string in {payload}"
-    );
-}
-
 pub fn full_yydb_caps() -> OpfsCapabilities {
     OpfsCapabilities::full_yydb_profile()
 }

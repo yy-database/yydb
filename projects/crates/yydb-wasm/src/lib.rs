@@ -18,7 +18,7 @@ pub use opfs::{
     OpfsCommittedVolume, OpfsDurableSnapshot, OpfsPersistentVolume, OpfsWriterLease,
     PersistentStorageMode,
 };
-pub use session::{open_persistent_session, query_memory};
+pub use session::open_persistent_session;
 
 use wasm_bindgen::prelude::*;
 
@@ -85,12 +85,6 @@ pub fn check_schema(source: &str) -> CheckSchemaResult {
 #[wasm_bindgen(js_name = introspectSchema)]
 pub fn introspect_schema(source: &str) -> String {
     introspect_schema_json(source)
-}
-
-/// Execute a VOS query on a fresh in-memory database; returns JSON `{ ok, rows, error }`.
-#[wasm_bindgen(js_name = queryMemory)]
-pub fn query_memory_js(source: &str) -> String {
-    query_memory(source)
 }
 
 pub use session::{MemorySession, PersistentSession};

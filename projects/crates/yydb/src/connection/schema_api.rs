@@ -1,6 +1,5 @@
 use crate::schema;
 use crate::ttl;
-use crate::udf::ScalarUdf;
 use crate::{Error, Result, SchemaVersion};
 
 use super::Connection;
@@ -11,9 +10,9 @@ impl Connection {
         Ok(self.read_state()?.schema)
     }
 
-    /// Current persisted VOS identity ledger, if the database has one.
-    pub fn catalog_snapshot(&self) -> Result<Option<vos::ast::CatalogSnapshot>> {
-        Ok(self.read_state()?.catalog)
+    /// Current persisted VOS identity history, if the database has one.
+    pub fn identity_history(&self) -> Result<Option<vos::types::IdentityHistory>> {
+        Ok(self.read_state()?.identity_history)
     }
 
     /// Current validated VOS resolved contract, if the database has one.
@@ -65,7 +64,7 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        schema::validate_document(document)?;
+        let projection = schema::project_schema(document)?;
         let mut state = self.read_state()?;
         if let Some(current) = &state.schema {
             if current.document != document {
@@ -75,28 +74,19 @@ impl Connection {
                             .into(),
                 });
             }
-            if let Some(catalog) = &state.catalog {
-                if state.resolved_contract.is_none() {
-                    state.resolved_contract =
-                        Some(schema::resolved_contract_for_catalog(document, catalog)?);
-                    self.write_state(&state)?;
-                }
-                return Ok(());
+            let resolved = rebind_identities(&state, &projection)?;
+            if state.resolved_contract.is_none() {
+                state.resolved_contract = Some(resolved);
+                self.write_state(&state)?;
             }
+            return Ok(());
         }
-        let version = state
-            .schema
-            .as_ref()
-            .map(|schema| schema.version)
-            .unwrap_or_else(|| schema::initial_version(document));
-        let parsed =
-            vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
-                message: diagnostics.to_string(),
-            })?;
-        let catalog =
-            vos::catalog_from_document(&parsed).map_err(|message| Error::Schema { message })?;
-        state.resolved_contract = Some(schema::resolved_contract_for_catalog(document, &catalog)?);
-        state.catalog = Some(catalog);
+        let version = schema::initial_version(document);
+        let manifest = schema::allocate_initial_manifest(&projection);
+        let bound = schema::bind(&projection, &manifest)?;
+        let history = schema::evolve(&schema::empty_history(), bound)?;
+        state.resolved_contract = Some(schema::resolve_contract_from_bound(&history.snapshot)?);
+        state.identity_history = Some(history);
         state.schema = Some(SchemaVersion {
             version,
             document: document.to_owned(),
@@ -106,38 +96,61 @@ impl Connection {
 
     /// Evolve the persisted schema to the next version (`current + 1`).
     ///
-    /// Existing type and field identities are preserved only by exact name
-    /// matching or by mappings in `renames`. When the document carries
+    /// Existing type and field identities are preserved by exact name matching
+    /// or by mappings in `renames`. When the document carries
     /// `// @yydb-schema-version: <n>`, `n` must equal the new version.
-    pub fn migrate_schema(&self, document: &str, renames: &vos::ast::RenameMap) -> Result<()> {
+    pub fn migrate_schema(&self, document: &str, renames: &schema::RenameMap) -> Result<()> {
         let _guard = self
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        schema::validate_document(document)?;
-        let parsed =
-            vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
-                message: diagnostics.to_string(),
-            })?;
+        let projection = schema::project_schema(document)?;
         let mut state = self.read_state()?;
         let current = state.schema.as_ref().ok_or_else(|| Error::Schema {
             message: "schema migration requires an existing schema".into(),
         })?;
-        let expected = current.version;
-        let version = expected + 1;
+        let version = current.version + 1;
         schema::validate_migration_version(document, version)?;
-        let previous_catalog = state.catalog.as_ref().ok_or_else(|| Error::Schema {
-            message: "initialize the identity ledger with ensure_schema before migration".into(),
-        })?;
-        let catalog = vos::evolve_catalog(previous_catalog, &parsed, renames)
-            .map_err(|message| Error::Schema { message })?;
-        let resolved_contract = schema::resolved_contract_for_catalog(document, &catalog)?;
+        let history = state
+            .identity_history
+            .as_ref()
+            .ok_or_else(|| Error::Schema {
+                message: "initialize the identity ledger with ensure_schema before migration"
+                    .into(),
+            })?;
+        let manifest = schema::migration_manifest(history, &projection, renames)?;
+        let bound = schema::bind(&projection, &manifest)?;
+        let evolved = schema::evolve(history, bound)?;
+        let resolved_contract = schema::resolve_contract_from_bound(&evolved.snapshot)?;
         state.schema = Some(SchemaVersion {
             version,
             document: document.to_owned(),
         });
-        state.catalog = Some(catalog);
+        state.identity_history = Some(evolved);
         state.resolved_contract = Some(resolved_contract);
         self.write_state(&state)
     }
+}
+
+/// Reproject a document against persisted identities and verify the ledger.
+///
+/// Returns the resolved contract for the persisted snapshot. When the document
+/// no longer matches the durable ledger this fails structurally without
+/// rewriting any state.
+fn rebind_identities(
+    state: &super::State,
+    projection: &vos::types::SchemaProjection,
+) -> Result<vos::ResolvedContract> {
+    let history = state.identity_history.as_ref().ok_or(Error::Corrupt(
+        "catalog identity ledger does not match schema",
+    ))?;
+    let manifest = schema::manifest_from_snapshot(&history.snapshot);
+    let bound = schema::bind(projection, &manifest)
+        .map_err(|_| Error::Corrupt("catalog identity ledger does not match schema"))?;
+    if bound != history.snapshot {
+        return Err(Error::Corrupt(
+            "catalog identity ledger does not match schema",
+        ));
+    }
+    schema::resolve_contract_from_bound(&bound)
 }

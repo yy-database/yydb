@@ -1,4 +1,4 @@
-﻿[workspace]
+[workspace]
 resolver = "2"
 members = ["projects/crates/*"]
 
@@ -16,7 +16,7 @@ sha1 = "0.10"
 base64 = "0.22"
 uuid = { version = "1", features = ["serde", "v4"] }
 serde_json = "1"
-vos = { version = "0.1.0", git = "https://github.com/voml/vos-language.git", branch = "dev" }
+vos = { git = "https://github.com/voml/vos-language.git", branch = "dev" }
 windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Storage_FileSystem", "Win32_System_IO"] }
 napi = { version = "2.16", default-features = false, features = ["napi4"] }
 napi-derive = "2.16"
@@ -31,7 +31,6 @@ yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }
 yydb-format = { version = "0.1.0", path = "projects/crates/yydb-format" }
 yydb-execution = { version = "0.1.0", path = "projects/crates/yydb-execution" }
 yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }
-yydb-query = { version = "0.1.0", path = "projects/crates/yydb-query" }
 
 # facade
 yydb = { path = "projects/crates/yydb" }

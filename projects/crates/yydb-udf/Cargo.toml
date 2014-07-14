@@ -13,8 +13,6 @@ readme = "readme.md"
 path = "src/lib.rs"
 
 [dependencies]
-blake3 = { workspace = true }
-vos = { workspace = true }
 yydb-execution = { workspace = true }
 
 [dev-dependencies]
