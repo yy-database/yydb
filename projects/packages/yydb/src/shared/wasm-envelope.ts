@@ -1,6 +1,6 @@
 import { YydbError, YydbErrorCodes } from '@yydb/yydb-client';
 
-/** Parsed `{ ok, rows, error, code }` envelope from wasm VOS calls. */
+/** Parsed `{ ok, rows, error, code }` envelope from wasm unit-valued calls. */
 export type WasmRowsResult = {
     ok: boolean;
     rows: Record<string, unknown>[];
@@ -48,11 +48,7 @@ function parseJson<T>(payload: string, operation: string): T {
     try {
         return JSON.parse(payload) as T;
     } catch (cause) {
-        throw new YydbError(
-            YydbErrorCodes.clientDecodeFailure,
-            `${operation}: invalid JSON envelope`,
-            { operation, cause },
-        );
+        throw new YydbError(YydbErrorCodes.clientDecodeFailure, `${operation}: invalid JSON envelope`, { operation, cause });
     }
 }
 
@@ -65,14 +61,6 @@ function envelopeError(envelope: EnvelopeErrorFields, operation: string): YydbEr
     const code = envelope.code ?? YydbErrorCodes.clientDecodeFailure;
     const message = envelope.error ?? `${operation}: wasm envelope carried no message`;
     return new YydbError(code, message, { operation });
-}
-
-export function parseWasmRowsResult(payload: string, operation: string): WasmRowsResult {
-    const parsed = parseJson<WasmRowsResult>(payload, operation);
-    if (!parsed.ok) {
-        throw envelopeError(parsed, operation);
-    }
-    return parsed;
 }
 
 export function parseWasmUnitResult(payload: string, operation: string): void {
