@@ -38,15 +38,9 @@ export async function connect(options: ConnectOptions | string): Promise<Client>
     }
     let transport;
     try {
-        transport = wantsWebSocket(endpoint)
-            ? await openWebSocketTransport(endpoint)
-            : await openTcpTransport(endpoint);
+        transport = wantsWebSocket(endpoint) ? await openWebSocketTransport(endpoint) : await openTcpTransport(endpoint);
     } catch (cause) {
-        throw new YydbError(
-            YydbErrorCodes.clientTransportFailure,
-            `connect ${endpoint}: transport failed`,
-            { operation: 'connect', cause },
-        );
+        throw new YydbError(YydbErrorCodes.clientTransportFailure, `connect ${endpoint}: transport failed`, { operation: 'connect', cause });
     }
     const client = Client.fromTransport(wantsWebSocket(endpoint) ? normalizeWsUrl(endpoint) : endpoint, transport);
     await client.hello();

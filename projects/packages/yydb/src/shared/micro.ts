@@ -1,10 +1,4 @@
-import type {
-    InferUdfArgs,
-    InferUdfReturn,
-    MicroEffect,
-    MicroInvocationMode,
-    UdfScalarDescriptor,
-} from './udf-types.js';
+import type { InferUdfArgs, InferUdfReturn, MicroEffect, MicroInvocationMode, UdfScalarDescriptor } from './udf-types.js';
 import type { AnyTypeDescriptor } from '@voml/vos';
 
 /** Value shape accepted and produced on the wire micro path. */
@@ -34,10 +28,7 @@ export function udfWireKind(descriptor: AnyTypeDescriptor): UdfWireKind {
 }
 
 /** Input accepted by [`Database.defineMicro`](./database.ts). */
-export interface TsMicroDefinitionInput<
-    TArgs extends readonly UdfScalarDescriptor[],
-    TReturn extends UdfScalarDescriptor,
-> {
+export interface TsMicroDefinitionInput<TArgs extends readonly UdfScalarDescriptor[], TReturn extends UdfScalarDescriptor> {
     readonly name: string;
     readonly version: number;
     readonly args: TArgs;
@@ -128,12 +119,7 @@ export class MicroSessionRegistry {
     }
 
     /** Invokes a registered micro from a wire `MicroHostInvoke` payload. */
-    invokeFromWire(payload: {
-        hostId: number;
-        handleVersion: number;
-        functionId: string;
-        args: readonly unknown[];
-    }): MicroWireValue {
+    invokeFromWire(payload: { hostId: number; handleVersion: number; functionId: string; args: readonly unknown[] }): MicroWireValue {
         const handle: MicroHandle = {
             hostId: payload.hostId,
             functionId: payload.functionId,

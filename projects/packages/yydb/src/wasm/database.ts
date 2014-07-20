@@ -1,5 +1,12 @@
 import { encodeMicroRegister, encodeScalarCall, YydbError, YydbErrorCodes } from '@yydb/yydb-client';
-import { defineMicro as buildMicro, microFingerprint, udfWireKind, type DefinedMicro, type MicroHandle, MicroSessionRegistry } from '../shared/micro.js';
+import {
+    defineMicro as buildMicro,
+    microFingerprint,
+    udfWireKind,
+    type DefinedMicro,
+    type MicroHandle,
+    MicroSessionRegistry,
+} from '../shared/micro.js';
 import type { UdfScalarDescriptor } from '../shared/udf-types.js';
 import {
     parseWasmKvGetResult,
@@ -149,11 +156,7 @@ export class Database {
 
     private requireSession(operation: string): WasmSession {
         if (!this.session) {
-            throw new YydbError(
-                YydbErrorCodes.sessionClosed,
-                `${operation}: @yydb/yydb/wasm session is closed`,
-                { operation },
-            );
+            throw new YydbError(YydbErrorCodes.sessionClosed, `${operation}: @yydb/yydb/wasm session is closed`, { operation });
         }
         return this.session;
     }

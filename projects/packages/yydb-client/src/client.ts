@@ -84,11 +84,10 @@ export class Client {
         try {
             transport = await openWebSocketTransport(endpoint);
         } catch (cause) {
-            throw new YydbError(
-                YydbErrorCodes.clientTransportFailure,
-                `connect ${endpoint}: transport failed`,
-                { operation: 'connect', cause },
-            );
+            throw new YydbError(YydbErrorCodes.clientTransportFailure, `connect ${endpoint}: transport failed`, {
+                operation: 'connect',
+                cause,
+            });
         }
         const client = new Client(endpoint, transport);
         await client.hello();
@@ -162,11 +161,7 @@ export class Client {
         const request = REQUESTS[msgType];
         const operation = request?.operation ?? `msgType(${msgType})`;
         if (this.closed) {
-            throw new YydbError(
-                YydbErrorCodes.sessionClosed,
-                `${operation}: YYDB session is closed`,
-                { operation },
-            );
+            throw new YydbError(YydbErrorCodes.sessionClosed, `${operation}: YYDB session is closed`, { operation });
         }
         const requestId = this.nextId++;
         let response: Frame;
@@ -178,11 +173,7 @@ export class Client {
                 body,
             });
         } catch (cause) {
-            throw new YydbError(
-                YydbErrorCodes.clientTransportFailure,
-                `${operation}: transport failed`,
-                { operation, cause },
-            );
+            throw new YydbError(YydbErrorCodes.clientTransportFailure, `${operation}: transport failed`, { operation, cause });
         }
         if (response.requestId !== requestId) {
             throw new YydbError(
@@ -195,11 +186,9 @@ export class Client {
             throw remoteError(response.body, operation);
         }
         if (request && response.msgType !== request.ok) {
-            throw new YydbError(
-                YydbErrorCodes.clientUnexpectedResponse,
-                `${operation}: unexpected wire response type ${response.msgType}`,
-                { operation },
-            );
+            throw new YydbError(YydbErrorCodes.clientUnexpectedResponse, `${operation}: unexpected wire response type ${response.msgType}`, {
+                operation,
+            });
         }
         return response;
     }
@@ -211,11 +200,7 @@ function remoteError(body: Uint8Array, operation: string): YydbError {
     try {
         decoded = decodeErrorBody(body);
     } catch (cause) {
-        return new YydbError(
-            YydbErrorCodes.clientDecodeFailure,
-            `${operation}: malformed wire error frame`,
-            { operation, cause },
-        );
+        return new YydbError(YydbErrorCodes.clientDecodeFailure, `${operation}: malformed wire error frame`, { operation, cause });
     }
     return new YydbError(decoded.code, decoded.message, { operation });
 }

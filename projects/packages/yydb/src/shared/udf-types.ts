@@ -24,10 +24,7 @@ export type UdfScalarKind = 'i64' | 'bool' | 'text' | 'null';
  * `v.list(…)` and every non-scalar descriptor are rejected before they reach
  * the wire.
  */
-export type UdfScalarDescriptor =
-    | TypeDescriptor<'i64', bigint>
-    | TypeDescriptor<'bool', boolean>
-    | TypeDescriptor<'utf8', string>;
+export type UdfScalarDescriptor = TypeDescriptor<'i64', bigint> | TypeDescriptor<'bool', boolean> | TypeDescriptor<'utf8', string>;
 
 /** Maps a descriptor tuple to positional boundary value types. */
 export type InferUdfArgs<T extends readonly UdfScalarDescriptor[]> = {
@@ -42,4 +39,3 @@ export type MicroEffect = 'pure';
 
 /** Invocation mode stored with the definition for future batch host calls. */
 export type MicroInvocationMode = 'scalar' | 'batch';
-
