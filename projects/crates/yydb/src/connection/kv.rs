@@ -15,9 +15,9 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let mut state = self.read_state()?;
-        ttl::put_record(&mut state.records, &key.into(), value.as_ref())?;
-        self.write_state(&state)
+        self.mutate_active_state_unlocked(|state| {
+            ttl::put_record(&mut state.records, &key.into(), value.as_ref())
+        })
     }
 
     /// Store a record that expires after `ttl`.
@@ -31,14 +31,14 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let mut state = self.read_state()?;
+        let mut state = self.active_state_unlocked()?;
         let version = ttl::put_with_ttl(
             &mut state.records,
             &key.into(),
             value.as_ref(),
             ttl.as_millis() as u64,
         )?;
-        self.write_state(&state)?;
+        self.replace_active_state_unlocked(state)?;
         Ok(version)
     }
 
@@ -48,9 +48,10 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let mut state = self.read_state()?;
-        ttl::set_namespace_quota(&mut state.records, namespace, quota);
-        self.write_state(&state)
+        self.mutate_active_state_unlocked(|state| {
+            ttl::set_namespace_quota(&mut state.records, namespace, quota);
+            Ok(())
+        })
     }
 
     /// Return byte and record usage for a namespace prefix.
@@ -59,7 +60,10 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        Ok(ttl::namespace_stats(&self.read_state()?.records, namespace))
+        Ok(ttl::namespace_stats(
+            &self.active_state_unlocked()?.records,
+            namespace,
+        ))
     }
 
     /// Remove expired TTL records under `namespace_prefix` up to `budget`.
@@ -72,9 +76,9 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let mut state = self.read_state()?;
+        let mut state = self.active_state_unlocked()?;
         let report = ttl::evict_expired(&mut state.records, namespace_prefix, budget)?;
-        self.write_state(&state)?;
+        self.replace_active_state_unlocked(state)?;
         Ok(report)
     }
 
@@ -84,7 +88,7 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let state = self.read_state()?;
+        let state = self.active_state_unlocked()?;
         if ttl::is_expired(&state.records, key) {
             return Ok(None);
         }
@@ -98,19 +102,20 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let mut state = self.read_state()?;
-        for (key, value) in changes {
-            match value {
-                Some(bytes) => {
-                    state.records.insert(key.clone(), bytes.clone());
-                }
-                None => {
-                    state.records.remove(key);
+        self.mutate_active_state_unlocked(|state| {
+            for (key, value) in changes {
+                match value {
+                    Some(bytes) => {
+                        state.records.insert(key.clone(), bytes.clone());
+                    }
+                    None => {
+                        state.records.remove(key);
+                    }
                 }
             }
-        }
-        lease::bump_commit_sequence(&mut state.records);
-        self.write_state(&state)
+            lease::bump_commit_sequence(&mut state.records);
+            Ok(())
+        })
     }
 
     /// Replace or delete a key only if its current bytes match `expected`.
@@ -125,7 +130,7 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let mut state = self.read_state()?;
+        let mut state = self.active_state_unlocked()?;
         if state.records.get(key).map(Vec::as_slice) != expected {
             return Ok(false);
         }
@@ -137,7 +142,7 @@ impl Connection {
                 state.records.remove(key);
             }
         }
-        self.write_state(&state)?;
+        self.replace_active_state_unlocked(state)?;
         Ok(true)
     }
 
@@ -152,7 +157,7 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let state = self.read_state()?;
+        let state = self.active_state_unlocked()?;
         Ok(state
             .records
             .range(prefix.to_owned()..)
