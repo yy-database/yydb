@@ -10,11 +10,10 @@
 use std::collections::BTreeMap;
 
 use vos::types::{
-    resolved_schema_fingerprint, FieldIdentity, IdentityBoundProjection, IdentityHistory,
-    IdentityManifest, ResolvedContract, SchemaProjection, TypeIdentity,
-    IDENTITY_HISTORY_FORMAT_VERSION, IDENTITY_MANIFEST_VERSION, RESOLVED_CONTRACT_FORMAT_VERSION,
+    FieldIdentity, IdentityBoundProjection, IdentityHistory, IdentityManifest, ResolvedContract,
+    SchemaProjection, TypeIdentity, IDENTITY_HISTORY_FORMAT_VERSION, IDENTITY_MANIFEST_VERSION,
 };
-use vos::{bind_identity, evolve_identity, resolve_identity_types};
+use vos::{bind_identity, evolve_identity, resolve_contract_from_bound as vos_resolve_contract};
 use yydb_execution::{FieldHandle, LayoutField, RecordLayout, RecordLayoutError, Type};
 use yydb_types::{Error, Result};
 
@@ -47,7 +46,7 @@ pub(crate) fn allocate_initial_manifest(projection: &SchemaProjection) -> Identi
             fields.push(FieldIdentity {
                 canonical_name: field.canonical_name.clone(),
                 field_id: next_field_id,
-                virtual_field_index: slot as u32,
+                virtual_field_index: Some(slot as u32),
             });
             next_field_id += 1;
         }
@@ -126,17 +125,9 @@ pub(crate) fn evolve(
 }
 
 /// Resolves an already-bound projection into the strict YYDB-consumed contract.
-pub(crate) fn resolve_contract_from_bound(
-    bound: &IdentityBoundProjection,
-) -> Result<ResolvedContract> {
-    let resolved = resolve_identity_types(bound).map_err(|diagnostics| Error::Schema {
+pub(crate) fn resolve_contract(bound: &IdentityBoundProjection) -> Result<ResolvedContract> {
+    vos_resolve_contract(bound).map_err(|diagnostics| Error::Schema {
         message: format!("VOS name resolution failed: {diagnostics:?}"),
-    })?;
-    Ok(ResolvedContract {
-        format_version: RESOLVED_CONTRACT_FORMAT_VERSION.to_owned(),
-        identity_manifest_version: resolved.manifest_version.clone(),
-        schema_fingerprint: resolved_schema_fingerprint(&resolved),
-        types: resolved.types,
     })
 }
 
@@ -275,13 +266,13 @@ pub(crate) fn migration_manifest(
             previous_type
                 .iter()
                 .flat_map(|previous| previous.fields.iter())
-                .map(|field| field.virtual_field_index)
+                .filter_map(|field| field.virtual_field_index)
                 .chain(
                     history
                         .retired_fields
                         .iter()
                         .filter(|field| field.type_id == type_id)
-                        .map(|field| field.virtual_field_index),
+                        .filter_map(|field| field.virtual_field_index),
                 ),
         );
         let mut fields = Vec::with_capacity(projected.fields.len());
@@ -301,13 +292,15 @@ pub(crate) fn migration_manifest(
                         .unwrap_or(previous_name);
                     target == field.canonical_name
                         && !used_field_ids.contains(&candidate.field_id)
-                        && !used_slots.contains(&candidate.virtual_field_index)
+                        && candidate
+                            .virtual_field_index
+                            .is_none_or(|slot| !used_slots.contains(&slot))
                 })
             });
             let identity = match previous_field {
                 Some(previous_field) => {
                     used_field_ids.insert(previous_field.field_id);
-                    used_slots.insert(previous_field.virtual_field_index);
+                    used_slots.extend(previous_field.virtual_field_index);
                     FieldIdentity {
                         canonical_name: field.canonical_name.clone(),
                         field_id: previous_field.field_id,
@@ -315,15 +308,16 @@ pub(crate) fn migration_manifest(
                     }
                 }
                 None => {
+                    let assigned_slot = slot;
                     let identity = FieldIdentity {
                         canonical_name: field.canonical_name.clone(),
                         field_id: next_field_id,
-                        virtual_field_index: slot,
+                        virtual_field_index: Some(assigned_slot),
                     };
                     next_field_id += 1;
                     slot += 1;
                     used_field_ids.insert(identity.field_id);
-                    used_slots.insert(identity.virtual_field_index);
+                    used_slots.insert(assigned_slot);
                     identity
                 }
             };
@@ -410,7 +404,7 @@ pub fn execution_catalog(document: &str) -> Result<ExecutionCatalog> {
     let projection = project_schema(document)?;
     let manifest = allocate_initial_manifest(&projection);
     let bound = bind(&projection, &manifest)?;
-    let contract = resolve_contract_from_bound(&bound)?;
+    let contract = resolve_contract(&bound)?;
     execution_catalog_from_resolved_contract(&contract)
 }
 
@@ -442,15 +436,20 @@ pub fn execution_catalog_from_resolved_contract(
             })?;
         let mut fields = Vec::with_capacity(item.fields.len());
         for field in &item.fields {
+            let virtual_field_index = field.virtual_field_index.ok_or_else(|| Error::Schema {
+                message: format!(
+                    "resolved VOS field `{}` has no durable virtual slot",
+                    field.canonical_name
+                ),
+            })?;
             let ty = resolved_execution_type(&field.canonical_type)?;
-            let handle =
-                FieldHandle::new(item.type_id, field.field_id, field.virtual_field_index, ty)
-                    .map_err(|_| Error::Schema {
-                        message: "resolved VOS contract emitted an invalid field identity".into(),
-                    })?;
+            let handle = FieldHandle::new(item.type_id, field.field_id, virtual_field_index, ty)
+                .map_err(|_| Error::Schema {
+                    message: "resolved VOS contract emitted an invalid field identity".into(),
+                })?;
             fields.push(ExecutionField {
                 field_id: field.field_id,
-                virtual_field: field.virtual_field_index,
+                virtual_field: virtual_field_index,
                 name: field.canonical_name.clone(),
                 handle,
             });

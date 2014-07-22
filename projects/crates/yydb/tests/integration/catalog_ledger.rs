@@ -63,14 +63,14 @@ fn persists_reorder_rename_and_tombstones_across_reopen() {
         .find(|field| field.canonical_name == "label")
         .expect("renamed field survives");
     assert_eq!(label.field_id, 2);
-    assert_eq!(label.virtual_field_index, 1);
+    assert_eq!(label.virtual_field_index, Some(1));
     let status = snapshot.snapshot.types[0]
         .fields
         .iter()
         .find(|field| field.canonical_name == "status")
         .expect("added field survives");
     assert_eq!(status.field_id, 4);
-    assert_eq!(status.virtual_field_index, 3);
+    assert_eq!(status.virtual_field_index, Some(3));
     assert_eq!(snapshot.retired_fields[0].field_id, 3);
     let execution = connection.execution_catalog().unwrap().unwrap();
     assert_eq!(execution.types[0].fields[2].handle.field_id(), 4);

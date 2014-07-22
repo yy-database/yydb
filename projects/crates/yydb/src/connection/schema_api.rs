@@ -85,7 +85,7 @@ impl Connection {
         let manifest = schema::allocate_initial_manifest(&projection);
         let bound = schema::bind(&projection, &manifest)?;
         let history = schema::evolve(&schema::empty_history(), bound)?;
-        state.resolved_contract = Some(schema::resolve_contract_from_bound(&history.snapshot)?);
+        state.resolved_contract = Some(schema::resolve_contract(&history.snapshot)?);
         state.identity_history = Some(history);
         state.schema = Some(SchemaVersion {
             version,
@@ -121,7 +121,7 @@ impl Connection {
         let manifest = schema::migration_manifest(history, &projection, renames)?;
         let bound = schema::bind(&projection, &manifest)?;
         let evolved = schema::evolve(history, bound)?;
-        let resolved_contract = schema::resolve_contract_from_bound(&evolved.snapshot)?;
+        let resolved_contract = schema::resolve_contract(&evolved.snapshot)?;
         state.schema = Some(SchemaVersion {
             version,
             document: document.to_owned(),
@@ -152,5 +152,5 @@ fn rebind_identities(
             "catalog identity ledger does not match schema",
         ));
     }
-    schema::resolve_contract_from_bound(&bound)
+    schema::resolve_contract(&bound)
 }

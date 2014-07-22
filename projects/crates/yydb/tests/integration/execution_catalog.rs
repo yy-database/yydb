@@ -15,7 +15,7 @@ fn resolved_user_contract() -> yydb::vos::ResolvedContract {
             kind: yydb::vos::types::TypeContractKind::Table,
             fields: vec![yydb::vos::types::ResolvedFieldContract {
                 field_id: 11,
-                virtual_field_index: 3,
+                virtual_field_index: Some(3),
                 canonical_name: "id".into(),
                 canonical_type: yydb::vos::types::ResolvedCanonicalType::Builtin(
                     vec!["i64".into()],
@@ -25,12 +25,7 @@ fn resolved_user_contract() -> yydb::vos::ResolvedContract {
             }],
         }],
     };
-    contract.schema_fingerprint = yydb::vos::types::resolved_schema_fingerprint(
-        &yydb::vos::types::ResolvedIdentityProjection {
-            manifest_version: contract.identity_manifest_version.clone(),
-            types: contract.types.clone(),
-        },
-    );
+    contract.schema_fingerprint = yydb::vos::types::resolved_schema_fingerprint(&contract.types);
     contract
 }
 
