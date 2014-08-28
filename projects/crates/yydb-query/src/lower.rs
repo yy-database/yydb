@@ -1,7 +1,8 @@
 //! Lower VOS expression pipelines into Phase 1 query ops.
 
-use vos::ast::expr::{BinaryOp, Expr, FieldInit, ProjItem, Stmt};
-use vos::ast::{Literal, Program};
+use vos::syntax::{
+    VosBinaryOp, VosExpr, VosFieldInit, VosLiteral, VosProgram, VosProjItem, VosStmt,
+};
 
 use yydb_types::{Error, Result};
 
@@ -14,17 +15,12 @@ fn query_error(message: impl Into<String>) -> Error {
 }
 
 /// Lower a VOS program into an ordered physical op list.
-pub fn lower_program(program: &Program) -> Result<Vec<QueryOp>> {
-    let mut bindings: Vec<(String, Expr)> = Vec::new();
+pub fn lower_program(program: &VosProgram) -> Result<Vec<QueryOp>> {
+    let mut bindings: Vec<(String, VosExpr)> = Vec::new();
     for stmt in &program.statements {
         match stmt {
-            Stmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
-            Stmt::Expr(expr) => return lower_exec_expr(expr, &bindings),
-            _ => {
-                return Err(query_error(
-                    "unsupported statement in Phase 1 query program",
-                ));
-            }
+            VosStmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
+            VosStmt::Expr(expr) => return lower_exec_expr(expr, &bindings),
         }
     }
     let Some(result) = &program.result else {
@@ -33,7 +29,7 @@ pub fn lower_program(program: &Program) -> Result<Vec<QueryOp>> {
     lower_exec_expr(result, &bindings)
 }
 
-fn lower_exec_expr(expr: &Expr, bindings: &[(String, Expr)]) -> Result<Vec<QueryOp>> {
+fn lower_exec_expr(expr: &VosExpr, bindings: &[(String, VosExpr)]) -> Result<Vec<QueryOp>> {
     let expr = expand_bindings(expr, bindings)?;
     let pipeline = split_collect(&expr)?;
     let mut ops = lower_pipeline(&pipeline)?;
@@ -41,46 +37,48 @@ fn lower_exec_expr(expr: &Expr, bindings: &[(String, Expr)]) -> Result<Vec<Query
     Ok(ops)
 }
 
-fn expand_bindings(expr: &Expr, bindings: &[(String, Expr)]) -> Result<Expr> {
+fn expand_bindings(expr: &VosExpr, bindings: &[(String, VosExpr)]) -> Result<VosExpr> {
     match expr {
-        Expr::Name { name, .. } => {
+        VosExpr::Name { name, .. } => {
             if let Some((_, value)) = bindings.iter().rev().find(|(n, _)| n == name) {
                 expand_bindings(value, bindings)
             } else {
                 Ok(expr.clone())
             }
         }
-        Expr::Member {
+        VosExpr::Member {
             object,
             name,
+            name_span,
             sep,
             span,
-        } => Ok(Expr::Member {
+        } => Ok(VosExpr::Member {
             object: Box::new(expand_bindings(object, bindings)?),
             name: name.clone(),
+            name_span: name_span.clone(),
             sep: *sep,
-            span: *span,
+            span: span.clone(),
         }),
-        Expr::Call { callee, args, span } => Ok(Expr::Call {
+        VosExpr::Call { callee, args, span } => Ok(VosExpr::Call {
             callee: Box::new(expand_bindings(callee, bindings)?),
             args: args
                 .iter()
                 .map(|arg| expand_bindings(arg, bindings))
                 .collect::<Result<Vec<_>>>()?,
-            span: *span,
+            span: span.clone(),
         }),
         other => Ok(other.clone()),
     }
 }
 
-fn split_collect(expr: &Expr) -> Result<Expr> {
+fn split_collect(expr: &VosExpr) -> Result<VosExpr> {
     match expr {
-        Expr::Call {
+        VosExpr::Call {
             callee,
             args,
             span: _,
         } => match callee.as_ref() {
-            Expr::Member { object, name, .. } if name == "collect" => {
+            VosExpr::Member { object, name, .. } if name == "collect" => {
                 if !args.is_empty() {
                     return Err(query_error("`.collect()` takes no arguments"));
                 }
@@ -96,23 +94,23 @@ fn split_collect(expr: &Expr) -> Result<Expr> {
     }
 }
 
-fn lower_pipeline(expr: &Expr) -> Result<Vec<QueryOp>> {
-    let mut methods: Vec<(&str, &[Expr])> = Vec::new();
+fn lower_pipeline(expr: &VosExpr) -> Result<Vec<QueryOp>> {
+    let mut methods: Vec<(&str, &[VosExpr])> = Vec::new();
     let mut cur = expr;
     loop {
         match cur {
-            Expr::Call { callee, args, .. } => match callee.as_ref() {
-                Expr::Member { object, name, .. } => {
+            VosExpr::Call { callee, args, .. } => match callee.as_ref() {
+                VosExpr::Member { object, name, .. } => {
                     methods.push((name.as_str(), args.as_slice()));
                     cur = object.as_ref();
                 }
                 _ => return Err(query_error("unsupported call shape in query pipeline")),
             },
-            Expr::Member { object, name, .. } if name == "all" => {
+            VosExpr::Member { object, name, .. } if name == "all" => {
                 methods.push(("all", &[]));
                 cur = object.as_ref();
             }
-            Expr::Name { name, .. } => {
+            VosExpr::Name { name, .. } => {
                 let mut ops = vec![QueryOp::Scan {
                     table: name.clone(),
                 }];
@@ -126,7 +124,7 @@ fn lower_pipeline(expr: &Expr) -> Result<Vec<QueryOp>> {
     }
 }
 
-fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[Expr]) -> Result<()> {
+fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[VosExpr]) -> Result<()> {
     match method {
         "all" => Ok(()),
         "filter" | "where" => {
@@ -190,9 +188,9 @@ fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[Expr]) -> Result<()
     }
 }
 
-fn lower_predicate(expr: &Expr) -> Result<Pred> {
+fn lower_predicate(expr: &VosExpr) -> Result<Pred> {
     match expr {
-        Expr::Lambda(lambda) => {
+        VosExpr::Lambda(lambda) => {
             let param = lambda.params.first().map(String::as_str);
             lower_pred_body(lambda.body.as_ref(), param)
         }
@@ -200,12 +198,12 @@ fn lower_predicate(expr: &Expr) -> Result<Pred> {
     }
 }
 
-fn lower_pred_body(expr: &Expr, param: Option<&str>) -> Result<Pred> {
+fn lower_pred_body(expr: &VosExpr, param: Option<&str>) -> Result<Pred> {
     match expr {
-        Expr::Literal(Literal::Bool(true)) => Ok(Pred::True),
-        Expr::Literal(Literal::Bool(false)) => Ok(Pred::False),
-        Expr::Binary {
-            op: BinaryOp::And,
+        VosExpr::Literal(VosLiteral::Bool(true)) => Ok(Pred::True),
+        VosExpr::Literal(VosLiteral::Bool(false)) => Ok(Pred::False),
+        VosExpr::Binary {
+            op: VosBinaryOp::And,
             left,
             right,
             ..
@@ -213,8 +211,8 @@ fn lower_pred_body(expr: &Expr, param: Option<&str>) -> Result<Pred> {
             Box::new(lower_pred_body(left, param)?),
             Box::new(lower_pred_body(right, param)?),
         )),
-        Expr::Binary {
-            op: BinaryOp::Or,
+        VosExpr::Binary {
+            op: VosBinaryOp::Or,
             left,
             right,
             ..
@@ -222,7 +220,7 @@ fn lower_pred_body(expr: &Expr, param: Option<&str>) -> Result<Pred> {
             Box::new(lower_pred_body(left, param)?),
             Box::new(lower_pred_body(right, param)?),
         )),
-        Expr::Binary {
+        VosExpr::Binary {
             op, left, right, ..
         } => {
             let path = lower_field_path(left.as_ref(), param)?;
@@ -232,29 +230,28 @@ fn lower_pred_body(expr: &Expr, param: Option<&str>) -> Result<Pred> {
                 ));
             }
             let (literal, kind) = match right.as_ref() {
-                Expr::Literal(Literal::Bool(b)) => (b.to_string(), LiteralKind::Bool),
-                Expr::Literal(Literal::Int(t)) => (t.clone(), LiteralKind::Int),
-                Expr::Literal(Literal::String(s)) => (s.clone(), LiteralKind::Str),
-                Expr::Literal(Literal::Null) => ("null".into(), LiteralKind::Null),
-                Expr::Literal(Literal::Float(t)) => (t.clone(), LiteralKind::Str),
-                Expr::Literal(Literal::Ident(t)) => (t.clone(), LiteralKind::Str),
+                VosExpr::Literal(VosLiteral::Bool(b)) => (b.to_string(), LiteralKind::Bool),
+                VosExpr::Literal(VosLiteral::Int(t)) => (t.clone(), LiteralKind::Int),
+                VosExpr::Literal(VosLiteral::String(s)) => (s.clone(), LiteralKind::Str),
+                VosExpr::Literal(VosLiteral::Null) => ("null".into(), LiteralKind::Null),
+                VosExpr::Literal(VosLiteral::Float(t)) => (t.clone(), LiteralKind::Str),
                 _ => {
                     return Err(query_error(
                         "Phase 1 filters require a literal right-hand side",
                     ));
                 }
             };
-            if matches!(op, BinaryOp::Eq) && kind == LiteralKind::Bool {
+            if matches!(op, VosBinaryOp::Eq) && kind == LiteralKind::Bool {
                 let value = literal == "true";
                 return Ok(Pred::FieldBool { path, value });
             }
             let cmp = match op {
-                BinaryOp::Eq => CmpOp::Eq,
-                BinaryOp::Ne => CmpOp::Ne,
-                BinaryOp::Lt => CmpOp::Lt,
-                BinaryOp::Le => CmpOp::Le,
-                BinaryOp::Gt => CmpOp::Gt,
-                BinaryOp::Ge => CmpOp::Ge,
+                VosBinaryOp::Eq => CmpOp::Eq,
+                VosBinaryOp::Ne => CmpOp::Ne,
+                VosBinaryOp::Lt => CmpOp::Lt,
+                VosBinaryOp::Le => CmpOp::Le,
+                VosBinaryOp::Gt => CmpOp::Gt,
+                VosBinaryOp::Ge => CmpOp::Ge,
                 _ => return Err(query_error("unsupported comparison in filter")),
             };
             Ok(Pred::FieldCmp {
@@ -274,53 +271,52 @@ fn lower_pred_body(expr: &Expr, param: Option<&str>) -> Result<Pred> {
     }
 }
 
-fn lower_field_path(expr: &Expr, param: Option<&str>) -> Result<Vec<String>> {
+fn lower_field_path(expr: &VosExpr, param: Option<&str>) -> Result<Vec<String>> {
     match expr {
-        Expr::Member { object, name, .. } => {
+        VosExpr::Member { object, name, .. } => {
             let mut path = lower_field_path(object.as_ref(), param)?;
             path.push(name.clone());
             Ok(path)
         }
-        Expr::Name { name, .. } if Some(name.as_str()) == param => Ok(Vec::new()),
+        VosExpr::Name { name, .. } if Some(name.as_str()) == param => Ok(Vec::new()),
         _ => Err(query_error(
             "Phase 1 filters must use field paths rooted at the lambda parameter",
         )),
     }
 }
 
-fn lower_field_lambda(expr: &Expr) -> Result<String> {
+fn lower_field_lambda(expr: &VosExpr) -> Result<String> {
     let body = match expr {
-        Expr::Lambda(lambda) => lambda.body.as_ref(),
+        VosExpr::Lambda(lambda) => lambda.body.as_ref(),
         other => other,
     };
     match body {
-        Expr::Member { name, .. } => Ok(name.clone()),
+        VosExpr::Member { name, .. } => Ok(name.clone()),
         _ => Err(query_error(
             "Phase 1 sort key must be a field access lambda",
         )),
     }
 }
 
-fn lower_projection(expr: &Expr) -> Result<Vec<ProjectField>> {
+fn lower_projection(expr: &VosExpr) -> Result<Vec<ProjectField>> {
     let (body, param) = match expr {
-        Expr::Lambda(lambda) => (
+        VosExpr::Lambda(lambda) => (
             lambda.body.as_ref(),
             lambda.params.first().map(String::as_str),
         ),
         other => (other, None),
     };
     match body {
-        Expr::StructProj { items, .. } => {
+        VosExpr::StructProj { items, .. } => {
             let mut fields = Vec::new();
             for item in items {
                 match item {
-                    ProjItem::Star { .. } => {
+                    VosProjItem::Star { .. } => {
                         return Err(query_error("Phase 1 projection does not expand `*` yet"));
                     }
-                    ProjItem::Field(init) => {
+                    VosProjItem::Field(init) => {
                         fields.push(lower_project_field(init, param)?);
                     }
-                    _ => return Err(query_error("unsupported projection item")),
                 }
             }
             Ok(fields)
@@ -329,7 +325,7 @@ fn lower_projection(expr: &Expr) -> Result<Vec<ProjectField>> {
     }
 }
 
-fn lower_project_field(init: &FieldInit, param: Option<&str>) -> Result<ProjectField> {
+fn lower_project_field(init: &VosFieldInit, param: Option<&str>) -> Result<ProjectField> {
     let expr = match &init.value {
         None => ProjectExpr::Scalar {
             path: vec![init.name.clone()],
@@ -342,22 +338,21 @@ fn lower_project_field(init: &FieldInit, param: Option<&str>) -> Result<ProjectF
     })
 }
 
-fn lower_project_expr(expr: &Expr, param: Option<&str>) -> Result<ProjectExpr> {
+fn lower_project_expr(expr: &VosExpr, param: Option<&str>) -> Result<ProjectExpr> {
     match expr {
-        Expr::StructProj {
+        VosExpr::StructProj {
             receiver, items, ..
         } => {
             let path = lower_field_path(receiver.as_ref(), param)?;
             let mut fields = Vec::new();
             for item in items {
                 match item {
-                    ProjItem::Star { .. } => {
+                    VosProjItem::Star { .. } => {
                         return Err(query_error(
                             "Phase 1 nested projection does not expand `*` yet",
                         ));
                     }
-                    ProjItem::Field(init) => fields.push(lower_project_field(init, param)?),
-                    _ => return Err(query_error("unsupported nested projection item")),
+                    VosProjItem::Field(init) => fields.push(lower_project_field(init, param)?),
                 }
             }
             Ok(ProjectExpr::Nested { path, fields })
@@ -374,14 +369,14 @@ fn lower_project_expr(expr: &Expr, param: Option<&str>) -> Result<ProjectExpr> {
     }
 }
 
-fn literal_u64(expr: Option<&Expr>, method: &str) -> Result<u64> {
+fn literal_u64(expr: Option<&VosExpr>, method: &str) -> Result<u64> {
     let Some(expr) = expr else {
         return Err(query_error(format!(
             "`.{method}` requires a count argument"
         )));
     };
     match expr {
-        Expr::Literal(Literal::Int(t)) => t
+        VosExpr::Literal(VosLiteral::Int(t)) => t
             .parse::<u64>()
             .map_err(|_| query_error(format!("invalid `{method}` count"))),
         _ => Err(query_error(format!(

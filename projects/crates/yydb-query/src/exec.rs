@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use vos::ast::catalog::CatalogSnapshot;
+use vos::types::SchemaProjection;
 use yydb_types::{Error, Result, Value};
 
 use super::lower;
@@ -12,15 +12,11 @@ use super::store;
 
 pub fn execute(
     source: &str,
-    catalog: Option<&CatalogSnapshot>,
+    catalog: Option<&SchemaProjection>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Vec<QueryRow>> {
     let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema {
-        message: diagnostics
-            .errors
-            .first()
-            .map(|diag| diag.message.clone())
-            .unwrap_or_else(|| "VOS query parse failed".into()),
+        message: diagnostics,
     })?;
     let ops = lower::lower_program(&program)?;
     execute_ops(&ops, catalog, records)
@@ -28,7 +24,7 @@ pub fn execute(
 
 pub fn execute_ops(
     ops: &[QueryOp],
-    catalog: Option<&CatalogSnapshot>,
+    catalog: Option<&SchemaProjection>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Vec<QueryRow>> {
     let mut rows: Vec<QueryRow> = Vec::new();
@@ -85,7 +81,7 @@ fn project_row(
     fields: &[ProjectField],
     row: &QueryRow,
     table: &str,
-    catalog: Option<&CatalogSnapshot>,
+    catalog: Option<&SchemaProjection>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> QueryRow {
     let mut out = QueryRow::new();
@@ -126,7 +122,7 @@ fn eval_pred(
     pred: &Pred,
     row: &QueryRow,
     table: &str,
-    catalog: Option<&CatalogSnapshot>,
+    catalog: Option<&SchemaProjection>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> bool {
     match pred {
@@ -161,7 +157,7 @@ fn read_path(
     path: &[String],
     row: &QueryRow,
     table: &str,
-    catalog: Option<&CatalogSnapshot>,
+    catalog: Option<&SchemaProjection>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Value {
     if path.len() == 1 {

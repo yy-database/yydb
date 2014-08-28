@@ -33,10 +33,7 @@ macro seed_blog() -> unit {
 
 #[test]
 fn expand_schema_macro_when_vos_supports_document_macros() {
-    let Ok(document) = vos::parser::parse_document(BLOG_WITH_MACRO) else {
-        return;
-    };
-    let catalog = vos::catalog_from_document(&document).expect("catalog");
+    let catalog = vos::validate_schema(BLOG_SCHEMA).expect("catalog");
     let mut records = BTreeMap::new();
     execute_write("seed_blog()", &catalog, Some(BLOG_WITH_MACRO), &mut records).expect("execute");
     assert_eq!(records.len(), 2);
@@ -44,8 +41,7 @@ fn expand_schema_macro_when_vos_supports_document_macros() {
 
 #[test]
 fn static_insert_call_shape() {
-    let document = vos::parser::parse_document(BLOG_SCHEMA).expect("schema");
-    let catalog = vos::catalog_from_document(&document).expect("catalog");
+    let catalog = vos::validate_schema(BLOG_SCHEMA).expect("catalog");
     let mut records = BTreeMap::new();
     execute_write(
         r#"User::insert({

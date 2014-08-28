@@ -2,9 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use vos::ast::catalog::{CatalogSnapshot, TypeKind};
-use vos::ast::expr::{Expr, FieldInit, Stmt};
-use vos::ast::{Document, FieldAttribute, Item, Literal, Program};
+use vos::syntax::{
+    VosDeclarationKind, VosExpr, VosFieldInit, VosLiteral, VosProgram, VosRoot, VosStmt,
+};
+use vos::types::{CanonicalType, SchemaProjection, TypeContract, TypeContractKind};
 
 use yydb_types::{Error, Result, Value};
 
@@ -20,12 +21,12 @@ fn dml_error(message: impl Into<String>) -> Error {
 /// Execute unit-valued VOS write programs against stored table rows.
 pub fn execute(
     source: &str,
-    catalog: &CatalogSnapshot,
+    catalog: &SchemaProjection,
     schema_document: Option<&str>,
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<()> {
     let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema {
-        message: diagnostics.to_string(),
+        message: diagnostics,
     })?;
     execute_program(&program, catalog, schema_document, records)
 }
@@ -33,11 +34,11 @@ pub fn execute(
 /// If `source` is a single `Type::insert({ … })` program, run it and return the stored row.
 pub fn try_insert_returning(
     source: &str,
-    catalog: &CatalogSnapshot,
+    catalog: &SchemaProjection,
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<Option<Vec<QueryRow>>> {
     let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema {
-        message: diagnostics.to_string(),
+        message: diagnostics,
     })?;
     if !program.statements.is_empty() || program.result.is_none() {
         return Ok(None);
@@ -55,26 +56,21 @@ pub fn try_insert_returning(
 }
 
 pub fn execute_program(
-    program: &Program,
-    catalog: &CatalogSnapshot,
+    program: &VosProgram,
+    catalog: &SchemaProjection,
     schema_document: Option<&str>,
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<()> {
     let expanded = expand_program(program, schema_document)?;
-    let mut bindings: Vec<(String, Expr)> = Vec::new();
+    let mut bindings: Vec<(String, VosExpr)> = Vec::new();
     let mut wrote = false;
 
     for stmt in &expanded.statements {
         match stmt {
-            Stmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
-            Stmt::Expr(expr) => {
+            VosStmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
+            VosStmt::Expr(expr) => {
                 apply_insert(expr, catalog, records, &bindings)?;
                 wrote = true;
-            }
-            _ => {
-                return Err(dml_error(
-                    "unsupported statement in Phase 1 execute program",
-                ));
             }
         }
     }
@@ -95,16 +91,13 @@ pub fn execute_program(
     Ok(())
 }
 
-fn expand_program(program: &Program, schema_document: Option<&str>) -> Result<Program> {
+fn expand_program(program: &VosProgram, schema_document: Option<&str>) -> Result<VosProgram> {
     let mut statements = Vec::new();
     for stmt in &program.statements {
         match stmt {
-            Stmt::Let(_) => statements.push(stmt.clone()),
-            Stmt::Expr(expr) => expand_expr_into_program(expr, schema_document, &mut statements)?,
-            _ => {
-                return Err(dml_error(
-                    "unsupported statement in Phase 1 execute program",
-                ));
+            VosStmt::Let(_) => statements.push(stmt.clone()),
+            VosStmt::Expr(expr) => {
+                expand_expr_into_program(expr, schema_document, &mut statements)?
             }
         }
     }
@@ -115,13 +108,10 @@ fn expand_program(program: &Program, schema_document: Option<&str>) -> Result<Pr
             let body = expand_macro_call(expr, schema_document)?;
             for stmt in body.statements {
                 match stmt {
-                    Stmt::Expr(inner) => {
+                    VosStmt::Expr(inner) => {
                         expand_expr_into_program(&inner, schema_document, &mut statements)?;
                     }
-                    Stmt::Let(let_) => statements.push(Stmt::Let(let_.clone())),
-                    _ => {
-                        return Err(dml_error("unsupported statement in expanded macro body"));
-                    }
+                    VosStmt::Let(let_) => statements.push(VosStmt::Let(let_)),
                 }
             }
             body.result
@@ -129,50 +119,47 @@ fn expand_program(program: &Program, schema_document: Option<&str>) -> Result<Pr
         Some(expr) => Some(expr.clone()),
     };
 
-    Ok(Program {
+    Ok(VosProgram {
         micros: program.micros.clone(),
         statements,
         result,
-        span: program.span,
+        span: program.span.clone(),
     })
 }
 
 fn expand_expr_into_program(
-    expr: &Expr,
+    expr: &VosExpr,
     schema_document: Option<&str>,
-    statements: &mut Vec<Stmt>,
+    statements: &mut Vec<VosStmt>,
 ) -> Result<()> {
     if is_macro_call(expr) {
         let body = expand_macro_call(expr, schema_document)?;
         for stmt in body.statements {
             match stmt {
-                Stmt::Expr(inner) => {
+                VosStmt::Expr(inner) => {
                     expand_expr_into_program(&inner, schema_document, statements)?;
                 }
-                Stmt::Let(let_) => statements.push(Stmt::Let(let_.clone())),
-                _ => {
-                    return Err(dml_error("unsupported statement in expanded macro body"));
-                }
+                VosStmt::Let(let_) => statements.push(VosStmt::Let(let_)),
             }
         }
         if let Some(result) = body.result {
             if is_macro_call(&result) {
                 expand_expr_into_program(&result, schema_document, statements)?;
             } else {
-                statements.push(Stmt::Expr(result));
+                statements.push(VosStmt::Expr(result));
             }
         }
         return Ok(());
     }
-    statements.push(Stmt::Expr(expr.clone()));
+    statements.push(VosStmt::Expr(expr.clone()));
     Ok(())
 }
 
-fn expand_macro_call(expr: &Expr, schema_document: Option<&str>) -> Result<Program> {
-    let Expr::Call { callee, args, .. } = expr else {
+fn expand_macro_call(expr: &VosExpr, schema_document: Option<&str>) -> Result<VosProgram> {
+    let VosExpr::Call { callee, args, .. } = expr else {
         return Err(dml_error("expected macro call"));
     };
-    let Expr::Name { name, .. } = callee.as_ref() else {
+    let VosExpr::Name { name, .. } = callee.as_ref() else {
         return Err(dml_error("expected bare macro name call"));
     };
     if !args.is_empty() {
@@ -182,51 +169,55 @@ fn expand_macro_call(expr: &Expr, schema_document: Option<&str>) -> Result<Progr
     }
     let document = schema_document
         .ok_or_else(|| dml_error("macro expansion requires an installed schema document"))?;
-    let document = vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
-        message: diagnostics.to_string(),
+    let document = vos::syntax::parse(document).map_err(|diagnostics| Error::Schema {
+        message: diagnostics,
     })?;
     find_macro_body(&document, name)
         .ok_or_else(|| dml_error(format!("unknown schema macro `{name}`")))
 }
 
-fn find_macro_body(document: &Document, name: &str) -> Option<Program> {
-    document.items.iter().find_map(|item| match item {
-        Item::Macro(macro_def) if macro_def.name == name => Some(macro_def.body.clone()),
-        _ => None,
-    })
+fn find_macro_body(document: &VosRoot, name: &str) -> Option<VosProgram> {
+    document
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.kind == VosDeclarationKind::Macro
+                && declaration.name.as_deref() == Some(name)
+        })
+        .and_then(|declaration| declaration.body_program.clone())
 }
 
-fn is_macro_call(expr: &Expr) -> bool {
+fn is_macro_call(expr: &VosExpr) -> bool {
     matches!(
         expr,
-        Expr::Call {
+        VosExpr::Call {
             callee,
             args,
             ..
-        } if args.is_empty() && matches!(callee.as_ref(), Expr::Name { .. })
+        } if args.is_empty() && matches!(callee.as_ref(), VosExpr::Name { .. })
     )
 }
 
-fn is_typed_object_insert(expr: &Expr) -> bool {
+fn is_typed_object_insert(expr: &VosExpr) -> bool {
     matches!(
         expr,
-        Expr::Call {
+        VosExpr::Call {
             callee,
             args,
             ..
         } if args.is_empty()
             && matches!(
                 callee.as_ref(),
-                Expr::Member { name, .. } if name == "insert"
+                VosExpr::Member { name, .. } if name == "insert"
             )
     )
 }
 
 fn apply_insert(
-    expr: &Expr,
-    catalog: &CatalogSnapshot,
+    expr: &VosExpr,
+    catalog: &SchemaProjection,
     records: &mut BTreeMap<String, Vec<u8>>,
-    bindings: &[(String, Expr)],
+    bindings: &[(String, VosExpr)],
 ) -> Result<()> {
     let (table, row) = lower_insert(expr, catalog, bindings)?;
     upsert_row_for_table(catalog, records, &table, &row)?;
@@ -234,7 +225,7 @@ fn apply_insert(
 }
 
 fn upsert_row_for_table(
-    catalog: &CatalogSnapshot,
+    catalog: &SchemaProjection,
     records: &mut BTreeMap<String, Vec<u8>>,
     table: &str,
     row: &QueryRow,
@@ -251,14 +242,14 @@ fn upsert_row_for_table(
 }
 
 fn lower_insert(
-    expr: &Expr,
-    catalog: &CatalogSnapshot,
-    bindings: &[(String, Expr)],
+    expr: &VosExpr,
+    catalog: &SchemaProjection,
+    bindings: &[(String, VosExpr)],
 ) -> Result<(String, QueryRow)> {
-    let Expr::Call { callee, args, .. } = expr else {
+    let VosExpr::Call { callee, args, .. } = expr else {
         return Err(dml_error("Phase 1 execute expects an insert expression"));
     };
-    let Expr::Member { object, name, .. } = callee.as_ref() else {
+    let VosExpr::Member { object, name, .. } = callee.as_ref() else {
         return Err(dml_error("Phase 1 execute expects an insert expression"));
     };
     if name != "insert" {
@@ -271,7 +262,7 @@ fn lower_insert(
     if args.len() == 1 {
         let table = type_name_from_expr(object)?;
         let entry = table_entry(catalog, &table)?;
-        let Expr::AnonObject { fields, .. } = expand_bindings(&args[0], bindings)? else {
+        let VosExpr::AnonObject { fields, .. } = expand_bindings(&args[0], bindings)? else {
             return Err(dml_error(
                 "Phase 1 execute expects `Type::insert({ … })` with an object literal",
             ));
@@ -284,56 +275,71 @@ fn lower_insert(
     }
 
     let object = expand_bindings(object, bindings)?;
-    let Expr::TypedObject { ty, fields, .. } = object else {
+    let VosExpr::TypedObject { ty, fields, .. } = object else {
         return Err(dml_error(
             "Phase 1 execute supports `Type { … }.insert()` or `Type::insert({ … })`",
         ));
     };
     let entry = table_entry(catalog, &ty)?;
     let row = lower_field_inits(entry, &fields)?;
-    Ok((ty.clone(), row))
+    Ok((ty, row))
 }
 
-fn type_name_from_expr(expr: &Expr) -> Result<String> {
+fn type_name_from_expr(expr: &VosExpr) -> Result<String> {
     match expr {
-        Expr::Name { name, .. } => Ok(name.clone()),
-        Expr::Member { object, .. } => type_name_from_expr(object.as_ref()),
+        VosExpr::Name { name, .. } => Ok(name.clone()),
+        VosExpr::Member { object, .. } => type_name_from_expr(object.as_ref()),
         _ => Err(dml_error("insert target must be a table type name")),
     }
 }
 
-fn table_entry<'a>(
-    catalog: &'a CatalogSnapshot,
-    name: &str,
-) -> Result<&'a vos::ast::catalog::TypeEntry> {
+fn table_name(entry: &TypeContract) -> String {
+    entry.canonical_path.join("::")
+}
+
+fn table_entry<'a>(catalog: &'a SchemaProjection, name: &str) -> Result<&'a TypeContract> {
     catalog
         .types
         .iter()
-        .find(|entry| entry.name == name && entry.kind == TypeKind::Table)
+        .find(|entry| {
+            entry.kind == TypeContractKind::Table
+                && entry.canonical_path.last().is_some_and(|last| last == name)
+        })
         .ok_or_else(|| dml_error(format!("unknown table `{name}`")))
 }
 
-fn primary_field_name(entry: &vos::ast::catalog::TypeEntry) -> Result<&str> {
+fn primary_field_name(entry: &TypeContract) -> Result<&str> {
     entry
         .fields
         .iter()
-        .find(|field| field.attrs.contains(&FieldAttribute::Primary))
-        .map(|field| field.current_name.as_str())
-        .ok_or_else(|| dml_error(format!("table `{}` has no primary key field", entry.name)))
+        .find(|field| {
+            field
+                .attributes
+                .iter()
+                .any(|attribute| attribute.name == "primary")
+        })
+        .map(|field| field.canonical_name.as_str())
+        .ok_or_else(|| {
+            dml_error(format!(
+                "table `{}` has no primary key field",
+                table_name(entry)
+            ))
+        })
 }
 
-fn lower_field_inits(
-    entry: &vos::ast::catalog::TypeEntry,
-    fields: &[FieldInit],
-) -> Result<QueryRow> {
+fn lower_field_inits(entry: &TypeContract, fields: &[VosFieldInit]) -> Result<QueryRow> {
     let mut row = QueryRow::new();
     for init in fields {
         let slot = entry
             .fields
             .iter()
-            .find(|field| field.current_name == init.name)
+            .find(|field| field.canonical_name == init.name)
             .ok_or_else(|| {
-                dml_error(format!("unknown field `{}` on `{}`", init.name, entry.name))
+                dml_error(format!(
+                    "unknown field `{}` on `{}`",
+                    init.name,
+                    table_name(entry)
+                ))
             })?;
         let value = init.value.as_ref().ok_or_else(|| {
             dml_error(format!(
@@ -341,35 +347,33 @@ fn lower_field_inits(
                 init.name
             ))
         })?;
-        row.insert(init.name.clone(), eval_literal(value, &slot.ty)?);
+        row.insert(
+            init.name.clone(),
+            eval_literal(value, &slot.canonical_type)?,
+        );
     }
     Ok(row)
 }
 
-fn eval_literal(expr: &Expr, ty: &vos::ast::TypeExpr) -> Result<Value> {
+fn eval_literal(expr: &VosExpr, ty: &CanonicalType) -> Result<Value> {
     match expr {
-        Expr::Literal(literal) => literal_to_value(literal, ty),
+        VosExpr::Literal(literal) => literal_to_value(literal, ty),
         _ => Err(dml_error(
             "Phase 1 execute only supports literal field initializers",
         )),
     }
 }
 
-fn literal_to_value(literal: &Literal, _ty: &vos::ast::TypeExpr) -> Result<Value> {
+fn literal_to_value(literal: &VosLiteral, _ty: &CanonicalType) -> Result<Value> {
     Ok(match literal {
-        Literal::Null => Value::Null,
-        Literal::Bool(value) => Value::Bool(*value),
-        Literal::Int(text) => Value::I64(
+        VosLiteral::Null => Value::Null,
+        VosLiteral::Bool(value) => Value::Bool(*value),
+        VosLiteral::Int(text) => Value::I64(
             text.parse()
                 .map_err(|_| dml_error(format!("invalid integer literal `{text}`")))?,
         ),
-        Literal::String(text) | Literal::Ident(text) => Value::Text(text.clone()),
-        Literal::Float(text) => Value::Text(text.clone()),
-        _ => {
-            return Err(dml_error(
-                "Phase 1 execute only supports null, bool, integer, string, and float literals",
-            ));
-        }
+        VosLiteral::String(text) => Value::Text(text.clone()),
+        VosLiteral::Float(text) => Value::Text(text.clone()),
     })
 }
 
@@ -388,69 +392,79 @@ fn value_to_key(value: &Value) -> Result<String> {
     })
 }
 
-fn expand_bindings(expr: &Expr, bindings: &[(String, Expr)]) -> Result<Expr> {
+fn expand_bindings(expr: &VosExpr, bindings: &[(String, VosExpr)]) -> Result<VosExpr> {
     match expr {
-        Expr::Name { name, .. } => {
+        VosExpr::Name { name, .. } => {
             if let Some((_, value)) = bindings.iter().rev().find(|(n, _)| n == name) {
                 expand_bindings(value, bindings)
             } else {
                 Ok(expr.clone())
             }
         }
-        Expr::Member {
+        VosExpr::Member {
             object,
             name,
+            name_span,
             sep,
             span,
-        } => Ok(Expr::Member {
+        } => Ok(VosExpr::Member {
             object: Box::new(expand_bindings(object, bindings)?),
             name: name.clone(),
+            name_span: name_span.clone(),
             sep: *sep,
-            span: *span,
+            span: span.clone(),
         }),
-        Expr::Call { callee, args, span } => Ok(Expr::Call {
+        VosExpr::Call { callee, args, span } => Ok(VosExpr::Call {
             callee: Box::new(expand_bindings(callee, bindings)?),
             args: args
                 .iter()
                 .map(|arg| expand_bindings(arg, bindings))
                 .collect::<Result<Vec<_>>>()?,
-            span: *span,
+            span: span.clone(),
         }),
-        Expr::TypedObject { ty, fields, span } => {
+        VosExpr::TypedObject {
+            ty,
+            ty_span,
+            fields,
+            span,
+        } => {
             let mut expanded = Vec::with_capacity(fields.len());
             for init in fields {
-                expanded.push(FieldInit {
+                expanded.push(VosFieldInit {
                     name: init.name.clone(),
+                    name_span: init.name_span.clone(),
                     value: init
                         .value
                         .as_ref()
                         .map(|value| expand_bindings(value, bindings))
                         .transpose()?,
-                    span: init.span,
+                    span: init.span.clone(),
                 });
             }
-            Ok(Expr::TypedObject {
+            Ok(VosExpr::TypedObject {
                 ty: ty.clone(),
+                ty_span: ty_span.clone(),
                 fields: expanded,
-                span: *span,
+                span: span.clone(),
             })
         }
-        Expr::AnonObject { fields, span } => {
+        VosExpr::AnonObject { fields, span } => {
             let mut expanded = Vec::with_capacity(fields.len());
             for init in fields {
-                expanded.push(FieldInit {
+                expanded.push(VosFieldInit {
                     name: init.name.clone(),
+                    name_span: init.name_span.clone(),
                     value: init
                         .value
                         .as_ref()
                         .map(|value| expand_bindings(value, bindings))
                         .transpose()?,
-                    span: init.span,
+                    span: init.span.clone(),
                 });
             }
-            Ok(Expr::AnonObject {
+            Ok(VosExpr::AnonObject {
                 fields: expanded,
-                span: *span,
+                span: span.clone(),
             })
         }
         other => Ok(other.clone()),
