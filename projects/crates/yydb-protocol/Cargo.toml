@@ -1,0 +1,16 @@
+[package]
+name = "yydb-protocol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YY wire frame and message-body codec shared by yydb serve and clients"
+homepage = "https://github.com/yy-database/yydb.rs"
+documentation = "https://docs.rs/yydb-protocol"
+keywords = ["database", "protocol", "wire"]
+categories = ["database-implementations"]
+
+[dependencies]
+yydb-types = { workspace = true }
+yydb-udf = { workspace = true }

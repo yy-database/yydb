@@ -75,7 +75,7 @@ mod ttl;
 mod udf_bridge;
 
 /// YY wire protocol (`YYDB`|`YYDS` + version digits `0000`…).
-pub mod wire;
+pub use yydb_protocol as wire;
 
 pub use journal::{JournalMode, OpenFlags};
 pub use objects::ObjectStore;

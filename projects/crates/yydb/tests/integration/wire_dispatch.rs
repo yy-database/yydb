@@ -1,13 +1,13 @@
 use yydb::{
     wire::{
         decode_error, decode_kv_get_ok, decode_micro_host_invoke, decode_micro_host_invoke_ok,
-        decode_scalar_call_ok, dispatch, encode_kv_get, encode_micro_host_invoke,
+        decode_scalar_call_ok, encode_kv_get, encode_micro_host_invoke,
         encode_micro_host_invoke_ok, encode_micro_register, encode_scalar_call,
-        encode_schema_ensure, is_loopback_host, Frame, MessageType, MAGIC_YYDB, MAGIC_YYDS,
-        WIRE_VERSION,
+        encode_schema_ensure, Frame, MessageType, MAGIC_YYDB, MAGIC_YYDS, WIRE_VERSION,
     },
     Connection, HostFunctionHandle, UdfValue, Value,
 };
+use yydb_server::{dispatch, is_loopback_host};
 
 #[test]
 fn roundtrip_frame() {

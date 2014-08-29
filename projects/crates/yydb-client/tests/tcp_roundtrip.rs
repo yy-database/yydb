@@ -5,8 +5,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use yydb::{wire::dispatch, Connection, Value};
+use yydb::{Connection, Value};
 use yydb_client::{Client, Error};
+use yydb_protocol::{read_frame, write_frame};
+use yydb_server::dispatch;
 
 #[test]
 fn connect_rejects_empty_endpoint() {
@@ -22,9 +24,9 @@ fn remote_error_keeps_stable_code() {
     let server_conn = Arc::clone(&conn);
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        while let Ok(request) = yydb::wire::read_frame(&mut stream) {
+        while let Ok(request) = read_frame(&mut stream) {
             let response = dispatch(&server_conn, &request);
-            yydb::wire::write_frame(&mut stream, &response).unwrap();
+            write_frame(&mut stream, &response).unwrap();
         }
     });
 
@@ -58,9 +60,9 @@ fn tcp_roundtrip_against_local_dispatch_server() {
     let server_conn = Arc::clone(&conn);
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        while let Ok(request) = yydb::wire::read_frame(&mut stream) {
+        while let Ok(request) = read_frame(&mut stream) {
             let response = dispatch(&server_conn, &request);
-            yydb::wire::write_frame(&mut stream, &response).unwrap();
+            write_frame(&mut stream, &response).unwrap();
         }
     });
 

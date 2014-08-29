@@ -15,12 +15,13 @@ use std::{
     sync::Mutex,
 };
 
-pub use yydb::{Error, HostMicroDefinition, Result, SchemaVersion, Value};
+pub use yydb_types::{Error, Result, SchemaVersion, Value};
+pub use yydb_udf::HostMicroDefinition;
 
-use yydb::wire::{
-    self, decode_error, decode_kv_get_ok, decode_scalar_call_ok, decode_schema_get_ok,
-    encode_kv_get, encode_kv_put, encode_micro_register, encode_scalar_call, encode_schema_ensure,
-    read_frame, write_frame, Frame, MessageType,
+use yydb_protocol::{
+    decode_error, decode_kv_get_ok, decode_scalar_call_ok, decode_schema_get_ok, encode_kv_get,
+    encode_kv_put, encode_micro_register, encode_scalar_call, encode_schema_ensure, read_frame,
+    split_bind, write_frame, Frame, MessageType,
 };
 
 /// Handle to a remote YYDB server started with `yydb serve`.
@@ -158,7 +159,7 @@ fn normalize_endpoint(endpoint: String) -> Result<String> {
         .unwrap_or(endpoint);
     let trimmed = trimmed.split('/').next().unwrap_or(trimmed);
     // Validate host:port shape.
-    let _ = wire::split_bind(trimmed)?;
+    let _ = split_bind(trimmed)?;
     Ok(trimmed.to_owned())
 }
 

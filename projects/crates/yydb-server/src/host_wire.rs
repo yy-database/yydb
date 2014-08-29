@@ -4,9 +4,9 @@ use std::net::TcpStream;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-use yydb::wire::{
-    self, decode_micro_host_invoke_ok, encode_micro_host_invoke, read_frame, write_frame, Frame,
-    MessageType,
+use yydb_protocol::{
+    decode_error, decode_micro_host_invoke_ok, encode_micro_host_invoke, read_frame, write_frame,
+    Frame, MessageType,
 };
 use yydb::{HostFunctionHandle, HostRuntimeAdapter, UdfError, UdfResult, UdfValue};
 
@@ -43,7 +43,7 @@ impl TcpWireHostAdapter {
         write_frame(&mut *stream, &request).map_err(map_wire_error)?;
         let response = read_frame(&mut *stream).map_err(map_wire_error)?;
         if response.msg_type == MessageType::Error {
-            let error = wire::decode_error(&response.body).map_err(map_wire_error)?;
+            let error = decode_error(&response.body).map_err(map_wire_error)?;
             return Err(UdfError::ExecutionFailed {
                 message: error.message,
             });

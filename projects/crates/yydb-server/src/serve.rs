@@ -9,8 +9,10 @@ use std::{
 };
 
 use sha1::{Digest, Sha1};
-use yydb::wire::{self, dispatch, read_frame, write_frame, Frame};
 use yydb::{Connection, Error};
+use yydb_protocol::{read_frame, split_bind, write_frame, Frame, HEADER_LEN, MAX_BODY_LEN};
+
+use crate::dispatch::{dispatch, is_loopback_host};
 
 use crate::host_wire::TcpWireHostAdapter;
 
@@ -18,8 +20,8 @@ const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 /// Validate bind policy before listening.
 pub fn assert_bind_allowed(bind: &str, insecure_bind: bool) -> Result<(), String> {
-    let (host, _port) = wire::split_bind(bind).map_err(|e| e.to_string())?;
-    if wire::is_loopback_host(&host) {
+    let (host, _port) = split_bind(bind).map_err(|e| e.to_string())?;
+    if is_loopback_host(&host) {
         return Ok(());
     }
     if insecure_bind {
@@ -39,8 +41,8 @@ pub fn run_serve(
 ) -> Result<(), Box<dyn std::error::Error>> {
     assert_bind_allowed(bind, insecure_bind)?;
     if insecure_bind && {
-        let (host, _) = wire::split_bind(bind)?;
-        !wire::is_loopback_host(&host)
+        let (host, _) = split_bind(bind)?;
+        !is_loopback_host(&host)
     } {
         eprintln!(
             "WARNING: yydb serve bound to non-loopback `{bind}` with --insecure-bind. \
@@ -201,7 +203,7 @@ fn read_ws_binary(stream: &mut TcpStream) -> Result<Option<Vec<u8>>, Box<dyn std
         stream.read_exact(&mut mask)?;
     }
 
-    if len > wire::MAX_BODY_LEN as u64 + wire::HEADER_LEN as u64 {
+    if len > MAX_BODY_LEN as u64 + HEADER_LEN as u64 {
         return Err("websocket frame too large".into());
     }
 

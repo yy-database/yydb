@@ -10,4 +10,10 @@ readme = "readme.md"
 publish = false
 
 [dependencies]
+yydb-types = { workspace = true }
+yydb-udf = { workspace = true }
+yydb-protocol = { workspace = true }
+
+[dev-dependencies]
 yydb = { workspace = true }
+yydb-server = { workspace = true }
