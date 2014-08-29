@@ -16,7 +16,7 @@ User- and integrator-facing Agent Skills live in `projects/packages/yydb-skills/
 
 Human guides stay in `projects/packages/homepage/documentation/zh-hans/`.
 
-Do not recreate root `documentation/` or `/docs`.
+Root `documentation/` is developer-facing design guidance: invariants, layering, encoding and compatibility, engineering standards, UX/DX rules. It is not user usage docs and not a roadmap. Do not create `/docs`.
 
 ## Quick commands
 
