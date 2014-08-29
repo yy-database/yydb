@@ -9,8 +9,5 @@ description = "Rust remote client for yydb serve (non-embedded; TCP binary wire 
 readme = "readme.md"
 publish = false
 
-[lib]
-path = "src/lib.rs"
-
 [dependencies]
 yydb = { workspace = true }

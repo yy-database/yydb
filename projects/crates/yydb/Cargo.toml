@@ -12,13 +12,7 @@ readme = "readme.md"
 keywords = ["database", "embedded", "storage", "vos"]
 categories = ["database-implementations", "embedded"]
 
-[lib]
-path = "src/lib.rs"
-
 [dependencies]
-base64 = { workspace = true }
-blake3 = { workspace = true }
-sha1 = { workspace = true }
 vos = { workspace = true }
 yydb-types = { workspace = true }
 yydb-execution = { workspace = true }
