@@ -14,7 +14,7 @@ browser, WebUI, Electron renderer, or a thin Node process.
 | `@yydb/yydb-client`      | WebSocket `/wire` | Browsers and WebUI |
 | `@yydb/yydb-client/node` | TCP or WebSocket  | Node and Electron  |
 
-Frame helpers (`encodeFrame`, `MsgType`, …) are exported for tools and tests.
+Frame helpers (`encodeFrame`, `MessageType`, …) are exported for tools and tests.
 
 ## Example
 

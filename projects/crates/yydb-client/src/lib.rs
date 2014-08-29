@@ -20,7 +20,7 @@ pub use yydb::{Error, HostMicroDefinition, Result, SchemaVersion, Value};
 use yydb::wire::{
     self, decode_error, decode_kv_get_ok, decode_scalar_call_ok, decode_schema_get_ok,
     encode_kv_get, encode_kv_put, encode_micro_register, encode_scalar_call, encode_schema_ensure,
-    read_frame, write_frame, Frame, MsgType,
+    read_frame, write_frame, Frame, MessageType,
 };
 
 /// Handle to a remote YYDB server started with `yydb serve`.
@@ -59,63 +59,63 @@ impl Client {
 
     /// Fetch remote schema metadata.
     pub fn schema(&self) -> Result<Option<SchemaVersion>> {
-        let response = self.roundtrip(MsgType::SchemaGet, Vec::new())?;
-        expect_type(&response, MsgType::SchemaGetOk)?;
+        let response = self.round_trip(MessageType::SchemaGet, Vec::new())?;
+        expect_type(&response, MessageType::SchemaGetOk)?;
         decode_schema_get_ok(&response.body)
     }
 
     /// Ensure the remote schema (VOS document).
     pub fn ensure_schema(&self, document: &str) -> Result<()> {
-        let response = self.roundtrip(MsgType::SchemaEnsure, encode_schema_ensure(0, document))?;
-        expect_type(&response, MsgType::SchemaEnsureOk)?;
+        let response = self.round_trip(MessageType::SchemaEnsure, encode_schema_ensure(0, document))?;
+        expect_type(&response, MessageType::SchemaEnsureOk)?;
         Ok(())
     }
 
     /// Fetch remote info text (`path=…\\n…`).
     pub fn info(&self) -> Result<String> {
-        let response = self.roundtrip(MsgType::Info, Vec::new())?;
-        expect_type(&response, MsgType::InfoOk)?;
+        let response = self.round_trip(MessageType::Info, Vec::new())?;
+        expect_type(&response, MessageType::InfoOk)?;
         Ok(String::from_utf8_lossy(&response.body).into_owned())
     }
 
     /// Get a KV record.
     pub fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        let response = self.roundtrip(MsgType::KvGet, encode_kv_get(key))?;
-        expect_type(&response, MsgType::KvGetOk)?;
+        let response = self.round_trip(MessageType::KvGet, encode_kv_get(key))?;
+        expect_type(&response, MessageType::KvGetOk)?;
         decode_kv_get_ok(&response.body)
     }
 
     /// Put a KV record.
     pub fn put(&self, key: &str, value: impl AsRef<[u8]>) -> Result<()> {
-        let response = self.roundtrip(MsgType::KvPut, encode_kv_put(key, value.as_ref()))?;
-        expect_type(&response, MsgType::KvPutOk)?;
+        let response = self.round_trip(MessageType::KvPut, encode_kv_put(key, value.as_ref()))?;
+        expect_type(&response, MessageType::KvPutOk)?;
         Ok(())
     }
 
     /// Register a session-local host micro contract on the remote engine.
     pub fn register_host_micro(&self, definition: &HostMicroDefinition) -> Result<()> {
-        let response = self.roundtrip(MsgType::MicroRegister, encode_micro_register(definition))?;
-        expect_type(&response, MsgType::MicroRegisterOk)?;
+        let response = self.round_trip(MessageType::MicroRegister, encode_micro_register(definition))?;
+        expect_type(&response, MessageType::MicroRegisterOk)?;
         Ok(())
     }
 
     /// Invoke a registered scalar UDF on the remote engine.
     pub fn call_scalar_version(&self, name: &str, version: u32, args: &[Value]) -> Result<Value> {
-        let response = self.roundtrip(
-            MsgType::ScalarCall,
+        let response = self.round_trip(
+            MessageType::ScalarCall,
             encode_scalar_call(name, version, args)?,
         )?;
-        expect_type(&response, MsgType::ScalarCallOk)?;
+        expect_type(&response, MessageType::ScalarCallOk)?;
         decode_scalar_call_ok(&response.body)
     }
 
     fn hello(&self) -> Result<String> {
-        let response = self.roundtrip(MsgType::Hello, Vec::new())?;
-        expect_type(&response, MsgType::HelloOk)?;
+        let response = self.round_trip(MessageType::Hello, Vec::new())?;
+        expect_type(&response, MessageType::HelloOk)?;
         Ok(String::from_utf8_lossy(&response.body).into_owned())
     }
 
-    fn roundtrip(&self, msg_type: MsgType, body: Vec<u8>) -> Result<Frame> {
+    fn round_trip(&self, msg_type: MessageType, body: Vec<u8>) -> Result<Frame> {
         let request_id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let request = Frame::new(msg_type, request_id, body);
         let mut stream = self
@@ -127,7 +127,7 @@ impl Client {
         if response.request_id != request_id {
             return Err(Error::Corrupt("wire response request_id mismatch"));
         }
-        if response.msg_type == MsgType::Error {
+        if response.msg_type == MessageType::Error {
             let error = decode_error(&response.body)?;
             return Err(Error::Remote {
                 code: error.code,
@@ -138,7 +138,7 @@ impl Client {
     }
 }
 
-fn expect_type(frame: &Frame, expected: MsgType) -> Result<()> {
+fn expect_type(frame: &Frame, expected: MessageType) -> Result<()> {
     if frame.msg_type == expected {
         Ok(())
     } else {

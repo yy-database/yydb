@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use yydb::wire::{
     self, decode_micro_host_invoke_ok, encode_micro_host_invoke, read_frame, write_frame, Frame,
-    MsgType,
+    MessageType,
 };
 use yydb::{HostFunctionHandle, HostRuntimeAdapter, UdfError, UdfResult, UdfValue};
 
@@ -32,7 +32,7 @@ impl TcpWireHostAdapter {
     ) -> UdfResult<UdfValue> {
         let request_id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let request = Frame::new(
-            MsgType::MicroHostInvoke,
+            MessageType::MicroHostInvoke,
             request_id,
             encode_micro_host_invoke(handle, args),
         );
@@ -42,7 +42,7 @@ impl TcpWireHostAdapter {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         write_frame(&mut *stream, &request).map_err(map_wire_error)?;
         let response = read_frame(&mut *stream).map_err(map_wire_error)?;
-        if response.msg_type == MsgType::Error {
+        if response.msg_type == MessageType::Error {
             let error = wire::decode_error(&response.body).map_err(map_wire_error)?;
             return Err(UdfError::ExecutionFailed {
                 message: error.message,
@@ -53,7 +53,7 @@ impl TcpWireHostAdapter {
                 message: "wire micro host invoke response id mismatch".into(),
             });
         }
-        if response.msg_type != MsgType::MicroHostInvokeOk {
+        if response.msg_type != MessageType::MicroHostInvokeOk {
             return Err(UdfError::ExecutionFailed {
                 message: format!(
                     "unexpected wire response type {}",

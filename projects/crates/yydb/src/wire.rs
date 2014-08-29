@@ -32,7 +32,7 @@ pub const MAX_BODY_LEN: u32 = 16 * 1024 * 1024;
 
 /// Wire message type codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MsgType {
+pub enum MessageType {
     /// Client hello.
     Hello,
     /// Server hello reply (version string).
@@ -75,7 +75,7 @@ pub enum MsgType {
     Unknown(u16),
 }
 
-impl MsgType {
+impl MessageType {
     /// Parse a raw `u16` code.
     pub fn from_u16(value: u16) -> Self {
         match value {
@@ -133,7 +133,7 @@ impl MsgType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     /// Message type.
-    pub msg_type: MsgType,
+    pub msg_type: MessageType,
     /// Reserved flags (must be 0 in v0).
     pub flags: u16,
     /// Client-chosen request id (echoed on replies).
@@ -144,7 +144,7 @@ pub struct Frame {
 
 impl Frame {
     /// Build a frame with empty flags.
-    pub fn new(msg_type: MsgType, request_id: u32, body: impl Into<Vec<u8>>) -> Self {
+    pub fn new(msg_type: MessageType, request_id: u32, body: impl Into<Vec<u8>>) -> Self {
         Self {
             msg_type,
             flags: 0,
@@ -186,7 +186,7 @@ impl Frame {
         }
         check_prefix(&bytes[..8])?;
         let msg_raw = u16::from_le_bytes([bytes[8], bytes[9]]);
-        let msg_type = MsgType::from_u16(msg_raw);
+        let msg_type = MessageType::from_u16(msg_raw);
         let flags = u16::from_le_bytes([bytes[10], bytes[11]]);
         let request_id = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
         let body_len = u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
@@ -284,7 +284,7 @@ fn push_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
 }
 
 fn error_frame(request_id: u32, error: &Error) -> Frame {
-    Frame::new(MsgType::Error, request_id, encode_error_body(error))
+    Frame::new(MessageType::Error, request_id, encode_error_body(error))
 }
 
 fn encode_schema_ok(schema: Option<SchemaVersion>) -> Vec<u8> {
@@ -363,67 +363,67 @@ fn info_body(conn: &Connection) -> Result<Vec<u8>> {
 pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
     let id = request.request_id;
     match request.msg_type {
-        MsgType::Hello => Frame::new(MsgType::HelloOk, id, crate::version().as_bytes().to_vec()),
-        MsgType::Info => match info_body(conn) {
-            Ok(body) => Frame::new(MsgType::InfoOk, id, body),
+        MessageType::Hello => Frame::new(MessageType::HelloOk, id, crate::version().as_bytes().to_vec()),
+        MessageType::Info => match info_body(conn) {
+            Ok(body) => Frame::new(MessageType::InfoOk, id, body),
             Err(error) => error_frame(id, &error),
         },
-        MsgType::SchemaGet => match conn.schema() {
-            Ok(schema) => Frame::new(MsgType::SchemaGetOk, id, encode_schema_ok(schema)),
+        MessageType::SchemaGet => match conn.schema() {
+            Ok(schema) => Frame::new(MessageType::SchemaGetOk, id, encode_schema_ok(schema)),
             Err(error) => error_frame(id, &error),
         },
-        MsgType::SchemaEnsure => match decode_schema_ensure(&request.body) {
+        MessageType::SchemaEnsure => match decode_schema_ensure(&request.body) {
             Ok((_version, document)) => match conn.ensure_schema(&document) {
-                Ok(()) => Frame::new(MsgType::SchemaEnsureOk, id, Vec::new()),
+                Ok(()) => Frame::new(MessageType::SchemaEnsureOk, id, Vec::new()),
                 Err(error) => error_frame(id, &error),
             },
             Err(error) => error_frame(id, &error),
         },
-        MsgType::KvGet => match decode_kv_get(&request.body) {
+        MessageType::KvGet => match decode_kv_get(&request.body) {
             Ok(key) => match conn.get(&key) {
-                Ok(value) => Frame::new(MsgType::KvGetOk, id, encode_kv_get_ok(value)),
+                Ok(value) => Frame::new(MessageType::KvGetOk, id, encode_kv_get_ok(value)),
                 Err(error) => error_frame(id, &error),
             },
             Err(error) => error_frame(id, &error),
         },
-        MsgType::KvPut => match decode_kv_put(&request.body) {
+        MessageType::KvPut => match decode_kv_put(&request.body) {
             Ok((key, value)) => match conn.put(key, value) {
-                Ok(()) => Frame::new(MsgType::KvPutOk, id, Vec::new()),
+                Ok(()) => Frame::new(MessageType::KvPutOk, id, Vec::new()),
                 Err(error) => error_frame(id, &error),
             },
             Err(error) => error_frame(id, &error),
         },
-        MsgType::MicroRegister => match decode_micro_register(&request.body) {
+        MessageType::MicroRegister => match decode_micro_register(&request.body) {
             Ok(definition) => match conn.register_host_micro(definition) {
-                Ok(()) => Frame::new(MsgType::MicroRegisterOk, id, Vec::new()),
+                Ok(()) => Frame::new(MessageType::MicroRegisterOk, id, Vec::new()),
                 Err(error) => error_frame(id, &error),
             },
             Err(error) => error_frame(id, &error),
         },
-        MsgType::ScalarCall => match decode_scalar_call(&request.body) {
+        MessageType::ScalarCall => match decode_scalar_call(&request.body) {
             Ok((name, version, args)) => match conn.call_scalar_version(&name, version, &args) {
-                Ok(value) => Frame::new(MsgType::ScalarCallOk, id, encode_scalar_call_ok(value)),
+                Ok(value) => Frame::new(MessageType::ScalarCallOk, id, encode_scalar_call_ok(value)),
                 Err(error) => error_frame(id, &error),
             },
             Err(error) => error_frame(id, &error),
         },
-        MsgType::HelloOk
-        | MsgType::InfoOk
-        | MsgType::SchemaGetOk
-        | MsgType::SchemaEnsureOk
-        | MsgType::KvGetOk
-        | MsgType::KvPutOk
-        | MsgType::MicroRegisterOk
-        | MsgType::MicroHostInvoke
-        | MsgType::MicroHostInvokeOk
-        | MsgType::ScalarCallOk
-        | MsgType::Error => error_frame(
+        MessageType::HelloOk
+        | MessageType::InfoOk
+        | MessageType::SchemaGetOk
+        | MessageType::SchemaEnsureOk
+        | MessageType::KvGetOk
+        | MessageType::KvPutOk
+        | MessageType::MicroRegisterOk
+        | MessageType::MicroHostInvoke
+        | MessageType::MicroHostInvokeOk
+        | MessageType::ScalarCallOk
+        | MessageType::Error => error_frame(
             id,
             &Error::Protocol {
                 message: "unexpected client message type".to_owned(),
             },
         ),
-        MsgType::Unknown(code) => error_frame(
+        MessageType::Unknown(code) => error_frame(
             id,
             &Error::Protocol {
                 message: format!("unknown msg_type {code}"),
