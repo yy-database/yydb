@@ -13,16 +13,16 @@
 2. 测试按用途分层：acceptance（行为合同）、integration（跨模块主链）、fixtures（共享构造）。
 3. 崩溃与恢复类测试必须真的模拟中断：截断文件、删除 companion、在提交中间停止，而不是断言时间或睡眠。
 4. 存储与协议测试必须有字节级 golden。golden 变更即格式变更，需要按兼容规则判定。
-5. 回归测试固定缺陷的**可观察行为**，不为内部实现细节写断言。
+5. 回归测试固定缺陷的 **可观察行为**，不为内部实现细节写断言。
 6. 一个缺陷的修复与其回归测试属于同一个变更。
 
 ## 3. 格式与静态检查
 
-| 范围 | 工具 | 门槛 |
-|------|------|------|
-| Rust | `rustfmt`，工具链 pin 在 `rust-toolchain.toml` | `cargo fmt --all --check` |
-| TypeScript / 配置 | Nifty preset | `pnpm exec nifty format --check` |
-| 编译 | `cargo test --workspace` 与 `cargo build -p yydb-napi --release` | 必须通过 |
+| 范围              | 工具                                                             | 门槛                             |
+|-------------------|------------------------------------------------------------------|----------------------------------|
+| Rust              | `rustfmt`，工具链 pin 在 `rust-toolchain.toml`                   | `cargo fmt --all --check`        |
+| TypeScript / 配置 | Nifty preset                                                     | `pnpm exec nifty format --check` |
+| 编译              | `cargo test --workspace` 与 `cargo build -p yydb-napi --release` | 必须通过                         |
 
 规则：
 

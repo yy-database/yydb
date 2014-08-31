@@ -1,6 +1,6 @@
 # YYDB 开发者文档
 
-本目录面向**修改 YYDB 实现的人**，记录设计准则与不可破坏的合同。它不是产品介绍，也不是路线图。
+本目录面向 **修改 YYDB 实现的人**，记录设计准则与不可破坏的合同。它不是产品介绍，也不是路线图。
 
 ## 范围
 
@@ -12,22 +12,22 @@
 
 ## 非范围
 
-| 内容 | 位置 |
-|------|------|
-| 路线图、阶段计划、发布排期 | 不进入仓库；本目录不记录 |
-| 终端用户安装与使用 | `projects/packages/homepage/documentation/zh-hans/` |
-| 单项 API 用法 | 各 crate 的 `readme.md` 与 docs.rs |
-| 维护者发布操作流程 | `.agents/skills/yydb-release/SKILL.md` |
+| 内容                       | 位置                                                |
+|----------------------------|-----------------------------------------------------|
+| 路线图、阶段计划、发布排期 | 不进入仓库；本目录不记录                            |
+| 终端用户安装与使用         | `projects/packages/homepage/documentation/zh-hans/` |
+| 单项 API 用法              | 各 crate 的 `readme.md` 与 docs.rs                  |
+| 维护者发布操作流程         | `.agents/skills/yydb-release/SKILL.md`              |
 
 ## 目录
 
-| 文件 | 内容 |
-|------|------|
-| [`01-invariants.md`](./01-invariants.md) | 产品、存储、身份、并发与安全的不变量 |
-| [`02-architecture.md`](./02-architecture.md) | 分层与依赖方向、能力归属判定、门面规则 |
-| [`03-encoding-and-compatibility.md`](./03-encoding-and-compatibility.md) | 磁盘格式、线协议、版本与升级规则 |
-| [`04-engineering-standards.md`](./04-engineering-standards.md) | 文档、测试、格式、CI、依赖与发布门槛 |
-| [`05-ux-dx.md`](./05-ux-dx.md) | 错误模型、诊断、作者面与绑定层准则 |
+| 文件                                                                     | 内容                                   |
+|--------------------------------------------------------------------------|----------------------------------------|
+| [`01-invariants.md`](./01-invariants.md)                                 | 产品、存储、身份、并发与安全的不变量   |
+| [`02-architecture.md`](./02-architecture.md)                             | 分层与依赖方向、能力归属判定、门面规则 |
+| [`03-encoding-and-compatibility.md`](./03-encoding-and-compatibility.md) | 磁盘格式、线协议、版本与升级规则       |
+| [`04-engineering-standards.md`](./04-engineering-standards.md)           | 文档、测试、格式、CI、依赖与发布门槛   |
+| [`05-ux-dx.md`](./05-ux-dx.md)                                           | 错误模型、诊断、作者面与绑定层准则     |
 
 ## 维护规则
 
