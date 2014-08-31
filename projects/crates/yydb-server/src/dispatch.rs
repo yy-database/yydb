@@ -6,7 +6,8 @@ use yydb_protocol::{
     decode_kv_get, decode_kv_put, decode_micro_register, decode_scalar_call, decode_schema_ensure,
     encode_kv_get_ok, encode_scalar_call_ok, encode_schema_ok, error_frame, Frame, MessageType,
 };
-use yydb::{Connection, Error, Result};
+use yydb_store::Connection;
+use yydb_types::{Error, Result};
 
 fn info_body(conn: &Connection) -> Result<Vec<u8>> {
     let path = conn
@@ -29,7 +30,11 @@ fn info_body(conn: &Connection) -> Result<Vec<u8>> {
 pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
     let id = request.request_id;
     match request.msg_type {
-        MessageType::Hello => Frame::new(MessageType::HelloOk, id, env!("CARGO_PKG_VERSION").as_bytes().to_vec()),
+        MessageType::Hello => Frame::new(
+            MessageType::HelloOk,
+            id,
+            env!("CARGO_PKG_VERSION").as_bytes().to_vec(),
+        ),
         MessageType::Info => match info_body(conn) {
             Ok(body) => Frame::new(MessageType::InfoOk, id, body),
             Err(error) => error_frame(id, &error),
@@ -68,7 +73,9 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
         },
         MessageType::ScalarCall => match decode_scalar_call(&request.body) {
             Ok((name, version, args)) => match conn.call_scalar_version(&name, version, &args) {
-                Ok(value) => Frame::new(MessageType::ScalarCallOk, id, encode_scalar_call_ok(value)),
+                Ok(value) => {
+                    Frame::new(MessageType::ScalarCallOk, id, encode_scalar_call_ok(value))
+                }
                 Err(error) => error_frame(id, &error),
             },
             Err(error) => error_frame(id, &error),
@@ -98,7 +105,6 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
     }
 }
 
-
 /// Whether a `--bind` host is loopback (product-safe default).
 pub fn is_loopback_host(host: &str) -> bool {
     let host = host.trim().trim_start_matches('[').trim_end_matches(']');
@@ -107,4 +113,3 @@ pub fn is_loopback_host(host: &str) -> bool {
         "127.0.0.1" | "::1" | "localhost" | "0:0:0:0:0:0:0:1"
     )
 }
-

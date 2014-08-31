@@ -6,8 +6,9 @@
 //! | Layer | Crate | Role |
 //! |-------|-------|------|
 //! | Bottom | `yydb-types` | `Error`, `Value`, CAS refs |
-//! | Engine | `yydb-execution`, `yydb-udf` | Execution IR and UDF |
-//! | **Facade** | **`yydb`** | `Connection`, `wire`, re-exports |
+//! | Engine | `yydb-store`, `yydb-format`, `yydb-execution`, `yydb-udf`, `yydb-query` | Storage, formats, execution IR, UDF, query |
+//! | **Facade** | **`yydb`** | Re-exports, prelude, version |
+//! | Protocol | `yydb-protocol` | Wire frames and bodies (no database access) |
 //! | Transport | `yydb-client`, `yydb-server` | Remote client / serve loop |
 //! | Bindings | `yydb-napi`, `yydb-pyo3`, ... | Language hosts only |
 //!
@@ -19,7 +20,7 @@
 //! sidecars `{path}-wal` / `{path}-shm` appear when
 //! [`JournalMode::Wal`](journal::JournalMode::Wal) is enabled. Binary payloads
 //! use the unified [`objects`] CAS (`<hash-prefix>/<chunk_hash>.blob`) with optional
-//! runtime hot/cold tiering — not a `.yydb-vec` sidecar.
+//! runtime hot/cold tiering -- not a `.yydb-vec` sidecar.
 //!
 //! ```rust,no_run
 //! use yydb::{Connection, OpenFlags, Result, Value};
@@ -41,22 +42,22 @@
 
 #![deny(missing_docs)]
 
-/// Shared types (`Error`, `Result`, `Value`, …).
+/// Shared types (`Error`, `Result`, `Value`, ...).
 pub mod types {
     pub use yydb_types::*;
 }
 
 /// Journal modes and `-wal` / `-shm` sidecar helpers.
-pub mod journal;
+pub use yydb_store::journal;
 
 /// Unified `<hash-prefix>/<chunk_hash>.blob` CAS + hot/cold tiering.
-pub mod objects;
+pub use yydb_store::objects;
 
-/// Shared VOS schema contract (`vos` git @ `dev`).
-pub mod schema;
+/// Shared VOS schema contract.
+pub use yydb_store::catalog as schema;
 
 /// UDF traits (`ScalarUdf`) and registry types (`UdfRegistry`, ...).
-pub mod udf;
+pub use yydb_store::udf;
 
 /// Common embed imports (`use yydb::prelude::*`).
 pub mod prelude {
@@ -66,31 +67,27 @@ pub mod prelude {
     };
 }
 
-mod doctor;
-mod file_lock;
-mod format_v0;
-mod lease;
-mod refs;
-mod ttl;
-mod udf_bridge;
+/// Batched write operations.
+pub use yydb_store::batch;
 
-/// YY wire protocol (`YYDB`|`YYDS` + version digits `0000`…).
+/// Durable connection handle and statement surface.
+pub use yydb_store::connection;
+
+/// YY wire protocol (`YYDB`|`YYDS` + version digits `0000`...).
 pub use yydb_protocol as wire;
 
-pub use journal::{JournalMode, OpenFlags};
-pub use objects::ObjectStore;
-pub use udf::ScalarUdf;
+/// Query planning and DML operations.
+pub use yydb_query as query;
 
-pub use yydb_execution as execution;
-pub use yydb_types;
-pub use yydb_udf;
-
-pub use udf::{
-    HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, UdfError, UdfRegistry, UdfType,
-    UdfValue,
+pub use yydb_store::{
+    Batch, Connection, HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, JournalMode,
+    ObjectStore, OpenFlags, ScalarUdf, UdfError, UdfRegistry, UdfType, UdfValue,
 };
 /// Result alias for UDF host functions and registry operations.
 pub type UdfResult<T = UdfValue> = yydb_udf::Result<T>;
+
+pub use yydb_execution as execution;
+pub use yydb_types;
 pub use yydb_types::{
     ChunkManifest, CommitSequence, CompactReport, DoctorIssue, DoctorReport, DoctorSeverity, Error,
     EvictBudget, EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken,
@@ -98,15 +95,10 @@ pub use yydb_types::{
     ReleaseOutcome, Result, SchemaVersion, Tier, Value, Vector, DEFAULT_CHUNK_SIZE,
     INLINE_BYTES_MAX,
 };
+pub use yydb_udf;
 
-/// VOS schema language facade (`git+https://github.com/voml/vos-language.git?branch=dev`).
+/// VOS schema language facade.
 pub use vos;
-
-mod batch;
-pub mod connection;
-
-pub use batch::Batch;
-pub use connection::Connection;
 
 /// Library version string (Cargo package version).
 pub fn version() -> &'static str {

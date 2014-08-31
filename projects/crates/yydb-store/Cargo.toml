@@ -1,0 +1,26 @@
+[package]
+name = "yydb-store"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YYDB storage engine: connection, catalog, CAS, journal and UDF session state"
+homepage = "https://github.com/yy-database/yydb.rs"
+documentation = "https://docs.rs/yydb-store"
+keywords = ["database", "embedded", "storage", "vos"]
+categories = ["database-implementations", "embedded"]
+
+[dependencies]
+vos = { workspace = true }
+yydb-types = { workspace = true }
+yydb-format = { workspace = true }
+yydb-execution = { workspace = true }
+yydb-udf = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", default-features = false }

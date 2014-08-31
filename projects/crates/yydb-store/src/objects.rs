@@ -4,8 +4,7 @@
 //! the same path layout. Hot/cold tiering is an in-process cache over this CAS.
 //!
 //! Production layout: `.yydx` uses `<app-name>-objects/` with `YYBB` segments.
-//! `open_beside_db` (`<db>.objects`) is a prototype drift path. `.yydb` single-
-//! file mode must not rely on persistent sidecars.
+//! `.yydb` single-file mode must not rely on persistent sidecars.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -53,24 +52,6 @@ impl ObjectStore {
             catalog: Mutex::new(HashMap::new()),
             pinned: Mutex::new(HashSet::new()),
         }
-    }
-
-    /// Open or create the store next to `db_path` (`app.yydb` → `app.yydb.objects`).
-    ///
-    /// Prototype layout only. `Connection::open` does not call this path.
-    #[deprecated(note = "prototype drift layout; use open_ephemeral for .yydb or .yydx blob roots")]
-    pub fn open_beside_db(db_path: &Path) -> Result<Self> {
-        let mut os = db_path.as_os_str().to_owned();
-        os.push(".objects");
-        let root = PathBuf::from(os);
-        fs::create_dir_all(&root)?;
-        Ok(Self {
-            root: ObjectStoreRoot::OnDisk(root),
-            hot: Mutex::new(HashMap::new()),
-            cold: Mutex::new(HashMap::new()),
-            catalog: Mutex::new(HashMap::new()),
-            pinned: Mutex::new(HashSet::new()),
-        })
     }
 
     /// On-disk CAS under `root` (integration tests that need filesystem objects).

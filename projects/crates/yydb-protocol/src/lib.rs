@@ -10,7 +10,6 @@ use std::io::{Read, Write};
 use yydb_types::{Error, Result, SchemaVersion, Value};
 use yydb_udf::{HostFunctionHandle, UdfValue};
 
-
 /// Product magic for YYDB hosts (self-claim; same wire as `YYDS`).
 pub const MAGIC_YYDB: &[u8; 4] = b"YYDB";
 

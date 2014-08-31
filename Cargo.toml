@@ -31,6 +31,8 @@ yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }
 yydb-format = { version = "0.1.0", path = "projects/crates/yydb-format" }
 yydb-execution = { version = "0.1.0", path = "projects/crates/yydb-execution" }
 yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }
+yydb-query = { version = "0.1.0", path = "projects/crates/yydb-query" }
+yydb-store = { version = "0.1.0", path = "projects/crates/yydb-store" }
 yydb-protocol = { version = "0.1.0", path = "projects/crates/yydb-protocol" }
 
 # facade

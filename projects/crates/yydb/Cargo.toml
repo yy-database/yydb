@@ -18,15 +18,9 @@ yydb-types = { workspace = true }
 yydb-execution = { workspace = true }
 yydb-udf = { workspace = true }
 yydb-protocol = { workspace = true }
-serde_json = { workspace = true }
-yydb-format = { workspace = true }
+yydb-store = { workspace = true }
+yydb-query = { workspace = true }
 
 [dev-dependencies]
 yydb-format = { workspace = true }
 yydb-server = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true }
-
-[target.'cfg(unix)'.dependencies]
-libc = { version = "0.2", default-features = false }

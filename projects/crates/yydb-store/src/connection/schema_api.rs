@@ -1,4 +1,4 @@
-use crate::schema;
+use crate::catalog as schema;
 use crate::ttl;
 use crate::{Error, Result, SchemaVersion};
 

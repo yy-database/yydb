@@ -72,6 +72,23 @@ function planWrite(path, content) {
   plan.writes.push({ path, content });
 }
 
+function planOverwrite(path, content, expectedMarker) {
+  insideRepo(path);
+  if (!existsSync(path)) {
+    plan.writes.push({ path, content });
+    return;
+  }
+  const current = read(path);
+  if (current === content) {
+    plan.notes.push(`already current: ${rel(path)}`);
+    return;
+  }
+  if (!current.includes(expectedMarker)) {
+    fail(`refusing to overwrite ${rel(path)}: expected marker ${JSON.stringify(expectedMarker)} not found`);
+  }
+  plan.writes.push({ path, content });
+}
+
 function planDelete(path) {
   insideRepo(path);
   if (!existsSync(path)) {
@@ -81,9 +98,7 @@ function planDelete(path) {
   plan.deletes.push({ path });
 }
 
-function planEdit(path, replacements) {
-  insideRepo(path);
-  if (!existsSync(path)) fail(`missing edit target: ${rel(path)}`);
+function applyReplacements(path, replacements, label = rel(path)) {
   const source = read(path);
   const crlf = source.includes('\r\n');
   const toEol = (text) => (crlf ? text.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n') : text);
@@ -94,11 +109,29 @@ function planEdit(path, replacements) {
     const found = next.split(search).length - 1;
     if (found === 0 && next.includes(replace)) continue;
     if (found !== item.expected) {
-      fail(`expected ${item.expected} hit(s) for ${JSON.stringify(search.slice(0, 60))} in ${rel(path)}, found ${found}`);
+      fail(`expected ${item.expected} hit(s) for ${JSON.stringify(search.slice(0, 60))} in ${label}, found ${found}`);
     }
     next = next.split(search).join(replace);
   }
-  if (next !== source) plan.edits.push({ path, content: next });
+  return next === source ? null : next;
+}
+
+function planEdit(path, replacements) {
+  insideRepo(path);
+  if (!existsSync(path)) fail(`missing edit target: ${rel(path)}`);
+  const next = applyReplacements(path, replacements);
+  if (next !== null) plan.edits.push({ path, content: next });
+}
+
+function planEditMoved(source, target, replacements) {
+  insideRepo(source);
+  insideRepo(target);
+  if (!existsSync(source)) {
+    plan.notes.push(`already moved past edit target: ${rel(source)}`);
+    return;
+  }
+  const next = applyReplacements(source, replacements, `${rel(source)} -> ${rel(target)}`);
+  if (next !== null) plan.edits.push({ path: target, content: next });
 }
 
 function listFiles(dir) {
@@ -152,6 +185,7 @@ yydb-types = { workspace = true }
 yydb-format = { workspace = true }
 yydb-execution = { workspace = true }
 yydb-udf = { workspace = true }
+serde_json = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }
@@ -174,11 +208,17 @@ const storeLib = `//! YYDB storage engine: durable connection state, VOS catalog
 
 #![deny(missing_docs)]
 
+/// Batched write operations.
 pub mod batch;
+/// VOS catalog publication and contract resolution.
 pub mod catalog;
+/// Durable connection handle and statement surface.
 pub mod connection;
+/// Journal modes and \`-wal\` / \`-shm\` sidecar helpers.
 pub mod journal;
+/// Unified \`<hash-prefix>/<chunk_hash>.blob\` CAS + hot/cold tiering.
 pub mod objects;
+/// UDF traits (\`ScalarUdf\`) and registry types (\`UdfRegistry\`, ...).
 pub mod udf;
 
 mod doctor;
@@ -475,18 +515,37 @@ function planStore() {
 
   planWrite(join(storeDir, 'Cargo.toml'), storeManifest);
   planWrite(join(storeDir, 'src', 'lib.rs'), storeLib);
-  planWrite(join(crates, 'yydb', 'src', 'lib.rs'), facadeLib);
+  planOverwrite(join(crates, 'yydb', 'src', 'lib.rs'), facadeLib, 'pub use yydb_protocol as wire;');
 
-  planEdit(join(storeDir, 'src', 'connection', 'schema_api.rs'), [
-    { search: 'use crate::schema;', replace: 'use crate::catalog;', expected: 1 },
-  ]);
+  planEditMoved(
+    join(facadeSrc, 'connection', 'schema_api.rs'),
+    join(storeDir, 'src', 'connection', 'schema_api.rs'),
+    [{ search: 'use crate::schema;', replace: 'use crate::catalog as schema;', expected: 1 }],
+  );
 
   planEdit(join(root, 'Cargo.toml'), [
-    { search: 'yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }\n', replace: 'yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }\nyydb-query = { version = "0.1.0", path = "projects/crates/yydb-query" }\nyydb-store = { version = "0.1.0", path = "projects/crates/yydb-store" }\nyydb-protocol = { version = "0.1.0", path = "projects/crates/yydb-protocol" }\n', expected: 1 },
+    { search: 'yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }\n', replace: 'yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }\nyydb-query = { version = "0.1.0", path = "projects/crates/yydb-query" }\nyydb-store = { version = "0.1.0", path = "projects/crates/yydb-store" }\n', expected: 1 },
   ]);
 
   planEdit(join(crates, 'yydb', 'Cargo.toml'), [
-    { search: 'yydb-protocol = { workspace = true }\nserde_json = { workspace = true }\nyydb-format = { workspace = true }\n\n[dev-dependencies]\nyydb-format = { workspace = true }\n\n[target.\'cfg(windows)\'.dependencies]\nwindows-sys = { workspace = true }\n\n[target.\'cfg(unix)\'.dependencies]\nlibc = { version = "0.2", default-features = false }\n', replace: 'yydb-protocol = { workspace = true }\nyydb-store = { workspace = true }\nyydb-query = { workspace = true }\n\n[dev-dependencies]\nyydb-format = { workspace = true }\nyydb-server = { workspace = true }\n', expected: 1 },
+    { search: 'yydb-protocol = { workspace = true }\nserde_json = { workspace = true }\nyydb-format = { workspace = true }\n\n[dev-dependencies]\nyydb-format = { workspace = true }\nyydb-server = { workspace = true }\n\n[target.\'cfg(windows)\'.dependencies]\nwindows-sys = { workspace = true }\n\n[target.\'cfg(unix)\'.dependencies]\nlibc = { version = "0.2", default-features = false }\n', replace: 'yydb-protocol = { workspace = true }\nyydb-store = { workspace = true }\nyydb-query = { workspace = true }\n\n[dev-dependencies]\nyydb-format = { workspace = true }\nyydb-server = { workspace = true }\n', expected: 1 },
+  ]);
+
+  planEdit(join(serverDir, 'Cargo.toml'), [
+    { search: 'yydb = { workspace = true }\nyydb-protocol = { workspace = true }', replace: 'yydb-store = { workspace = true }\nyydb-protocol = { workspace = true }\nyydb-types = { workspace = true }\nyydb-udf = { workspace = true }', expected: 1 },
+  ]);
+
+  planEdit(join(serverDir, 'src', 'dispatch.rs'), [
+    { search: 'use yydb::{Connection, Error, Result};', replace: 'use yydb_store::Connection;\nuse yydb_types::{Error, Result};', expected: 1 },
+  ]);
+
+  planEdit(join(serverDir, 'src', 'serve.rs'), [
+    { search: 'use yydb::{Connection, Error};', replace: 'use yydb_store::Connection;\nuse yydb_types::Error;', expected: 1 },
+  ]);
+
+  planEdit(join(serverDir, 'src', 'host_wire.rs'), [
+    { search: 'use yydb::{HostFunctionHandle, HostRuntimeAdapter, UdfError, UdfResult, UdfValue};', replace: 'use yydb_types::Error;\nuse yydb_udf::{HostFunctionHandle, HostRuntimeAdapter, Result as UdfResult, UdfError, UdfValue};', expected: 1 },
+    { search: 'fn map_wire_error(error: yydb::Error) -> UdfError {', replace: 'fn map_wire_error(error: Error) -> UdfError {', expected: 1 },
   ]);
 }
 

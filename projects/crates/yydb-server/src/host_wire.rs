@@ -8,7 +8,8 @@ use yydb_protocol::{
     decode_error, decode_micro_host_invoke_ok, encode_micro_host_invoke, read_frame, write_frame,
     Frame, MessageType,
 };
-use yydb::{HostFunctionHandle, HostRuntimeAdapter, UdfError, UdfResult, UdfValue};
+use yydb_types::Error;
+use yydb_udf::{HostFunctionHandle, HostRuntimeAdapter, Result as UdfResult, UdfError, UdfValue};
 
 /// Invokes host micros on the wire peer that owns the host registry.
 pub struct TcpWireHostAdapter {
@@ -79,7 +80,7 @@ impl HostRuntimeAdapter for TcpWireHostAdapter {
     }
 }
 
-fn map_wire_error(error: yydb::Error) -> UdfError {
+fn map_wire_error(error: Error) -> UdfError {
     UdfError::ExecutionFailed {
         message: error.to_string(),
     }

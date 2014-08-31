@@ -45,7 +45,10 @@ fn dispatch_hello_info_kv() {
     let text = String::from_utf8(info.body).unwrap();
     assert!(text.contains("records=1"));
 
-    let get = dispatch(&conn, &Frame::new(MessageType::KvGet, 3, encode_kv_get("a")));
+    let get = dispatch(
+        &conn,
+        &Frame::new(MessageType::KvGet, 3, encode_kv_get("a")),
+    );
     assert_eq!(get.msg_type, MessageType::KvGetOk);
     assert_eq!(
         decode_kv_get_ok(&get.body).unwrap().as_deref(),
@@ -134,7 +137,11 @@ fn error_frame_carries_structured_code_and_message() {
     let conn = Connection::open_in_memory().unwrap();
     let response = dispatch(
         &conn,
-        &Frame::new(MessageType::SchemaEnsure, 6, encode_schema_ensure(1, "table {")),
+        &Frame::new(
+            MessageType::SchemaEnsure,
+            6,
+            encode_schema_ensure(1, "table {"),
+        ),
     );
     assert_eq!(response.msg_type, MessageType::Error);
     let error = decode_error(&response.body).expect("structured error body");
@@ -146,7 +153,10 @@ fn error_frame_carries_structured_code_and_message() {
 fn error_frame_codes_cover_protocol_and_corrupt_paths() {
     let conn = Connection::open_in_memory().unwrap();
 
-    let unknown = dispatch(&conn, &Frame::new(MessageType::Unknown(9999), 7, Vec::new()));
+    let unknown = dispatch(
+        &conn,
+        &Frame::new(MessageType::Unknown(9999), 7, Vec::new()),
+    );
     assert_eq!(unknown.msg_type, MessageType::Error);
     assert_eq!(decode_error(&unknown.body).unwrap().code, "yydb.protocol");
 
