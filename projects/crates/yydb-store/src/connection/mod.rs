@@ -53,7 +53,8 @@ pub(crate) fn is_yydx_main_path(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("yydx")
 }
 
-pub(crate) fn main_snapshot_database_id() -> [u8; 16] {
+/// Stable database id for process-local in-memory pagers.
+pub(crate) fn in_memory_database_id() -> [u8; 16] {
     [
         0xAA, 0xBB, 0xCC, 0xDD, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1,
     ]
@@ -140,7 +141,7 @@ impl Connection {
         match &self.backend {
             Backend::Memory { .. } => {
                 let state = self.read_state()?;
-                let mut pager = MemoryPager::new_empty(main_snapshot_database_id(), 0x01);
+                let mut pager = MemoryPager::new_empty(in_memory_database_id(), 0x01);
                 format_v0::write_state_to_memory_pager(&mut pager, &state)?;
                 main_bytes_from_memory_pager(&pager)
             }
