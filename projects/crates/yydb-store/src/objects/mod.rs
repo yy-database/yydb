@@ -504,3 +504,5 @@ fn decode_hash_hex(hash_hex: &str) -> Result<[u8; 32]> {
     }
     Ok(hash)
 }
+
+pub(crate) mod references;

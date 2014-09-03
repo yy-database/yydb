@@ -1,6 +1,6 @@
-use crate::format_v0;
 use crate::journal::JournalMode;
-use crate::lease;
+use crate::kv::lease;
+use crate::storage::state_codec;
 use crate::Result;
 
 use super::{is_yydx_main_path, Backend, Connection, State};
@@ -59,7 +59,7 @@ impl Connection {
                 let mut pager = pager
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                format_v0::read_state(&mut pager)
+                state_codec::read_state(&mut pager)
             }
             Backend::Memory { state } => Ok(state
                 .lock()
@@ -81,7 +81,7 @@ impl Connection {
                 } else {
                     None
                 };
-                format_v0::write_state_with_objects(&mut pager, state, blob_objects)
+                state_codec::write_state_with_objects(&mut pager, state, blob_objects)
             }
             Backend::Memory { state: slot } => {
                 *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = state.clone();

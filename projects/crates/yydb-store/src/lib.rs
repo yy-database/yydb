@@ -19,13 +19,8 @@ pub mod objects;
 /// UDF traits (`ScalarUdf`) and registry types (`UdfRegistry`, ...).
 pub mod udf;
 
-mod doctor;
-mod file_lock;
-mod format_v0;
-mod lease;
-mod refs;
-mod ttl;
-mod udf_bridge;
+mod kv;
+mod storage;
 
 pub use batch::Batch;
 /// Historic module alias kept for `yydb::schema` compatibility.

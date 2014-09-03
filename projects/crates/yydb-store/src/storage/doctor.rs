@@ -8,10 +8,10 @@ use yydb_types::{
     NamespaceQuota, ObjectRef, Result,
 };
 
-use crate::lease::{read_u64_meta, write_u64_meta, META_COMMIT_SEQ};
+use crate::kv::lease::{read_u64_meta, write_u64_meta, META_COMMIT_SEQ};
+use crate::kv::retention::{self as ttl, QUOTA_PREFIX, TTL_PREFIX};
 use crate::objects::ObjectStore;
-use crate::refs;
-use crate::ttl::{self, QUOTA_PREFIX, TTL_PREFIX};
+use crate::objects::references as refs;
 
 pub(crate) const META_CHECKPOINT_SEQ: &str = "__yydb/meta/checkpoint_sequence";
 pub(crate) const PENDING_BATCH_KEY: &str = "__yydb/batch/pending";
@@ -120,7 +120,7 @@ fn collect_namespace_stats(records: &BTreeMap<String, Vec<u8>>) -> Vec<DoctorNam
         }
     }
 
-    let now = crate::lease::now_millis();
+    let now = crate::kv::lease::now_millis();
     prefixes
         .into_iter()
         .map(|prefix| {

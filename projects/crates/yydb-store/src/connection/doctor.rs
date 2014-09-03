@@ -1,5 +1,5 @@
-use crate::doctor;
-use crate::refs;
+use crate::objects::references as refs;
+use crate::storage::doctor;
 use crate::{DoctorReport, ObjectRef, ReclaimReport, Result};
 
 use super::Connection;

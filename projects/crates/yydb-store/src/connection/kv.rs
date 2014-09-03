@@ -1,5 +1,4 @@
-use crate::lease;
-use crate::ttl;
+use crate::kv::{lease, retention as ttl};
 use crate::{EvictBudget, EvictReport, NamespaceQuota, NamespaceStats, RecordVersion, Result};
 
 use super::Connection;

@@ -1,5 +1,5 @@
 use crate::catalog as schema;
-use crate::ttl;
+use crate::kv::retention as ttl;
 use crate::{Error, Result, SchemaVersion};
 
 use super::Connection;

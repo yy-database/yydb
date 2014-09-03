@@ -5,11 +5,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::file_lock::WriterLock;
-use crate::format_v0;
 use crate::journal::{shm_path, wal_path, JournalMode, OpenFlags};
 use crate::objects::ObjectStore;
-use crate::udf_bridge::UdfSubsystem;
+use crate::storage::{file_lock, state_codec};
+use crate::udf::UdfSubsystem;
 use crate::INLINE_BYTES_MAX;
 use crate::{Error, Result, SchemaVersion};
 use yydb_format::{
@@ -40,7 +39,7 @@ pub(crate) enum Backend {
     File {
         path: PathBuf,
         #[allow(dead_code)]
-        writer_lock: WriterLock,
+        writer_lock: file_lock::WriterLock,
         pager: Mutex<FilePager>,
         journal_mode: Mutex<JournalMode>,
     },
@@ -96,11 +95,11 @@ impl Connection {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        if path.exists() && !format_v0::file_is_ydpg(&path)? {
+        if path.exists() && !state_codec::file_is_ydpg(&path)? {
             return Err(Error::Corrupt("main file is not YDPG format v0"));
         }
-        let writer_lock = WriterLock::acquire(&path)?;
-        let pager = format_v0::open_pager(&path, flags.journal_mode)?;
+        let writer_lock = file_lock::WriterLock::acquire(&path)?;
+        let pager = state_codec::open_pager(&path, flags.journal_mode)?;
         let connection = Self {
             operation_lock: Mutex::new(()),
             txn: Mutex::new(None),
@@ -142,7 +141,7 @@ impl Connection {
             Backend::Memory { .. } => {
                 let state = self.read_state()?;
                 let mut pager = MemoryPager::new_empty(in_memory_database_id(), 0x01);
-                format_v0::write_state_to_memory_pager(&mut pager, &state)?;
+                state_codec::write_state_to_memory_pager(&mut pager, &state)?;
                 main_bytes_from_memory_pager(&pager)
             }
             Backend::File { path, .. } => {
@@ -157,7 +156,7 @@ impl Connection {
         match &self.backend {
             Backend::Memory { .. } => {
                 let mut pager = memory_pager_from_main_bytes(bytes)?;
-                let state = format_v0::read_state_from_memory_pager(&mut pager)?;
+                let state = state_codec::read_state_from_memory_pager(&mut pager)?;
                 self.write_state(&state)
             }
             Backend::File { .. } => Err(Error::Unsupported(

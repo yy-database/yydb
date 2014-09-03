@@ -7,7 +7,7 @@ use yydb_types::{
     Result,
 };
 
-use crate::lease::{now_millis, read_u64_meta, write_u64_meta};
+use super::lease::{now_millis, read_u64_meta, write_u64_meta};
 
 pub(crate) const TTL_PREFIX: &str = "__yydb/ttl/";
 pub(crate) const QUOTA_PREFIX: &str = "__yydb/quota/";

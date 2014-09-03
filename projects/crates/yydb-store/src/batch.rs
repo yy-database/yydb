@@ -1,5 +1,5 @@
 use crate::connection::Connection;
-use crate::refs;
+use crate::objects::references as refs;
 use crate::{ObjectRef, Result};
 
 /// Pending record mutations applied atomically by [`Batch::commit`].

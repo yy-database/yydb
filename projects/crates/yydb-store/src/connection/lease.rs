@@ -1,4 +1,4 @@
-use crate::lease;
+use crate::kv::lease;
 use crate::Batch;
 use crate::{CommitSequence, LeaseExpectation, LeaseToken, ReleaseOutcome, Result};
 

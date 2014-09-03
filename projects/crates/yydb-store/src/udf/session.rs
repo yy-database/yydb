@@ -12,7 +12,7 @@ use yydb_udf::{
 
 type UdfBridgeResult<T> = std::result::Result<T, UdfError>;
 
-use crate::udf::{validate_local_execution_body, RegisteredUdf, ScalarFn, ScalarUdf};
+use super::api::{validate_local_execution_body, RegisteredUdf, ScalarFn, ScalarUdf};
 
 #[derive(Default)]
 pub(crate) struct UdfSubsystem {
