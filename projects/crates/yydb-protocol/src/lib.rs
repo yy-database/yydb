@@ -8,7 +8,7 @@
 use std::io::{Read, Write};
 
 use yydb_types::{Error, Result, SchemaVersion, Value};
-use yydb_udf::{HostFunctionHandle, UdfValue};
+use yydb_udf_types::{HostFunctionHandle, UdfValue};
 
 /// Product magic for YYDB hosts (self-claim; same wire as `YYDS`).
 pub const MAGIC_YYDB: &[u8; 4] = b"YYDB";
@@ -383,21 +383,21 @@ fn read_u64(buf: &[u8], offset: &mut usize) -> Result<u64> {
     Ok(value)
 }
 
-fn encode_udf_type_tag(ty: yydb_udf::UdfType) -> u8 {
+fn encode_udf_type_tag(ty: yydb_udf_types::UdfType) -> u8 {
     match ty {
-        yydb_udf::UdfType::Null => 0,
-        yydb_udf::UdfType::Bool => 1,
-        yydb_udf::UdfType::I64 => 2,
-        yydb_udf::UdfType::Text => 3,
+        yydb_udf_types::UdfType::Null => 0,
+        yydb_udf_types::UdfType::Bool => 1,
+        yydb_udf_types::UdfType::I64 => 2,
+        yydb_udf_types::UdfType::Text => 3,
     }
 }
 
-fn decode_udf_type_tag(tag: u8) -> Result<yydb_udf::UdfType> {
+fn decode_udf_type_tag(tag: u8) -> Result<yydb_udf_types::UdfType> {
     match tag {
-        0 => Ok(yydb_udf::UdfType::Null),
-        1 => Ok(yydb_udf::UdfType::Bool),
-        2 => Ok(yydb_udf::UdfType::I64),
-        3 => Ok(yydb_udf::UdfType::Text),
+        0 => Ok(yydb_udf_types::UdfType::Null),
+        1 => Ok(yydb_udf_types::UdfType::Bool),
+        2 => Ok(yydb_udf_types::UdfType::I64),
+        3 => Ok(yydb_udf_types::UdfType::Text),
         _ => Err(Error::Corrupt("wire scalar value has invalid type tag")),
     }
 }
@@ -595,7 +595,7 @@ pub fn decode_scalar_call_ok(body: &[u8]) -> Result<Value> {
 }
 
 /// Encode a `MicroRegister` body.
-pub fn encode_micro_register(definition: &yydb_udf::HostMicroDefinition) -> Vec<u8> {
+pub fn encode_micro_register(definition: &yydb_udf_types::HostMicroDefinition) -> Vec<u8> {
     let mut body = Vec::new();
     push_u64(&mut body, definition.handle.host_id);
     push_u32(&mut body, definition.handle.version);
@@ -613,7 +613,7 @@ pub fn encode_micro_register(definition: &yydb_udf::HostMicroDefinition) -> Vec<
 }
 
 /// Decode a `MicroRegister` body.
-pub fn decode_micro_register(body: &[u8]) -> Result<yydb_udf::HostMicroDefinition> {
+pub fn decode_micro_register(body: &[u8]) -> Result<yydb_udf_types::HostMicroDefinition> {
     let mut offset = 0;
     let host_id = read_u64(body, &mut offset)?;
     let handle_version = read_u32(body, &mut offset)?;
@@ -650,7 +650,7 @@ pub fn decode_micro_register(body: &[u8]) -> Result<yydb_udf::HostMicroDefinitio
     }
     let mut fingerprint = [0_u8; 32];
     fingerprint.copy_from_slice(&body[offset..offset + 32]);
-    yydb_udf::HostMicroDefinition::from_scalar(
+    yydb_udf_types::HostMicroDefinition::from_scalar(
         name,
         udf_version,
         args,

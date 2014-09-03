@@ -204,9 +204,9 @@ impl UdfSubsystem {
 fn execution_body_to_lowered(body: ValidatedUdf) -> UdfBridgeResult<yydb_udf::LoweredUdf> {
     let mut arg_types = Vec::new();
     for ty in body.input_types() {
-        arg_types.push(UdfType::from_execution(*ty)?);
+        arg_types.push(yydb_udf::type_from_execution(*ty)?);
     }
-    let return_ty = UdfType::from_execution(body.output_type())?;
+    let return_ty = yydb_udf::type_from_execution(body.output_type())?;
     let identity = UdfIdentity::new("", body.id(), body.version())?;
     Ok(yydb_udf::LoweredUdf {
         identity,

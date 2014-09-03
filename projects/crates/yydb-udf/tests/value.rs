@@ -1,5 +1,7 @@
 use yydb_execution::Value;
-use yydb_udf::{UdfType, UdfValue};
+use yydb_udf::{
+    from_execution, into_execution, type_from_execution, UdfError, UdfValue,
+};
 
 #[test]
 fn udf_value_round_trips_phase1_execution_types() {
@@ -9,19 +11,19 @@ fn udf_value_round_trips_phase1_execution_types() {
         (UdfValue::I64(7), Value::I64(7)),
         (UdfValue::Text("yydb".into()), Value::Text("yydb".into())),
     ] {
-        assert_eq!(UdfValue::from_execution(&execution).expect("from"), udf);
-        assert_eq!(udf.into_execution().expect("into"), execution);
+        assert_eq!(from_execution(&execution).expect("from"), udf);
+        assert_eq!(into_execution(udf).expect("into"), execution);
     }
 }
 
 #[test]
 fn unsupported_execution_types_are_rejected_at_boundary() {
     assert!(matches!(
-        UdfValue::from_execution(&Value::Bytes(vec![1, 2, 3])),
-        Err(yydb_udf::UdfError::UnsupportedType)
+        from_execution(&Value::Bytes(vec![1, 2, 3])),
+        Err(UdfError::UnsupportedType)
     ));
     assert!(matches!(
-        UdfType::from_execution(yydb_execution::Type::Bytes),
-        Err(yydb_udf::UdfError::UnsupportedType)
+        type_from_execution(yydb_execution::Type::Bytes),
+        Err(UdfError::UnsupportedType)
     ));
 }

@@ -3,12 +3,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::contract::UdfDefinition;
-use crate::error::{Result, UdfError};
-use crate::identity::UdfIdentity;
 use crate::implementation::UdfImplementation;
 use crate::invocation::{Budget, UdfContext, UdfInvocation};
-use crate::value::UdfValue;
+use crate::{Result, UdfDefinition, UdfError, UdfIdentity, UdfValue};
 
 /// Catalog-visible metadata without host callbacks.
 #[derive(Debug, Clone)]

@@ -11,7 +11,7 @@ publish = false
 
 [dependencies]
 yydb-types = { workspace = true }
-yydb-udf = { workspace = true }
+yydb-udf-types = { workspace = true }
 yydb-protocol = { workspace = true }
 
 [dev-dependencies]

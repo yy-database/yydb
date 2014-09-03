@@ -1,30 +1,27 @@
-//! YYDB UDF subsystem: contract, registry, and host adapters.
+//! YYDB UDF subsystem: registry, dispatch, and host adapters.
 //!
-//! Sits above [`yydb-execution`] and below the [`yydb`] facade. Applications
-//! should use `yydb::udf` (`UdfRegistry`, `HostMicroDefinition`, …) instead of
-//! depending here directly. Not shared with YYDS.
+//! Pure contracts live in [`yydb_udf_types`]. This crate sits above
+//! [`yydb-execution`] and below the [`yydb`] facade. Applications should use
+//! `yydb::udf` (`UdfRegistry`, `HostMicroDefinition`, …) instead of depending
+//! here directly. Not shared with YYDS.
 
 #![deny(missing_docs)]
 
-mod capability;
-mod contract;
-mod error;
 mod host;
-mod identity;
 mod implementation;
 mod invocation;
 mod native;
 mod program;
 mod registry;
-mod value;
+mod value_execution;
 
-pub use capability::{CapabilitySet, Determinism, Effect, Placement, UdfPolicy};
-pub use contract::{ImplementationKind, Signature, UdfDefinition, UdfType};
-pub use error::{Result, UdfError};
-pub use host::{
-    HostFunctionHandle, HostMicroDefinition, HostMicroImplementation, HostRuntimeAdapter,
+pub use yydb_udf_types::{
+    CapabilitySet, Determinism, Effect, HostFunctionHandle, HostMicroDefinition,
+    ImplementationKind, Placement, Result, Signature, UdfDefinition, UdfError, UdfFingerprint,
+    UdfIdentity, UdfPolicy, UdfType, UdfValue,
 };
-pub use identity::{UdfFingerprint, UdfIdentity};
+
+pub use host::{HostMicroImplementation, HostRuntimeAdapter};
 pub use implementation::UdfImplementation;
 pub use invocation::{Budget, InvocationMode, UdfContext, UdfInvocation};
 pub use native::{NativeHandler, NativeImplementation, NativeUdfDefinition};
@@ -33,4 +30,6 @@ pub use registry::{
     CatalogUdfEntry, CatalogUdfRegistry, HostUdfEntry, HostUdfRegistry, RegisterOptions,
     SessionUdfEntry, SessionUdfRegistry, UdfRegistry,
 };
-pub use value::UdfValue;
+pub use value_execution::{
+    from_execution, into_execution, type_from_execution, type_to_execution,
+};

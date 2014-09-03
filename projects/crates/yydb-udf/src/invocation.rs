@@ -1,8 +1,6 @@
 //! Invocation envelopes and bounded execution context.
 
-use crate::error::{Result, UdfError};
-use crate::identity::UdfIdentity;
-use crate::value::UdfValue;
+use crate::{Result, UdfError, UdfIdentity, UdfValue};
 
 /// Scalar or batch invocation mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

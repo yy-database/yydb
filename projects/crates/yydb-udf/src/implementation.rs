@@ -1,10 +1,7 @@
 //! Strategy implementations invoked by the registry dispatcher.
 
-use crate::contract::Signature;
-use crate::error::{Result, UdfError};
-use crate::identity::UdfIdentity;
 use crate::invocation::{InvocationMode, UdfContext};
-use crate::value::UdfValue;
+use crate::{Result, Signature, UdfError, UdfIdentity, UdfValue};
 
 /// One registered UDF implementation strategy.
 pub trait UdfImplementation: Send + Sync {

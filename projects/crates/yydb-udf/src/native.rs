@@ -2,13 +2,12 @@
 
 use std::sync::Arc;
 
-use crate::capability::{Placement, UdfPolicy};
-use crate::contract::{ImplementationKind, Signature, UdfDefinition};
-use crate::error::{Result, UdfError};
-use crate::identity::UdfIdentity;
 use crate::implementation::UdfImplementation;
 use crate::invocation::UdfContext;
-use crate::value::UdfValue;
+use crate::{
+    ImplementationKind, Placement, Result, Signature, UdfDefinition, UdfError, UdfIdentity,
+    UdfPolicy, UdfValue,
+};
 
 /// Native handler invoked through the UDF boundary.
 pub type NativeHandler =
@@ -45,7 +44,7 @@ impl NativeUdfDefinition {
     /// Validates the definition before registration.
     pub fn validate(&self) -> Result<()> {
         self.session_definition().validate()?;
-        if self.policy.effect != crate::capability::Effect::Pure {
+        if self.policy.effect != crate::Effect::Pure {
             return Err(UdfError::UnsupportedEffect);
         }
         Ok(())

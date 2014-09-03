@@ -6,14 +6,13 @@
 
 use yydb_execution::ValidatedUdf;
 
-use crate::capability::Placement;
-use crate::capability::UdfPolicy;
-use crate::contract::{ImplementationKind, Signature, UdfDefinition};
-use crate::error::{Result, UdfError};
-use crate::identity::UdfIdentity;
 use crate::implementation::UdfImplementation;
 use crate::invocation::UdfContext;
-use crate::value::UdfValue;
+use crate::value_execution::{from_execution, into_execution};
+use crate::{
+    ImplementationKind, Placement, Result, Signature, UdfDefinition, UdfError, UdfIdentity,
+    UdfPolicy, UdfValue,
+};
 
 /// YYDB-internal product wrapping a validated execution program for registration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,7 +80,7 @@ impl UdfImplementation for VosProgramImplementation {
         let execution_args = args
             .iter()
             .cloned()
-            .map(UdfValue::into_execution)
+            .map(into_execution)
             .collect::<Result<Vec<_>>>()?;
         let result = self
             .lowered
@@ -90,6 +89,6 @@ impl UdfImplementation for VosProgramImplementation {
             .map_err(|error| UdfError::ExecutionFailed {
                 message: format!("{error:?}"),
             })?;
-        UdfValue::from_execution(&result)
+        from_execution(&result)
     }
 }

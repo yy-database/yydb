@@ -16,7 +16,7 @@ use std::{
 };
 
 pub use yydb_types::{Error, Result, SchemaVersion, Value};
-pub use yydb_udf::HostMicroDefinition;
+pub use yydb_udf_types::HostMicroDefinition;
 
 use yydb_protocol::{
     decode_error, decode_kv_get_ok, decode_scalar_call_ok, decode_schema_get_ok, encode_kv_get,
