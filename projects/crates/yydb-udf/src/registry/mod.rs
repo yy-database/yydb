@@ -3,8 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::implementation::UdfImplementation;
-use crate::invocation::{Budget, UdfContext, UdfInvocation};
+use crate::runtime::{Budget, UdfContext, UdfImplementation, UdfInvocation};
 use crate::{Result, UdfDefinition, UdfError, UdfIdentity, UdfValue};
 
 /// Catalog-visible metadata without host callbacks.

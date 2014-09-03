@@ -1,7 +1,6 @@
 //! Host runtime adapter and embedded host implementation strategy.
 
-use crate::implementation::UdfImplementation;
-use crate::invocation::{InvocationMode, UdfContext};
+use crate::runtime::{InvocationMode, UdfContext, UdfImplementation};
 use crate::{
     HostFunctionHandle, HostMicroDefinition, Result, Signature, UdfIdentity, UdfValue,
 };

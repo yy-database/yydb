@@ -1,6 +1,6 @@
 //! Strategy implementations invoked by the registry dispatcher.
 
-use crate::invocation::{InvocationMode, UdfContext};
+use super::invocation::{InvocationMode, UdfContext};
 use crate::{Result, Signature, UdfError, UdfIdentity, UdfValue};
 
 /// One registered UDF implementation strategy.

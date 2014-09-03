@@ -7,13 +7,9 @@
 
 #![deny(missing_docs)]
 
-mod host;
-mod implementation;
-mod invocation;
-mod native;
-mod program;
+mod adapters;
 mod registry;
-mod value_execution;
+mod runtime;
 
 pub use yydb_udf_types::{
     CapabilitySet, Determinism, Effect, HostFunctionHandle, HostMicroDefinition,
@@ -21,15 +17,15 @@ pub use yydb_udf_types::{
     UdfIdentity, UdfPolicy, UdfType, UdfValue,
 };
 
-pub use host::{HostMicroImplementation, HostRuntimeAdapter};
-pub use implementation::UdfImplementation;
-pub use invocation::{Budget, InvocationMode, UdfContext, UdfInvocation};
-pub use native::{NativeHandler, NativeImplementation, NativeUdfDefinition};
-pub use program::{LoweredUdf, VosProgramImplementation};
+pub use adapters::{
+    HostMicroImplementation, HostRuntimeAdapter, LoweredUdf, NativeHandler, NativeImplementation,
+    NativeUdfDefinition, VosProgramImplementation,
+};
 pub use registry::{
     CatalogUdfEntry, CatalogUdfRegistry, HostUdfEntry, HostUdfRegistry, RegisterOptions,
     SessionUdfEntry, SessionUdfRegistry, UdfRegistry,
 };
-pub use value_execution::{
-    from_execution, into_execution, type_from_execution, type_to_execution,
+pub use runtime::{
+    Budget, InvocationMode, UdfContext, UdfImplementation, UdfInvocation, from_execution,
+    into_execution, type_from_execution, type_to_execution,
 };
