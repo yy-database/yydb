@@ -6,7 +6,8 @@ impl Connection {
     /// Begin a KV-state transaction on this connection.
     ///
     /// While open, KV reads and writes (`get`, `put`, `write_batch`,
-    /// `compare_exchange`, `scan_prefix`, …) operate on an in-memory snapshot.
+    /// `compare_exchange`, `scan_prefix`, …) and VOS DML
+    /// ([`Self::execute_vos_write`]) operate on an in-memory snapshot.
     /// [`Self::commit`] persists the snapshot, and [`Self::rollback`] discards
     /// it. Schema and DDL calls stay outside the transaction.
     pub fn begin(&self) -> Result<()> {

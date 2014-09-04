@@ -5,5 +5,6 @@ mod execution_udf;
 mod host_micro_udf;
 mod main_snapshot;
 mod schema_pragma;
+mod vos_query;
 mod vos_transaction;
 mod wire_dispatch;

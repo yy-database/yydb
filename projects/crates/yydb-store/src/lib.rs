@@ -38,6 +38,7 @@ pub use udf::{
 pub type UdfResult<T = UdfValue> = yydb_udf::Result<T>;
 
 pub use yydb_execution as execution;
+pub use yydb_query::QueryRow;
 pub use yydb_types;
 pub use yydb_types::{
     ChunkManifest, CommitSequence, CompactReport, DoctorIssue, DoctorReport, DoctorSeverity, Error,

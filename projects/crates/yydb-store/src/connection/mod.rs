@@ -22,6 +22,7 @@ mod journal;
 mod kv;
 mod lease;
 mod objects_api;
+mod query;
 mod schema_api;
 mod state;
 mod transaction;
