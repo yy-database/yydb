@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::execution;
-use crate::udf::{ClosureUdf, ScalarFn, ScalarUdf};
+use crate::udf::{ScalarFn, ScalarUdf};
 use crate::{HostMicroDefinition, HostRuntimeAdapter, Result, Value};
 
 use super::Connection;
@@ -52,15 +52,10 @@ impl Connection {
         F: Fn(&[Value]) -> Result<Value> + Send + Sync + 'static,
     {
         let boxed: Arc<ScalarFn> = Arc::new(func);
-        if matches!(arity, Some(1) | Some(2)) {
-            return self
-                .udfs
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .register_closure_scalar(name, version, arity, boxed);
-        }
-        let udf: Arc<dyn ScalarUdf> = Arc::new(ClosureUdf::new(arity, boxed));
-        self.register_scalar_versioned(name, version, udf)
+        self.udfs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .register_closure_scalar(name, version, arity, boxed)
     }
 
     /// Register an object-safe [`ScalarUdf`] at version `1`.

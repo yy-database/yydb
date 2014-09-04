@@ -15,6 +15,8 @@ pub enum UdfType {
     I64,
     /// UTF-8 text.
     Text,
+    /// Accepts any Phase-1 argument type. Used only for embedded closure contracts.
+    Any,
 }
 
 /// Argument and return signature for a UDF.
@@ -24,23 +26,64 @@ pub struct Signature {
     pub args: Vec<UdfType>,
     /// Return type.
     pub returns: UdfType,
+    /// When true, only the Phase-1 value subset is checked and arity is not fixed.
+    pub variadic: bool,
 }
 
 impl Signature {
-    /// Creates a new signature.
+    /// Creates a fully typed signature.
     pub fn new(args: Vec<UdfType>, returns: UdfType) -> Self {
-        Self { args, returns }
+        Self {
+            args,
+            returns,
+            variadic: false,
+        }
     }
 
-    /// Returns the expected argument count.
+    /// Creates a fixed-arity closure contract that accepts any Phase-1 argument types.
+    pub fn untyped_fixed(arity: usize) -> Self {
+        Self {
+            args: vec![UdfType::Any; arity],
+            returns: UdfType::Any,
+            variadic: false,
+        }
+    }
+
+    /// Creates a variadic closure contract that accepts any Phase-1 argument count and types.
+    pub fn untyped_variadic() -> Self {
+        Self {
+            args: vec![],
+            returns: UdfType::Any,
+            variadic: true,
+        }
+    }
+
+    /// Returns the fixed argument count, if any.
+    pub fn expected_arity(&self) -> Option<usize> {
+        if self.variadic {
+            None
+        } else {
+            Some(self.args.len())
+        }
+    }
+
+    /// Returns the expected argument count for typed signatures.
     pub fn arity(&self) -> usize {
         self.args.len()
     }
 
     /// Verifies that `actual` matches this signature.
     pub fn ensure_args(&self, actual: &[UdfType]) -> Result<()> {
-        if self.args != actual {
-            return Err(UdfError::SignatureMismatch);
+        if self.variadic {
+            return Ok(());
+        }
+        if self.args.len() != actual.len() {
+            return Err(UdfError::ArityMismatch);
+        }
+        for (expected, actual) in self.args.iter().zip(actual) {
+            if *expected != UdfType::Any && *expected != *actual {
+                return Err(UdfError::SignatureMismatch);
+            }
         }
         Ok(())
     }
@@ -49,8 +92,8 @@ impl Signature {
 /// Implementation kind recorded in catalog metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ImplementationKind {
-    /// Lowered `yydb-execution` program from VOS macro/micro source.
-    VosProgram,
+    /// Validated `yydb-execution` program bound at registration time.
+    ExecutionProgram,
     /// Rust native handler in the embedded process.
     Native,
     /// Session micro implemented by an external host runtime.

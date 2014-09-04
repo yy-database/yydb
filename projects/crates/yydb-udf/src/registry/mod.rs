@@ -22,9 +22,9 @@ pub struct SessionUdfEntry {
     pub shadow: bool,
 }
 
-/// Host-installed implementation binding.
+/// Installed implementation binding for a resolved definition.
 #[derive(Clone)]
-pub struct HostUdfEntry {
+pub struct ImplementationEntry {
     /// Logical identity.
     pub identity: UdfIdentity,
     /// Runnable implementation.
@@ -149,14 +149,14 @@ impl SessionUdfRegistry {
     }
 }
 
-/// Process-local host registry for native and host-runtime implementations.
+/// Process-local registry for native, execution, and host-runtime implementations.
 #[derive(Default)]
-pub struct HostUdfRegistry {
-    entries: HashMap<String, HostUdfEntry>,
+pub struct ImplementationRegistry {
+    entries: HashMap<String, ImplementationEntry>,
 }
 
-impl HostUdfRegistry {
-    /// Installs a host implementation.
+impl ImplementationRegistry {
+    /// Installs an implementation binding.
     pub fn install(&mut self, implementation: Arc<dyn UdfImplementation>) -> Result<()> {
         let key = logical_key(implementation.identity());
         if self.entries.contains_key(&key) {
@@ -164,7 +164,7 @@ impl HostUdfRegistry {
         }
         self.entries.insert(
             key,
-            HostUdfEntry {
+            ImplementationEntry {
                 identity: implementation.identity().clone(),
                 implementation,
             },
@@ -172,12 +172,12 @@ impl HostUdfRegistry {
         Ok(())
     }
 
-    /// Returns a host implementation by logical id.
-    pub fn get(&self, identity: &UdfIdentity) -> Option<&HostUdfEntry> {
+    /// Returns an implementation binding by logical id.
+    pub fn get(&self, identity: &UdfIdentity) -> Option<&ImplementationEntry> {
         self.entries.get(&logical_key(identity))
     }
 
-    /// Removes a host binding by logical id.
+    /// Removes an implementation binding by logical id.
     pub fn remove(&mut self, identity: &UdfIdentity) {
         self.entries.remove(&logical_key(identity));
     }
@@ -188,7 +188,7 @@ impl HostUdfRegistry {
 pub struct UdfRegistry {
     catalog: CatalogUdfRegistry,
     session: SessionUdfRegistry,
-    host: HostUdfRegistry,
+    implementations: ImplementationRegistry,
     builtins: CatalogUdfRegistry,
 }
 
@@ -203,9 +203,9 @@ impl UdfRegistry {
         &mut self.session
     }
 
-    /// Returns the mutable host registry.
-    pub fn host_mut(&mut self) -> &mut HostUdfRegistry {
-        &mut self.host
+    /// Returns the mutable implementation registry.
+    pub fn implementation_mut(&mut self) -> &mut ImplementationRegistry {
+        &mut self.implementations
     }
 
     /// Registers a built-in catalog entry.
@@ -236,26 +236,29 @@ impl UdfRegistry {
         options: RegisterOptions,
     ) -> Result<()> {
         self.register_session(definition, options)?;
-        self.bind_host(implementation)
+        self.bind_implementation(implementation)
     }
 
-    /// Registers a catalog macro and binds its host implementation.
+    /// Registers a catalog macro and binds its implementation.
     pub fn register_catalog_macro(
         &mut self,
         definition: UdfDefinition,
         implementation: Arc<dyn UdfImplementation>,
     ) -> Result<()> {
         self.catalog_mut().register(definition)?;
-        self.bind_host(implementation)
+        self.bind_implementation(implementation)
     }
 
-    /// Installs a host implementation after verifying catalog/session metadata exists.
-    pub fn bind_host(&mut self, implementation: Arc<dyn UdfImplementation>) -> Result<()> {
+    /// Installs an implementation after verifying catalog or session metadata exists.
+    pub fn bind_implementation(
+        &mut self,
+        implementation: Arc<dyn UdfImplementation>,
+    ) -> Result<()> {
         let identity = implementation.identity();
         if self.resolve_definition(identity).is_none() {
             return Err(UdfError::InvalidDefinition);
         }
-        self.host.install(implementation)
+        self.implementations.install(implementation)
     }
 
     /// Resolves catalog metadata using `session > catalog > built-in` precedence.
@@ -291,28 +294,32 @@ impl UdfRegistry {
             .or_else(|| self.builtins.version_for_name(name))
     }
 
-    /// Removes a session-local UDF and any bound host implementation.
+    /// Removes a session-local UDF and any bound implementation.
     pub fn remove_session_by_name(&mut self, name: &str) -> Result<()> {
         let identity = self.session.remove_by_name(name)?;
-        self.host.remove(&identity);
+        self.implementations.remove(&identity);
         Ok(())
     }
 
-    /// Invokes a UDF through the host registry.
+    /// Invokes a UDF through the implementation registry.
     pub fn invoke(&self, invocation: &UdfInvocation, budget: Budget) -> Result<UdfValue> {
-        let host = self
-            .host
+        let binding = self
+            .implementations
             .get(&invocation.identity)
             .ok_or(UdfError::ImplementationUnavailable)?;
-        if host.identity.version != invocation.identity.version {
+        if binding.identity.version != invocation.identity.version {
             return Err(UdfError::VersionMismatch);
         }
-        let signature = host.implementation.signature();
-        if invocation.args.len() != signature.arity() {
-            return Err(UdfError::ArityMismatch);
+        let signature = binding.implementation.signature();
+        if let Some(expected) = signature.expected_arity() {
+            if invocation.args.len() != expected {
+                return Err(UdfError::ArityMismatch);
+            }
         }
         signature.ensure_args(&UdfValue::argument_types(&invocation.args))?;
         let mut context = UdfContext::new(budget);
-        host.implementation.invoke(&mut context, &invocation.args)
+        binding
+            .implementation
+            .invoke(&mut context, &invocation.args)
     }
 }

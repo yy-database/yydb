@@ -65,7 +65,7 @@ fn rejects_wrong_types_and_overflow_without_panicking() {
     ));
     assert!(matches!(
         conn.call_scalar_version("sum", 2, &[Value::Null, Value::I64(1)]),
-        Err(Error::Unsupported(_))
+        Err(Error::Udf { .. })
     ));
 }
 

@@ -4,6 +4,6 @@ mod execution;
 mod host;
 mod native;
 
-pub use execution::{LoweredUdf, VosProgramImplementation};
+pub use execution::{ExecutionProgramImplementation, ExecutionUdfBinding};
 pub use host::{HostMicroImplementation, HostRuntimeAdapter};
 pub use native::{NativeHandler, NativeImplementation, NativeUdfDefinition};

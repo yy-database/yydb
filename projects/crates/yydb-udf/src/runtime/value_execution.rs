@@ -43,5 +43,6 @@ pub fn type_to_execution(ty: UdfType) -> Type {
         UdfType::Bool => Type::Bool,
         UdfType::I64 => Type::I64,
         UdfType::Text => Type::Text,
+        UdfType::Any => unreachable!("UdfType::Any is a contract wildcard, not a concrete execution type"),
     }
 }

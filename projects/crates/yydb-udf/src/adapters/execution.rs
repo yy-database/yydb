@@ -14,7 +14,7 @@ use crate::{
 
 /// YYDB-internal product wrapping a validated execution program for registration.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoweredUdf {
+pub struct ExecutionUdfBinding {
     /// Logical identity assigned during registration.
     pub identity: UdfIdentity,
     /// Boundary signature derived from the program.
@@ -29,7 +29,7 @@ pub struct LoweredUdf {
     pub source_fingerprint: [u8; 32],
 }
 
-impl LoweredUdf {
+impl ExecutionUdfBinding {
     /// Returns the execution identity string stored in `yydb-execution`.
     pub fn execution_id(&self) -> &str {
         self.program.id()
@@ -42,35 +42,35 @@ impl LoweredUdf {
             signature: self.signature.clone(),
             policy: self.policy,
             placement: self.placement,
-            implementation_kind: ImplementationKind::VosProgram,
+            implementation_kind: ImplementationKind::ExecutionProgram,
             fingerprint: self.source_fingerprint,
         }
     }
 }
 
 /// Embedded execution program implementation strategy.
-pub struct VosProgramImplementation {
-    lowered: LoweredUdf,
+pub struct ExecutionProgramImplementation {
+    binding: ExecutionUdfBinding,
 }
 
-impl VosProgramImplementation {
-    /// Creates an implementation from a validated execution program.
-    pub fn new(lowered: LoweredUdf) -> Self {
-        Self { lowered }
+impl ExecutionProgramImplementation {
+    /// Creates an implementation from a validated execution program binding.
+    pub fn new(binding: ExecutionUdfBinding) -> Self {
+        Self { binding }
     }
 }
 
-impl UdfImplementation for VosProgramImplementation {
+impl UdfImplementation for ExecutionProgramImplementation {
     fn identity(&self) -> &UdfIdentity {
-        &self.lowered.identity
+        &self.binding.identity
     }
 
     fn signature(&self) -> &Signature {
-        &self.lowered.signature
+        &self.binding.signature
     }
 
     fn invoke(&self, context: &mut UdfContext, args: &[UdfValue]) -> Result<UdfValue> {
-        self.lowered
+        self.binding
             .signature
             .ensure_args(&UdfValue::argument_types(args))?;
         context.check_cancelled()?;
@@ -81,7 +81,7 @@ impl UdfImplementation for VosProgramImplementation {
             .map(into_execution)
             .collect::<Result<Vec<_>>>()?;
         let result = self
-            .lowered
+            .binding
             .program
             .evaluate(&[], &execution_args)
             .map_err(|error| UdfError::ExecutionFailed {

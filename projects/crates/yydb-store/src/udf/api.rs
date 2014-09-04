@@ -7,8 +7,6 @@
 //! Other languages should use `yydb-client` / `@yydb/yydb-client` against
 //! `yydb serve` rather than embedding this crate.
 
-use std::sync::Arc;
-
 use yydb_execution::{UdfEffect, UdfPlacement, ValidatedUdf};
 use yydb_types::{Result, Value};
 
@@ -39,36 +37,11 @@ pub trait ScalarUdf: Send + Sync {
 /// Type alias for closure-style scalar UDFs.
 pub type ScalarFn = dyn Fn(&[Value]) -> Result<Value> + Send + Sync;
 
-pub(crate) struct ClosureUdf {
-    arity: Option<usize>,
-    func: Arc<ScalarFn>,
-}
-
-impl ClosureUdf {
-    pub(crate) fn new(arity: Option<usize>, func: Arc<ScalarFn>) -> Self {
-        Self { arity, func }
-    }
-}
-
-impl ScalarUdf for ClosureUdf {
-    fn arity(&self) -> Option<usize> {
-        self.arity
-    }
-
-    fn call(&self, args: &[Value]) -> Result<Value> {
-        (self.func)(args)
-    }
-}
-
-pub(crate) struct RegisteredUdf {
-    pub(crate) udf: Arc<dyn ScalarUdf>,
-    pub(crate) version: u32,
-}
-
 /// Registry, host adapters, and contract types from `yydb-udf`.
 pub use yydb_udf::{
     CatalogUdfEntry, CatalogUdfRegistry, HostFunctionHandle, HostMicroDefinition,
-    HostMicroImplementation, HostRuntimeAdapter, HostUdfEntry, HostUdfRegistry, RegisterOptions,
+    HostMicroImplementation, HostRuntimeAdapter, ImplementationEntry, ImplementationRegistry,
+    RegisterOptions,
     SessionUdfEntry, SessionUdfRegistry, Signature, UdfDefinition, UdfError, UdfIdentity,
     UdfRegistry, UdfType, UdfValue,
 };

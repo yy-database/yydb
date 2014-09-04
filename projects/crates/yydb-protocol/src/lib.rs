@@ -389,6 +389,9 @@ fn encode_udf_type_tag(ty: yydb_udf_types::UdfType) -> u8 {
         yydb_udf_types::UdfType::Bool => 1,
         yydb_udf_types::UdfType::I64 => 2,
         yydb_udf_types::UdfType::Text => 3,
+        yydb_udf_types::UdfType::Any => {
+            unreachable!("UdfType::Any is not encodable on the wire")
+        }
     }
 }
 

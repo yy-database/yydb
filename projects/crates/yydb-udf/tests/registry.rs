@@ -38,7 +38,7 @@ fn native_udf_registers_and_invokes_through_host_registry() {
         .register(definition)
         .expect("catalog");
     registry
-        .bind_host(Arc::new(native.into_implementation()))
+        .bind_implementation(Arc::new(native.into_implementation()))
         .expect("bind host");
 
     let result = registry
@@ -58,7 +58,7 @@ fn session_cannot_shadow_catalog_without_explicit_flag() {
         signature: Signature::new(vec![UdfType::I64, UdfType::I64], UdfType::I64),
         policy: UdfPolicy::pure_embedded(),
         placement: Placement::Embedded,
-        implementation_kind: ImplementationKind::VosProgram,
+        implementation_kind: ImplementationKind::ExecutionProgram,
         fingerprint: [1u8; 32],
     };
     let mut registry = UdfRegistry::default();

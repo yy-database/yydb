@@ -18,12 +18,12 @@ pub use yydb_udf_types::{
 };
 
 pub use adapters::{
-    HostMicroImplementation, HostRuntimeAdapter, LoweredUdf, NativeHandler, NativeImplementation,
-    NativeUdfDefinition, VosProgramImplementation,
+    ExecutionProgramImplementation, ExecutionUdfBinding, HostMicroImplementation,
+    HostRuntimeAdapter, NativeHandler, NativeImplementation, NativeUdfDefinition,
 };
 pub use registry::{
-    CatalogUdfEntry, CatalogUdfRegistry, HostUdfEntry, HostUdfRegistry, RegisterOptions,
-    SessionUdfEntry, SessionUdfRegistry, UdfRegistry,
+    CatalogUdfEntry, CatalogUdfRegistry, ImplementationEntry, ImplementationRegistry,
+    RegisterOptions, SessionUdfEntry, SessionUdfRegistry, UdfRegistry,
 };
 pub use runtime::{
     Budget, InvocationMode, UdfContext, UdfImplementation, UdfInvocation, from_execution,

@@ -1,23 +1,22 @@
-//! Bridge between the legacy scalar UDF API and `yydb-udf`.
+//! UDF session bridge: maps the embedded `Connection` API onto `yydb-udf`.
 
 use std::sync::Arc;
 
 use yydb_execution::ValidatedUdf;
 use yydb_types::{Error, Result, Value};
 use yydb_udf::{
-    Budget, HostMicroDefinition, HostMicroImplementation, HostRuntimeAdapter, NativeHandler,
-    NativeUdfDefinition, Placement, RegisterOptions, Signature, UdfError, UdfIdentity,
-    UdfInvocation, UdfPolicy, UdfRegistry, UdfType, UdfValue, VosProgramImplementation,
+    Budget, ExecutionProgramImplementation, HostMicroDefinition, HostMicroImplementation,
+    HostRuntimeAdapter, NativeHandler, NativeUdfDefinition, Placement, RegisterOptions, Signature,
+    UdfError, UdfIdentity, UdfInvocation, UdfPolicy, UdfRegistry, UdfValue,
 };
 
 type UdfBridgeResult<T> = std::result::Result<T, UdfError>;
 
-use super::api::{validate_local_execution_body, RegisteredUdf, ScalarFn, ScalarUdf};
+use super::api::{validate_local_execution_body, ScalarFn, ScalarUdf};
 
 #[derive(Default)]
 pub(crate) struct UdfSubsystem {
     registry: UdfRegistry,
-    legacy: std::collections::BTreeMap<String, RegisteredUdf>,
     host_adapter: Option<Arc<dyn HostRuntimeAdapter>>,
 }
 
@@ -34,15 +33,14 @@ impl UdfSubsystem {
                 message: "UDF name must not be empty".into(),
             });
         }
-        self.legacy
-            .insert(name.to_owned(), RegisteredUdf { udf, version });
-        Ok(())
+        let definition = native_from_scalar(name, version, udf).map_err(map_udf_error)?;
+        self.register_native_udf(definition)
     }
 
     pub(crate) fn register_execution_udf(&mut self, body: ValidatedUdf) -> Result<()> {
         validate_local_execution_body(&body)?;
-        let lowered = execution_body_to_lowered(body).map_err(map_udf_error)?;
-        self.install_session_lowered(lowered, RegisterOptions::new())?;
+        let binding = execution_body_to_binding(body).map_err(map_udf_error)?;
+        self.install_session_binding(binding, RegisterOptions::new())?;
         Ok(())
     }
 
@@ -64,7 +62,6 @@ impl UdfSubsystem {
     pub(crate) fn register_host_micro(&mut self, definition: HostMicroDefinition) -> Result<()> {
         definition.validate().map_err(map_udf_error)?;
         let session = definition.session_definition();
-        let name = session.identity.name().to_owned();
         if let Some(adapter) = self.host_adapter.clone() {
             let implementation = Arc::new(HostMicroImplementation::new(definition, adapter));
             self.registry
@@ -75,14 +72,12 @@ impl UdfSubsystem {
                 .register_session(session, RegisterOptions::new())
                 .map_err(map_udf_error)?;
         }
-        self.legacy.remove(&name);
         Ok(())
     }
 
     pub(crate) fn register_native_udf(&mut self, definition: NativeUdfDefinition) -> Result<()> {
         definition.validate().map_err(map_udf_error)?;
         let session = definition.session_definition();
-        let name = session.identity.name().to_owned();
         self.registry
             .register_session_micro(
                 session,
@@ -90,24 +85,17 @@ impl UdfSubsystem {
                 RegisterOptions::new(),
             )
             .map_err(map_udf_error)?;
-        self.legacy.remove(&name);
         Ok(())
     }
 
     pub(crate) fn remove_scalar(&mut self, name: &str) -> Result<()> {
-        if self.legacy.remove(name).is_some() {
-            return Ok(());
-        }
         self.registry
             .remove_session_by_name(name)
             .map_err(map_udf_error)
     }
 
     pub(crate) fn list_scalars(&self) -> Vec<String> {
-        let mut names: std::collections::BTreeSet<String> = self.legacy.keys().cloned().collect();
-        for name in self.registry.catalog_names() {
-            names.insert(name);
-        }
+        let mut names: std::collections::BTreeSet<String> = self.registry.catalog_names().into_iter().collect();
         for name in self.registry.session_names() {
             names.insert(name);
         }
@@ -122,19 +110,20 @@ impl UdfSubsystem {
     ) -> Result<Value> {
         let identity = UdfIdentity::new("", name, version).map_err(map_udf_error)?;
         if let Some(definition) = self.registry.resolve_definition(&identity) {
-            let expected = definition.signature.arity();
-            if args.len() != expected {
-                return Err(Error::UdfArity {
-                    name: name.to_owned(),
-                    expected,
-                    got: args.len(),
-                });
+            if let Some(expected) = definition.signature.expected_arity() {
+                if args.len() != expected {
+                    return Err(Error::UdfArity {
+                        name: name.to_owned(),
+                        expected,
+                        got: args.len(),
+                    });
+                }
             }
             let udf_args = values_to_udf(args)?;
             let result = self
                 .registry
                 .invoke(&UdfInvocation::scalar(identity, udf_args), Budget::new(64))
-                .map_err(|error| map_udf_error_with_name(error, name, expected, args.len()))?;
+                .map_err(|error| map_udf_error_with_name(error, name, args.len()))?;
             return udf_to_value(result);
         }
 
@@ -148,67 +137,36 @@ impl UdfSubsystem {
             }
         }
 
-        let entry = self.legacy.get(name).ok_or_else(|| Error::UdfNotFound {
+        Err(Error::UdfNotFound {
             name: name.to_owned(),
-        })?;
-        if entry.version != version {
-            return Err(Error::UdfVersionMismatch {
-                name: name.to_owned(),
-                expected: entry.version,
-                got: version,
-            });
-        }
-        if let Some(expected) = entry.udf.arity() {
-            if args.len() != expected {
-                return Err(Error::UdfArity {
-                    name: name.to_owned(),
-                    expected,
-                    got: args.len(),
-                });
-            }
-        }
-        entry.udf.call(args).map_err(|error| match error {
-            Error::Udf { .. }
-            | Error::UdfArity { .. }
-            | Error::UdfNotFound { .. }
-            | Error::UdfVersionMismatch { .. }
-            | Error::ObjectNotFound { .. }
-            | Error::ObjectCorrupt { .. }
-            | Error::Unsupported(_) => error,
-            other => Error::Udf {
-                name: name.to_owned(),
-                message: other.to_string(),
-            },
         })
     }
 
-    fn install_session_lowered(
+    fn install_session_binding(
         &mut self,
-        lowered: yydb_udf::LoweredUdf,
+        binding: yydb_udf::ExecutionUdfBinding,
         options: RegisterOptions,
     ) -> Result<()> {
-        let name = lowered.identity.name().to_owned();
-        let definition = lowered.session_definition();
-        let implementation = Arc::new(VosProgramImplementation::new(lowered));
+        let definition = binding.session_definition();
+        let implementation = Arc::new(ExecutionProgramImplementation::new(binding));
         self.registry
             .register_session(definition, options)
             .map_err(map_udf_error)?;
         self.registry
-            .bind_host(implementation)
+            .bind_implementation(implementation)
             .map_err(map_udf_error)?;
-        self.legacy.remove(&name);
         Ok(())
     }
 }
 
-fn execution_body_to_lowered(body: ValidatedUdf) -> UdfBridgeResult<yydb_udf::LoweredUdf> {
+fn execution_body_to_binding(body: ValidatedUdf) -> UdfBridgeResult<yydb_udf::ExecutionUdfBinding> {
     let mut arg_types = Vec::new();
     for ty in body.input_types() {
         arg_types.push(yydb_udf::type_from_execution(*ty)?);
     }
     let return_ty = yydb_udf::type_from_execution(body.output_type())?;
     let identity = UdfIdentity::new("", body.id(), body.version())?;
-    Ok(yydb_udf::LoweredUdf {
+    Ok(yydb_udf::ExecutionUdfBinding {
         identity,
         signature: Signature::new(arg_types, return_ty),
         policy: UdfPolicy::pure_embedded(),
@@ -222,10 +180,11 @@ fn values_to_udf(args: &[Value]) -> Result<Vec<UdfValue>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
         out.push(match value {
+            Value::Null => UdfValue::Null,
             Value::Bool(value) => UdfValue::Bool(*value),
             Value::I64(value) => UdfValue::I64(*value),
             Value::Text(value) => UdfValue::Text(value.clone()),
-            Value::Null | _ => {
+            _ => {
                 return Err(Error::Unsupported(
                     "value type is not supported by the yydb-udf scalar bridge",
                 ))
@@ -245,15 +204,10 @@ fn udf_to_value(value: UdfValue) -> Result<Value> {
 }
 
 fn map_udf_error(error: UdfError) -> Error {
-    map_udf_error_with_name(error, "<udf>", 0, 0)
+    map_udf_error_with_name(error, "<udf>", 0)
 }
 
-fn map_udf_error_with_name(
-    error: UdfError,
-    name: &str,
-    expected_arity: usize,
-    got_arity: usize,
-) -> Error {
+fn map_udf_error_with_name(error: UdfError, name: &str, got_arity: usize) -> Error {
     match error {
         UdfError::NotFound => Error::UdfNotFound {
             name: name.to_owned(),
@@ -265,7 +219,7 @@ fn map_udf_error_with_name(
         },
         UdfError::ArityMismatch => Error::UdfArity {
             name: name.to_owned(),
-            expected: expected_arity,
+            expected: 0,
             got: got_arity,
         },
         UdfError::UnsupportedType | UdfError::UnsupportedEffect => {
@@ -282,40 +236,23 @@ fn map_udf_error_with_name(
     }
 }
 
-pub(crate) fn native_from_closure(
+fn native_from_scalar(
     name: &str,
     version: u32,
-    arity: Option<usize>,
-    func: Arc<ScalarFn>,
+    udf: Arc<dyn ScalarUdf>,
 ) -> UdfBridgeResult<NativeUdfDefinition> {
     let identity = UdfIdentity::new("", name, version)?;
-    let signature = match arity {
-        Some(1) => Signature::new(vec![UdfType::I64], UdfType::I64),
-        Some(2) => Signature::new(vec![UdfType::I64, UdfType::I64], UdfType::I64),
-        Some(_) => return Err(UdfError::InvalidDefinition),
-        None => return Err(UdfError::InvalidDefinition),
+    let signature = match udf.arity() {
+        Some(arity) => Signature::untyped_fixed(arity),
+        None => Signature::untyped_variadic(),
     };
     let handler: NativeHandler = Arc::new(move |context, args| {
-        let values = args
-            .iter()
-            .map(|value| match value {
-                UdfValue::Null => Ok(Value::Null),
-                UdfValue::Bool(value) => Ok(Value::Bool(*value)),
-                UdfValue::I64(value) => Ok(Value::I64(*value)),
-                UdfValue::Text(value) => Ok(Value::Text(value.clone())),
-            })
-            .collect::<UdfBridgeResult<Vec<_>>>()?;
+        let values = udf_values_to_store(args)?;
         context.check_cancelled()?;
-        let result = func(&values).map_err(|error| UdfError::ExecutionFailed {
+        let result = udf.call(&values).map_err(|error| UdfError::ExecutionFailed {
             message: error.to_string(),
         })?;
-        match result {
-            Value::Null => Ok(UdfValue::Null),
-            Value::Bool(value) => Ok(UdfValue::Bool(value)),
-            Value::I64(value) => Ok(UdfValue::I64(value)),
-            Value::Text(value) => Ok(UdfValue::Text(value)),
-            _ => Err(UdfError::UnsupportedType),
-        }
+        store_value_to_udf(result)
     });
     Ok(NativeUdfDefinition {
         identity,
@@ -324,4 +261,53 @@ pub(crate) fn native_from_closure(
         handler,
         fingerprint: [0u8; 32],
     })
+}
+
+pub(crate) fn native_from_closure(
+    name: &str,
+    version: u32,
+    arity: Option<usize>,
+    func: Arc<ScalarFn>,
+) -> UdfBridgeResult<NativeUdfDefinition> {
+    let identity = UdfIdentity::new("", name, version)?;
+    let signature = match arity {
+        Some(arity) => Signature::untyped_fixed(arity),
+        None => Signature::untyped_variadic(),
+    };
+    let handler: NativeHandler = Arc::new(move |context, args| {
+        let values = udf_values_to_store(args)?;
+        context.check_cancelled()?;
+        let result = func(&values).map_err(|error| UdfError::ExecutionFailed {
+            message: error.to_string(),
+        })?;
+        store_value_to_udf(result)
+    });
+    Ok(NativeUdfDefinition {
+        identity,
+        signature,
+        policy: UdfPolicy::pure_embedded(),
+        handler,
+        fingerprint: [0u8; 32],
+    })
+}
+
+fn udf_values_to_store(args: &[UdfValue]) -> UdfBridgeResult<Vec<Value>> {
+    args.iter()
+        .map(|value| match value {
+            UdfValue::Null => Ok(Value::Null),
+            UdfValue::Bool(value) => Ok(Value::Bool(*value)),
+            UdfValue::I64(value) => Ok(Value::I64(*value)),
+            UdfValue::Text(value) => Ok(Value::Text(value.clone())),
+        })
+        .collect()
+}
+
+fn store_value_to_udf(value: Value) -> UdfBridgeResult<UdfValue> {
+    match value {
+        Value::Null => Ok(UdfValue::Null),
+        Value::Bool(value) => Ok(UdfValue::Bool(value)),
+        Value::I64(value) => Ok(UdfValue::I64(value)),
+        Value::Text(value) => Ok(UdfValue::Text(value)),
+        _ => Err(UdfError::UnsupportedType),
+    }
 }
