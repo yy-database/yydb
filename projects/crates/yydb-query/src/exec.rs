@@ -2,9 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use vos::types::SchemaProjection;
+use vos::types::ResolvedContract;
 use yydb_types::{Error, Result, Value};
 
+use super::catalog::table_row_key_name;
 use super::lower;
 use super::ops::{CmpOp, LiteralKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow};
 use super::resolve;
@@ -12,19 +13,19 @@ use super::store;
 
 pub fn execute(
     source: &str,
-    catalog: Option<&SchemaProjection>,
+    contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Vec<QueryRow>> {
     let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema {
         message: diagnostics,
     })?;
     let ops = lower::lower_program(&program)?;
-    execute_ops(&ops, catalog, records)
+    execute_ops(&ops, contract, records)
 }
 
 pub fn execute_ops(
     ops: &[QueryOp],
-    catalog: Option<&SchemaProjection>,
+    contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Vec<QueryRow>> {
     let mut rows: Vec<QueryRow> = Vec::new();
@@ -32,14 +33,18 @@ pub fn execute_ops(
     for op in ops {
         match op {
             QueryOp::Scan { table } => {
+                let storage_table = match contract {
+                    Some(contract) => table_row_key_name(contract, table)?,
+                    None => table.clone(),
+                };
                 current_table = Some(table.clone());
-                rows = store::load_table(records, table)?;
+                rows = store::load_table(records, &storage_table)?;
             }
             QueryOp::Filter { predicate } => {
                 let table = current_table.as_deref().ok_or_else(|| Error::Schema {
                     message: "filter without a preceding table scan".into(),
                 })?;
-                rows.retain(|row| eval_pred(predicate, row, table, catalog, records));
+                rows.retain(|row| eval_pred(predicate, row, table, contract, records));
             }
             QueryOp::Project { fields } => {
                 let table = current_table.as_deref().ok_or_else(|| Error::Schema {
@@ -47,7 +52,7 @@ pub fn execute_ops(
                 })?;
                 rows = rows
                     .into_iter()
-                    .map(|row| project_row(fields, &row, table, catalog, records))
+                    .map(|row| project_row(fields, &row, table, contract, records))
                     .collect();
             }
             QueryOp::Sort { keys } => {
@@ -81,29 +86,29 @@ fn project_row(
     fields: &[ProjectField],
     row: &QueryRow,
     table: &str,
-    catalog: Option<&SchemaProjection>,
+    contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> QueryRow {
     let mut out = QueryRow::new();
     for field in fields {
         match &field.expr {
             ProjectExpr::Scalar { path } => {
-                let value = read_path(path, row, table, catalog, records);
+                let value = read_path(path, row, table, contract, records);
                 out.insert(field.name.clone(), value);
             }
             ProjectExpr::Nested {
                 path,
                 fields: nested,
             } => {
-                let nested_value = match catalog {
-                    Some(catalog) => {
-                        resolve::resolve_row_at_path(path, row, table, catalog, records)
+                let nested_value = match contract {
+                    Some(contract) => {
+                        resolve::resolve_row_at_path(path, row, table, contract, records)
                             .map(|(nested_row, nested_table)| {
                                 Value::Row(project_row(
                                     nested,
                                     &nested_row,
                                     &nested_table,
-                                    Some(catalog),
+                                    Some(contract),
                                     records,
                                 ))
                             })
@@ -122,14 +127,14 @@ fn eval_pred(
     pred: &Pred,
     row: &QueryRow,
     table: &str,
-    catalog: Option<&SchemaProjection>,
+    contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> bool {
     match pred {
         Pred::True => true,
         Pred::False => false,
         Pred::FieldBool { path, value } => {
-            let left = read_path(path, row, table, catalog, records);
+            let left = read_path(path, row, table, contract, records);
             matches!(left, Value::Bool(b) if b == *value)
         }
         Pred::FieldCmp {
@@ -138,17 +143,17 @@ fn eval_pred(
             literal,
             kind,
         } => {
-            let left = read_path(path, row, table, catalog, records);
+            let left = read_path(path, row, table, contract, records);
             let right = decode_literal(literal, *kind);
             cmp_values(&left, *op, &right)
         }
         Pred::And(left, right) => {
-            eval_pred(left, row, table, catalog, records)
-                && eval_pred(right, row, table, catalog, records)
+            eval_pred(left, row, table, contract, records)
+                && eval_pred(right, row, table, contract, records)
         }
         Pred::Or(left, right) => {
-            eval_pred(left, row, table, catalog, records)
-                || eval_pred(right, row, table, catalog, records)
+            eval_pred(left, row, table, contract, records)
+                || eval_pred(right, row, table, contract, records)
         }
     }
 }
@@ -157,14 +162,14 @@ fn read_path(
     path: &[String],
     row: &QueryRow,
     table: &str,
-    catalog: Option<&SchemaProjection>,
+    contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Value {
     if path.len() == 1 {
         return row.get(&path[0]).cloned().unwrap_or(Value::Null);
     }
-    if let Some(catalog) = catalog {
-        return resolve::resolve_field_path(path, row, table, catalog, records)
+    if let Some(contract) = contract {
+        return resolve::resolve_field_path(path, row, table, contract, records)
             .unwrap_or(Value::Null);
     }
     Value::Null

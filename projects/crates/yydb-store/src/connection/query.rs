@@ -1,6 +1,5 @@
 //! VOS query and DML execution on the connection record map.
 
-use crate::catalog as schema;
 use crate::{Error, Result};
 use yydb_query::QueryRow;
 
@@ -17,8 +16,8 @@ impl Connection {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let state = self.active_state_unlocked()?;
-        let catalog = catalog_projection(&state)?;
-        yydb_query::execute(source, Some(&catalog), &state.records)
+        let contract = resolved_contract(&state)?;
+        yydb_query::execute(source, Some(&contract), &state.records)
     }
 
     /// Execute a VOS write program (inserts and schema macros).
@@ -31,24 +30,18 @@ impl Connection {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.mutate_active_state_unlocked(|state| {
-            let catalog = catalog_projection(state)?;
+            let contract = resolved_contract(state)?;
             let schema_document = state
                 .schema
                 .as_ref()
                 .map(|schema| schema.document.as_str());
-            yydb_query::execute_write(source, &catalog, schema_document, &mut state.records)
+            yydb_query::execute_write(source, &contract, schema_document, &mut state.records)
         })
     }
 }
 
-fn catalog_projection(state: &super::State) -> Result<vos::types::SchemaProjection> {
-    let document = state
-        .schema
-        .as_ref()
-        .ok_or_else(|| Error::Schema {
-            message: "VOS query requires ensure_schema before execution".into(),
-        })?
-        .document
-        .as_str();
-    schema::project_schema(document)
+fn resolved_contract(state: &super::State) -> Result<vos::ResolvedContract> {
+    state.resolved_contract.clone().ok_or_else(|| Error::Schema {
+        message: "VOS query requires ensure_schema before execution".into(),
+    })
 }

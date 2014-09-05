@@ -5,10 +5,11 @@ use std::collections::BTreeMap;
 use vos::syntax::{
     VosDeclarationKind, VosExpr, VosFieldInit, VosLiteral, VosProgram, VosRoot, VosStmt,
 };
-use vos::types::{CanonicalType, SchemaProjection, TypeContract, TypeContractKind};
+use vos::types::{ResolvedCanonicalType, ResolvedContract, ResolvedTypeContract};
 
 use yydb_types::{Error, Result, Value};
 
+use super::catalog::{field_on_table, primary_field_name, table_storage_name, table_type_by_name};
 use super::ops::QueryRow;
 use super::store;
 
@@ -21,20 +22,20 @@ fn dml_error(message: impl Into<String>) -> Error {
 /// Execute unit-valued VOS write programs against stored table rows.
 pub fn execute(
     source: &str,
-    catalog: &SchemaProjection,
+    contract: &ResolvedContract,
     schema_document: Option<&str>,
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<()> {
     let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema {
         message: diagnostics,
     })?;
-    execute_program(&program, catalog, schema_document, records)
+    execute_program(&program, contract, schema_document, records)
 }
 
 /// If `source` is a single `Type::insert({ … })` program, run it and return the stored row.
 pub fn try_insert_returning(
     source: &str,
-    catalog: &SchemaProjection,
+    contract: &ResolvedContract,
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<Option<Vec<QueryRow>>> {
     let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema {
@@ -47,17 +48,17 @@ pub fn try_insert_returning(
     if is_macro_call(result) || is_typed_object_insert(result) {
         return Ok(None);
     }
-    let (table, row) = match lower_insert(result, catalog, &[]) {
+    let (table, row) = match lower_insert(result, contract, &[]) {
         Ok(value) => value,
         Err(_) => return Ok(None),
     };
-    let stored = upsert_row_for_table(catalog, records, &table, &row)?;
+    let stored = upsert_row_for_table(contract, records, &table, &row)?;
     Ok(Some(vec![stored]))
 }
 
 pub fn execute_program(
     program: &VosProgram,
-    catalog: &SchemaProjection,
+    contract: &ResolvedContract,
     schema_document: Option<&str>,
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<()> {
@@ -69,7 +70,7 @@ pub fn execute_program(
         match stmt {
             VosStmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
             VosStmt::Expr(expr) => {
-                apply_insert(expr, catalog, records, &bindings)?;
+                apply_insert(expr, contract, records, &bindings)?;
                 wrote = true;
             }
         }
@@ -81,7 +82,7 @@ pub fn execute_program(
                 "macro call could not be expanded (schema document required)",
             ));
         }
-        apply_insert(result, catalog, records, &bindings)?;
+        apply_insert(result, contract, records, &bindings)?;
         wrote = true;
     }
 
@@ -215,35 +216,37 @@ fn is_typed_object_insert(expr: &VosExpr) -> bool {
 
 fn apply_insert(
     expr: &VosExpr,
-    catalog: &SchemaProjection,
+    contract: &ResolvedContract,
     records: &mut BTreeMap<String, Vec<u8>>,
     bindings: &[(String, VosExpr)],
 ) -> Result<()> {
-    let (table, row) = lower_insert(expr, catalog, bindings)?;
-    upsert_row_for_table(catalog, records, &table, &row)?;
+    let (table, row) = lower_insert(expr, contract, bindings)?;
+    upsert_row_for_table(contract, records, &table, &row)?;
     Ok(())
 }
 
 fn upsert_row_for_table(
-    catalog: &SchemaProjection,
+    contract: &ResolvedContract,
     records: &mut BTreeMap<String, Vec<u8>>,
     table: &str,
     row: &QueryRow,
 ) -> Result<QueryRow> {
-    let pk_field = primary_field_name(table_entry(catalog, table)?)?;
+    let entry = table_type_by_name(contract, table)?;
+    let pk_field = primary_field_name(entry)?;
     let pk = row.get(pk_field).ok_or_else(|| {
         dml_error(format!(
             "insert row is missing primary key field `{pk_field}`"
         ))
     })?;
     let pk_text = value_to_key(pk)?;
-    store::upsert_row(records, table, &pk_text, row)?;
+    let storage_name = table_storage_name(entry)?.to_string();
+    store::upsert_row(records, &storage_name, &pk_text, row)?;
     Ok(row.clone())
 }
 
 fn lower_insert(
     expr: &VosExpr,
-    catalog: &SchemaProjection,
+    contract: &ResolvedContract,
     bindings: &[(String, VosExpr)],
 ) -> Result<(String, QueryRow)> {
     let VosExpr::Call { callee, args, .. } = expr else {
@@ -261,7 +264,7 @@ fn lower_insert(
 
     if args.len() == 1 {
         let table = type_name_from_expr(object)?;
-        let entry = table_entry(catalog, &table)?;
+        let entry = table_type_by_name(contract, &table)?;
         let VosExpr::AnonObject { fields, .. } = expand_bindings(&args[0], bindings)? else {
             return Err(dml_error(
                 "Phase 1 execute expects `Type::insert({ … })` with an object literal",
@@ -280,7 +283,7 @@ fn lower_insert(
             "Phase 1 execute supports `Type { … }.insert()` or `Type::insert({ … })`",
         ));
     };
-    let entry = table_entry(catalog, &ty)?;
+    let entry = table_type_by_name(contract, &ty)?;
     let row = lower_field_inits(entry, &fields)?;
     Ok((ty, row))
 }
@@ -293,54 +296,20 @@ fn type_name_from_expr(expr: &VosExpr) -> Result<String> {
     }
 }
 
-fn table_name(entry: &TypeContract) -> String {
+fn table_display_name(entry: &ResolvedTypeContract) -> String {
     entry.canonical_path.join("::")
 }
 
-fn table_entry<'a>(catalog: &'a SchemaProjection, name: &str) -> Result<&'a TypeContract> {
-    catalog
-        .types
-        .iter()
-        .find(|entry| {
-            entry.kind == TypeContractKind::Table
-                && entry.canonical_path.last().is_some_and(|last| last == name)
-        })
-        .ok_or_else(|| dml_error(format!("unknown table `{name}`")))
-}
-
-fn primary_field_name(entry: &TypeContract) -> Result<&str> {
-    entry
-        .fields
-        .iter()
-        .find(|field| {
-            field
-                .attributes
-                .iter()
-                .any(|attribute| attribute.name == "primary")
-        })
-        .map(|field| field.canonical_name.as_str())
-        .ok_or_else(|| {
-            dml_error(format!(
-                "table `{}` has no primary key field",
-                table_name(entry)
-            ))
-        })
-}
-
-fn lower_field_inits(entry: &TypeContract, fields: &[VosFieldInit]) -> Result<QueryRow> {
+fn lower_field_inits(entry: &ResolvedTypeContract, fields: &[VosFieldInit]) -> Result<QueryRow> {
     let mut row = QueryRow::new();
     for init in fields {
-        let slot = entry
-            .fields
-            .iter()
-            .find(|field| field.canonical_name == init.name)
-            .ok_or_else(|| {
-                dml_error(format!(
-                    "unknown field `{}` on `{}`",
-                    init.name,
-                    table_name(entry)
-                ))
-            })?;
+        let slot = field_on_table(entry, &init.name).map_err(|_| {
+            dml_error(format!(
+                "unknown field `{}` on `{}`",
+                init.name,
+                table_display_name(entry)
+            ))
+        })?;
         let value = init.value.as_ref().ok_or_else(|| {
             dml_error(format!(
                 "field `{}` requires an explicit initializer",
@@ -355,7 +324,7 @@ fn lower_field_inits(entry: &TypeContract, fields: &[VosFieldInit]) -> Result<Qu
     Ok(row)
 }
 
-fn eval_literal(expr: &VosExpr, ty: &CanonicalType) -> Result<Value> {
+fn eval_literal(expr: &VosExpr, ty: &ResolvedCanonicalType) -> Result<Value> {
     match expr {
         VosExpr::Literal(literal) => literal_to_value(literal, ty),
         _ => Err(dml_error(
@@ -364,7 +333,7 @@ fn eval_literal(expr: &VosExpr, ty: &CanonicalType) -> Result<Value> {
     }
 }
 
-fn literal_to_value(literal: &VosLiteral, _ty: &CanonicalType) -> Result<Value> {
+fn literal_to_value(literal: &VosLiteral, _ty: &ResolvedCanonicalType) -> Result<Value> {
     Ok(match literal {
         VosLiteral::Null => Value::Null,
         VosLiteral::Bool(value) => Value::Bool(*value),

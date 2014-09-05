@@ -1,52 +1,18 @@
-//! Resolve dotted field paths against stored rows and the VOS schema projection.
+//! Resolve dotted field paths against stored rows and the resolved VOS contract.
 
 use std::collections::BTreeMap;
 
-use vos::types::{CanonicalType, FieldContract, SchemaProjection, TypeContract, TypeContractKind};
+use vos::types::ResolvedContract;
 
 use yydb_types::{Error, Result, Value};
 
+use super::catalog::{field_on_table, reference_target_storage_name, table_type_by_name};
 use super::ops::QueryRow;
 use super::store;
 
 fn resolve_error(message: impl Into<String>) -> Error {
     Error::Schema {
         message: message.into(),
-    }
-}
-
-fn table_name(entry: &TypeContract) -> String {
-    entry.canonical_path.join("::")
-}
-
-fn table_entry<'a>(catalog: &'a SchemaProjection, name: &str) -> Result<&'a TypeContract> {
-    catalog
-        .types
-        .iter()
-        .find(|entry| {
-            entry.kind == TypeContractKind::Table
-                && entry.canonical_path.last().is_some_and(|last| last == name)
-        })
-        .ok_or_else(|| resolve_error(format!("unknown table `{name}`")))
-}
-
-fn field_entry<'a>(entry: &'a TypeContract, name: &str) -> Option<&'a FieldContract> {
-    entry
-        .fields
-        .iter()
-        .find(|field| field.canonical_name == name)
-}
-
-fn reference_target(ty: &CanonicalType) -> Result<&str> {
-    match ty {
-        CanonicalType::Reference(inner) => match inner.as_ref() {
-            CanonicalType::Named(path) => path
-                .last()
-                .map(String::as_str)
-                .ok_or_else(|| resolve_error("reference field must name a table type")),
-            _ => Err(resolve_error("reference field must name a table type")),
-        },
-        _ => Err(resolve_error("field is not a reference")),
     }
 }
 
@@ -70,7 +36,7 @@ pub fn resolve_field_path(
     path: &[String],
     row: &QueryRow,
     table: &str,
-    catalog: &SchemaProjection,
+    contract: &ResolvedContract,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Value> {
     if path.is_empty() {
@@ -90,14 +56,9 @@ pub fn resolve_field_path(
             return Ok(value);
         }
 
-        let entry = table_entry(catalog, &current_table)?;
-        let field = field_entry(entry, segment).ok_or_else(|| {
-            resolve_error(format!(
-                "unknown field `{segment}` on table `{}`",
-                table_name(entry)
-            ))
-        })?;
-        let target_table = reference_target(&field.canonical_type)?.to_string();
+        let entry = table_type_by_name(contract, &current_table)?;
+        let field = field_on_table(entry, segment)?;
+        let target_table = reference_target_storage_name(contract, &field.canonical_type)?;
         let pk = value_to_pk(&value)?;
         owned = Some(store::load_row(records, &target_table, &pk)?);
         current = owned.as_ref().expect("loaded referenced row");
@@ -112,7 +73,7 @@ pub fn resolve_row_at_path(
     path: &[String],
     row: &QueryRow,
     table: &str,
-    catalog: &SchemaProjection,
+    contract: &ResolvedContract,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Result<(QueryRow, String)> {
     if path.is_empty() {
@@ -125,14 +86,9 @@ pub fn resolve_row_at_path(
 
     for segment in path {
         let value = current.get(segment).cloned().unwrap_or(Value::Null);
-        let entry = table_entry(catalog, &current_table)?;
-        let field = field_entry(entry, segment).ok_or_else(|| {
-            resolve_error(format!(
-                "unknown field `{segment}` on table `{}`",
-                table_name(entry)
-            ))
-        })?;
-        let target_table = reference_target(&field.canonical_type)?.to_string();
+        let entry = table_type_by_name(contract, &current_table)?;
+        let field = field_on_table(entry, segment)?;
+        let target_table = reference_target_storage_name(contract, &field.canonical_type)?;
         let pk = value_to_pk(&value)?;
         owned = Some(store::load_row(records, &target_table, &pk)?);
         current = owned.as_ref().expect("loaded referenced row");
@@ -141,6 +97,6 @@ pub fn resolve_row_at_path(
 
     Ok((
         owned.unwrap_or_else(|| row.clone()),
-        current_table.to_string(),
+        current_table,
     ))
 }

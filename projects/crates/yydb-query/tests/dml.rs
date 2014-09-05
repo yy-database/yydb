@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use yydb_query::execute_write;
+use yydb_query::{execute_write, resolved_contract_from_document};
 
 const BLOG_SCHEMA: &str = r#"
 table User {
@@ -33,15 +33,15 @@ macro seed_blog() -> unit {
 
 #[test]
 fn expand_schema_macro_when_vos_supports_document_macros() {
-    let catalog = vos::validate_schema(BLOG_SCHEMA).expect("catalog");
+    let contract = resolved_contract_from_document(BLOG_SCHEMA).expect("contract");
     let mut records = BTreeMap::new();
-    execute_write("seed_blog()", &catalog, Some(BLOG_WITH_MACRO), &mut records).expect("execute");
+    execute_write("seed_blog()", &contract, Some(BLOG_WITH_MACRO), &mut records).expect("execute");
     assert_eq!(records.len(), 2);
 }
 
 #[test]
 fn static_insert_call_shape() {
-    let catalog = vos::validate_schema(BLOG_SCHEMA).expect("catalog");
+    let contract = resolved_contract_from_document(BLOG_SCHEMA).expect("contract");
     let mut records = BTreeMap::new();
     execute_write(
         r#"User::insert({
@@ -49,7 +49,7 @@ fn static_insert_call_shape() {
                 user_name: "ada",
                 active: true,
             })"#,
-        &catalog,
+        &contract,
         None,
         &mut records,
     )
