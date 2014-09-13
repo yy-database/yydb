@@ -95,7 +95,8 @@ impl UdfSubsystem {
     }
 
     pub(crate) fn list_scalars(&self) -> Vec<String> {
-        let mut names: std::collections::BTreeSet<String> = self.registry.catalog_names().into_iter().collect();
+        let mut names: std::collections::BTreeSet<String> =
+            self.registry.catalog_names().into_iter().collect();
         for name in self.registry.session_names() {
             names.insert(name);
         }
@@ -249,9 +250,11 @@ fn native_from_scalar(
     let handler: NativeHandler = Arc::new(move |context, args| {
         let values = udf_values_to_store(args)?;
         context.check_cancelled()?;
-        let result = udf.call(&values).map_err(|error| UdfError::ExecutionFailed {
-            message: error.to_string(),
-        })?;
+        let result = udf
+            .call(&values)
+            .map_err(|error| UdfError::ExecutionFailed {
+                message: error.to_string(),
+            })?;
         store_value_to_udf(result)
     });
     Ok(NativeUdfDefinition {

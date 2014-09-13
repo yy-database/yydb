@@ -41,7 +41,6 @@ pub type ScalarFn = dyn Fn(&[Value]) -> Result<Value> + Send + Sync;
 pub use yydb_udf::{
     CatalogUdfEntry, CatalogUdfRegistry, HostFunctionHandle, HostMicroDefinition,
     HostMicroImplementation, HostRuntimeAdapter, ImplementationEntry, ImplementationRegistry,
-    RegisterOptions,
-    SessionUdfEntry, SessionUdfRegistry, Signature, UdfDefinition, UdfError, UdfIdentity,
-    UdfRegistry, UdfType, UdfValue,
+    RegisterOptions, SessionUdfEntry, SessionUdfRegistry, Signature, UdfDefinition, UdfError,
+    UdfIdentity, UdfRegistry, UdfType, UdfValue,
 };

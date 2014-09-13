@@ -31,17 +31,17 @@ impl Connection {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.mutate_active_state_unlocked(|state| {
             let contract = resolved_contract(state)?;
-            let schema_document = state
-                .schema
-                .as_ref()
-                .map(|schema| schema.document.as_str());
+            let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
             yydb_query::execute_write(source, &contract, schema_document, &mut state.records)
         })
     }
 }
 
 fn resolved_contract(state: &super::State) -> Result<vos::ResolvedContract> {
-    state.resolved_contract.clone().ok_or_else(|| Error::Schema {
-        message: "VOS query requires ensure_schema before execution".into(),
-    })
+    state
+        .resolved_contract
+        .clone()
+        .ok_or_else(|| Error::Schema {
+            message: "VOS query requires ensure_schema before execution".into(),
+        })
 }

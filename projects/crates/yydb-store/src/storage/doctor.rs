@@ -10,8 +10,8 @@ use yydb_types::{
 
 use crate::kv::lease::{read_u64_meta, write_u64_meta, META_COMMIT_SEQ};
 use crate::kv::retention::{self as ttl, QUOTA_PREFIX, TTL_PREFIX};
-use crate::objects::ObjectStore;
 use crate::objects::references as refs;
+use crate::objects::ObjectStore;
 
 pub(crate) const META_CHECKPOINT_SEQ: &str = "__yydb/meta/checkpoint_sequence";
 pub(crate) const PENDING_BATCH_KEY: &str = "__yydb/batch/pending";

@@ -95,8 +95,5 @@ pub fn resolve_row_at_path(
         current_table = target_table;
     }
 
-    Ok((
-        owned.unwrap_or_else(|| row.clone()),
-        current_table,
-    ))
+    Ok((owned.unwrap_or_else(|| row.clone()), current_table))
 }

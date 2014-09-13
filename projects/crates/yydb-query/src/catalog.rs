@@ -2,8 +2,8 @@
 
 use vos::types::{
     FieldIdentity, IdentityManifest, ResolvedCanonicalType, ResolvedContract,
-    ResolvedFieldContract, ResolvedTypeContract, SchemaProjection, TypeContractKind,
-    TypeIdentity, IDENTITY_MANIFEST_VERSION,
+    ResolvedFieldContract, ResolvedTypeContract, SchemaProjection, TypeContractKind, TypeIdentity,
+    IDENTITY_MANIFEST_VERSION,
 };
 use vos::{bind_identity, resolve_contract_from_bound};
 use yydb_types::{Error, Result};
@@ -78,10 +78,7 @@ pub fn table_type_by_name<'a>(
 ) -> Result<&'a ResolvedTypeContract> {
     let mut matches = contract.types.iter().filter(|entry| {
         entry.kind == TypeContractKind::Table
-            && entry
-                .canonical_path
-                .last()
-                .is_some_and(|last| last == name)
+            && entry.canonical_path.last().is_some_and(|last| last == name)
     });
     let first = matches
         .next()
