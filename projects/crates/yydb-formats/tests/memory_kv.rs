@@ -1,4 +1,4 @@
-use yydb_format::MemoryPager;
+use yydb_formats::MemoryPager;
 
 #[test]
 fn memory_pager_kv_roundtrip() {

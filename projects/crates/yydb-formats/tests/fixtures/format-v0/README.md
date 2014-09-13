@@ -15,4 +15,4 @@ page0_bad_checksum.bin     slot A checksum 故意损坏
 crc32c_reference.txt       空输入 CRC32C 参考值
 ```
 
-生成工具可在实现仓落地为 `yydb-format-fixture-gen`；设计仓只保留权威 bytes，不以生成器输出覆盖 golden 而不更新 manifest。
+生成工具可在实现仓落地为 `yydb-formats-fixture-gen`；设计仓只保留权威 bytes，不以生成器输出覆盖 golden 而不更新 manifest。

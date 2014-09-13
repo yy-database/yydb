@@ -3,11 +3,11 @@
 use std::fs;
 
 use yydb::{Connection, DoctorSeverity, OpenFlags};
-use yydb_format::diagnose_file;
+use yydb_formats::diagnose_file;
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "yydb-format-v0-doctor-{}-{}.yydb",
+        "yydb-formats-v0-doctor-{}-{}.yydb",
         std::process::id(),
         label
     ))
@@ -15,12 +15,12 @@ fn temp_path(label: &str) -> std::path::PathBuf {
 
 fn fixture(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../yydb-format/tests/fixtures/format-v0")
+        .join("../yydb-formats/tests/fixtures/format-v0")
         .join(name)
 }
 
 #[test]
-fn yydb_format_v0_doctor_roundtrip_clean() {
+fn yydb_formats_v0_doctor_roundtrip_clean() {
     let path = temp_path("clean");
     let _ = fs::remove_file(&path);
 
@@ -43,7 +43,7 @@ fn yydb_format_v0_doctor_roundtrip_clean() {
 }
 
 #[test]
-fn yydb_format_v0_doctor_corrupt_header_fixture() {
+fn yydb_formats_v0_doctor_corrupt_header_fixture() {
     let path = temp_path("bad-header");
     let _ = fs::remove_file(&path);
     fs::copy(fixture("page0_bad_checksum.bin"), &path).unwrap();

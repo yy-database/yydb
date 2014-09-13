@@ -3,18 +3,18 @@
 use std::fs;
 
 use yydb::{Connection, OpenFlags};
-use yydb_format::PAGE_MAGIC;
+use yydb_formats::PAGE_MAGIC;
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "yydb-format-v0-connection-{}-{}.yydb",
+        "yydb-formats-v0-connection-{}-{}.yydb",
         std::process::id(),
         label
     ))
 }
 
 #[test]
-fn yydb_format_v0_connection_put_get_reopen() {
+fn yydb_formats_v0_connection_put_get_reopen() {
     let path = temp_path("roundtrip");
     let _ = fs::remove_file(&path);
 
@@ -33,7 +33,7 @@ fn yydb_format_v0_connection_put_get_reopen() {
 }
 
 #[test]
-fn yydb_format_v0_connection_wal_checkpoint() {
+fn yydb_formats_v0_connection_wal_checkpoint() {
     let path = temp_path("wal");
     let _ = fs::remove_file(&path);
     let wal = std::path::PathBuf::from(format!("{}-wal", path.display()));

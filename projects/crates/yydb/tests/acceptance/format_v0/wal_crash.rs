@@ -3,18 +3,18 @@
 use std::fs;
 
 use yydb::{journal::wal_path, Connection, OpenFlags};
-use yydb_format::{parse_wal, strip_trailing_txn_commit, FilePager};
+use yydb_formats::{parse_wal, strip_trailing_txn_commit, FilePager};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "yydb-format-v0-wal-crash-{}-{}.yydb",
+        "yydb-formats-v0-wal-crash-{}-{}.yydb",
         std::process::id(),
         label
     ))
 }
 
 #[test]
-fn yydb_format_v0_wal_crash() {
+fn yydb_formats_v0_wal_crash() {
     let path = temp_path("crash");
     let wal = wal_path(&path);
     let _ = fs::remove_file(&wal);

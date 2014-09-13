@@ -3,18 +3,18 @@
 use std::fs;
 
 use yydb::{Connection, OpenFlags};
-use yydb_format::{parse_page0, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B};
+use yydb_formats::{parse_page0, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "yydb-format-v0-checkpoint-header-{}-{}.yydb",
+        "yydb-formats-v0-checkpoint-header-{}-{}.yydb",
         std::process::id(),
         label
     ))
 }
 
 #[test]
-fn yydb_format_v0_checkpoint_header() {
+fn yydb_formats_v0_checkpoint_header() {
     let path = temp_path("checkpoint");
     let _ = fs::remove_file(&path);
 
@@ -40,7 +40,7 @@ fn slot_generation(bytes: &[u8], offset: usize) -> u64 {
 }
 
 #[test]
-fn yydb_format_v0_checkpoint_alternates_header_slot() {
+fn yydb_formats_v0_checkpoint_alternates_header_slot() {
     let path = temp_path("alternate");
     let _ = fs::remove_file(&path);
 

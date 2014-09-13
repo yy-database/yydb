@@ -4,7 +4,7 @@ use crate::fixtures::yydb::{cleanup, temp_yydx};
 use yydb::{Batch, Connection, ObjectKind, ObjectStore};
 
 #[test]
-fn yydb_format_v0_backup_yydx_copy() {
+fn yydb_formats_v0_backup_yydx_copy() {
     let path = temp_yydx("backup-yydx-src");
     let backup = temp_yydx("backup-yydx-copy");
 

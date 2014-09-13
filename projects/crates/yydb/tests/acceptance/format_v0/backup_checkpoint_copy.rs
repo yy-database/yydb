@@ -4,7 +4,7 @@ use crate::fixtures::yydb::{cleanup, temp_db};
 use yydb::{journal::wal_path, Connection, OpenFlags};
 
 #[test]
-fn yydb_format_v0_backup_checkpoint_copy() {
+fn yydb_formats_v0_backup_checkpoint_copy() {
     let path = temp_db("backup-checkpoint");
     let backup = temp_db("backup-checkpoint-copy");
 
@@ -34,7 +34,7 @@ fn yydb_format_v0_backup_checkpoint_copy() {
 }
 
 #[test]
-fn yydb_format_v0_backup_with_wal_copy() {
+fn yydb_formats_v0_backup_with_wal_copy() {
     let path = temp_db("backup-wal");
     let backup = temp_db("backup-wal-copy");
 

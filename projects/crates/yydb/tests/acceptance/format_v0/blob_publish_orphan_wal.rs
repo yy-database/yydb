@@ -9,7 +9,7 @@ use yydb::{
 
 fn temp_yydx(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "yydb-format-v0-blob-orphan-wal-{}-{}.yydx",
+        "yydb-formats-v0-blob-orphan-wal-{}-{}.yydx",
         std::process::id(),
         label
     ))
@@ -23,7 +23,7 @@ fn cleanup(path: &Path) {
 }
 
 #[test]
-fn yydb_format_v0_blob_publish_orphan_wal() {
+fn yydb_formats_v0_blob_publish_orphan_wal() {
     let path = temp_yydx("publish-orphan-wal");
     cleanup(&path);
 

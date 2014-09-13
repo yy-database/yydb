@@ -4,11 +4,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use yydb::{journal::wal_path, Batch, Connection, ObjectKind, ObjectStore, OpenFlags};
-use yydb_format::{parse_wal, strip_trailing_txn_commit, FRAME_BLOB_REFS};
+use yydb_formats::{parse_wal, strip_trailing_txn_commit, FRAME_BLOB_REFS};
 
 fn temp_yydx(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "yydb-format-v0-wal-blob-refs-crash-{}-{}.yydx",
+        "yydb-formats-v0-wal-blob-refs-crash-{}-{}.yydx",
         std::process::id(),
         label
     ))
@@ -22,7 +22,7 @@ fn cleanup(path: &Path) {
 }
 
 #[test]
-fn yydb_format_v0_wal_blob_refs_crash() {
+fn yydb_formats_v0_wal_blob_refs_crash() {
     let path = temp_yydx("wal-blob-refs-crash");
     cleanup(&path);
 

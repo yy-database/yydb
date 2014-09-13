@@ -22,7 +22,7 @@ enum ObjectStoreRoot {
     OnDisk(PathBuf),
 }
 
-use yydb_format::{blob_chunk_hash, encode_blob_chunk, read_blob_payload};
+use yydb_formats::{blob_chunk_hash, encode_blob_chunk, read_blob_payload};
 use yydb_types::{
     ChunkManifest, Error, HashAlgo, ObjectKind, ObjectRef, Result, Tier, Vector,
     DEFAULT_CHUNK_SIZE, INLINE_BYTES_MAX,

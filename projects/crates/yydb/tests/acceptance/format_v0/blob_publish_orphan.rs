@@ -7,7 +7,7 @@ use yydb::{Batch, Connection, DoctorSeverity, ObjectKind, ObjectStore};
 
 fn temp_yydx(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "yydb-format-v0-blob-orphan-{}-{}.yydx",
+        "yydb-formats-v0-blob-orphan-{}-{}.yydx",
         std::process::id(),
         label
     ))
@@ -20,7 +20,7 @@ fn cleanup(path: &Path) {
 }
 
 #[test]
-fn yydb_format_v0_blob_publish_orphan() {
+fn yydb_formats_v0_blob_publish_orphan() {
     let path = temp_yydx("publish-orphan");
     cleanup(&path);
 

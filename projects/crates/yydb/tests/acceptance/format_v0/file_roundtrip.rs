@@ -2,12 +2,12 @@
 
 use std::path::PathBuf;
 
-use yydb_format::{FilePager, PAGE_MAGIC};
+use yydb_formats::{FilePager, PAGE_MAGIC};
 
 #[test]
-fn yydb_format_v0_file_roundtrip() {
+fn yydb_formats_v0_file_roundtrip() {
     let path = std::env::temp_dir().join(format!(
-        "yydb-format-v0-file-{}-{}.yydb",
+        "yydb-formats-v0-file-{}-{}.yydb",
         std::process::id(),
         "roundtrip"
     ));

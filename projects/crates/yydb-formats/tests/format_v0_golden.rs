@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use yydb_format::{
+use yydb_formats::{
     committed_tail_lsn, committed_transactions, crc32c, parse_blob_header, parse_page0, parse_shm,
     parse_wal, parse_wal_recover, strip_trailing_txn_commit, BLOB_HEADER_BYTES,
 };
@@ -69,7 +69,7 @@ fn format_v0_blob_header_min() {
 
 #[test]
 fn format_v0_blob_chunk_roundtrip() {
-    use yydb_format::{encode_blob_chunk, read_blob_payload};
+    use yydb_formats::{encode_blob_chunk, read_blob_payload};
     let payload = b"hello-yblo";
     let file = encode_blob_chunk(payload, 0);
     assert_eq!(read_blob_payload(&file).unwrap(), payload);

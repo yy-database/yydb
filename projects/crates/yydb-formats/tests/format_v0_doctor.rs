@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use yydb_format::diagnose_file;
+use yydb_formats::diagnose_file;
 use yydb_types::DoctorSeverity;
 
 fn fixture(name: &str) -> PathBuf {

@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use yydb_format::{parse_wal, WAL_MAGIC};
+use yydb_formats::{parse_wal, WAL_MAGIC};
 use yydb_types::{Error, Result};
 
 /// How durable writes are published to disk.

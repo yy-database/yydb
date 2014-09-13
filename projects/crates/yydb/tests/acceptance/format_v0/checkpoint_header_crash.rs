@@ -3,11 +3,11 @@
 use std::fs;
 
 use yydb::{journal::wal_path, Connection, OpenFlags};
-use yydb_format::{inactive_slot_offset, parse_page0, slot_offset_for_kind, FilePager};
+use yydb_formats::{inactive_slot_offset, parse_page0, slot_offset_for_kind, FilePager};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "yydb-format-v0-checkpoint-header-crash-{}-{}.yydb",
+        "yydb-formats-v0-checkpoint-header-crash-{}-{}.yydb",
         std::process::id(),
         label
     ))
@@ -28,7 +28,7 @@ fn prepare_wal_pending(path: &std::path::Path) {
 }
 
 #[test]
-fn yydb_format_v0_checkpoint_header_crash_before_commit() {
+fn yydb_formats_v0_checkpoint_header_crash_before_commit() {
     let path = temp_path("before-header");
     prepare_wal_pending(&path);
     let wal = wal_path(&path);
@@ -58,7 +58,7 @@ fn yydb_format_v0_checkpoint_header_crash_before_commit() {
 }
 
 #[test]
-fn yydb_format_v0_checkpoint_header_crash_corrupt_inactive_slot() {
+fn yydb_formats_v0_checkpoint_header_crash_corrupt_inactive_slot() {
     let path = temp_path("corrupt-inactive");
     prepare_wal_pending(&path);
     let wal = wal_path(&path);

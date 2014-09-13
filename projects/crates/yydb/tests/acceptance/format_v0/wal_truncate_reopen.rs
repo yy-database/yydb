@@ -3,20 +3,20 @@
 use std::fs;
 
 use yydb::{journal::wal_path, Connection, OpenFlags};
-use yydb_format::{
+use yydb_formats::{
     parse_wal, strip_trailing_txn_commit, truncate_wal_to_recoverable_prefix, FilePager,
 };
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "yydb-format-v0-wal-truncate-{}-{}.yydb",
+        "yydb-formats-v0-wal-truncate-{}-{}.yydb",
         std::process::id(),
         label
     ))
 }
 
 #[test]
-fn yydb_format_v0_wal_truncate_reopen() {
+fn yydb_formats_v0_wal_truncate_reopen() {
     let path = temp_path("truncate-reopen");
     let wal = wal_path(&path);
     let _ = fs::remove_file(&wal);

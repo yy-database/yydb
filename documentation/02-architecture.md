@@ -6,7 +6,7 @@
 
 ```text
 yydb-types       模型：错误、值、对象引用、报告类型。无 IO。
-yydb-format      页、WAL、shm、blob、pager、CRC 的解析与校验。
+yydb-formats      页、WAL、shm、blob、pager、CRC 的解析与校验。
 yydb-execution   本地执行模型：类型、程序、字段句柄、记录布局、UDF 验证。
 yydb-udf         UDF 合同、registry、host adapter、scalar 合同。
 yydb-query       VOS 语言整合、DML / DDL 定义与本地查询降级。
@@ -26,7 +26,7 @@ yydb-client                    yydb-napi / yydb-pyo3 / yydb-wasm
 
 1. 底层 crate 不依赖上层 crate，也不依赖宿主（WASM、N-API、Python）。
 2. 门面依赖实现，实现不反向依赖门面。
-3. 绑定层依赖门面（以及 serve 需要的 server），不直接依赖 `yydb-format` 或内部模块。
+3. 绑定层依赖门面（以及 serve 需要的 server），不直接依赖 `yydb-formats` 或内部模块。
 4. 下游产品只依赖门面公开路径。内部 crate 不是稳定 ABI。
 5. `yydb-protocol` 只依赖 `yydb-types` 与 `yydb-udf`，不依赖 `yydb-store`，因此不包含 `dispatch` 与绑定策略。
 6. `yydb-client` 只依赖 `yydb-protocol`、`yydb-types` 与 `yydb-udf`，不依赖 `yydb` 或存储实现。
@@ -36,7 +36,7 @@ yydb-client                    yydb-napi / yydb-pyo3 / yydb-wasm
 | crate            | 拥有                                                                        | 不拥有                                           |
 |------------------|-----------------------------------------------------------------------------|--------------------------------------------------|
 | `yydb-types`     | 错误与错误码、`Value`、`ObjectRef`、lease/配额/诊断报告等共享模型           | 文件 IO、连接、协议、格式解析                    |
-| `yydb-format`    | `YDPG` 页、`YYWL` WAL、`YYSH` shm、`YYBB` blob 的编码/解析/校验、内存 pager | 连接生命周期、用户记录语义、schema               |
+| `yydb-formats`    | `YDPG` 页、`YYWL` WAL、`YYSH` shm、`YYBB` blob 的编码/解析/校验、内存 pager | 连接生命周期、用户记录语义、schema               |
 | `yydb-execution` | 本地类型、程序、字段句柄、记录布局、UDF 效果与放置验证                      | VOS 语法、文件格式、网络                         |
 | `yydb-udf`       | UDF 合同、注册表、调用、宿主适配                                            | 持久化、连接、查询语言                           |
 | `yydb-query`     | VOS 语言整合、DML/DDL 定义、查询降级                                        | 存储格式、连接、传输                             |
@@ -68,7 +68,7 @@ yydb-client                    yydb-napi / yydb-pyo3 / yydb-wasm
 | 问题                                      | 归属                               |
 |-------------------------------------------|------------------------------------|
 | 只是数据结构、错误或报告类型？            | `yydb-types`                       |
-| 只关乎字节布局、校验和、页或 WAL 恢复？   | `yydb-format`                      |
+| 只关乎字节布局、校验和、页或 WAL 恢复？   | `yydb-formats`                      |
 | 只关乎本地执行语义、类型布局或 UDF 验证？ | `yydb-execution`                   |
 | 只关乎 UDF 合同、注册、调用或宿主适配？   | `yydb-udf`                         |
 | 只关乎 VOS 语言整合、DML/DDL 定义？       | `yydb-query`                       |

@@ -22,5 +22,5 @@ yydb-store = { workspace = true }
 yydb-query = { workspace = true }
 
 [dev-dependencies]
-yydb-format = { workspace = true }
+yydb-formats = { workspace = true }
 yydb-server = { workspace = true }

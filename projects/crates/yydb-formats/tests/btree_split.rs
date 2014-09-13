@@ -1,4 +1,4 @@
-use yydb_format::{
+use yydb_formats::{
     InternalPage, MemoryPager, PageHeader, TreeKey, PAGE_TYPE_INTERNAL, TREE_RECORD,
 };
 
@@ -29,7 +29,7 @@ fn memory_pager_kv_leaf_split() {
 
 #[test]
 fn leaf_split_halves_cells() {
-    let mut leaf = yydb_format::LeafPage::empty(1, 1, TREE_RECORD);
+    let mut leaf = yydb_formats::LeafPage::empty(1, 1, TREE_RECORD);
     let value = vec![0_u8; 100];
     for i in 0..20_u32 {
         assert!(leaf
@@ -45,7 +45,7 @@ fn leaf_split_halves_cells() {
 
 #[test]
 fn internal_page_roundtrip() {
-    use yydb_format::{InternalEntry, TreeKey, TREE_RECORD};
+    use yydb_formats::{InternalEntry, TreeKey, TREE_RECORD};
     let page = InternalPage::new(
         2,
         1,

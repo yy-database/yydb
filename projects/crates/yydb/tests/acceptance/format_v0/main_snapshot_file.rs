@@ -2,10 +2,10 @@
 
 use crate::fixtures::yydb::{cleanup, temp_db};
 use yydb::{Connection, OpenFlags};
-use yydb_format::PAGE_MAGIC;
+use yydb_formats::PAGE_MAGIC;
 
 #[test]
-fn yydb_format_v0_main_snapshot_file_roundtrip() {
+fn yydb_formats_v0_main_snapshot_file_roundtrip() {
     let path = temp_db("main-snapshot-file");
     let conn = Connection::open_with_flags(&path, OpenFlags::wal()).expect("open");
     conn.put("theme", b"dark").expect("put");

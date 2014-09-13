@@ -1,4 +1,4 @@
-use yydb_format::{LeafPage, TreeKey, TREE_RECORD};
+use yydb_formats::{LeafPage, TreeKey, TREE_RECORD};
 
 #[test]
 fn leaf_page_roundtrip_sorted_cells() {

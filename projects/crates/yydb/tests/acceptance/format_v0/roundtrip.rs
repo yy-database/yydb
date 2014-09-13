@@ -6,14 +6,14 @@ use yydb::{Connection, DoctorSeverity, OpenFlags};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "yydb-format-v0-roundtrip-{}-{}.yydb",
+        "yydb-formats-v0-roundtrip-{}-{}.yydb",
         std::process::id(),
         label
     ))
 }
 
 #[test]
-fn yydb_format_v0_roundtrip() {
+fn yydb_formats_v0_roundtrip() {
     let path = temp_path("roundtrip");
     let _ = fs::remove_file(&path);
 

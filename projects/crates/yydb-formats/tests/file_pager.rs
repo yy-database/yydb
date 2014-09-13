@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-use yydb_format::{parse_page0, FilePager, PAGE_MAGIC, PAGE_SIZE};
+use yydb_formats::{parse_page0, FilePager, PAGE_MAGIC, PAGE_SIZE};
 
 fn temp_db(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("yydb-format-{name}-{}.yydb", std::process::id()))
+    std::env::temp_dir().join(format!("yydb-formats-{name}-{}.yydb", std::process::id()))
 }
 
 #[test]

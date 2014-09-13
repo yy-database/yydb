@@ -7,7 +7,7 @@ use std::{
     path::Path,
 };
 
-use yydb_format::{
+use yydb_formats::{
     parse_blob_header, wal_sidecar_path, BlobChunkRef, BlobManifestDelta, FilePager, MemoryPager,
     BLOB_REF_OP_DELETE, BLOB_REF_OP_PUT, KEY_KIND_USER, PAGE_MAGIC, TREE_RECORD,
 };
@@ -110,7 +110,7 @@ trait FormatKvPager {
     fn get_kv(&mut self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>>;
     fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()>;
     fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool>;
-    fn scan_kv(&mut self) -> Result<Vec<(yydb_format::TreeKey, Vec<u8>)>>;
+    fn scan_kv(&mut self) -> Result<Vec<(yydb_formats::TreeKey, Vec<u8>)>>;
 }
 
 impl FormatKvPager for FilePager {
@@ -126,7 +126,7 @@ impl FormatKvPager for FilePager {
         FilePager::delete_kv(self, key)
     }
 
-    fn scan_kv(&mut self) -> Result<Vec<(yydb_format::TreeKey, Vec<u8>)>> {
+    fn scan_kv(&mut self) -> Result<Vec<(yydb_formats::TreeKey, Vec<u8>)>> {
         FilePager::scan_kv(self)
     }
 }
@@ -144,7 +144,7 @@ impl FormatKvPager for MemoryPager {
         MemoryPager::delete_kv(self, key)
     }
 
-    fn scan_kv(&mut self) -> Result<Vec<(yydb_format::TreeKey, Vec<u8>)>> {
+    fn scan_kv(&mut self) -> Result<Vec<(yydb_formats::TreeKey, Vec<u8>)>> {
         MemoryPager::scan_kv(self)
     }
 }

@@ -4,7 +4,7 @@ use crate::fixtures::yydb::{cleanup, temp_yydx};
 use yydb::{journal::wal_path, Batch, Connection, ObjectKind, OpenFlags};
 
 #[test]
-fn yydb_format_v0_yydx_compact_orphans() {
+fn yydb_formats_v0_yydx_compact_orphans() {
     let path = temp_yydx("yydx-compact");
     let conn = Connection::open_with_flags(&path, OpenFlags::wal()).expect("wal open");
 
@@ -40,7 +40,7 @@ fn yydb_format_v0_yydx_compact_orphans() {
 }
 
 #[test]
-fn yydb_format_v0_yydx_compact_skips_pinned_orphans() {
+fn yydb_formats_v0_yydx_compact_skips_pinned_orphans() {
     let path = temp_yydx("yydx-compact-pinned");
     let conn = Connection::open_yydx(&path).expect("open");
 

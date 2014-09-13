@@ -3,7 +3,7 @@ use std::fs;
 use crate::storage::{doctor, state_codec};
 use crate::journal::{wal_path, JournalMode};
 use crate::{Error, Result};
-use yydb_format::{parse_wal, WAL_MAGIC};
+use yydb_formats::{parse_wal, WAL_MAGIC};
 
 use super::{Backend, Connection};
 

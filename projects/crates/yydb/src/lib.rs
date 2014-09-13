@@ -6,7 +6,7 @@
 //! | Layer | Crate | Role |
 //! |-------|-------|------|
 //! | Bottom | `yydb-types` | `Error`, `Value`, CAS refs |
-//! | Engine | `yydb-store`, `yydb-format`, `yydb-execution`, `yydb-udf`, `yydb-query` | Storage, formats, execution IR, UDF, query |
+//! | Engine | `yydb-store`, `yydb-formats`, `yydb-execution`, `yydb-udf`, `yydb-query` | Storage, formats, execution IR, UDF, query |
 //! | **Facade** | **`yydb`** | Re-exports, prelude, version |
 //! | Protocol | `yydb-protocol` | Wire frames and bodies (no database access) |
 //! | Transport | `yydb-client`, `yydb-server` | Remote client / serve loop |

@@ -11,7 +11,7 @@ use crate::storage::{file_lock, state_codec};
 use crate::udf::UdfSubsystem;
 use crate::INLINE_BYTES_MAX;
 use crate::{Error, Result, SchemaVersion};
-use yydb_format::{
+use yydb_formats::{
     main_bytes_from_memory_pager, memory_pager_from_main_bytes, FilePager, MemoryPager,
 };
 
