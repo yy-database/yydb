@@ -15,8 +15,8 @@ use yydb_types::{Error, ObjectRef, Result};
 
 use crate::connection::State;
 use crate::journal::JournalMode;
-use crate::objects::ObjectStore;
 use crate::objects::references::OBJECT_REF_PREFIX;
+use crate::objects::ObjectStore;
 
 const META_SCHEMA: &[u8] = b"__yydb/meta/schema";
 const META_IDENTITY: &[u8] = b"__yydb/meta/identity";
