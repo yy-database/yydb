@@ -2,11 +2,11 @@
 //!
 //! Kept out of `yydb-protocol` because it executes database operations.
 
+use yydb_engine::Connection;
 use yydb_protocol::{
     decode_kv_get, decode_kv_put, decode_micro_register, decode_scalar_call, decode_schema_ensure,
     encode_kv_get_ok, encode_scalar_call_ok, encode_schema_ok, error_frame, Frame, MessageType,
 };
-use yydb_store::Connection;
 use yydb_types::{Error, Result};
 
 fn info_body(conn: &Connection) -> Result<Vec<u8>> {

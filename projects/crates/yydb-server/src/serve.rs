@@ -9,8 +9,8 @@ use std::{
 };
 
 use sha1::{Digest, Sha1};
+use yydb_engine::Connection;
 use yydb_protocol::{read_frame, split_bind, write_frame, Frame, HEADER_LEN, MAX_BODY_LEN};
-use yydb_store::Connection;
 use yydb_types::Error;
 
 use crate::dispatch::{dispatch, is_loopback_host};

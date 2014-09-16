@@ -1,8 +1,8 @@
-//! YYDB storage engine: durable connection state, VOS catalog publication, CAS,
-//! journal/WAL, lease/TTL and the UDF session bridge.
+//! YYDB database runtime: connection state, VOS catalog publication, query
+//! invocation, CAS coordination, lease/TTL, backup and the UDF session bridge.
 //!
-//! This crate owns byte-level implementation. The `yydb` facade re-exports it and
-//! must not grow implementations of its own.
+//! This crate owns runtime behaviour, and the `yydb` facade re-exports it
+//! without growing implementations of its own.
 
 #![deny(missing_docs)]
 

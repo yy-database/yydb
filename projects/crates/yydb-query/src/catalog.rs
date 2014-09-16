@@ -16,8 +16,8 @@ fn catalog_error(message: impl Into<String>) -> Error {
 
 /// Assigns durable identities to an unreleased projection in document order.
 ///
-/// Mirrors the first-persistence path in `yydb-store` so tests can bind a fresh
-/// schema without depending on the storage crate.
+/// Mirrors the first-persistence path in `yydb-engine` so tests can bind a fresh
+/// schema without depending on the engine crate.
 fn allocate_initial_manifest(projection: &SchemaProjection) -> IdentityManifest {
     let mut next_field_id = 1_u64;
     let mut types = Vec::with_capacity(projection.types.len());

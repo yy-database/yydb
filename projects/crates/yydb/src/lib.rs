@@ -6,7 +6,7 @@
 //! | Layer | Crate | Role |
 //! |-------|-------|------|
 //! | Bottom | `yydb-types` | `Error`, `Value`, CAS refs |
-//! | Engine | `yydb-store`, `yydb-formats`, `yydb-execution`, `yydb-udf`, `yydb-query` | Storage, formats, execution IR, UDF, query |
+//! | Engine | `yydb-engine`, `yydb-formats`, `yydb-execution`, `yydb-udf`, `yydb-query` | Storage, formats, execution IR, UDF, query |
 //! | **Facade** | **`yydb`** | Re-exports, prelude, version |
 //! | Protocol | `yydb-protocol` | Wire frames and bodies (no database access) |
 //! | Transport | `yydb-client`, `yydb-server` | Remote client / serve loop |
@@ -48,16 +48,16 @@ pub mod types {
 }
 
 /// Journal modes and `-wal` / `-shm` sidecar helpers.
-pub use yydb_store::journal;
+pub use yydb_engine::journal;
 
 /// Unified `<hash-prefix>/<chunk_hash>.blob` CAS + hot/cold tiering.
-pub use yydb_store::objects;
+pub use yydb_engine::objects;
 
 /// Shared VOS schema contract.
-pub use yydb_store::catalog as schema;
+pub use yydb_engine::catalog as schema;
 
 /// UDF traits (`ScalarUdf`) and registry types (`UdfRegistry`, ...).
-pub use yydb_store::udf;
+pub use yydb_engine::udf;
 
 /// Common embed imports (`use yydb::prelude::*`).
 pub mod prelude {
@@ -68,10 +68,10 @@ pub mod prelude {
 }
 
 /// Batched write operations.
-pub use yydb_store::batch;
+pub use yydb_engine::batch;
 
 /// Durable connection handle and statement surface.
-pub use yydb_store::connection;
+pub use yydb_engine::connection;
 
 /// YY wire protocol (`YYDB`|`YYDS` + version digits `0000`...).
 pub use yydb_protocol as wire;
@@ -79,7 +79,7 @@ pub use yydb_protocol as wire;
 /// Query planning and DML operations.
 pub use yydb_query as query;
 
-pub use yydb_store::{
+pub use yydb_engine::{
     Batch, Connection, HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, JournalMode,
     ObjectStore, OpenFlags, ScalarUdf, UdfError, UdfRegistry, UdfType, UdfValue,
 };

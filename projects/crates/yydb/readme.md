@@ -41,7 +41,7 @@ use yydb::prelude::*;
 | Layer      | Crate                             | When to depend                 |
 |------------|-----------------------------------|--------------------------------|
 | Bottom     | `yydb-types`                      | Engine internals only          |
-| Engine     | `yydb-store`, `yydb-formats`, `yydb-execution`, `yydb-udf`, `yydb-query` | Storage, formats, execution IR, UDF, query |
+| Engine     | `yydb-engine`, `yydb-formats`, `yydb-execution`, `yydb-udf`, `yydb-query` | Storage, formats, execution IR, UDF, query |
 | **Facade** | **`yydb`**                        | **Default — `Connection`**     |
 | Protocol   | `yydb-protocol`                   | Wire frames only (no database) |
 | Transport  | `yydb-client`, `yydb-server`      | Remote client or serve process |

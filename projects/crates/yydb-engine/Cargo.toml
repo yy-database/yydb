@@ -1,13 +1,13 @@
 [package]
-name = "yydb-store"
+name = "yydb-engine"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "YYDB storage engine: connection, catalog, CAS, journal and UDF session state"
+description = "YYDB database runtime: connection, catalog, CAS, journal, leases and UDF session state"
 homepage = "https://github.com/yy-database/yydb.rs"
-documentation = "https://docs.rs/yydb-store"
+documentation = "https://docs.rs/yydb-engine"
 keywords = ["database", "embedded", "storage", "vos"]
 categories = ["database-implementations", "embedded"]
 

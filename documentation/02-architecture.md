@@ -11,7 +11,7 @@ yydb-execution   本地执行模型：类型、程序、字段句柄、记录布
 yydb-udf         UDF 合同、registry、host adapter、scalar 合同。
 yydb-query       VOS 语言整合、DML / DDL 定义与本地查询降级。
         ↑
-yydb-store       连接、KV、事务、CAS、lease/TTL、journal、catalog 适配。
+yydb-engine       连接、KV、事务、CAS、lease/TTL、journal、catalog 适配。
         ↑                                  ↑
 yydb-protocol                            yydb-server
 帧与消息体编解码                          dispatch、绑定策略、serve 循环、host wire
@@ -28,7 +28,7 @@ yydb-client                    yydb-napi / yydb-pyo3 / yydb-wasm
 2. 门面依赖实现，实现不反向依赖门面。
 3. 绑定层依赖门面（以及 serve 需要的 server），不直接依赖 `yydb-formats` 或内部模块。
 4. 下游产品只依赖门面公开路径。内部 crate 不是稳定 ABI。
-5. `yydb-protocol` 只依赖 `yydb-types` 与 `yydb-udf`，不依赖 `yydb-store`，因此不包含 `dispatch` 与绑定策略。
+5. `yydb-protocol` 只依赖 `yydb-types` 与 `yydb-udf`，不依赖 `yydb-engine`，因此不包含 `dispatch` 与绑定策略。
 6. `yydb-client` 只依赖 `yydb-protocol`、`yydb-types` 与 `yydb-udf`，不依赖 `yydb` 或存储实现。
 
 ## 2. crate 职责
@@ -40,7 +40,7 @@ yydb-client                    yydb-napi / yydb-pyo3 / yydb-wasm
 | `yydb-execution` | 本地类型、程序、字段句柄、记录布局、UDF 效果与放置验证                      | VOS 语法、文件格式、网络                         |
 | `yydb-udf`       | UDF 合同、注册表、调用、宿主适配                                            | 持久化、连接、查询语言                           |
 | `yydb-query`     | VOS 语言整合、DML/DDL 定义、查询降级                                        | 存储格式、连接、传输                             |
-| `yydb-store`     | 连接与后端、KV/事务、CAS、lease/TTL/配额、journal/backup/compact、catalog 适配、UDF 会话桥 | 门面组装、协议编解码、serve 策略、宿主映射      |
+| `yydb-engine`     | 连接与后端、KV/事务、CAS、lease/TTL/配额、journal/backup/compact、catalog 适配、UDF 会话桥 | 门面组装、协议编解码、serve 策略、宿主映射      |
 | `yydb-protocol`  | YY 帧、消息体 encode/decode、错误体、`split_bind`                           | 数据库操作、`Connection`、dispatch、绑定安全策略 |
 | `yydb`           | 公开作者面与跨层重导出                                                      | 字节级格式、记录元数据、协议编解码、健康检查实现 |
 | `yydb-server`    | serve 循环、帧分发、绑定策略、host 回调通道                                 | 存储实现、页格式                                 |
@@ -57,9 +57,9 @@ yydb-client                    yydb-napi / yydb-pyo3 / yydb-wasm
 4. 新增能力先落到对应实现 crate，再由门面重导出；不允许“先塞进门面再说”。
 5. 公开路径稳定优先于内部结构调整。移动实现时保持门面路径不变。
 
-现状：存储实现已迁入 `yydb-store`，协议编解码已迁入 `yydb-protocol`，`dispatch` 与 loopback 判定已迁入 `yydb-server`。门面只剩重导出与 `version()`；公开路径（`yydb::schema`、`yydb::wire`、`yydb::objects` 等）保持不变。
+现状：存储实现已迁入 `yydb-engine`，协议编解码已迁入 `yydb-protocol`，`dispatch` 与 loopback 判定已迁入 `yydb-server`。门面只剩重导出与 `version()`；公开路径（`yydb::schema`、`yydb::wire`、`yydb::objects` 等）保持不变。
 
-已知残留：`yydb-store::udf` 仍包含旧 `ScalarUdf` 闭包体系与 `yydb-udf` registry 之间的双注册表桥，尚未收敛为单一合同。
+已知残留：`yydb-engine::udf` 仍包含旧 `ScalarUdf` 闭包体系与 `yydb-udf` registry 之间的双注册表桥，尚未收敛为单一合同。
 
 ## 4. 能力归属判定
 
@@ -72,7 +72,7 @@ yydb-client                    yydb-napi / yydb-pyo3 / yydb-wasm
 | 只关乎本地执行语义、类型布局或 UDF 验证？ | `yydb-execution`                   |
 | 只关乎 UDF 合同、注册、调用或宿主适配？   | `yydb-udf`                         |
 | 只关乎 VOS 语言整合、DML/DDL 定义？       | `yydb-query`                       |
-| 关乎连接、记录、事务、CAS、配额、lease？  | `yydb-store`                       |
+| 关乎连接、记录、事务、CAS、配额、lease？  | `yydb-engine`                       |
 | 关乎帧、消息体、错误体编码？              | `yydb-protocol`                    |
 | 关乎监听、绑定策略、连接循环？            | `yydb-server`                      |
 | 关乎语言类型映射与宿主卷？                | 对应绑定 crate                     |
