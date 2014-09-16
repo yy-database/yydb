@@ -8,6 +8,9 @@
 use std::collections::BTreeMap;
 use std::{error, fmt, io, result, sync::Arc};
 
+/// Pure UDF identity, signature, policy, values, and host metadata.
+pub mod udf;
+
 /// Soft recommendation: prefer CAS above this size instead of row-inline bytes.
 pub const INLINE_BYTES_MAX: usize = 4 * 1024;
 

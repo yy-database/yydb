@@ -1,8 +1,8 @@
 //! Logical UDF identity separate from host implementation objects.
 
-use crate::policy::{Determinism, Effect, Placement};
-use crate::signature::Signature;
-use crate::{Result, UdfError};
+use super::policy::{Determinism, Effect, Placement};
+use super::signature::Signature;
+use super::{Result, UdfError};
 
 /// Stable logical identity for a catalog or session UDF.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

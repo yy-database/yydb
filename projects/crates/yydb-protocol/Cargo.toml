@@ -13,4 +13,3 @@ categories = ["database-implementations"]
 
 [dependencies]
 yydb-types = { workspace = true }
-yydb-udf-types = { workspace = true }

@@ -1,6 +1,6 @@
 //! UDF boundary values for protocol and runtime invocation.
 
-use crate::signature::UdfType;
+use super::signature::UdfType;
 
 /// Phase-1 invocation boundary value.
 #[derive(Debug, Clone, PartialEq, Eq)]

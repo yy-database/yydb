@@ -1,8 +1,8 @@
 //! UDF definition contracts shared by catalog, session, and host registries.
 
-use crate::policy::{Determinism, Effect, Placement, UdfPolicy};
-use crate::{Result, UdfError};
-use crate::identity::UdfIdentity;
+use super::identity::UdfIdentity;
+use super::policy::{Determinism, Effect, Placement, UdfPolicy};
+use super::{Result, UdfError};
 
 /// Phase-1 scalar types supported by the UDF boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

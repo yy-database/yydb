@@ -1,9 +1,7 @@
 //! Host runtime adapter and embedded host implementation strategy.
 
 use crate::runtime::{InvocationMode, UdfContext, UdfImplementation};
-use crate::{
-    HostFunctionHandle, HostMicroDefinition, Result, Signature, UdfIdentity, UdfValue,
-};
+use crate::{HostFunctionHandle, HostMicroDefinition, Result, Signature, UdfIdentity, UdfValue};
 
 /// Adapter that owns the real function registry in an external host runtime.
 pub trait HostRuntimeAdapter: Send + Sync {

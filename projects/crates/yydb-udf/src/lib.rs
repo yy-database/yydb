@@ -1,6 +1,6 @@
 //! YYDB UDF subsystem: registry, dispatch, and host adapters.
 //!
-//! Pure contracts live in [`yydb_udf_types`]. This crate sits above
+//! Pure contracts live in [`yydb_types::udf`]. This crate sits above
 //! [`yydb-execution`] and below the [`yydb`] facade. Applications should use
 //! `yydb::udf` (`UdfRegistry`, `HostMicroDefinition`, …) instead of depending
 //! here directly. Not shared with YYDS.
@@ -11,7 +11,7 @@ mod adapters;
 mod registry;
 mod runtime;
 
-pub use yydb_udf_types::{
+pub use yydb_types::udf::{
     CapabilitySet, Determinism, Effect, HostFunctionHandle, HostMicroDefinition,
     ImplementationKind, Placement, Result, Signature, UdfDefinition, UdfError, UdfFingerprint,
     UdfIdentity, UdfPolicy, UdfType, UdfValue,
@@ -26,6 +26,6 @@ pub use registry::{
     RegisterOptions, SessionUdfEntry, SessionUdfRegistry, UdfRegistry,
 };
 pub use runtime::{
-    Budget, InvocationMode, UdfContext, UdfImplementation, UdfInvocation, from_execution,
-    into_execution, type_from_execution, type_to_execution,
+    from_execution, into_execution, type_from_execution, type_to_execution, Budget, InvocationMode,
+    UdfContext, UdfImplementation, UdfInvocation,
 };

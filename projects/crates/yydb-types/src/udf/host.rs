@@ -1,9 +1,9 @@
 //! Transportable host micro metadata shared by protocol and runtime.
 
-use crate::policy::{Placement, UdfPolicy};
-use crate::signature::{ImplementationKind, Signature, UdfDefinition, UdfType};
-use crate::{Result, UdfError};
-use crate::identity::UdfIdentity;
+use super::identity::UdfIdentity;
+use super::policy::{Placement, UdfPolicy};
+use super::signature::{ImplementationKind, Signature, UdfDefinition, UdfType};
+use super::{Result, UdfError};
 
 /// Opaque handle to a function registered in an external host runtime.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

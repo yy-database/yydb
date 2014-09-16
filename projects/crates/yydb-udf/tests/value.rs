@@ -1,7 +1,5 @@
 use yydb_execution::Value;
-use yydb_udf::{
-    from_execution, into_execution, type_from_execution, UdfError, UdfValue,
-};
+use yydb_udf::{from_execution, into_execution, type_from_execution, UdfError, UdfValue};
 
 #[test]
 fn udf_value_round_trips_phase1_execution_types() {
