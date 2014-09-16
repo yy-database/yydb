@@ -1,6 +1,6 @@
 use crate::journal::JournalMode;
 use crate::kv::lease;
-use crate::storage::state_codec;
+use crate::storage::snapshot;
 use crate::Result;
 
 use super::{is_yydx_main_path, Backend, Connection, State};
@@ -55,11 +55,11 @@ impl Connection {
 
     pub(crate) fn read_state(&self) -> Result<State> {
         match &self.backend {
-            Backend::File { pager, .. } => {
-                let mut pager = pager
+            Backend::File { database, .. } => {
+                let mut database = database
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                state_codec::read_state(&mut pager)
+                snapshot::state_from_snapshot(&database.snapshot()?)
             }
             Backend::Memory { state } => Ok(state
                 .lock()
@@ -70,10 +70,7 @@ impl Connection {
 
     pub(crate) fn write_state(&self, state: &State) -> Result<()> {
         match &self.backend {
-            Backend::File { pager, .. } => {
-                let mut pager = pager
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+            Backend::File { database, .. } => {
                 let blob_objects = if self.path().is_some_and(is_yydx_main_path)
                     && self.journal_mode() == JournalMode::Wal
                 {
@@ -81,7 +78,16 @@ impl Connection {
                 } else {
                     None
                 };
-                state_codec::write_state_with_objects(&mut pager, state, blob_objects)
+                let mut database = database
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let before = database.snapshot()?.records;
+                let next = snapshot::snapshot_from_state(state)?;
+                let blob_refs = match blob_objects {
+                    Some(objects) => snapshot::blob_deltas(&before, &next.records, objects)?,
+                    None => Vec::new(),
+                };
+                database.commit(&next, &blob_refs)
             }
             Backend::Memory { state: slot } => {
                 *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = state.clone();

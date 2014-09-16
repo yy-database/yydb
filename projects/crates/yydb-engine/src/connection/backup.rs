@@ -1,7 +1,7 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::journal::{shm_path, wal_path};
+use yydb_storage::files::{copy_main, copy_sidecars, copy_tree};
+
 use crate::objects::ObjectStore;
 use crate::{Error, Result};
 
@@ -18,12 +18,7 @@ impl Connection {
         let src = self.path().ok_or(Error::Unsupported(
             "backup_to requires a file-backed connection",
         ))?;
-        let dest = dest.as_ref();
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(src, dest)?;
-        Ok(())
+        copy_main(src, dest.as_ref())
     }
 
     /// Copy the main file and any present `-wal` / `-shm` sidecars without checkpoint.
@@ -38,13 +33,8 @@ impl Connection {
             "backup_with_wal_to requires a file-backed connection",
         ))?;
         let dest = dest.as_ref();
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(src, dest)?;
-        copy_sidecar_if_present(&wal_path(src), wal_path(dest))?;
-        copy_sidecar_if_present(&shm_path(src), shm_path(dest))?;
-        Ok(())
+        copy_main(src, dest)?;
+        copy_sidecars(src, dest)
     }
 
     /// Copy a checkpointed `.yydx` main file and sibling `<stem>-objects/` tree to `dest`.
@@ -67,38 +57,10 @@ impl Connection {
             ));
         }
         self.checkpoint()?;
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(src, dest)?;
-        copy_dir_if_present(
+        copy_main(src, dest)?;
+        copy_tree(
             &ObjectStore::yydx_objects_root(src),
             &ObjectStore::yydx_objects_root(dest),
-        )?;
-        Ok(())
+        )
     }
-}
-
-fn copy_sidecar_if_present(src: &Path, dest: PathBuf) -> Result<()> {
-    if src.exists() {
-        fs::copy(src, dest)?;
-    }
-    Ok(())
-}
-
-fn copy_dir_if_present(src: &Path, dest: &Path) -> Result<()> {
-    if !src.exists() {
-        return Ok(());
-    }
-    fs::create_dir_all(dest)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let target = dest.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir_if_present(&entry.path(), &target)?;
-        } else {
-            fs::copy(entry.path(), target)?;
-        }
-    }
-    Ok(())
 }

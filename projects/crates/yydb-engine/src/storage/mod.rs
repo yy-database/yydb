@@ -1,5 +1,4 @@
-//! On-disk layout, writer locks, and maintenance helpers.
+//! Runtime-maintenance probes and the engine-side snapshot codec.
 
 pub(crate) mod doctor;
-pub(crate) mod file_lock;
-pub(crate) mod state_codec;
+pub(crate) mod snapshot;

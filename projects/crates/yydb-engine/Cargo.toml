@@ -15,13 +15,8 @@ categories = ["database-implementations", "embedded"]
 vos = { workspace = true }
 yydb-types = { workspace = true }
 yydb-formats = { workspace = true }
+yydb-storage = { workspace = true }
 yydb-execution = { workspace = true }
 yydb-udf = { workspace = true }
 yydb-query = { workspace = true }
 serde_json = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true }
-
-[target.'cfg(unix)'.dependencies]
-libc = { version = "0.2", default-features = false }

@@ -29,7 +29,7 @@ impl Connection {
             .unwrap_or_else(|p| p.into_inner());
         let state = self.read_state()?;
         let mut report =
-            doctor::diagnose(&state.records, &self.objects, self.path(), self.wal_path())?;
+            doctor::diagnose(&state.records, &self.objects, self.path(), self.wal_bytes())?;
         if let Some(path) = self.path() {
             report.issues.extend(yydb_formats::diagnose_file(path)?);
         }

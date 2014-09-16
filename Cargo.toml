@@ -32,6 +32,7 @@ yydb-formats = { version = "0.1.0", path = "projects/crates/yydb-formats" }
 yydb-execution = { version = "0.1.0", path = "projects/crates/yydb-execution" }
 yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }
 yydb-query = { version = "0.1.0", path = "projects/crates/yydb-query" }
+yydb-storage = { version = "0.1.0", path = "projects/crates/yydb-storage" }
 yydb-engine = { version = "0.1.0", path = "projects/crates/yydb-engine" }
 yydb-protocol = { version = "0.1.0", path = "projects/crates/yydb-protocol" }
 

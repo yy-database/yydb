@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use yydb_types::{Error, Result};
 
-/// Exclusive writer lock held for the lifetime of a file-backed [`Connection`].
+/// Exclusive writer lock held for the lifetime of a file-backed database.
 pub struct WriterLock {
     file: File,
 }

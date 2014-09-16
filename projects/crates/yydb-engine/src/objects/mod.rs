@@ -8,8 +8,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs::{self, File},
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -18,11 +17,12 @@ use std::{
 enum ObjectStoreRoot {
     /// Process-local CAS only. No filesystem writes.
     Ephemeral,
-    /// On-disk CAS rooted at `root/<hash-prefix>/<chunk_hash>.blob`.
-    OnDisk(PathBuf),
+    /// Durable CAS rooted at `<store>/<hash-prefix>/<chunk_hash>.blob`.
+    OnDisk(BlobStore),
 }
 
-use yydb_formats::{blob_chunk_hash, encode_blob_chunk, read_blob_payload};
+use yydb_formats::{blob_chunk_hash, BlobChunkRef};
+use yydb_storage::BlobStore;
 use yydb_types::{
     ChunkManifest, Error, HashAlgo, ObjectKind, ObjectRef, Result, Tier, Vector,
     DEFAULT_CHUNK_SIZE, INLINE_BYTES_MAX,
@@ -75,9 +75,8 @@ impl ObjectStore {
     }
 
     fn open_on_disk_root(root: PathBuf) -> Result<Self> {
-        fs::create_dir_all(&root)?;
         Ok(Self {
-            root: ObjectStoreRoot::OnDisk(root),
+            root: ObjectStoreRoot::OnDisk(BlobStore::open(root)?),
             hot: Mutex::new(HashMap::new()),
             cold: Mutex::new(HashMap::new()),
             catalog: Mutex::new(HashMap::new()),
@@ -89,7 +88,7 @@ impl ObjectStore {
     pub fn root(&self) -> &Path {
         match &self.root {
             ObjectStoreRoot::Ephemeral => Path::new("/yydb-ephemeral"),
-            ObjectStoreRoot::OnDisk(root) => root.as_path(),
+            ObjectStoreRoot::OnDisk(store) => store.root(),
         }
     }
 
@@ -104,10 +103,15 @@ impl ObjectStore {
 
     /// Path for a chunk digest: `<store>/<hash-prefix>/<chunk_hash>.blob`.
     pub fn path_for_hash(&self, hash_hex: &str) -> PathBuf {
-        let prefix: String = hash_hex.chars().take(2).collect();
-        self.cas_root()
-            .join(prefix)
-            .join(format!("{hash_hex}.blob"))
+        match &self.root {
+            ObjectStoreRoot::Ephemeral => {
+                let prefix: String = hash_hex.chars().take(2).collect();
+                self.cas_root()
+                    .join(prefix)
+                    .join(format!("{hash_hex}.blob"))
+            }
+            ObjectStoreRoot::OnDisk(store) => store.path_for_hash(hash_hex),
+        }
     }
 
     /// Path for an [`ObjectRef`].
@@ -129,24 +133,8 @@ impl ObjectStore {
             size: bytes.len() as u64,
             kind,
         };
-        if self.persist_to_disk() {
-            let path = self.path_for(&object);
-            let encoded = encode_blob_chunk(bytes, 0);
-            if path.exists() {
-                let existing = fs::read(&path)?;
-                if existing != encoded {
-                    return Err(Error::ObjectCorrupt {
-                        message: format!("blob chunk hash collision at {}", object.hash_hex()),
-                    });
-                }
-            } else {
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                let mut file = File::create(&path)?;
-                file.write_all(&encoded)?;
-                file.sync_all()?;
-            }
+        if let ObjectStoreRoot::OnDisk(store) = &self.root {
+            store.put(&object.hash_hex(), bytes)?;
         }
         self.hot
             .lock()
@@ -169,30 +157,8 @@ impl ObjectStore {
                 return Ok(Arc::clone(bytes));
             }
         }
-        if self.persist_to_disk() {
-            let path = self.path_for(object);
-            if !path.exists() {
-                return Err(Error::ObjectNotFound {
-                    hash_hex: object.hash_hex(),
-                });
-            }
-            let file_bytes = fs::read(&path)?;
-            let payload = read_blob_payload(&file_bytes).map_err(|error| match error {
-                Error::Corrupt(message) => Error::ObjectCorrupt {
-                    message: message.into(),
-                },
-                other => other,
-            })?;
-            if payload.len() as u64 != object.size {
-                return Err(Error::ObjectCorrupt {
-                    message: format!(
-                        "size mismatch for {}: expected {}, got {}",
-                        object.hash_hex(),
-                        object.size,
-                        payload.len()
-                    ),
-                });
-            }
+        if let ObjectStoreRoot::OnDisk(store) = &self.root {
+            let payload = store.read(&object.hash_hex(), object.size)?;
             let arc: Arc<[u8]> = Arc::from(payload.into_boxed_slice());
             self.hot
                 .lock()
@@ -412,60 +378,42 @@ impl ObjectStore {
                 .cloned()
                 .collect());
         }
-        let mut objects = Vec::new();
-        let hash_root = self.cas_root();
-        if !hash_root.exists() {
-            return Ok(objects);
-        }
-        for prefix_entry in fs::read_dir(&hash_root)? {
-            let prefix_path = prefix_entry?.path();
-            if !prefix_path.is_dir() {
-                continue;
-            }
-            for file_entry in fs::read_dir(prefix_path)? {
-                let path = file_entry?.path();
-                if path.extension().and_then(|ext| ext.to_str()) != Some("blob") {
-                    continue;
-                }
-                let hash_hex = path.file_stem().and_then(|stem| stem.to_str()).ok_or(
-                    Error::ObjectCorrupt {
-                        message: "object file name is not UTF-8".into(),
-                    },
-                )?;
-                if hash_hex.len() != 64 {
-                    continue;
-                }
-                let file_bytes = fs::read(&path)?;
-                let payload = read_blob_payload(&file_bytes).map_err(|error| match error {
-                    Error::Corrupt(message) => Error::ObjectCorrupt {
-                        message: message.into(),
-                    },
-                    other => other,
-                })?;
-                let hash = decode_hash_hex(hash_hex)?;
-                if hash != blob_chunk_hash(&payload) {
-                    return Err(Error::ObjectCorrupt {
-                        message: format!("blob file name does not match chunk_hash {}", hash_hex),
-                    });
-                }
-                objects.push(ObjectRef {
+        let ObjectStoreRoot::OnDisk(store) = &self.root else {
+            return Ok(Vec::new());
+        };
+        store
+            .list()?
+            .into_iter()
+            .map(|(hash_hex, size)| {
+                Ok(ObjectRef {
                     algo: HashAlgo::Blake3,
-                    hash,
-                    size: payload.len() as u64,
+                    hash: decode_hash_hex(&hash_hex)?,
+                    size,
                     kind: ObjectKind::Blob,
-                });
-            }
+                })
+            })
+            .collect()
+    }
+
+    /// Read the `YYBB` header fields for a chunk already stored in this CAS.
+    pub(crate) fn chunk_ref(&self, hash: &[u8; 32]) -> Result<BlobChunkRef> {
+        let hash_hex = ObjectRef {
+            algo: HashAlgo::Blake3,
+            hash: *hash,
+            size: 0,
+            kind: ObjectKind::Blob,
         }
-        Ok(objects)
+        .hash_hex();
+        match &self.root {
+            ObjectStoreRoot::OnDisk(store) => store.chunk_ref(&hash_hex),
+            ObjectStoreRoot::Ephemeral => Err(Error::ObjectNotFound { hash_hex }),
+        }
     }
 
     /// Delete a CAS object when it is no longer referenced.
     pub fn remove_object(&self, object: &ObjectRef) -> Result<()> {
-        if self.persist_to_disk() {
-            let path = self.path_for(object);
-            if path.exists() {
-                fs::remove_file(path)?;
-            }
+        if let ObjectStoreRoot::OnDisk(store) = &self.root {
+            store.remove(&object.hash_hex())?;
         }
         self.hot
             .lock()

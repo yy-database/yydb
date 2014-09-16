@@ -1,19 +1,16 @@
 //! [`Connection`] open paths, storage backends, and state I/O.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::journal::{shm_path, wal_path, JournalMode, OpenFlags};
+use crate::journal::{shm_path, wal_path, OpenFlags};
 use crate::objects::ObjectStore;
-use crate::storage::{file_lock, state_codec};
+use crate::storage::snapshot;
 use crate::udf::UdfSubsystem;
 use crate::INLINE_BYTES_MAX;
 use crate::{Error, Result, SchemaVersion};
-use yydb_formats::{
-    main_bytes_from_memory_pager, memory_pager_from_main_bytes, FilePager, MemoryPager,
-};
+use yydb_storage::{snapshot_from_main_bytes, snapshot_to_main_bytes, Database};
 
 mod backup;
 mod compact;
@@ -39,10 +36,7 @@ pub(crate) struct State {
 pub(crate) enum Backend {
     File {
         path: PathBuf,
-        #[allow(dead_code)]
-        writer_lock: file_lock::WriterLock,
-        pager: Mutex<FilePager>,
-        journal_mode: Mutex<JournalMode>,
+        database: Mutex<Database>,
     },
     Memory {
         state: Mutex<State>,
@@ -94,21 +88,15 @@ impl Connection {
     pub fn open_with_flags(path: impl AsRef<Path>, flags: OpenFlags) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)?;
         }
-        if path.exists() && !state_codec::file_is_ydpg(&path)? {
-            return Err(Error::Corrupt("main file is not YDPG format v0"));
-        }
-        let writer_lock = file_lock::WriterLock::acquire(&path)?;
-        let pager = state_codec::open_pager(&path, flags.journal_mode)?;
+        let database = Database::open(&path, flags.journal_mode)?;
         let connection = Self {
             operation_lock: Mutex::new(()),
             txn: Mutex::new(None),
             backend: Backend::File {
                 path: path.clone(),
-                writer_lock,
-                pager: Mutex::new(pager),
-                journal_mode: Mutex::new(flags.journal_mode),
+                database: Mutex::new(database),
             },
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: if is_yydx_main_path(&path) {
@@ -141,13 +129,15 @@ impl Connection {
         match &self.backend {
             Backend::Memory { .. } => {
                 let state = self.read_state()?;
-                let mut pager = MemoryPager::new_empty(in_memory_database_id(), 0x01);
-                state_codec::write_state_to_memory_pager(&mut pager, &state)?;
-                main_bytes_from_memory_pager(&pager)
+                snapshot_to_main_bytes(
+                    &snapshot::snapshot_from_state(&state)?,
+                    in_memory_database_id(),
+                    0x01,
+                )
             }
             Backend::File { path, .. } => {
                 self.checkpoint()?;
-                Ok(fs::read(path)?)
+                Ok(std::fs::read(path)?)
             }
         }
     }
@@ -156,8 +146,8 @@ impl Connection {
     pub fn load_main_snapshot(&self, bytes: &[u8]) -> Result<()> {
         match &self.backend {
             Backend::Memory { .. } => {
-                let mut pager = memory_pager_from_main_bytes(bytes)?;
-                let state = state_codec::read_state_from_memory_pager(&mut pager)?;
+                let snapshot = snapshot_from_main_bytes(bytes)?;
+                let state = snapshot::state_from_snapshot(&snapshot)?;
                 self.write_state(&state)
             }
             Backend::File { .. } => Err(Error::Unsupported(

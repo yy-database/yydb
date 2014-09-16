@@ -1,9 +1,6 @@
-use std::fs;
-
-use crate::journal::{wal_path, JournalMode};
-use crate::storage::{doctor, state_codec};
-use crate::{Error, Result};
-use yydb_formats::{parse_wal, WAL_MAGIC};
+use crate::journal::JournalMode;
+use crate::storage::doctor;
+use crate::Result;
 
 use super::{Backend, Connection};
 
@@ -11,9 +8,10 @@ impl Connection {
     /// Current journal mode (`delete` or `wal`). In-memory is always `delete`.
     pub fn journal_mode(&self) -> JournalMode {
         match &self.backend {
-            Backend::File { journal_mode, .. } => *journal_mode
+            Backend::File { database, .. } => database
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .journal_mode(),
             Backend::Memory { .. } => JournalMode::Delete,
         }
     }
@@ -22,29 +20,12 @@ impl Connection {
     /// checkpoints then removes `{db}-wal` / `{db}-shm`.
     pub fn set_journal_mode(&self, mode: JournalMode) -> Result<()> {
         match &self.backend {
-            Backend::Memory { .. } => return Ok(()),
-            Backend::File {
-                pager,
-                journal_mode,
-                ..
-            } => {
-                let mut slot = journal_mode
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if *slot == mode {
-                    return Ok(());
-                }
-                let mut pager = pager
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                match mode {
-                    JournalMode::Wal => pager.enable_wal()?,
-                    JournalMode::Delete => pager.disable_wal()?,
-                }
-                *slot = mode;
-            }
+            Backend::Memory { .. } => Ok(()),
+            Backend::File { database, .. } => database
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .set_journal_mode(mode),
         }
-        Ok(())
     }
 
     /// Fold WAL frames into the main file and truncate `-wal` / reset `-shm`.
@@ -57,25 +38,19 @@ impl Connection {
             .unwrap_or_else(|p| p.into_inner());
         match &self.backend {
             Backend::Memory { .. } => Ok(()),
-            Backend::File {
-                pager,
-                journal_mode,
-                ..
-            } => {
-                let mode = *journal_mode
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if mode != JournalMode::Wal {
+            Backend::File { database, .. } => {
+                if self.journal_mode() != JournalMode::Wal {
                     return Ok(());
                 }
-                let mut pager = pager
+                let mut database = database
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                let mut state = state_codec::read_state(&mut pager)?;
+                let mut state =
+                    crate::storage::snapshot::state_from_snapshot(&database.snapshot()?)?;
                 doctor::record_checkpoint(&mut state.records);
-                state_codec::write_state(&mut pager, &state)?;
-                pager.checkpoint()?;
-                Ok(())
+                let next = crate::storage::snapshot::snapshot_from_state(&state)?;
+                database.commit(&next, &[])?;
+                database.checkpoint()
             }
         }
     }
@@ -83,18 +58,21 @@ impl Connection {
     /// Number of committed frames recorded in `-shm` (0 if absent).
     pub fn wal_frame_count(&self) -> Result<u32> {
         match &self.backend {
-            Backend::File { path, .. } => {
-                let wal = wal_path(path);
-                if !wal.exists() {
-                    return Ok(0);
-                }
-                let bytes = fs::read(wal)?;
-                if bytes.get(0..5) != Some(WAL_MAGIC.as_slice()) {
-                    return Err(Error::Corrupt("wal magic mismatch"));
-                }
-                Ok(parse_wal(&bytes)?.frames.len() as u32)
-            }
+            Backend::File { database, .. } => database
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .wal_frame_count(),
             Backend::Memory { .. } => Ok(0),
+        }
+    }
+
+    pub(crate) fn wal_bytes(&self) -> u64 {
+        match &self.backend {
+            Backend::File { database, .. } => database
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .wal_bytes(),
+            Backend::Memory { .. } => 0,
         }
     }
 }

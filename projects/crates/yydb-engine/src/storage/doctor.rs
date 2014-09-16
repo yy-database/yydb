@@ -1,7 +1,6 @@
 //! Read-only consistency probes for `Connection::doctor`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 
 use yydb_types::{
     DoctorIssue, DoctorNamespaceStats, DoctorReport, DoctorSeverity, EvictionPolicy,
@@ -20,7 +19,7 @@ pub(crate) fn diagnose(
     records: &BTreeMap<String, Vec<u8>>,
     objects: &ObjectStore,
     file_path: Option<&std::path::Path>,
-    wal_path: Option<std::path::PathBuf>,
+    wal_bytes_uncheckpointed: u64,
 ) -> Result<DoctorReport> {
     let mut issues = Vec::new();
 
@@ -81,11 +80,6 @@ pub(crate) fn diagnose(
     let orphan_object_count = orphans.len() as u64;
 
     let namespaces = collect_namespace_stats(records);
-
-    let wal_bytes_uncheckpointed = wal_path
-        .and_then(|path| fs::metadata(path).ok())
-        .map(|meta| meta.len())
-        .unwrap_or(0);
 
     Ok(DoctorReport {
         file_path: file_path.map(|path| path.display().to_string()),
