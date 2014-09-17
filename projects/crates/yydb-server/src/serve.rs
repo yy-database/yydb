@@ -51,7 +51,7 @@ pub fn run_serve(
         );
     }
 
-    let conn = Arc::new(Connection::open(path)?);
+    let conn = Connection::open(path)?;
     let listener = TcpListener::bind(bind)?;
     println!(
         "yydb serve {} on {bind} (wire v1: TCP + ws://{bind}/wire; no ACL)",
@@ -60,9 +60,9 @@ pub fn run_serve(
 
     for stream in listener.incoming() {
         let stream = stream?;
-        let conn = Arc::clone(&conn);
+        let session = conn.session();
         thread::spawn(move || {
-            if let Err(error) = handle_client(stream, &conn) {
+            if let Err(error) = handle_client(stream, &session) {
                 eprintln!("client error: {error}");
             }
         });

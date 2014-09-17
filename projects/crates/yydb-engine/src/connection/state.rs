@@ -54,7 +54,7 @@ impl Connection {
     }
 
     pub(crate) fn read_state(&self) -> Result<State> {
-        match &self.backend {
+        match self.backend.as_ref() {
             Backend::File { database, .. } => {
                 let mut database = database
                     .lock()
@@ -69,7 +69,7 @@ impl Connection {
     }
 
     pub(crate) fn write_state(&self, state: &State) -> Result<()> {
-        match &self.backend {
+        match self.backend.as_ref() {
             Backend::File { database, .. } => {
                 let blob_objects = if self.path().is_some_and(is_yydx_main_path)
                     && self.journal_mode() == JournalMode::Wal

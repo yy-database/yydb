@@ -7,7 +7,7 @@ use super::{Backend, Connection};
 impl Connection {
     /// Current journal mode (`delete` or `wal`). In-memory is always `delete`.
     pub fn journal_mode(&self) -> JournalMode {
-        match &self.backend {
+        match self.backend.as_ref() {
             Backend::File { database, .. } => database
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -19,7 +19,7 @@ impl Connection {
     /// Switch journal mode. Enabling WAL creates sidecars; disabling WAL
     /// checkpoints then removes `{db}-wal` / `{db}-shm`.
     pub fn set_journal_mode(&self, mode: JournalMode) -> Result<()> {
-        match &self.backend {
+        match self.backend.as_ref() {
             Backend::Memory { .. } => Ok(()),
             Backend::File { database, .. } => database
                 .lock()
@@ -36,7 +36,7 @@ impl Connection {
             .operation_lock
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        match &self.backend {
+        match self.backend.as_ref() {
             Backend::Memory { .. } => Ok(()),
             Backend::File { database, .. } => {
                 if self.journal_mode() != JournalMode::Wal {
@@ -57,7 +57,7 @@ impl Connection {
 
     /// Number of committed frames recorded in `-shm` (0 if absent).
     pub fn wal_frame_count(&self) -> Result<u32> {
-        match &self.backend {
+        match self.backend.as_ref() {
             Backend::File { database, .. } => database
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -67,7 +67,7 @@ impl Connection {
     }
 
     pub(crate) fn wal_bytes(&self) -> u64 {
-        match &self.backend {
+        match self.backend.as_ref() {
             Backend::File { database, .. } => database
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())

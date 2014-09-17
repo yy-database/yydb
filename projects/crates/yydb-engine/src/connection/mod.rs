@@ -60,11 +60,11 @@ pub(crate) fn in_memory_database_id() -> [u8; 16] {
 /// UDFs are process-local and are **not** persisted in the `.yydb` file.
 /// Binary payloads use [`ObjectStore`](crate::ObjectStore) (`YYBB` `.blob` segments).
 pub struct Connection {
-    pub(crate) backend: Backend,
-    pub(crate) operation_lock: Mutex<()>,
+    pub(crate) backend: std::sync::Arc<Backend>,
+    pub(crate) operation_lock: std::sync::Arc<Mutex<()>>,
     pub(crate) txn: Mutex<Option<State>>,
     pub(crate) udfs: Mutex<UdfSubsystem>,
-    pub(crate) objects: ObjectStore,
+    pub(crate) objects: std::sync::Arc<ObjectStore>,
 }
 
 impl Connection {
@@ -92,18 +92,18 @@ impl Connection {
         }
         let database = Database::open(&path, flags.journal_mode)?;
         let connection = Self {
-            operation_lock: Mutex::new(()),
+            operation_lock: std::sync::Arc::new(Mutex::new(())),
             txn: Mutex::new(None),
-            backend: Backend::File {
+            backend: std::sync::Arc::new(Backend::File {
                 path: path.clone(),
                 database: Mutex::new(database),
-            },
+            }),
             udfs: Mutex::new(UdfSubsystem::default()),
-            objects: if is_yydx_main_path(&path) {
+            objects: std::sync::Arc::new(if is_yydx_main_path(&path) {
                 ObjectStore::open_yydx_blob_root(ObjectStore::yydx_objects_root(&path))?
             } else {
                 ObjectStore::open_ephemeral()
-            },
+            }),
         };
         // Force recovery path once so a leftover WAL is applied.
         let _ = connection.read_state()?;
@@ -114,19 +114,35 @@ impl Connection {
     /// Open a private in-memory database (useful for tests).
     pub fn open_in_memory() -> Result<Self> {
         Ok(Self {
-            operation_lock: Mutex::new(()),
+            operation_lock: std::sync::Arc::new(Mutex::new(())),
             txn: Mutex::new(None),
-            backend: Backend::Memory {
+            backend: std::sync::Arc::new(Backend::Memory {
                 state: Mutex::new(State::default()),
-            },
+            }),
             udfs: Mutex::new(UdfSubsystem::default()),
-            objects: ObjectStore::open_ephemeral(),
+            objects: std::sync::Arc::new(ObjectStore::open_ephemeral()),
         })
+    }
+
+    /// Create a session over the same durable store as this connection.
+    ///
+    /// Sessions share the pager, writer lock and content-addressed object store,
+    /// but keep an independent transaction slot, UDF registry and host adapter.
+    /// Servers open the database once and hand every peer its own session so
+    /// concurrent clients never reopen the file or clobber each other's state.
+    pub fn session(&self) -> Self {
+        Self {
+            backend: std::sync::Arc::clone(&self.backend),
+            operation_lock: std::sync::Arc::clone(&self.operation_lock),
+            txn: Mutex::new(None),
+            udfs: Mutex::new(UdfSubsystem::default()),
+            objects: std::sync::Arc::clone(&self.objects),
+        }
     }
 
     /// Serialize the current database as a checkpointed `YDPG` main-file byte image.
     pub fn main_snapshot(&self) -> Result<Vec<u8>> {
-        match &self.backend {
+        match self.backend.as_ref() {
             Backend::Memory { .. } => {
                 let state = self.read_state()?;
                 snapshot_to_main_bytes(
@@ -144,7 +160,7 @@ impl Connection {
 
     /// Replace the in-memory database from a `YDPG` main-file byte image.
     pub fn load_main_snapshot(&self, bytes: &[u8]) -> Result<()> {
-        match &self.backend {
+        match self.backend.as_ref() {
             Backend::Memory { .. } => {
                 let snapshot = snapshot_from_main_bytes(bytes)?;
                 let state = snapshot::state_from_snapshot(&snapshot)?;
@@ -163,7 +179,7 @@ impl Connection {
 
     /// Filesystem path for file-backed connections; `None` for in-memory.
     pub fn path(&self) -> Option<&Path> {
-        match &self.backend {
+        match self.backend.as_ref() {
             Backend::File { path, .. } => Some(path.as_path()),
             Backend::Memory { .. } => None,
         }
