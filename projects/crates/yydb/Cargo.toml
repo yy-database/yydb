@@ -21,6 +21,9 @@ yydb-protocol = { workspace = true }
 yydb-engine = { workspace = true }
 yydb-query = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+yydb-client = { workspace = true }
+yydb-server = { workspace = true }
+
 [dev-dependencies]
 yydb-formats = { workspace = true }
-yydb-server = { workspace = true }

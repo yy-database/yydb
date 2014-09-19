@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use yydb::schema::{FieldPath, RenameMap};
+use yydb::catalog::{FieldPath, RenameMap};
 use yydb::{Connection, Error, OpenFlags};
 
 const INITIAL: &str = "table User { @@id: i64, name: utf8, active: bool }";

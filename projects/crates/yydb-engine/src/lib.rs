@@ -23,8 +23,6 @@ mod kv;
 mod storage;
 
 pub use batch::Batch;
-/// Historic module alias kept for `yydb::schema` compatibility.
-pub use catalog as schema;
 pub use connection::Connection;
 pub use journal::{JournalMode, OpenFlags};
 pub use objects::ObjectStore;

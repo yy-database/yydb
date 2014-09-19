@@ -1,6 +1,6 @@
 use yydb::{
+    catalog::execution_catalog,
     execution::{Node, Program, RecordValue, Type, ValidatedProgram, Value},
-    schema::execution_catalog,
     Connection, Error,
 };
 
@@ -32,7 +32,7 @@ fn resolved_user_contract() -> yydb::vos::ResolvedContract {
 #[test]
 fn lowers_resolved_contract_without_reparsing_or_reassigning_identity() {
     let contract = resolved_user_contract();
-    let catalog = yydb::schema::execution_catalog_from_resolved_contract(&contract)
+    let catalog = yydb::catalog::execution_catalog_from_resolved_contract(&contract)
         .expect("resolved contract lowers");
     let table = &catalog.types[0];
     assert_eq!(table.schema_id, 7);
@@ -47,7 +47,7 @@ fn rejects_a_resolved_contract_with_a_forged_fingerprint() {
     let mut contract = resolved_user_contract();
     contract.schema_fingerprint = "0".repeat(64);
     assert!(matches!(
-        yydb::schema::execution_catalog_from_resolved_contract(&contract),
+        yydb::catalog::execution_catalog_from_resolved_contract(&contract),
         Err(Error::Schema { .. })
     ));
 }

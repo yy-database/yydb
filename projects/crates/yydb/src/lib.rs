@@ -5,16 +5,18 @@
 //!
 //! | Layer | Crate | Role |
 //! |-------|-------|------|
-//! | Bottom | `yydb-types` | `Error`, `Value`, CAS refs |
-//! | Engine | `yydb-engine`, `yydb-formats`, `yydb-execution`, `yydb-udf`, `yydb-query` | Storage, formats, execution IR, UDF, query |
-//! | **Facade** | **`yydb`** | Re-exports, prelude, version |
-//! | Protocol | `yydb-protocol` | Wire frames and bodies (no database access) |
-//! | Transport | `yydb-client`, `yydb-server` | Remote client / serve loop |
-//! | Bindings | `yydb-napi`, `yydb-pyo3`, ... | Language hosts only |
+//! | Contracts | `yydb-types` | `Error`, `Value`, CAS refs, UDF contracts |
+//! | Physical | `yydb-formats` | page, B-tree, WAL, SHM and blob v0 layout |
+//! | Durability | `yydb-storage` | file lifecycle, locking, snapshots, checkpoint, blob I/O |
+//! | Runtime | `yydb-engine` | connection, transactions, catalog, leases, UDF sessions |
+//! | **Facade** | **`yydb`** | module-wrapped re-exports, prelude, version |
+//! | Wire | `yydb-protocol` | frames and bodies only |
+//! | Remote | `yydb-client`, `yydb-server` | Rust remote client and serve loop (native only) |
 //!
 //! **Embedded host:** register native [UDFs](udf) on [`Connection`]. Remote Rust
-//! hosts use [`yydb-client`]. Lightweight TS hosts use `@yydb/yydb-client` against
-//! `yydb-server`.
+//! hosts use the [`client`] module (or `yydb-client` directly). Language bindings
+//! take every Rust capability from this facade. The native [`server`] module is
+//! excluded on `wasm32`.
 //!
 //! Durable layout is still **one primary `.yydb` file**. Optional journal
 //! sidecars `{path}-wal` / `{path}-shm` appear when
@@ -42,22 +44,92 @@
 
 #![deny(missing_docs)]
 
-/// Shared types (`Error`, `Result`, `Value`, ...).
+/// Shared data contracts (`Error`, `Result`, `Value`, CAS refs, ...).
 pub mod types {
     pub use yydb_types::*;
 }
 
+/// YY wire frames, message tags and body codecs.
+pub mod protocol {
+    pub use yydb_protocol::*;
+}
+
+/// Rust remote client for `yydb serve`.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod client {
+    pub use yydb_client::*;
+}
+
+/// Binary serve loop for out-of-process clients.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod server {
+    pub use yydb_server::*;
+}
+
+/// UDF traits, registry and host adapters.
+pub mod udf {
+    pub use yydb_engine::udf::*;
+}
+
+/// VOS catalog publication and contract resolution.
+pub mod catalog {
+    pub use yydb_engine::catalog::*;
+}
+
+/// Durable connection handle and statement surface.
+pub mod connection {
+    pub use yydb_engine::connection::*;
+}
+
+/// Batched write operations.
+pub mod batch {
+    pub use yydb_engine::batch::*;
+}
+
 /// Journal modes and `-wal` / `-shm` sidecar helpers.
-pub use yydb_engine::journal;
+pub mod journal {
+    pub use yydb_engine::journal::*;
+}
 
 /// Unified `<hash-prefix>/<chunk_hash>.blob` CAS + hot/cold tiering.
-pub use yydb_engine::objects;
+pub mod objects {
+    pub use yydb_engine::objects::*;
+}
 
-/// Shared VOS schema contract.
-pub use yydb_engine::catalog as schema;
+/// Query planning and DML operations.
+pub mod query {
+    pub use yydb_query::*;
+}
 
-/// UDF traits (`ScalarUdf`) and registry types (`UdfRegistry`, ...).
-pub use yydb_engine::udf;
+/// Local expression programs used by UDF execution.
+pub mod execution {
+    pub use yydb_execution::*;
+}
+
+/// Upstream VOS language contracts (`ResolvedContract`, ...).
+pub mod vos {
+    pub use vos::*;
+}
+
+pub use batch::Batch;
+pub use connection::Connection;
+pub use journal::{JournalMode, OpenFlags};
+pub use objects::ObjectStore;
+pub use udf::{
+    HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, ScalarUdf, UdfError, UdfRegistry,
+    UdfType, UdfValue,
+};
+
+/// Result alias for UDF host functions and registry operations.
+pub type UdfResult<T = UdfValue> = yydb_udf::Result<T>;
+
+pub use types::{
+    ChunkManifest, CommitSequence, CompactReport, DoctorIssue, DoctorReport, DoctorSeverity, Error,
+    EvictBudget, EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken,
+    NamespaceQuota, NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion,
+    ReleaseOutcome, Result, SchemaVersion, Tier, Value, Vector, DEFAULT_CHUNK_SIZE,
+    INLINE_BYTES_MAX,
+};
 
 /// Common embed imports (`use yydb::prelude::*`).
 pub mod prelude {
@@ -66,39 +138,6 @@ pub mod prelude {
         SchemaVersion, Value,
     };
 }
-
-/// Batched write operations.
-pub use yydb_engine::batch;
-
-/// Durable connection handle and statement surface.
-pub use yydb_engine::connection;
-
-/// YY wire protocol (`YYDB`|`YYDS` + version digits `0000`...).
-pub use yydb_protocol as wire;
-
-/// Query planning and DML operations.
-pub use yydb_query as query;
-
-pub use yydb_engine::{
-    Batch, Connection, HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, JournalMode,
-    ObjectStore, OpenFlags, ScalarUdf, UdfError, UdfRegistry, UdfType, UdfValue,
-};
-/// Result alias for UDF host functions and registry operations.
-pub type UdfResult<T = UdfValue> = yydb_udf::Result<T>;
-
-pub use yydb_execution as execution;
-pub use yydb_types;
-pub use yydb_types::{
-    ChunkManifest, CommitSequence, CompactReport, DoctorIssue, DoctorReport, DoctorSeverity, Error,
-    EvictBudget, EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken,
-    NamespaceQuota, NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion,
-    ReleaseOutcome, Result, SchemaVersion, Tier, Value, Vector, DEFAULT_CHUNK_SIZE,
-    INLINE_BYTES_MAX,
-};
-pub use yydb_udf;
-
-/// VOS schema language facade.
-pub use vos;
 
 /// Library version string (Cargo package version).
 pub fn version() -> &'static str {

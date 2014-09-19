@@ -5,8 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use yydb::{Connection, Value};
 use yydb_client::{Client, Error};
+use yydb_engine::{Connection, Value};
 use yydb_protocol::{read_frame, write_frame};
 use yydb_server::dispatch;
 

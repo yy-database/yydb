@@ -14,5 +14,5 @@ yydb-types = { workspace = true }
 yydb-protocol = { workspace = true }
 
 [dev-dependencies]
-yydb = { workspace = true }
+yydb-engine = { workspace = true }
 yydb-server = { workspace = true }

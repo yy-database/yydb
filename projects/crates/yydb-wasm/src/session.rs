@@ -2,7 +2,7 @@
 
 use js_sys::Function;
 use wasm_bindgen::prelude::*;
-use yydb::{wire, Connection, Error};
+use yydb::{protocol as wire, Connection, Error};
 
 use crate::core::{
     connection_info, kv_get_json, scalar_call_json, schema_get_json, unit_result_json,

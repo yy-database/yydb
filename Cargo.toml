@@ -39,10 +39,10 @@ yydb-protocol = { version = "0.1.0", path = "projects/crates/yydb-protocol" }
 # facade
 yydb = { path = "projects/crates/yydb" }
 
-# transport (siblings of the facade — no cycle back into yydb)
+# transport (aggregated by the facade; never depend back on `yydb`)
 yydb-client = { path = "projects/crates/yydb-client" }
 yydb-server = { path = "projects/crates/yydb-server" }
 
-# language bindings (thin; yydb + yydb-server only)
+# language bindings (thin; every Rust capability comes from `yydb`)
 yydb-napi = { path = "projects/crates/yydb-napi" }
 yydb-pyo3 = { path = "projects/crates/yydb-pyo3" }

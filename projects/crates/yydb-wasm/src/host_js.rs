@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::JsValue;
-use yydb::yydb_udf::{Result as UdfResult, UdfError, UdfValue};
+use yydb::types::udf::{Result as UdfResult, UdfError, UdfValue};
 use yydb::{HostFunctionHandle, HostRuntimeAdapter};
 
 /// Invokes session-local host micros through a JS callback.

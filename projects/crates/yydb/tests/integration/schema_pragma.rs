@@ -1,4 +1,4 @@
-use yydb::schema::{document_version, initial_version, validate_document};
+use yydb::catalog::{document_version, initial_version, validate_document};
 
 #[test]
 fn reads_optional_schema_version_pragma() {

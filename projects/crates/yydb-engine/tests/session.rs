@@ -17,7 +17,10 @@ fn cleanup(path: &Path) {
     let _ = fs::remove_file(path);
     let _ = fs::remove_file(format!("{}-wal", path.display()));
     let _ = fs::remove_file(format!("{}-shm", path.display()));
-    let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("app");
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("app");
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let _ = fs::remove_dir_all(parent.join(format!("{stem}-objects")));
 }

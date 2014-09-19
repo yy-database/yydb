@@ -1,4 +1,4 @@
-//! Thin Node-API binding — delegates to the [`yydb`] facade and [`yydb-server`].
+//! Thin Node-API binding — delegates to the [`yydb`] facade.
 
 #![deny(missing_docs)]
 
@@ -14,10 +14,10 @@ pub fn version() -> String {
     yydb::version().to_string()
 }
 
-/// Run `yydb-server` on `bind` for the database at `db_path`.
+/// Run the YYDB serve loop on `bind` for the database at `db_path`.
 #[napi]
 pub fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> Result<()> {
-    yydb_server::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
+    yydb::server::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
         .map_err(|error| Error::from_reason(error.to_string()))?;
     Ok(())
 }

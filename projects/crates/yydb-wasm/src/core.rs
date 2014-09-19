@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value as JsonValue};
 use yydb::{
-    schema::{self, ExecutionTypeKind},
+    catalog::{self, ExecutionTypeKind},
     Connection, Result, SchemaVersion, Value,
 };
 
@@ -31,7 +31,7 @@ fn schema_fingerprint(document: &str) -> String {
 
 /// Parse and validate schema source (same semantics as `Connection::ensure_schema`).
 pub fn check_schema_source(source: &str) -> SchemaCheck {
-    match schema::execution_catalog(source) {
+    match catalog::execution_catalog(source) {
         Ok(catalog) => {
             let table_count = u32::try_from(
                 catalog
@@ -59,7 +59,7 @@ pub fn check_schema_source(source: &str) -> SchemaCheck {
 
 /// Read-only schema introspection JSON.
 pub fn introspect_schema_json(source: &str) -> String {
-    match schema::execution_catalog(source) {
+    match catalog::execution_catalog(source) {
         Ok(catalog) => {
             let tables = catalog
                 .types

@@ -16,4 +16,3 @@ name = "yydb_pyo3"
 [dependencies]
 pyo3 = { workspace = true }
 yydb = { workspace = true }
-yydb-server = { workspace = true }

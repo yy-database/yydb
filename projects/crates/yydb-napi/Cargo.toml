@@ -17,7 +17,6 @@ name = "yydb_napi"
 napi = { workspace = true }
 napi-derive = { workspace = true }
 yydb = { workspace = true }
-yydb-server = { workspace = true }
 
 [build-dependencies]
 napi-build = { workspace = true }

@@ -1,4 +1,4 @@
-//! Thin Python binding — delegates to the [`yydb`] facade and [`yydb-server`].
+//! Thin Python binding — delegates to the [`yydb`] facade.
 //!
 //! TypeScript hosts use `yydb-napi`. Do not import `yydb-types` from Python glue.
 
@@ -20,11 +20,11 @@ fn version() -> String {
     yydb::version().to_string()
 }
 
-/// Run `yydb-server` on `bind` for the database at `db_path`.
+/// Run the YYDB serve loop on `bind` for the database at `db_path`.
 #[pyfunction]
 #[pyo3(signature = (db_path, bind, insecure_bind=None))]
 fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> PyResult<()> {
-    yydb_server::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
+    yydb::server::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
         .map_err(map_err)?;
     Ok(())
 }
