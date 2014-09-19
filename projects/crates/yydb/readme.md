@@ -35,16 +35,19 @@ filesystem sidecars — useful for tests.
 ```rust
 use yydb::prelude::*;
 // UDF: yydb::udf::UdfRegistry
-// wire types: yydb::wire
+// wire types: yydb::protocol
+// remote client: yydb::client
+// serve loop: yydb::server (native only)
 ```
 
 | Layer      | Crate                             | When to depend                 |
 |------------|-----------------------------------|--------------------------------|
-| Bottom     | `yydb-types`                      | Engine internals only          |
-| Engine     | `yydb-engine`, `yydb-formats`, `yydb-execution`, `yydb-udf`, `yydb-query` | Storage, formats, execution IR, UDF, query |
-| **Facade** | **`yydb`**                        | **Default — `Connection`**     |
+| Bottom     | `yydb-types`, `yydb-formats`      | Engine internals only          |
+| Durability | `yydb-storage`                    | File, snapshot, WAL and blob access |
+| Engine     | `yydb-engine`, `yydb-execution`, `yydb-udf`, `yydb-query` | Database runtime and components |
+| **Facade** | **`yydb`**                        | **Default — `Connection`, `client`, `server`** |
 | Protocol   | `yydb-protocol`                   | Wire frames only (no database) |
-| Transport  | `yydb-client`, `yydb-server`      | Remote client or serve process |
+| Transport  | `yydb-client`, `yydb-server`      | Aggregated as `yydb::client` / `yydb::server` |
 | Bindings   | `yydb-napi`, `yydb-pyo3`, `yydb-wasm` | Language hosts only        |
 
 ## Related surfaces
@@ -52,8 +55,8 @@ use yydb::prelude::*;
 | Need               | Surface               |
 |--------------------|-----------------------|
 | Rust embed         | `yydb` (`Connection`) |
-| Rust wire server   | `yydb-server`         |
-| Rust remote client | `yydb-client`         |
+| Rust wire server   | `yydb::server`        |
+| Rust remote client | `yydb::client`        |
 | Node all-in-one    | `@yydb/yydb`          |
 | TS wire client     | `@yydb/yydb-client`   |
 
