@@ -14,7 +14,6 @@ categories = ["database-implementations", "embedded"]
 [dependencies]
 vos = { workspace = true }
 yydb-types = { workspace = true }
-yydb-formats = { workspace = true }
 yydb-storage = { workspace = true }
 yydb-execution = { workspace = true }
 yydb-udf = { workspace = true }

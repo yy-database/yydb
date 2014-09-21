@@ -21,3 +21,11 @@ pub use database::{file_is_ydpg, snapshot_from_main_bytes, snapshot_to_main_byte
 pub use journal::{shm_path, wal_path, JournalMode, OpenFlags};
 pub use lock::WriterLock;
 pub use snapshot::{PagerKv, Snapshot};
+
+// Physical layout vocabulary that upper layers need while staying one hop away
+// from `yydb-formats`: CAS chunk hashes and WAL blob-manifest deltas are part of
+// durable storage, not query or engine semantics.
+pub use yydb_formats::{
+    blob_chunk_hash, diagnose_file, BlobChunkRef, BlobManifestDelta, BLOB_REF_OP_DELETE,
+    BLOB_REF_OP_PUT,
+};

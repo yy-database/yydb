@@ -31,7 +31,7 @@ impl Connection {
         let mut report =
             doctor::diagnose(&state.records, &self.objects, self.path(), self.wal_bytes())?;
         if let Some(path) = self.path() {
-            report.issues.extend(yydb_formats::diagnose_file(path)?);
+            report.issues.extend(yydb_storage::diagnose_file(path)?);
         }
         Ok(report)
     }

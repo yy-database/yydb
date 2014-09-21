@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use yydb_formats::{BlobManifestDelta, BLOB_REF_OP_DELETE, BLOB_REF_OP_PUT};
+use yydb_storage::{BlobManifestDelta, BLOB_REF_OP_DELETE, BLOB_REF_OP_PUT};
 use yydb_storage::Snapshot;
 use yydb_types::{Error, Result};
 

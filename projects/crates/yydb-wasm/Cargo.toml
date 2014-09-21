@@ -15,7 +15,6 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 blake3 = { workspace = true }
 serde_json = { workspace = true }
-vos = { workspace = true }
 yydb = { workspace = true }
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }

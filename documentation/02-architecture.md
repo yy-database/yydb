@@ -40,6 +40,7 @@ yydb  ←  yydb-napi / yydb-pyo3 / yydb-wasm
 6. `yydb-client` 只依赖 `yydb-protocol` 与 `yydb-types`，不依赖 `yydb`、`yydb-engine`、`yydb-formats` 或 VOS。
 7. `yydb-storage` 不理解 VOS、query、UDF 或 `Connection`，也不接收 `Connection::State`。
 8. `yydb-engine` 调用 `yydb-query`；`yydb-query` 不反向依赖 engine。
+9. `yydb-engine` 不直接依赖 `yydb-formats`；页、WAL、CAS 格式词汇经 `yydb-storage` 重导出。
 
 ## 2. crate 职责
 
@@ -91,9 +92,11 @@ yydb  ←  yydb-napi / yydb-pyo3 / yydb-wasm
 | `database` | 私有 | `Database`：打开、写锁、快照提交、checkpoint、WAL 统计 |
 | `lock` | 私有 | `WriterLock`（跨进程独占） |
 
-根导出：`Database`、`BlobStore`、`WriterLock`、`Snapshot`、`PagerKv`、`file_is_ydpg`、`snapshot_from_main_bytes`、`snapshot_to_main_bytes`。
+根导出：`Database`、`BlobStore`、`WriterLock`、`Snapshot`、`PagerKv`、`file_is_ydpg`、`snapshot_from_main_bytes`、`snapshot_to_main_bytes`，以及持久化层需要的物理格式词汇：`BlobChunkRef`、`BlobManifestDelta`、`blob_chunk_hash`、`BLOB_REF_OP_PUT` / `BLOB_REF_OP_DELETE`、`diagnose_file`。
 
 边界：`Snapshot.metadata` 是 `BTreeMap<Vec<u8>, Vec<u8>>`，`records` 是 `BTreeMap<String, Vec<u8>>`。storage 不解析 engine 的 `State`；状态编解码留在 `yydb-engine::storage::snapshot`。
+
+`yydb-engine` 不直接声明或导入 `yydb-formats`。engine 需要的 CAS chunk 引用、WAL blob manifest 操作常量与文件诊断探针都由 storage 重导出，因此 `yydb-formats → yydb-storage → yydb-engine` 是唯一持久化链路。
 
 ### 3.4 `yydb-engine`
 

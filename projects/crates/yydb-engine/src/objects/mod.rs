@@ -21,7 +21,7 @@ enum ObjectStoreRoot {
     OnDisk(BlobStore),
 }
 
-use yydb_formats::{blob_chunk_hash, BlobChunkRef};
+use yydb_storage::{blob_chunk_hash, BlobChunkRef};
 use yydb_storage::BlobStore;
 use yydb_types::{
     ChunkManifest, Error, HashAlgo, ObjectKind, ObjectRef, Result, Tier, Vector,
