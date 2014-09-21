@@ -5,7 +5,7 @@
 ## 范围
 
 - 产品与数据层不可破坏的不变量
-- crate 分层、能力归属与依赖方向
+- crate 分层、模块结构、能力归属与依赖方向
 - 磁盘格式、线协议与兼容规则
 - 代码、测试、CI 与发布的工程门槛
 - 面向宿主与绑定作者的 UX / DX 准则
@@ -24,7 +24,7 @@
 | 文件                                                                     | 内容                                   |
 |--------------------------------------------------------------------------|----------------------------------------|
 | [`01-invariants.md`](./01-invariants.md)                                 | 产品、存储、身份、并发与安全的不变量   |
-| [`02-architecture.md`](./02-architecture.md)                             | 分层与依赖方向、能力归属判定、门面规则 |
+| [`02-architecture.md`](./02-architecture.md)                             | 分层与依赖方向、模块结构、运行时结构、门面规则 |
 | [`03-encoding-and-compatibility.md`](./03-encoding-and-compatibility.md) | 磁盘格式、线协议、版本与升级规则       |
 | [`04-engineering-standards.md`](./04-engineering-standards.md)           | 文档、测试、格式、CI、依赖与发布门槛   |
 | [`05-ux-dx.md`](./05-ux-dx.md)                                           | 错误模型、诊断、作者面与绑定层准则     |

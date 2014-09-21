@@ -2,28 +2,33 @@
 
 ## 1. 依赖方向
 
-依赖只能自上而下，禁止回指或环形：
+依赖只能自上而下，禁止回指或环形。下图中 `A ← B` 表示 **B 依赖 A**：
 
 ```text
-yydb-types       共享合同：错误、值、对象引用、报告类型与 UDF 合同（`types::udf`）。无 IO。
-yydb-formats     物理格式：页、WAL、shm、blob、pager、CRC 的解析与校验。
-yydb-storage     持久化访问：文件生命周期与锁、快照提交、checkpoint/WAL 协调、CAS blob IO、存储指标。
-yydb-execution   本地执行模型：类型、程序、字段句柄、记录布局、UDF 验证。
-yydb-udf         UDF registry、调用调度、host adapter。
-yydb-query       VOS 语言整合、DML / DDL 定义、plan / optimizer / runtime。
-        ↑
-yydb-engine       数据库运行时：Connection、事务、catalog 发布、query 调用、CAS 协调、
-                  lease/TTL、UDF session、backup/doctor/compact 协调与 tuning 入口。
-        ↑                          ↑
-yydb-protocol                  yydb-server
-帧与消息体编解码                dispatch、绑定策略、serve 循环、host wire
-        ↑
-yydb-client       远程客户端（只依赖 `yydb-protocol` 与 `yydb-types`）
-        ↑
-yydb             总门面：模块包裹式重导出、精选根类型、prelude、版本与文档。
-        ↑
-yydb-napi / yydb-pyo3 / yydb-wasm        语言与浏览器宿主绑定。
+yydb-types  ←  yydb-formats  ←  yydb-storage  ←  yydb-engine
+yydb-types  ←  yydb-query     ←  yydb-engine
+yydb-types  ←  yydb-execution ←  yydb-engine
+yydb-types  ←  yydb-udf       ←  yydb-engine
+yydb-engine + yydb-protocol  ←  yydb-server
+yydb-types + yydb-protocol   ←  yydb-client
+yydb-engine + yydb-protocol + yydb-client + yydb-server  ←  yydb
+yydb  ←  yydb-napi / yydb-pyo3 / yydb-wasm
 ```
+
+| crate            | 角色                                                                 |
+|------------------|----------------------------------------------------------------------|
+| `yydb-types`     | 共享合同：错误、值、对象引用、报告类型与 `udf` 纯合同。无 IO。       |
+| `yydb-formats`   | 物理格式：页、B-tree、WAL、shm、blob、pager、CRC 的解析与校验。       |
+| `yydb-storage`   | 持久化访问：文件生命周期与锁、快照提交、checkpoint/WAL、CAS blob IO。 |
+| `yydb-execution` | 本地执行模型：类型、程序、字段句柄、记录布局、UDF 验证。               |
+| `yydb-udf`       | UDF registry、调用调度、host adapter。                                 |
+| `yydb-query`     | VOS 语言整合、DML / DDL 定义、plan / optimizer / runtime。             |
+| `yydb-engine`    | 数据库运行时：Connection、事务、catalog 发布、query 调用、CAS 协调、lease/TTL、UDF session、backup/doctor/compact 协调与 tuning 入口。 |
+| `yydb-protocol`  | YY 帧、消息体编解码、错误体、`split_bind`。                            |
+| `yydb-client`    | Rust 远程客户端（只依赖 `yydb-protocol` 与 `yydb-types`）。           |
+| `yydb-server`    | serve 循环、帧分发、绑定策略、host 回调通道（依赖 engine 与 protocol）。 |
+| `yydb`           | 总门面：模块包裹式重导出、精选根类型、`prelude`、版本与文档。         |
+| 绑定 crate       | `yydb-napi`、`yydb-pyo3`、`yydb-wasm`，只依赖门面。                   |
 
 规则：
 
@@ -53,7 +58,118 @@ yydb-napi / yydb-pyo3 / yydb-wasm        语言与浏览器宿主绑定。
 | `yydb-client`    | 远程调用与错误解码                                                          | 本地存储、serve 策略、门面                       |
 | 绑定 crate       | 类型转换、生命周期映射、宿主卷适配                                          | 数据库语义、格式、查询规则                       |
 
-## 3. 门面规则
+## 3. 模块结构
+
+### 3.1 `yydb-types`
+
+| 模块 | 内容 |
+|------|------|
+| 根   | `Error` / `Result` / `Value` / `ObjectRef` / `ObjectKind` / `HashAlgo`、lease、配额、诊断与压缩报告、`SchemaVersion` |
+| `udf` | 纯 UDF 合同：`UdfIdentity`、`Signature`、`UdfPolicy`、`CapabilitySet`、`Effect`、`Placement`、`UdfValue`、`UdfError`、host metadata |
+
+`types::udf` 不依赖 engine、execution 或协议。原 `yydb-udf-types` crate 已删除，不保留 shim。
+
+### 3.2 `yydb-formats`
+
+| 模块 | 内容 |
+|------|------|
+| `page` / `header` / `leaf` / `internal` / `key` | `YDPG` 页头、页槽、B-tree 叶/内部页、`TreeKey` |
+| `pager` / `file` / `memory` | `PageStore`、`FilePager`、`MemoryPager` |
+| `wal` / `wal_append` / `blob_refs` | `YYWL` 帧解析与追加、事务提交帧、blob 引用清单 |
+| `shm` | `YYSH` 索引块 |
+| `blob` | `YYBB` chunk 头与载荷 |
+| `crc32c` / `doctor` | 校验和与文件级诊断探针 |
+
+### 3.3 `yydb-storage`
+
+| 模块 | 可见性 | 内容 |
+|------|--------|------|
+| `blob` | 公开 | `BlobStore`：`<root>/<hash-prefix>/<chunk_hash>.blob` 的 put/read/list/remove |
+| `files` | 公开 | `copy_main` / `copy_sidecars` / `copy_tree` |
+| `journal` | 公开 | `JournalMode`、`OpenFlags`、`wal_path`、`shm_path`、`sidecar_status` |
+| `snapshot` | 公开 | `Snapshot`（metadata + records）、`PagerKv`、`read_snapshot` / `write_snapshot` |
+| `database` | 私有 | `Database`：打开、写锁、快照提交、checkpoint、WAL 统计 |
+| `lock` | 私有 | `WriterLock`（跨进程独占） |
+
+根导出：`Database`、`BlobStore`、`WriterLock`、`Snapshot`、`PagerKv`、`file_is_ydpg`、`snapshot_from_main_bytes`、`snapshot_to_main_bytes`。
+
+边界：`Snapshot.metadata` 是 `BTreeMap<Vec<u8>, Vec<u8>>`，`records` 是 `BTreeMap<String, Vec<u8>>`。storage 不解析 engine 的 `State`；状态编解码留在 `yydb-engine::storage::snapshot`。
+
+### 3.4 `yydb-engine`
+
+| 模块 | 内容 |
+|------|------|
+| `connection` | `Connection`、`Backend`（`File` / `Memory`）、事务、KV、lease、doctor、backup、compact、schema / 查询入口 |
+| `catalog` | VOS 合同发布、执行目录、identity / rename / version 处理 |
+| `objects` | `ObjectStore`：CAS + 内存热/冷层 + 引用扫描 |
+| `batch` | `Batch` 原子提交封装 |
+| `journal` | 仅重导出 `yydb-storage::journal`，保持 engine 路径稳定 |
+| `udf` | `ScalarUdf` 闭包体系、`UdfRegistry` 桥、session UDF |
+| `kv`（私有） | `State`、lease、retention、配额 |
+| `storage`（私有） | `snapshot`（`State` ↔ `Snapshot` 编解码、blob delta）与 `doctor` 探针 |
+
+`connection` 的子模块都是私有实现文件：`backup`、`compact`、`doctor`、`journal`、`kv`、`lease`、`objects_api`、`query`、`schema_api`、`state`、`transaction`、`udf`。对外只暴露 `Connection` 及其方法。
+
+### 3.5 `yydb-udf` / `yydb-query` / `yydb-execution`
+
+| crate | 公开面 |
+|-------|--------|
+| `yydb-udf` | `UdfRegistry`、`ImplementationRegistry`、`SessionUdfRegistry`、`UdfImplementation`、`UdfContext`、host adapter；纯合同全部重导出 `yydb_types::udf` |
+| `yydb-query` | VOS 解析/校验后的查询结果与 DML/DDL 执行入口；内部 `catalog` / `dml` / `exec` / `lower` / `ops` / `resolve` / `store` 均私有 |
+| `yydb-execution` | `Program`、`Node`、`Type`、`RecordValue`、`ValidatedProgram` 等执行模型；无公开子模块 |
+
+### 3.6 `yydb-protocol` / `yydb-client` / `yydb-server`
+
+| crate | 公开面 |
+|-------|--------|
+| `yydb-protocol` | 帧头常量、`MessageType`、`Frame`、`read_frame` / `write_frame`、各消息体 encode/decode、`split_bind` |
+| `yydb-client` | `Client`、错误解码、`HostMicroDefinition` 重导出 |
+| `yydb-server` | `dispatch`、`is_loopback_host`、`host_wire`、`run_serve`、`assert_bind_allowed`；`serve` 循环私有 |
+
+### 3.7 门面模块映射
+
+| `yydb` 模块 | 来源 |
+|-------------|------|
+| `types` | `yydb-types` |
+| `protocol` | `yydb-protocol` |
+| `client` / `server` | `yydb-client` / `yydb-server`（`wasm32` 不编译） |
+| `udf` | `yydb-engine::udf` |
+| `catalog` / `connection` / `batch` / `journal` / `objects` | `yydb-engine` 对应模块 |
+| `query` | `yydb-query` |
+| `execution` | `yydb-execution` |
+| `vos` | 上游 `vos` |
+
+根类型：`Connection`、`Batch`、`ObjectStore`、`JournalMode`、`OpenFlags`、`Error`、`Result`、`Value`、`SchemaVersion`、`ObjectRef` 与 UDF 根类型。`prelude` 只放嵌入场景最常用的类型。
+
+## 4. 运行时结构
+
+### 4.1 连接与后端
+
+```text
+Connection
+├── backend: Arc<Backend>
+│   ├── File { path, database: Mutex<Database> }   → yydb-storage
+│   └── Memory { state: Mutex<State> }
+├── operation_lock: Arc<Mutex<()>>                 // 串行化写路径与 checkpoint
+├── objects: Arc<ObjectStore>                      // 进程内热层 + 可选磁盘 CAS
+├── txn: Mutex<Option<State>>                      // 会话私有
+└── udfs: Mutex<UdfSubsystem>                      // 会话私有
+```
+
+- `Database` 持有 `FilePager`、`WriterLock` 与 journal 模式；打开文件、折叠 WAL、提交快照、checkpoint 都在该层完成。
+- engine 只通过 `Snapshot` + `BlobManifestDelta` 与 storage 交互；`State` 编解码在 `yydb-engine::storage::snapshot`。
+- `ObjectStore` 的磁盘分支使用 `yydb-storage::BlobStore`；内存分支不发文件 IO。
+
+### 4.2 会话隔离
+
+`Connection::session()` 复制 `Arc<Backend>`、`Arc<Mutex<()>>`、`Arc<ObjectStore>`，并新建空的 `txn` 与 `udfs`：
+
+- 数据、pager、写锁、CAS 共享，所以同一进程内只有一个写者、一个文件句柄。
+- 事务槽与 UDF registry 按会话隔离，回滚与 UDF 注册不跨 peer。
+- host adapter 按会话注册，一个 peer 的 host micro 不会泄漏给另一个 peer。
+- `yydb-server` 只调用一次 `Connection::open`，之后每个 peer 用 `conn.session()`；禁止每个 peer 重新打开数据库文件。
+
+## 5. 门面规则
 
 `yydb` 是总门面。判定标准如下，任一条不满足就不算门面：
 
@@ -69,7 +185,7 @@ yydb-napi / yydb-pyo3 / yydb-wasm        语言与浏览器宿主绑定。
 
 已知残留：`yydb-engine::udf` 仍包含旧 `ScalarUdf` 闭包体系与 `yydb-udf` registry 之间的双注册表桥，尚未收敛为单一合同。
 
-## 4. 能力归属判定
+## 6. 能力归属判定
 
 新增能力时依次回答：
 
@@ -87,7 +203,7 @@ yydb-napi / yydb-pyo3 / yydb-wasm        语言与浏览器宿主绑定。
 | 关乎语言类型映射与宿主卷？                | 对应绑定 crate                     |
 | 以上都不是，只是公开组装？                | `yydb`                             |
 
-## 5. 扩展点
+## 7. 扩展点
 
 只在确实需要时增加扩展点，并且必须落在已定义的层：
 
@@ -97,7 +213,7 @@ yydb-napi / yydb-pyo3 / yydb-wasm        语言与浏览器宿主绑定。
 4. **新查询能力**：进入 `yydb-query` 与执行模型，不进入门面或协议。
 5. **新对象类型**：进入 CAS 与 `ObjectKind`，不得新增旁路 sidecar。
 
-## 6. 禁止事项
+## 8. 禁止事项
 
 1. 在绑定层重写数据库格式或事务语义。
 2. `yydb-server` 绕过 `Connection` 直接读写文件。
