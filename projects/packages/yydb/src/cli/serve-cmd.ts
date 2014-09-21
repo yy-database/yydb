@@ -1,6 +1,6 @@
 import type { Cli, ParsedOptions } from '@vmz/commander';
 
-import { loadNative } from '../native.js';
+import { loadNative } from '../native/binding.js';
 import { flag, requiredPositional, str } from './options.js';
 
 export function registerServeCommand(cli: Cli): void {

@@ -27,7 +27,7 @@ export function udfWireKind(descriptor: AnyTypeDescriptor): UdfWireKind {
     }
 }
 
-/** Input accepted by [`Database.defineMicro`](./database.ts). */
+/** Input accepted by [`Database.defineMicro`](../api/database.ts). */
 export interface TsMicroDefinitionInput<TArgs extends readonly UdfScalarDescriptor[], TReturn extends UdfScalarDescriptor> {
     readonly name: string;
     readonly version: number;

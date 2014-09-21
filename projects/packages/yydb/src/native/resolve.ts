@@ -49,7 +49,7 @@ export function resolveYydbCli(): string {
         return path.resolve(fromEnv);
     }
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const candidate = path.join(here, 'cli.js');
+    const candidate = path.join(here, '..', 'cli.js');
     if (!existsFile(candidate)) {
         throw new Error('YYDB CLI script not found. Build `@yydb/yydb` (`pnpm --filter @yydb/yydb build`) or set YYDB_CLI.');
     }

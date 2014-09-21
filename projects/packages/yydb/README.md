@@ -1,8 +1,10 @@
 # `@yydb/yydb`
 
-Node all-in-one and browser wasm core from one package. On Node.js, `Database.open` starts a private loopback `yydb serve`
-process and talks over the YY wire protocol. In browsers, `@yydb/yydb/wasm` loads an in-process wasm session with KV
-and schema on memory or OPFS paths.
+Node embedded engine and CLI. `Database.open` starts a private loopback `yydb serve` process and talks over the YY
+wire protocol; platform `.node` bindings install through optional dependencies.
+
+Browsers are served by the pure TypeScript [`@yydb/light-db`](../light-db/readme.md) package. This package no longer
+ships a WebAssembly entry.
 
 For a wire client only (renderer or an app that already runs `yydb serve`), use
 [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client).
@@ -14,18 +16,14 @@ For a wire client only (renderer or an app that already runs `yydb serve`), use
 
 | Import | Runtime | Role |
 |--------|---------|------|
-| `@yydb/yydb` | Node (`node` export condition) | `Database.open`, micro helpers |
-| `@yydb/yydb` | Browser / bundler (`default`) | wasm `Database` |
-| `@yydb/yydb/node` | Node (explicit) | Same as Node default |
-| `@yydb/yydb/wasm` | Browser (explicit) | wasm `Database`, `initWasm`, `checkSchema` |
+| `@yydb/yydb` | Node | `Database.open`, micro helpers, VOS re-exports |
 | `@yydb/yydb/cli` | Node | CLI (`version`, `init`, `info`, `serve`) |
 
-Node.js 18+. Platform `.node` bindings install via optional dependencies.
+Node.js 18+.
 
-Schema truth lives in the `.yydb` file via `ensureSchema` and VOS documents. Wasm sessions mirror KV and schema calls
-on the embedded core.
+Schema truth lives in the `.yydb` file via `ensureSchema` and VOS documents.
 
-## Node example
+## Example
 
 ```ts
 import { Database } from '@yydb/yydb';
@@ -48,47 +46,7 @@ await db.close();
 
 The file is created when missing. Schema version and VOS document persist with the data.
 
-## Browser example
-
-```ts
-import { Database } from '@yydb/yydb/wasm';
-
-const db = await Database.openInMemory();
-
-await db.ensureSchema(
-    1,
-    `table Setting {
-        @@id: uuid,
-        key: utf8,
-        value: utf8,
-    }`,
-);
-
-await db.put('theme', 'dark');
-console.log(await db.get('theme'));
-db.close();
-```
-
-Use `Database.open('app.yydb')` for OPFS-backed paths in supported browsers.
-
-## Wasm API
-
-```ts
-const db = await Database.openInMemory();
-// or: const db = await Database.open('app.yydb');
-
-await db.ensureSchema(version, vosDocument);
-await db.getSchema();
-await db.put(key, stringOrBytes);
-await db.get(key);
-await db.info();
-await db.serverVersion();
-await db.registerMicro(microDefinition);
-await db.callScalar('double', 1, [21]);
-db.close();
-```
-
-## Node API
+## API
 
 ```ts
 const db = await Database.open(path, options?);
@@ -107,17 +65,20 @@ await db.close();
 `OpenOptions`: `cli` (explicit CLI script path), `port` (preferred loopback port), `serveArgs` (extra `yydb serve`
 arguments). `binary` is a deprecated alias for `cli`.
 
+The native binding exposes additive operations (`schemaVersion`, `schemaDocument`, `recordCount`, `journalMode`,
+`checkpoint`, `walFrameCount`, `get`, `put`); the CLI composes commands from them.
+
 ## Related packages
 
 | Need | Package |
 |------|---------|
-| Node all-in-one (this package) | **`@yydb/yydb`** or `@yydb/yydb/node` |
-| Browser wasm entry | **`@yydb/yydb/wasm`** |
+| Node embedded engine and CLI (this package) | **`@yydb/yydb`** |
+| Browser, pure TypeScript | **`@yydb/light-db`** |
 | Wire client only | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client) |
 | In-process Rust embed | [`yydb`](https://crates.io/crates/yydb) |
 | Agent skills (wire protocol) | [`@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills) |
 
-Electron: main process can use `@yydb/yydb/node`; renderer code can use `@yydb/yydb-client` against the main-process
+Electron: main process can use `@yydb/yydb`; renderer code can use `@yydb/yydb-client` against the main-process
 endpoint.
 
 The managed engine listens on `127.0.0.1` with no authentication — keep the endpoint private.

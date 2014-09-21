@@ -1,6 +1,6 @@
 import type { Cli } from '@vmz/commander';
 
-import { loadNative } from '../native.js';
+import { loadNative } from '../native/binding.js';
 
 export function registerVersionCommand(cli: Cli): void {
     cli.command('version', 'cli.cmd.version').action(() => cmdVersion());

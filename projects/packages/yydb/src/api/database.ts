@@ -11,7 +11,7 @@ import {
     type MicroHandle,
     MicroSessionRegistry,
 } from '../shared/micro.js';
-import { resolveYydbCli } from './resolve-bin.js';
+import { resolveYydbCli } from '../native/resolve.js';
 import type { UdfScalarDescriptor } from '../shared/udf-types.js';
 
 export type { SchemaVersion } from '@yydb/yydb-client';

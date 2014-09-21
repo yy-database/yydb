@@ -1,14 +1,30 @@
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
-import { platformKey } from './resolve-bin.js';
+import { platformKey } from './resolve.js';
 
+/** One open `.yydb` handle exposed by the native binding. */
+export interface NativeDatabase {
+    path(): string | null;
+    walPath(): string | null;
+    shmPath(): string | null;
+    schemaVersion(): number | null;
+    schemaDocument(): string | null;
+    ensureSchema(document: string): void;
+    recordCount(): number;
+    journalMode(): string;
+    setJournalMode(mode: string): void;
+    checkpoint(): void;
+    walFrameCount(): number;
+    get(key: string): Uint8Array | null;
+    put(key: string, value: Uint8Array): void;
+}
+
+/** Atomic operations exported by the Node-API binding. */
 export interface YydbNative {
     version(): string;
     serve(dbPath: string, bind: string, insecureBind?: boolean): void;
-    initDb(dbPath: string, schemaVersion: number, schemaDocument?: string | null): void;
-    infoText(dbPath: string): string;
-    readSchemaFile(schemaPath: string): string;
+    Database: { open(dbPath: string): NativeDatabase };
 }
 
 function loadModule(specifier: string): YydbNative {

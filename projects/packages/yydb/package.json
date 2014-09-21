@@ -1,32 +1,23 @@
 {
     "name": "@yydb/yydb",
     "version": "0.1.0",
-    "description": "YYDB all-in-one: Node embedded engine and CLI, browser wasm core",
+    "description": "YYDB Node embedded engine and CLI",
     "license": "MPL-2.0",
     "private": true,
     "type": "module",
     "bin": {
-        "yydb": "./dist/node/cli.js"
+        "yydb": "./dist/cli.js"
     },
-    "main": "./dist/node/index.js",
-    "types": "./dist/node/index.d.ts",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "types": "./dist/node/index.d.ts",
-            "node": "./dist/node/index.js",
-            "default": "./dist/wasm/index.js"
-        },
-        "./node": {
-            "types": "./dist/node/index.d.ts",
-            "import": "./dist/node/index.js"
-        },
-        "./wasm": {
-            "types": "./dist/wasm/index.d.ts",
-            "import": "./dist/wasm/index.js"
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
         },
         "./cli": {
-            "types": "./dist/node/cli.d.ts",
-            "import": "./dist/node/cli.js"
+            "types": "./dist/cli.d.ts",
+            "import": "./dist/cli.js"
         }
     },
     "files": [
@@ -34,8 +25,8 @@
         "README.md"
     ],
     "scripts": {
-        "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.wasm.json",
-        "test": "pnpm run build && node --experimental-strip-types --test src/node/**/*.test.ts src/shared/**/*.test.ts"
+        "build": "tsc -p tsconfig.json",
+        "test": "pnpm run build && node --experimental-strip-types --test src/**/*.test.ts"
     },
     "repository": {
         "type": "git",
@@ -59,8 +50,7 @@
     "dependencies": {
         "@vmz/commander": "^0.2.0",
         "@voml/vos": "^0.0.1",
-        "@yydb/yydb-client": "workspace:*",
-        "@yydb/yydb-unknown-wasm32": "workspace:*"
+        "@yydb/yydb-client": "workspace:*"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",
