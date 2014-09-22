@@ -31,5 +31,6 @@ jobs:
       - run: pnpm --filter @yydb/yydb-client test
       - run: pnpm --filter @yydb/yydb build
       - run: pnpm --filter @yydb/yydb test
+      - run: pnpm --filter @yydb/light-db build
       - run: pnpm --filter @yydb/yydb-webui build
       - run: pnpm --filter @yydb/yydb-homepage build

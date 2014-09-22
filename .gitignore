@@ -48,3 +48,6 @@ target/
 *.yydb
 *.yydx
 
+# Light DB test artifacts
+projects/packages/light-db/temp/
+

@@ -41,6 +41,10 @@
 4. 绑定层不得增加隐藏重试、隐藏重连、隐藏 flush。需要这些策略时由调用方显式选择。
 5. 异步边界必须明确：哪些调用阻塞、哪些返回 Promise/Future、取消语义如何。不允许同一方法在不同绑定里语义不同。
 6. wasm 绑定不得假装拥有文件系统能力。能力缺失必须返回 `yydb.unsupported`，不得回落到静默内存模式。
+7. TypeScript 产品面按宿主拆成两个包，不提供同一包内的多运行时入口：
+   - Node：`@yydb/yydb`，嵌入引擎与 CLI，原生能力经平台 `.node` 绑定加载，不发布 wasm 入口。
+   - 浏览器：`@yydb/light-db`，纯 TypeScript 实现，只在 Node 文件 IO 或浏览器存储适配器之上运行。
+8. N-API 只导出正交的原子方法（`open`、`ensure_schema`、`record_count`、`journal_mode`、`checkpoint`、`get`、`put` 等），不导出拼装好的 CLI 命令。面向用户的命令组合留在 TypeScript 层。
 
 ## 5. 线协议客户端
 
