@@ -77,7 +77,6 @@ export class LightFileSerializer {
         const recordSize = 4 + keyLength + 4 + valueLength + 4;
 
         const writer = new BufferWriter(recordSize);
-        writer.writeUInt32LE(keyLength);
         writer.writeString(record.key);
         writer.writeUInt32LE(valueLength);
         writer.writeBuffer(record.value);
@@ -121,7 +120,7 @@ export class LightFileSerializer {
         const recordBuffers = page.records.map((r) => this.serializeRecord(r));
         const recordsData = BinaryUtils.concat(recordBuffers);
 
-        const headerWriter = new BufferWriter(PAGE_HEADER_SIZE);
+        const headerWriter = new BufferWriter(PAGE_HEADER_SIZE - 4);
         headerWriter.writeUInt32LE(page.pageId);
         headerWriter.writeUInt16LE(page.records.length);
         headerWriter.writeUInt16LE(this.pageSize - PAGE_HEADER_SIZE - recordsData.length);
@@ -130,16 +129,11 @@ export class LightFileSerializer {
         pageData.push(recordsData);
 
         const pageBuffer = BinaryUtils.concat(pageData);
-        const checksum = BinaryUtils.calculateChecksum(pageBuffer);
 
         const finalWriter = new BufferWriter(this.pageSize);
         finalWriter.writeBuffer(pageBuffer);
-        finalWriter.writeUInt32LE(checksum);
-
-        const padding = this.pageSize - finalWriter.position;
-        if (padding > 0) {
-            finalWriter.writeBuffer(Buffer.alloc(padding));
-        }
+        finalWriter.writeBuffer(Buffer.alloc(this.pageSize - 4 - finalWriter.position));
+        finalWriter.writeChecksum(0);
 
         return finalWriter.data;
     }
@@ -160,6 +154,7 @@ export class LightFileSerializer {
         const reader = new BufferReader(buffer);
         const readPageId = reader.readUInt32LE();
         const recordCount = reader.readUInt16LE();
+        reader.readUInt16LE();
 
         if (readPageId !== pageId) {
             throw new PageError(`Page ID mismatch: expected ${pageId}, got ${readPageId}`, pageId);
@@ -167,8 +162,9 @@ export class LightFileSerializer {
 
         const records: Record[] = [];
         for (let i = 0; i < recordCount; i++) {
-            const { record } = this.deserializeRecord(buffer, reader.position);
+            const { record, bytesRead } = this.deserializeRecord(buffer, reader.position);
             records.push(record);
+            reader.position += bytesRead;
         }
 
         return {
@@ -401,12 +397,17 @@ export class LightFileManager {
 
         const data = this.serializer.serializeSnapshot(pages, lastSnapshotLsn);
 
+        const wasOpen = this.handle !== null;
+        if (this.handle) {
+            await this.handle.close();
+            this.handle = null;
+        }
+
         await FileUtils.writeFile(tempPath, data);
         await FileUtils.syncFile(tempPath);
         await FileUtils.rename(tempPath, finalPath);
 
-        if (this.handle) {
-            await this.handle.close();
+        if (wasOpen) {
             this.handle = new FileHandleWrapper(finalPath, "r+");
             await this.handle.open();
         }
