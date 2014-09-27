@@ -22,7 +22,7 @@ export class ShmSerializer {
         writer.writeBigUInt64LE(header.walFileSize);
         writer.writeBigUInt64LE(header.lastCompleteLsn);
         writer.writeUInt32LE(header.recordCount);
-        writer.writeUInt32LE(header.checksum);
+        writer.writeChecksum(0);
         return writer.data;
     }
 
