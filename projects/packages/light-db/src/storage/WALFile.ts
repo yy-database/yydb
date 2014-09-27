@@ -308,6 +308,7 @@ export class WalReader {
     private currentOffset: number;
     private readBufferSize: number;
     private readBuffer: Buffer;
+    private bufferOffset: number;
     private bufferValidBytes: number;
 
     /**
@@ -323,6 +324,7 @@ export class WalReader {
         this.currentOffset = 0;
         this.readBufferSize = readBufferSize;
         this.readBuffer = BinaryUtils.alloc(readBufferSize);
+        this.bufferOffset = 0;
         this.bufferValidBytes = 0;
     }
 
@@ -340,6 +342,7 @@ export class WalReader {
         await this.handle.open();
         this.fileSize = await this.handle.size();
         this.currentOffset = 0;
+        this.bufferOffset = 0;
         this.bufferValidBytes = 0;
     }
 
@@ -354,24 +357,42 @@ export class WalReader {
     }
 
     /**
-     * 填充读取缓冲区
+     * 追加读取数据到缓冲区，保留尚未消费的字节
+     * 返回是否读到了新数据
      */
-    private async fillBuffer(): Promise<boolean> {
+    private async refillBuffer(): Promise<boolean> {
         if (!this.handle) {
             return false;
         }
+
+        const unread = this.bufferValidBytes - this.bufferOffset;
+        if (unread > 0 && this.bufferOffset > 0) {
+            this.readBuffer.copy(this.readBuffer, 0, this.bufferOffset, this.bufferValidBytes);
+        }
+
+        this.bufferOffset = 0;
+        this.bufferValidBytes = unread;
 
         if (this.currentOffset >= this.fileSize) {
             return false;
         }
 
         const remaining = this.fileSize - this.currentOffset;
-        const toRead = Math.min(this.readBufferSize, remaining);
+        const need = unread + remaining;
+        const limit = this.readBufferSize * 8;
 
-        const bytesRead = await this.handle.read(this.readBuffer, 0, toRead, this.currentOffset);
+        if (need > this.readBuffer.length && need <= limit) {
+            const grown = BinaryUtils.alloc(need);
+            this.readBuffer.copy(grown, 0, 0, unread);
+            this.readBuffer = grown;
+        }
 
-        this.bufferValidBytes = bytesRead;
+        const capacity = this.readBuffer.length - unread;
+        const toRead = Math.min(this.readBufferSize, capacity, remaining);
+
+        const bytesRead = await this.handle.read(this.readBuffer, unread, toRead, this.currentOffset);
         this.currentOffset += bytesRead;
+        this.bufferValidBytes = unread + bytesRead;
 
         return bytesRead > 0;
     }
@@ -384,21 +405,22 @@ export class WalReader {
             return null;
         }
 
-        if (this.bufferValidBytes === 0) {
-            if (!(await this.fillBuffer())) {
+        while (true) {
+            if (this.bufferOffset >= this.bufferValidBytes && !(await this.refillBuffer())) {
+                return null;
+            }
+
+            const result = this.serializer.deserialize(this.readBuffer, this.bufferOffset);
+            if (result) {
+                this.bufferOffset += result.bytesRead;
+                return result.record;
+            }
+
+            // 记录跨越缓冲区边界：把剩余文件继续读进来再解析一次。
+            if (!(await this.refillBuffer())) {
                 return null;
             }
         }
-
-        const buffer = this.readBuffer.subarray(0, this.bufferValidBytes);
-        const result = this.serializer.deserialize(buffer, 0);
-
-        if (!result) {
-            return null;
-        }
-
-        this.bufferValidBytes = 0;
-        return result.record;
     }
 
     /**
@@ -424,6 +446,7 @@ export class WalReader {
      */
     public async seek(offset: number): Promise<void> {
         this.currentOffset = offset;
+        this.bufferOffset = 0;
         this.bufferValidBytes = 0;
     }
 
