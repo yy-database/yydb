@@ -247,8 +247,13 @@ export class LightFileManager {
 
     /**
      * 打开文件
+     * 幂等：已打开时直接返回，避免调用方重复打开造成句柄泄漏
      */
     public async open(): Promise<void> {
+        if (this.handle) {
+            return;
+        }
+
         const filePath = this.getFilePath();
         const exists = await FileUtils.exists(filePath);
 
@@ -258,6 +263,15 @@ export class LightFileManager {
             this.handle = new FileHandleWrapper(filePath, "w+");
         }
         await this.handle.open();
+    }
+
+    /**
+     * 确保文件已打开，未打开时按需打开
+     */
+    private async ensureOpen(): Promise<void> {
+        if (!this.handle) {
+            await this.open();
+        }
     }
 
     /**
@@ -274,17 +288,15 @@ export class LightFileManager {
      * 读取文件头部
      */
     public async readHeader(): Promise<LightHeader | null> {
-        if (!this.handle) {
-            throw new FileFormatError("File not open", this.getFilePath());
-        }
+        await this.ensureOpen();
 
-        const size = await this.handle.size();
+        const size = await this.handle!.size();
         if (size < HEADER_SIZE) {
             return null;
         }
 
         const buffer = BinaryUtils.alloc(HEADER_SIZE);
-        await this.handle.read(buffer, 0, HEADER_SIZE, 0);
+        await this.handle!.read(buffer, 0, HEADER_SIZE, 0);
 
         return this.serializer.deserializeHeader(buffer);
     }
@@ -294,12 +306,10 @@ export class LightFileManager {
      * @param header 头部数据
      */
     public async writeHeader(header: LightHeader): Promise<void> {
-        if (!this.handle) {
-            throw new FileFormatError("File not open", this.getFilePath());
-        }
+        await this.ensureOpen();
 
         const buffer = this.serializer.serializeHeader(header);
-        await this.handle.write(buffer, 0, buffer.length, 0);
+        await this.handle!.write(buffer, 0, buffer.length, 0);
     }
 
     /**
@@ -307,20 +317,18 @@ export class LightFileManager {
      * @param pageId 页面ID
      */
     public async readPage(pageId: number): Promise<Page | null> {
-        if (!this.handle) {
-            throw new FileFormatError("File not open", this.getFilePath());
-        }
+        await this.ensureOpen();
 
         const pageSize = this.serializer.getPageSize();
         const position = HEADER_SIZE + pageId * pageSize;
-        const size = await this.handle.size();
+        const size = await this.handle!.size();
 
         if (position + pageSize > size) {
             return null;
         }
 
         const buffer = BinaryUtils.alloc(pageSize);
-        await this.handle.read(buffer, 0, pageSize, position);
+        await this.handle!.read(buffer, 0, pageSize, position);
 
         return this.serializer.deserializePage(buffer, pageId);
     }
@@ -330,28 +338,24 @@ export class LightFileManager {
      * @param page 页面数据
      */
     public async writePage(page: Page): Promise<void> {
-        if (!this.handle) {
-            throw new FileFormatError("File not open", this.getFilePath());
-        }
+        await this.ensureOpen();
 
         const pageSize = this.serializer.getPageSize();
         const position = HEADER_SIZE + page.pageId * pageSize;
         const buffer = this.serializer.serializePage(page);
 
-        await this.handle.write(buffer, 0, buffer.length, position);
+        await this.handle!.write(buffer, 0, buffer.length, position);
     }
 
     /**
      * 加载所有页面
      */
     public async loadAllPages(): Promise<PageMap> {
-        if (!this.handle) {
-            throw new FileFormatError("File not open", this.getFilePath());
-        }
+        await this.ensureOpen();
 
         const pages: PageMap = new Map();
         const pageSize = this.serializer.getPageSize();
-        const size = await this.handle.size();
+        const size = await this.handle!.size();
 
         if (size <= HEADER_SIZE) {
             return pages;
@@ -417,10 +421,16 @@ export class LightFileManager {
      * 获取文件大小
      */
     public async getFileSize(): Promise<number> {
-        if (!this.handle) {
-            return 0;
+        if (this.handle) {
+            return this.handle.size();
         }
-        return this.handle.size();
+
+        const filePath = this.getFilePath();
+        if (await FileUtils.exists(filePath)) {
+            return FileUtils.getFileSize(filePath);
+        }
+
+        return 0;
     }
 
     /**

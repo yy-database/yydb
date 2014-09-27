@@ -212,7 +212,7 @@ export class RecoveryManager {
         await reader.open();
 
         let replayCount = 0;
-        let lastLsn = 0n;
+        let lastLsn = this.context.lastCheckpointLsn;
 
         try {
             while (true) {

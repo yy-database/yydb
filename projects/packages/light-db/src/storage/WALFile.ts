@@ -665,12 +665,13 @@ export class WalManager {
 
     /**
      * 清空 WAL 文件
+     * LSN 保持单调递增：快照记录的 `lastSnapshotLsn` 已写入 .light，
+     * 若清空后重置 LSN，检查点之后写入的 WAL 记录会因 LSN 不大于快照 LSN 而在恢复时被跳过。
      */
     public async clear(): Promise<void> {
         if (this.writer) {
             await this.writer.clear();
         }
-        this.currentLsn = 1n;
     }
 
     /**
