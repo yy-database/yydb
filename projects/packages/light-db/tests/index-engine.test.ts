@@ -12,6 +12,7 @@ import {
     assertNull,
     assertThrows,
     assertNoThrow,
+    assertGreater,
     assertLength,
     assertContains,
     assertNotContains,
@@ -43,7 +44,7 @@ function createBPlusTreeTests(): TestSuite {
         const tree = new BPlusTree<string, number>();
 
         const result = tree.insert("key1", 100);
-        assertNull(result);
+        assertEqual(result, undefined);
 
         assertEqual(tree.Size, 1);
         assertFalse(tree.isEmpty());
@@ -74,7 +75,7 @@ function createBPlusTreeTests(): TestSuite {
 
         tree.insert("key1", 100);
 
-        assertNull(tree.find("nonexistent"));
+        assertEqual(tree.find("nonexistent"), undefined);
     });
 
     suite.test("检查键是否存在", () => {
@@ -102,7 +103,7 @@ function createBPlusTreeTests(): TestSuite {
 
         const result = tree.delete("nonexistent");
 
-        assertNull(result);
+        assertEqual(result, undefined);
     });
 
     suite.test("更新存在的键", () => {
@@ -421,7 +422,7 @@ function createPrimaryIndexTests(): TestSuite {
 
         const found = index.find(999);
 
-        assertNull(found);
+        assertEqual(found, undefined);
     });
 
     suite.test("检查键是否存在", () => {
@@ -519,7 +520,7 @@ function createPrimaryIndexTests(): TestSuite {
 
         const deleted = index.delete(999);
 
-        assertNull(deleted);
+        assertEqual(deleted, undefined);
     });
 
     suite.test("范围查询", () => {

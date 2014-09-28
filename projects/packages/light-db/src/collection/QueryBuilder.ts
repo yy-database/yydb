@@ -17,6 +17,8 @@ export interface QueryExecutor<T extends object> {
     findByPrimaryKey(key: PrimaryKeyType): T | undefined;
     /** 通过二级索引查找 */
     findBySecondaryIndex(indexName: string, value: unknown): T[];
+    /** 通过二级索引字段查找 */
+    findBySecondaryIndexField(fieldName: string, value: unknown): T[];
     /** 获取主键字段名 */
     getPrimaryKeyField(): string;
     /** 获取二级索引字段列表 */
@@ -313,7 +315,6 @@ export class QueryBuilder<T extends object> {
      * 执行查询并返回最后一条匹配的文档
      */
     public last(): T | null {
-        this.limitValue = 1;
         const result = this.execute();
         return result.docs.length > 0 ? (result.docs[result.docs.length - 1] ?? null) : null;
     }
@@ -420,7 +421,7 @@ export class QueryBuilder<T extends object> {
         const secondaryIndexFields = this.executor.getSecondaryIndexFields();
         if (secondaryIndexFields.includes(analysis.indexField!)) {
             if (analysis.isExactMatch && analysis.indexValue !== undefined && analysis.indexField) {
-                const docs = this.executor.findBySecondaryIndex(analysis.indexField, analysis.indexValue);
+                const docs = this.executor.findBySecondaryIndexField(analysis.indexField, analysis.indexValue);
                 const filtered = docs.filter((doc) => QueryParser.matches(doc, this.filter));
                 const output: { docs: T[]; usedIndex: boolean; indexName?: string } = {
                     docs: filtered,

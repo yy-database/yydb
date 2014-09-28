@@ -12,6 +12,7 @@ import {
     assertNull,
     assertThrows,
     assertNoThrow,
+    assertGreater,
     assertLength,
     TestSuite,
 } from "./test-utils";
@@ -301,7 +302,7 @@ function createCollectionTests(): TestSuite {
         collection.updateOne({ id: 1 }, { $unset: { profile: true } });
 
         const doc = collection.findByPrimaryKey(1);
-        assertNull(doc!.profile);
+        assertEqual(doc!.profile, undefined);
     });
 
     suite.test("使用 $inc 增加数值", () => {

@@ -298,7 +298,7 @@ function createTransactionTests(): TestSuite {
         assertTrue(result.success);
 
         const users = db.collection<User>("users", { primaryKey: "id" });
-        assertTrue(users.hasCollection);
+        assertTrue(db.hasCollection("users"));
         assertEqual(users.Size, 3);
     });
 
@@ -606,7 +606,7 @@ function createWorkflowTests(): TestSuite {
         assertEqual(user!.age, 26);
 
         users.deleteOne({ id: 1 });
-        assertNull(users.findByPrimaryKey(1));
+        assertEqual(users.findByPrimaryKey(1), undefined);
     });
 
     suite.test("数据持久化工作流", async () => {

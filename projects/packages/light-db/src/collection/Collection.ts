@@ -248,6 +248,15 @@ export class Collection<T extends Record<string, unknown>> implements QueryExecu
     }
 
     /**
+     * 通过二级索引字段查找文档
+     * @param fieldName 字段名
+     * @param value 索引值
+     */
+    public findBySecondaryIndexField(fieldName: string, value: unknown): T[] {
+        return this.indexManager.findBySecondaryIndexField(fieldName, value as IndexValue);
+    }
+
+    /**
      * 更新文档
      * @param filter 查询条件
      * @param update 更新操作
@@ -767,7 +776,7 @@ export class Collection<T extends Record<string, unknown>> implements QueryExecu
      * 获取二级索引字段列表（实现 QueryExecutor 接口）
      */
     public getSecondaryIndexFields(): string[] {
-        return this.indexManager.getSecondaryIndexNames();
+        return this.indexManager.getSecondaryIndexFields();
     }
 
     /**

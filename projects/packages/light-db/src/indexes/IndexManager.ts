@@ -196,6 +196,28 @@ export class IndexManager<T = unknown> {
     }
 
     /**
+     * 获取所有二级索引对应的字段名
+     */
+    public getSecondaryIndexFields(): string[] {
+        return Array.from(this.secondaryIndexes.values()).map((index) => index.FieldName);
+    }
+
+    /**
+     * 按字段名查询二级索引
+     * @param fieldName 字段名
+     * @param value 索引值
+     */
+    public findBySecondaryIndexField(fieldName: string, value: IndexValue): T[] {
+        for (const [name, index] of this.secondaryIndexes) {
+            if (index.FieldName === fieldName) {
+                return this.findBySecondaryIndex(name, value);
+            }
+        }
+
+        throw new IndexNotFoundError(fieldName);
+    }
+
+    /**
      * 插入记录
      * @param record 记录
      * @param throwOnDuplicate 如果主键已存在是否抛出异常

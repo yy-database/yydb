@@ -474,13 +474,13 @@ export class SecondaryIndex {
             return null;
         }
         if (key.startsWith("\x01num:")) {
-            return parseFloat(key.slice(6));
+            return parseFloat(key.slice("\x01num:".length));
         }
         if (key.startsWith("\x02bool:")) {
-            return key.slice(7) === "true";
+            return key.slice("\x02bool:".length) === "true";
         }
         if (key.startsWith("\x03str:")) {
-            return key.slice(6);
+            return key.slice("\x03str:".length);
         }
         return key;
     }

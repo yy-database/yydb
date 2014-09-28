@@ -19,7 +19,37 @@ import type {
     CollectionSchema,
 } from "./types";
 import type { CheckpointResult, StorageStats, StorageEngineOptions } from "../types";
+import type { IndexConfig } from "../collection/types";
 import { StorageError } from "../errors";
+
+/**
+ * 集合快照在存储引擎中的键名
+ */
+const SNAPSHOT_KEY = "__lightdb__/snapshot";
+
+/**
+ * 快照中的集合描述
+ */
+interface SnapshotCollection {
+    /** 集合名称 */
+    name: string;
+    /** 主键字段名 */
+    primaryKey: string;
+    /** 二级索引配置 */
+    indexes: IndexConfig[];
+    /** 集合内全部文档 */
+    docs: Record<string, unknown>[];
+}
+
+/**
+ * 数据库快照结构
+ */
+interface DatabaseSnapshot {
+    /** 快照格式版本 */
+    version: number;
+    /** 集合列表 */
+    collections: SnapshotCollection[];
+}
 
 /**
  * LightDB 数据库实例
@@ -28,11 +58,13 @@ import { StorageError } from "../errors";
 export class LightDB implements ILightDB {
     private readonly storageEngine: StorageEngine;
     private readonly collections: Map<string, Collection<Record<string, unknown>>>;
+    private readonly collectionSchemas: Map<string, { primaryKey: string; indexes: IndexConfig[] }>;
     private readonly transactionManager: TransactionManager;
     private readonly options: Required<Omit<LightDBOptions, "fsyncStrategy">> & {
         fsyncStrategy?: LightDBOptions["fsyncStrategy"];
     };
     private closed: boolean;
+    private snapshotPersisted: boolean;
 
     /**
      * 创建 LightDB 实例
@@ -48,8 +80,10 @@ export class LightDB implements ILightDB {
         this.storageEngine = storageEngine;
         this.options = options;
         this.collections = new Map();
+        this.collectionSchemas = new Map();
         this.transactionManager = new TransactionManager(this.collections as Map<string, Collection<Record<string, unknown>>>);
         this.closed = false;
+        this.snapshotPersisted = false;
     }
 
     /**
@@ -91,7 +125,9 @@ export class LightDB implements ILightDB {
 
         const storageEngine = await createStorageEngine(path, dbName, storageEngineOptions);
 
-        return new LightDB(storageEngine, fullOptions);
+        const db = new LightDB(storageEngine, fullOptions);
+        await db.restoreSnapshot();
+        return db;
     }
 
     /**
@@ -148,6 +184,15 @@ export class LightDB implements ILightDB {
             return existingCollection as Collection<T>;
         }
 
+        return this.createCollection<T>(name, options);
+    }
+
+    /**
+     * 创建集合并登记其 Schema
+     * @param name 集合名称
+     * @param options 集合配置选项
+     */
+    private createCollection<T extends Record<string, unknown>>(name: string, options: CollectionCreateOptions<T>): Collection<T> {
         const collectionOptions: CollectionOptions<T> = {
             name,
             primaryKey: options.primaryKey,
@@ -156,6 +201,10 @@ export class LightDB implements ILightDB {
 
         const collection = new Collection<T>(collectionOptions);
         this.collections.set(name, collection as Collection<Record<string, unknown>>);
+        this.collectionSchemas.set(name, {
+            primaryKey: collectionOptions.primaryKey,
+            indexes: (collectionOptions.indexes ?? []) as IndexConfig[],
+        });
 
         return collection;
     }
@@ -187,6 +236,7 @@ export class LightDB implements ILightDB {
 
         collection.clear();
         this.collections.delete(name);
+        this.collectionSchemas.delete(name);
         return true;
     }
 
@@ -230,6 +280,7 @@ export class LightDB implements ILightDB {
      */
     public async checkpoint(): Promise<CheckpointResult> {
         this.ensureOpen();
+        await this.persistSnapshot();
         return this.storageEngine.checkpoint();
     }
 
@@ -278,6 +329,7 @@ export class LightDB implements ILightDB {
      */
     public async sync(): Promise<void> {
         this.ensureOpen();
+        await this.persistSnapshot();
         await this.storageEngine.sync();
     }
 
@@ -290,13 +342,78 @@ export class LightDB implements ILightDB {
             return;
         }
 
+        await this.persistSnapshot();
+
         for (const collection of this.collections.values()) {
             collection.clear();
         }
         this.collections.clear();
+        this.collectionSchemas.clear();
 
         await this.storageEngine.close();
         this.closed = true;
+    }
+
+    /**
+     * 将内存中的集合与文档写入存储引擎快照
+     * 集合结构（主键与索引）与文档内容一起写入，重开时据此重建集合。
+     */
+    private async persistSnapshot(): Promise<void> {
+        if (this.collections.size === 0) {
+            if (this.snapshotPersisted && (await this.storageEngine.exists(SNAPSHOT_KEY))) {
+                await this.storageEngine.delete(SNAPSHOT_KEY);
+            }
+            this.snapshotPersisted = false;
+            return;
+        }
+
+        const snapshot: DatabaseSnapshot = {
+            version: 1,
+            collections: [],
+        };
+
+        for (const [name, collection] of this.collections) {
+            const schema = this.collectionSchemas.get(name);
+            if (!schema) {
+                continue;
+            }
+
+            snapshot.collections.push({
+                name,
+                primaryKey: schema.primaryKey,
+                indexes: schema.indexes,
+                docs: collection.getAll(),
+            });
+        }
+
+        await this.storageEngine.upsert(SNAPSHOT_KEY, Buffer.from(JSON.stringify(snapshot), "utf-8"));
+        this.snapshotPersisted = true;
+    }
+
+    /**
+     * 从存储引擎快照恢复集合与文档
+     */
+    private async restoreSnapshot(): Promise<void> {
+        const raw = await this.storageEngine.get(SNAPSHOT_KEY);
+        if (!raw) {
+            return;
+        }
+
+        const snapshot = JSON.parse(raw.toString("utf-8")) as DatabaseSnapshot;
+
+        for (const entry of snapshot.collections) {
+            const collection = this.createCollection<Record<string, unknown>>(entry.name, {
+                name: entry.name,
+                primaryKey: entry.primaryKey,
+                indexes: entry.indexes,
+            });
+
+            for (const doc of entry.docs) {
+                collection.insert(doc);
+            }
+        }
+
+        this.snapshotPersisted = true;
     }
 
     /**

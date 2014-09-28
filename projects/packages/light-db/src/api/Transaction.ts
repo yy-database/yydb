@@ -63,10 +63,10 @@ class TransactionCollectionWrapper<T extends Record<string, unknown>> implements
 
     public async update(filter: Record<string, unknown>, update: Partial<T>): Promise<number> {
         this.transaction.ensureActive();
+        const beforeDocs = this.collection.find({ where: filter as QueryFilter<T> }).docs;
         const result = this.collection.updateMany(filter as Parameters<Collection<T>["updateMany"]>[0], { $set: update });
         this.transaction.recordOperation("update", this.collection.Name, {
-            filter,
-            update,
+            beforeDocs,
             count: result.modifiedCount,
         });
         return result.modifiedCount;
@@ -74,9 +74,10 @@ class TransactionCollectionWrapper<T extends Record<string, unknown>> implements
 
     public async delete(filter: Record<string, unknown>): Promise<number> {
         this.transaction.ensureActive();
+        const deletedDocs = this.collection.find({ where: filter as QueryFilter<T> }).docs;
         const result = this.collection.deleteMany(filter as Parameters<Collection<T>["deleteMany"]>[0]);
         this.transaction.recordOperation("delete", this.collection.Name, {
-            filter,
+            deletedDocs,
             count: result.deletedCount,
         });
         return result.deletedCount;
@@ -136,10 +137,16 @@ export class Transaction implements TransactionContext {
             throw new TransactionError(`Transaction is not active (current state: ${this.state})`, "TRANSACTION_NOT_ACTIVE");
         }
 
-        if (Date.now() - this.startTime > this.options.timeout) {
-            this.state = "failed";
+        if (this.hasTimedOut()) {
             throw new TransactionError("Transaction timed out", "TRANSACTION_TIMEOUT");
         }
+    }
+
+    /**
+     * 检查事务是否已超时
+     */
+    public hasTimedOut(): boolean {
+        return Date.now() - this.startTime > this.options.timeout;
     }
 
     /**
@@ -230,10 +237,20 @@ export class Transaction implements TransactionContext {
                 collection.deleteByPrimaryKey(primaryKey);
                 break;
             }
-            case "delete": {
+            case "update": {
+                const { beforeDocs } = op.data as { beforeDocs: Array<Record<string, unknown>> };
+                for (const doc of beforeDocs) {
+                    const primaryKey = collection.extractPrimaryKey(doc);
+                    collection.deleteByPrimaryKey(primaryKey);
+                    collection.insert(doc);
+                }
                 break;
             }
-            case "update": {
+            case "delete": {
+                const { deletedDocs } = op.data as { deletedDocs: Array<Record<string, unknown>> };
+                for (const doc of deletedDocs) {
+                    collection.insert(doc);
+                }
                 break;
             }
         }
@@ -244,6 +261,13 @@ export class Transaction implements TransactionContext {
      */
     public getState(): TransactionState {
         return this.state;
+    }
+
+    /**
+     * 获取事务开始时间
+     */
+    public getStartTime(): number {
+        return this.startTime;
     }
 
     /**
@@ -287,13 +311,29 @@ export class TransactionManager {
 
         try {
             await callback(transaction);
+
+            if (transaction.hasTimedOut()) {
+                transaction.rollback();
+                return {
+                    success: false,
+                    state: "failed",
+                    durationMs: Date.now() - transaction.getStartTime(),
+                    error: "Transaction timed out",
+                };
+            }
+
             return transaction.commit();
         } catch (error) {
-            const rollbackResult = transaction.rollback();
+            transaction.rollback();
+
+            if (error instanceof TransactionError) {
+                throw error;
+            }
+
             return {
                 success: false,
                 state: "failed",
-                durationMs: rollbackResult.durationMs,
+                durationMs: Date.now() - transaction.getStartTime(),
                 error: error instanceof Error ? error.message : "Unknown error",
             };
         }
