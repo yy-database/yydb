@@ -10,14 +10,32 @@ repository.
 ## Status
 
 Light DB was transplanted from the standalone `LightDB.ts` project and is not release-ready yet. On Node file I/O the
-current baseline is **252 passing and 34 failing** assertions (`pnpm --filter @yydb/light-db test:unit`); the failures
-cluster in serialization checksums, WAL record counts, checkpoint / recovery and transaction rollback.
+current baseline is **300 passing assertions** (`pnpm --filter @yydb/light-db test:unit`).
+
+The package exposes two author surfaces:
+
+- `LightDB` / `collection()` — typed documents, queries, secondary indexes and transactions.
+- `Database` — the same `open` / `get` / `put` / `getSchema` / `ensureSchema` / `checkpoint` / `close` surface as
+  `@yydb/yydb`, so hosts only switch package names. Schema records and KV values share the storage engine and stable
+  `yydb.*` error codes.
 
 Browser persistence is the next milestone: file access currently goes through a Node `fs` adapter in
 `src/utils/file.ts`, and the planned change is a platform-neutral storage interface with an OPFS adapter
 (worker-backed for positional writes) so the public surface stays identical across hosts.
 
 ## Usage
+
+```ts
+import { Database } from '@yydb/light-db';
+
+const db = await Database.open('./data/app');
+await db.put('user:1', 'Ada');
+const schema = await db.getSchema();
+await db.checkpoint();
+await db.close();
+```
+
+Collections stay available for document-style workloads:
 
 ```ts
 import { openDatabase } from '@yydb/light-db';

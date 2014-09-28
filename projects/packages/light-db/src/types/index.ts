@@ -132,6 +132,17 @@ export interface CheckpointResult {
 }
 
 /**
+ * Schema 版本与文档
+ * 与 `@yydb/yydb` 的线协议作者面同构。
+ */
+export interface SchemaVersion {
+    /** Schema 版本 */
+    version: number;
+    /** Schema 文档全文 */
+    document: string;
+}
+
+/**
  * 恢复结果
  */
 export interface RecoveryResult {

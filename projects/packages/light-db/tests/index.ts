@@ -9,6 +9,7 @@ import { getStorageEngineTests } from "./storage-engine.test";
 import { getIndexEngineTests } from "./index-engine.test";
 import { getCollectionTests } from "./collection.test";
 import { getAPITests } from "./api.test";
+import { createDatabaseTests } from "./database.test";
 import { getBenchmarkTests } from "./benchmark.test";
 
 /**
@@ -36,6 +37,8 @@ async function runAllTests(): Promise<void> {
     for (const suite of apiTests) {
         runner.addSuite(suite);
     }
+
+    runner.addSuite(createDatabaseTests());
 
     const benchmarkTests = getBenchmarkTests();
     for (const suite of benchmarkTests) {
@@ -70,6 +73,8 @@ async function runUnitTests(): Promise<void> {
     for (const suite of apiTests) {
         runner.addSuite(suite);
     }
+
+    runner.addSuite(createDatabaseTests());
 
     await runner.runAll();
 }

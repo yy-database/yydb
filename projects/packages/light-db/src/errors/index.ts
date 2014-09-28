@@ -122,3 +122,57 @@ export class ConfigurationError extends StorageError {
         Object.setPrototypeOf(this, ConfigurationError.prototype);
     }
 }
+
+/**
+ * 与 `@yydb/yydb` 共用的稳定错误码
+ *
+ * 浏览器产品与 Node 产品对同一失败必须给出相同标识，宿主只按 `code` 分支。
+ */
+export const LightDbErrorCodes = {
+    /** I/O 失败 */
+    io: "yydb.io",
+    /** 持久化数据损坏 */
+    corrupt: "yydb.corrupt",
+    /** Schema 文档与已持久化内容冲突 */
+    schemaConflict: "yydb.schema.conflict",
+    /** Schema 文档不合法 */
+    schemaInvalid: "yydb.schema.invalid",
+    /** 宿主不支持该能力 */
+    unsupported: "yydb.unsupported",
+    /** 会话或数据库已关闭 */
+    sessionClosed: "yydb.session.closed",
+} as const;
+
+/**
+ * 数据库错误选项
+ */
+export interface LightDbErrorOptions {
+    /** 失败的操作（`schemaGet`、`kvPut` 等） */
+    operation?: string;
+    /** 底层失败 */
+    cause?: unknown;
+}
+
+/**
+ * 携带稳定错误码的数据库错误
+ * 与 `@yydb/yydb` 的作者面同构：`code` 稳定，`message` 只用于显示。
+ */
+export class LightDbError extends Error {
+    /** 稳定错误码 */
+    public readonly code: string;
+
+    /** 失败的操作 */
+    public readonly operation: string;
+
+    /** 是否可以用相同参数重试 */
+    public readonly retryable: boolean;
+
+    constructor(code: string, message: string, options: LightDbErrorOptions = {}) {
+        super(message, { cause: options.cause });
+        this.name = "LightDbError";
+        this.code = code;
+        this.operation = options.operation ?? "unknown";
+        this.retryable = false;
+        Object.setPrototypeOf(this, LightDbError.prototype);
+    }
+}

@@ -28,3 +28,5 @@ export {
 } from "./Transaction";
 
 export { LightDB, defineCollectionSchema, openDatabase } from "./LightDB";
+
+export { Database, documentVersion, DatabaseOptions } from "./Database";

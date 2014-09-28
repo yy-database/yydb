@@ -37,6 +37,7 @@ export {
     CheckpointResult,
     RecoveryResult,
     StorageStats,
+    SchemaVersion,
     WriteResult,
     BatchWriteResult,
     HashIteratorResult,
@@ -58,6 +59,8 @@ export {
     PageError,
     SerializationError,
     ConfigurationError,
+    LightDbError,
+    LightDbErrorCodes,
 } from "./errors";
 
 // 工具类导出
@@ -251,6 +254,8 @@ export {
     defineCollectionSchema,
     openDatabase,
 } from "./api";
+
+export { Database, documentVersion, DatabaseOptions } from "./api";
 
 // 性能优化模块导出
 export {
