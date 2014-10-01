@@ -1,32 +1,16 @@
 /**
- * LightDB API 层
- * 提供用户直接使用的接口层
- *
- * @packageDocumentation
+ * api 层导出
  */
 
+export { BrowserDatabase, openLightDatabase } from "./database";
+export { Transaction } from "./transaction";
+export type { TransactionState } from "./transaction";
 export {
-    LightDBOptions,
-    CollectionCreateOptions,
-    TransactionContext,
-    TransactionCollection,
-    TransactionCallback,
-    TransactionOptions,
-    TransactionState,
-    TransactionResult,
-    DatabaseStats,
-    DatabaseConfig,
-    ILightDB,
-    DefineCollectionSchema,
-    CollectionSchema,
-} from "./types";
-
-export {
-    TransactionError,
-    Transaction,
-    TransactionManager,
-} from "./Transaction";
-
-export { LightDB, defineCollectionSchema, openDatabase } from "./LightDB";
-
-export { Database, documentVersion, DatabaseOptions } from "./Database";
+    SCHEMA_KEY,
+    RESERVED_KEY_PREFIX,
+    documentVersion,
+    parseSchemaDocument,
+    encodeSchema,
+    decodeSchema,
+} from "./schema";
+export type { LightDatabase, LightDatabaseOptions, SchemaVersion } from "./types";
