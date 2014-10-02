@@ -42,6 +42,9 @@ export {
     OpfsStorageAdapter,
     OpfsStorageAdapterFactory,
     isOpfsAvailable,
+    IndexedDbStorageAdapter,
+    IndexedDbStorageAdapterFactory,
+    isIndexedDbAvailable,
 } from "./storage";
 export type {
     StorageAdapter,

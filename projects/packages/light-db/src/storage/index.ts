@@ -15,3 +15,8 @@ export type {
 } from "./StorageAdapter";
 export { MemoryStorageAdapter, MemoryStorageBackend } from "./memory/MemoryStorageAdapter";
 export { OpfsStorageAdapter, OpfsStorageAdapterFactory, isOpfsAvailable } from "./opfs/OpfsStorageAdapter";
+export {
+    IndexedDbStorageAdapter,
+    IndexedDbStorageAdapterFactory,
+    isIndexedDbAvailable,
+} from "./indexeddb/IndexedDbStorageAdapter";
