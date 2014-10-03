@@ -304,6 +304,12 @@ export class StorageEngine {
         return { lsn: this.lastLsn, bytesWritten, walBytesReleased };
     }
 
+    /** 广播 schema 变更，供其它标签页失效本地视图 */
+    public notifySchemaChange(): void {
+        this.assertOpen("notifySchemaChange");
+        this.broadcaster.notify({ type: "schema", name: this.databaseName });
+    }
+
     /** 统计信息 */
     public getStats(): StorageEngineStats {
         this.assertOpen("stats");

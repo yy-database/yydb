@@ -101,6 +101,7 @@ export class BrowserDatabase implements LightDatabase {
         }
 
         await this.engine.put(SCHEMA_KEY, encodeSchema({ version, document }));
+        this.engine.notifySchemaChange();
     }
 
     /**

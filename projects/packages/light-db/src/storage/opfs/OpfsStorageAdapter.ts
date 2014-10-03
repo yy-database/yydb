@@ -223,14 +223,20 @@ export class OpfsStorageAdapter implements StorageAdapter {
         try {
             const source = await this.directory.getFileHandle(fromName);
             if (typeof source.move === "function") {
-                await source.move(toName);
-                return;
+                try {
+                    await source.move(toName);
+                    return;
+                } catch {
+                    // 宿主声明了 `move` 但拒绝执行（目标已存在或上下文受限），退回复制路径
+                }
             }
         } catch (error) {
-            throw new LightDbError(LightDbErrorCodes.io, `failed to rename OPFS file "${fromName}"`, {
-                operation: "storageRename",
-                cause: error,
-            });
+            if (!isNotFound(error)) {
+                throw new LightDbError(LightDbErrorCodes.io, `failed to rename OPFS file "${fromName}"`, {
+                    operation: "storageRename",
+                    cause: error,
+                });
+            }
         }
 
         const data = await this.readAll(from);
