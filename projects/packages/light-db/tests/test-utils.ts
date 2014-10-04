@@ -3,9 +3,7 @@
  * 提供测试运行器和辅助函数
  */
 
-import * as assert from "assert";
-import * as fs from "fs";
-import * as path from "path";
+import * as assert from 'assert';
 
 /**
  * 测试结果接口
@@ -282,7 +280,7 @@ export async function assertThrows<T extends Error>(fn: () => Promise<void> | vo
     }
 
     if (!thrown) {
-        throw new assert.AssertionError({ message: "Expected function to throw an error" });
+        throw new assert.AssertionError({ message: 'Expected function to throw an error' });
     }
 
     if (errorType && !(error instanceof errorType)) {
@@ -350,24 +348,6 @@ export function assertNotContains<T>(arr: T[], item: T, message?: string): void 
 }
 
 /**
- * 创建临时测试目录
- */
-export function createTempDir(prefix: string = "lightdb-test-"): string {
-    const tempDir = path.join(process.cwd(), "temp", `${prefix}${Date.now()}`);
-    fs.mkdirSync(tempDir, { recursive: true });
-    return tempDir;
-}
-
-/**
- * 删除临时测试目录
- */
-export function removeTempDir(dir: string): void {
-    if (fs.existsSync(dir)) {
-        fs.rmSync(dir, { recursive: true, force: true });
-    }
-}
-
-/**
  * 等待指定毫秒
  */
 export function sleep(ms: number): Promise<void> {
@@ -378,8 +358,8 @@ export function sleep(ms: number): Promise<void> {
  * 生成随机字符串
  */
 export function randomString(length: number = 10): string {
-    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let result = "";
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
     for (let i = 0; i < length; i++) {
         result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
@@ -406,9 +386,9 @@ export class TestRunner {
     }
 
     public async runAll(): Promise<void> {
-        console.log("\n\x1b[35m========================================\x1b[0m");
-        console.log("\x1b[35m         LightDB Test Runner\x1b[0m");
-        console.log("\x1b[35m========================================\x1b[0m");
+        console.log('\n\x1b[35m========================================\x1b[0m');
+        console.log('\x1b[35m         LightDB Test Runner\x1b[0m');
+        console.log('\x1b[35m========================================\x1b[0m');
 
         const startTime = Date.now();
         let totalPassed = 0;
@@ -423,12 +403,12 @@ export class TestRunner {
 
         const totalDuration = Date.now() - startTime;
 
-        console.log("\n\x1b[35m========================================\x1b[0m");
-        console.log("\x1b[35m            Test Summary\x1b[0m");
-        console.log("\x1b[35m========================================\x1b[0m\n");
+        console.log('\n\x1b[35m========================================\x1b[0m');
+        console.log('\x1b[35m            Test Summary\x1b[0m');
+        console.log('\x1b[35m========================================\x1b[0m\n');
 
         for (const result of this.results) {
-            const status = result.failed === 0 ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
+            const status = result.failed === 0 ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
             console.log(`  ${status} ${result.suiteName}: ${result.passed}/${result.passed + result.failed} passed`);
         }
 

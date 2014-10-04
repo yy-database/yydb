@@ -4,13 +4,29 @@
  * 公共类型只用 `Uint8Array`，不依赖 Node `Buffer`。
  */
 
-import { crc32 } from "./checksum";
+import { crc32 } from './checksum';
+
+/** Web 平台 UTF-8 编码器最小结构（不引入 DOM lib） */
+interface TextEncoderLike {
+    encode(input?: string): Uint8Array;
+}
+
+/** Web 平台 UTF-8 解码器最小结构（不引入 DOM lib） */
+interface TextDecoderLike {
+    decode(input?: Uint8Array): string;
+}
+
+/** 宿主提供的 UTF-8 编解码器构造器 */
+const HOST_TEXT_CODEC = globalThis as unknown as {
+    TextEncoder: new () => TextEncoderLike;
+    TextDecoder: new (label?: string) => TextDecoderLike;
+};
 
 /** UTF-8 编码器 */
-const TEXT_ENCODER = new TextEncoder();
+const TEXT_ENCODER = new HOST_TEXT_CODEC.TextEncoder();
 
 /** UTF-8 解码器 */
-const TEXT_DECODER = new TextDecoder("utf-8");
+const TEXT_DECODER = new HOST_TEXT_CODEC.TextDecoder('utf-8');
 
 /**
  * 二进制辅助方法
@@ -376,7 +392,7 @@ export class ChecksumMismatchError extends Error {
 
     constructor(expected: number, actual: number, position: number) {
         super(`Checksum mismatch: expected ${expected}, got ${actual} at offset ${position}`);
-        this.name = "ChecksumMismatchError";
+        this.name = 'ChecksumMismatchError';
         this.expected = expected;
         this.actual = actual;
         this.position = position;
