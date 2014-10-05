@@ -5,7 +5,7 @@
  * LSN(8) + 事务号(8) + 操作(1) + 键长度(4) + 值长度(4) + 键 + 值 + CRC32(4)。
  */
 
-import { ByteReader, ByteWriter, BinaryUtils } from "./binary";
+import { ByteReader, ByteWriter, BinaryUtils } from './binary';
 
 /** WAL 记录头部长度（不含尾部校验和） */
 export const WAL_RECORD_HEADER_SIZE = 25;
@@ -38,7 +38,7 @@ export interface WalRecord {
 }
 
 /** WAL 解码结果 */
-export type WalDecodeResult = { status: "ok"; record: WalRecord; bytesRead: number } | { status: "incomplete" };
+export type WalDecodeResult = { status: 'ok'; record: WalRecord; bytesRead: number } | { status: 'incomplete' };
 
 /**
  * 计算记录编码大小
@@ -85,7 +85,7 @@ export function decodeWalRecord(data: Uint8Array, offset: number = 0): WalDecode
     const reader = new ByteReader(data, offset);
 
     if (!reader.hasRemaining(WAL_RECORD_HEADER_SIZE)) {
-        return { status: "incomplete" };
+        return { status: 'incomplete' };
     }
 
     const start = reader.position;
@@ -96,7 +96,7 @@ export function decodeWalRecord(data: Uint8Array, offset: number = 0): WalDecode
     const valueLength = reader.readUInt32LE();
 
     if (!reader.hasRemaining(keyLength + valueLength + WAL_RECORD_CHECKSUM_SIZE)) {
-        return { status: "incomplete" };
+        return { status: 'incomplete' };
     }
 
     const key = BinaryUtils.decode(reader.readBytes(keyLength));
@@ -104,7 +104,7 @@ export function decodeWalRecord(data: Uint8Array, offset: number = 0): WalDecode
     reader.readAndVerifyChecksum(start);
 
     return {
-        status: "ok",
+        status: 'ok',
         record: { lsn, transactionId, operation, key, value },
         bytesRead: reader.position - start,
     };

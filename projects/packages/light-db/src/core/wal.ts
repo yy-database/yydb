@@ -4,10 +4,10 @@
  * 只通过 `StorageAdapter` 访问平台，记录格式由 `codec/record` 决定。
  */
 
-import { ChecksumMismatchError, decodeWalRecord, encodeWalRecord } from "../codec";
-import type { WalRecord } from "../codec";
-import { LightDbError, LightDbErrorCodes } from "../errors";
-import type { StorageAdapter, StorageHandle } from "../storage/StorageAdapter";
+import { ChecksumMismatchError, decodeWalRecord, encodeWalRecord } from '../codec';
+import type { WalRecord } from '../codec';
+import { LightDbError, LightDbErrorCodes } from '../errors';
+import type { StorageAdapter, StorageHandle } from '../storage/StorageAdapter';
 
 /**
  * 预写日志
@@ -30,7 +30,7 @@ export class WalLog {
      * 打开日志，定位到末尾
      */
     public async open(): Promise<void> {
-        this.handle = await this.adapter.open("wal", "readwrite");
+        this.handle = await this.adapter.open('wal', 'readwrite');
         this.offset = await this.handle.size();
     }
 
@@ -43,7 +43,7 @@ export class WalLog {
             return 0;
         }
 
-        const handle = this.requireHandle("walAppend");
+        const handle = this.requireHandle('walAppend');
         const encoded = records.map((record) => encodeWalRecord(record));
         const total = encoded.reduce((sum, part) => sum + part.length, 0);
 
@@ -66,7 +66,7 @@ export class WalLog {
      * 末尾不完整的记录（写入过程中断）会被丢弃，`validBytes` 指向最后一个完整记录之后。
      */
     public async readAll(): Promise<{ records: WalRecord[]; validBytes: number; fileSize: number }> {
-        const handle = this.requireHandle("walRead");
+        const handle = this.requireHandle('walRead');
         const size = await handle.size();
         if (size === 0) {
             return { records: [], validBytes: 0, fileSize: 0 };
@@ -79,7 +79,7 @@ export class WalLog {
         while (offset < data.length) {
             try {
                 const decoded = decodeWalRecord(data, offset);
-                if (decoded.status === "incomplete") {
+                if (decoded.status === 'incomplete') {
                     break;
                 }
                 records.push(decoded.record);
@@ -87,7 +87,7 @@ export class WalLog {
             } catch (error) {
                 if (error instanceof ChecksumMismatchError) {
                     throw new LightDbError(LightDbErrorCodes.corrupt, `WAL record is corrupt at offset ${offset}`, {
-                        operation: "walRead",
+                        operation: 'walRead',
                         cause: error,
                     });
                 }
@@ -103,7 +103,7 @@ export class WalLog {
      * @param size 目标字节数，默认 0
      */
     public async truncate(size: number = 0): Promise<void> {
-        const handle = this.requireHandle("walTruncate");
+        const handle = this.requireHandle('walTruncate');
         await handle.truncate(size);
         await handle.sync();
         this.offset = size;
@@ -123,7 +123,7 @@ export class WalLog {
      */
     private requireHandle(operation: string): StorageHandle {
         if (!this.handle) {
-            throw new LightDbError(LightDbErrorCodes.sessionClosed, "WAL is not open", { operation });
+            throw new LightDbError(LightDbErrorCodes.sessionClosed, 'WAL is not open', { operation });
         }
         return this.handle;
     }

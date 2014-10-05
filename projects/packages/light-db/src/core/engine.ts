@@ -5,16 +5,16 @@
  * 所有平台能力都经 `StorageAdapter`，本层不接触浏览器或 Node 文件 API。
  */
 
-import { BinaryUtils, DEFAULT_PAGE_SIZE, WalOperation } from "../codec";
-import { LightDbError, LightDbErrorCodes } from "../errors";
-import type { StorageAdapter, StorageAdapterFactory } from "../storage/StorageAdapter";
-import { DatabaseBroadcaster } from "./broadcast";
-import { CheckpointWriter } from "./checkpoint";
-import { acquireWriterLease } from "./lease";
-import type { LeaseMode, WriterLease } from "./lease";
-import { RecordStore } from "./records";
-import { RecoveryManager } from "./recovery";
-import { WalLog } from "./wal";
+import { BinaryUtils, DEFAULT_PAGE_SIZE, WalOperation } from '../codec';
+import { LightDbError, LightDbErrorCodes } from '../errors';
+import type { StorageAdapter, StorageAdapterFactory } from '../storage/StorageAdapter';
+import { DatabaseBroadcaster } from './broadcast';
+import { CheckpointWriter } from './checkpoint';
+import { acquireWriterLease } from './lease';
+import type { LeaseMode, WriterLease } from './lease';
+import { RecordStore } from './records';
+import { RecoveryManager } from './recovery';
+import { WalLog } from './wal';
 
 /** 默认 WAL 阈值：16MB */
 export const DEFAULT_WAL_THRESHOLD = 16 * 1024 * 1024;
@@ -32,7 +32,7 @@ export interface StorageEngineOptions {
 }
 
 /** 事务状态 */
-export type TransactionState = "idle" | "active";
+export type TransactionState = 'idle' | 'active';
 
 /** 检查点结果 */
 export interface CheckpointResult {
@@ -83,7 +83,7 @@ export class StorageEngine {
     private readonly checkpointWriter: CheckpointWriter;
     private readonly broadcaster: DatabaseBroadcaster;
     private readonly lease: WriterLease;
-    private readonly options: Required<Omit<StorageEngineOptions, "lease">>;
+    private readonly options: Required<Omit<StorageEngineOptions, 'lease'>>;
 
     private lastLsn: bigint;
     private nextTransactionId: bigint;
@@ -95,7 +95,7 @@ export class StorageEngine {
         adapter: StorageAdapter,
         wal: WalLog,
         lease: WriterLease,
-        options: Required<Omit<StorageEngineOptions, "lease">>,
+        options: Required<Omit<StorageEngineOptions, 'lease'>>,
         lastLsn: bigint,
     ) {
         this.databaseName = name;
@@ -118,11 +118,7 @@ export class StorageEngine {
      * @param factory 存储适配器工厂
      * @param options 引擎选项
      */
-    public static async open(
-        name: string,
-        factory: StorageAdapterFactory,
-        options: StorageEngineOptions = {},
-    ): Promise<StorageEngine> {
+    public static async open(name: string, factory: StorageAdapterFactory, options: StorageEngineOptions = {}): Promise<StorageEngine> {
         const resolved = {
             pageSize: options.pageSize ?? DEFAULT_PAGE_SIZE,
             walThreshold: options.walThreshold ?? DEFAULT_WAL_THRESHOLD,
@@ -130,12 +126,12 @@ export class StorageEngine {
         };
 
         if (resolved.pageSize < 512) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "page size must be at least 512 bytes", {
-                operation: "open",
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'page size must be at least 512 bytes', {
+                operation: 'open',
             });
         }
 
-        const lease = await acquireWriterLease(name, options.lease ?? "web-locks");
+        const lease = await acquireWriterLease(name, options.lease ?? 'web-locks');
         let adapter: StorageAdapter | null = null;
 
         try {
@@ -158,7 +154,7 @@ export class StorageEngine {
                 throw error;
             }
             throw new LightDbError(LightDbErrorCodes.io, `failed to open database "${name}"`, {
-                operation: "open",
+                operation: 'open',
                 cause: error,
             });
         }
@@ -176,7 +172,7 @@ export class StorageEngine {
 
     /** 事务状态 */
     public get transactionState(): TransactionState {
-        return this.overlay ? "active" : "idle";
+        return this.overlay ? 'active' : 'idle';
     }
 
     /** 是否已关闭 */
@@ -189,8 +185,8 @@ export class StorageEngine {
      * @param key 键
      */
     public async get(key: string): Promise<Uint8Array | null> {
-        this.assertOpen("kvGet");
-        this.assertKey(key, "kvGet");
+        this.assertOpen('kvGet');
+        this.assertKey(key, 'kvGet');
 
         if (this.overlay?.has(key)) {
             const pending = this.overlay.get(key)!;
@@ -206,8 +202,8 @@ export class StorageEngine {
      * @param value 值
      */
     public async put(key: string, value: Uint8Array): Promise<void> {
-        this.assertOpen("kvPut");
-        this.assertKey(key, "kvPut");
+        this.assertOpen('kvPut');
+        this.assertKey(key, 'kvPut');
 
         if (this.overlay) {
             this.overlay.set(key, { operation: WalOperation.Put, value: BinaryUtils.copy(value) });
@@ -223,8 +219,8 @@ export class StorageEngine {
      * @returns 键存在时返回 true
      */
     public async delete(key: string): Promise<boolean> {
-        this.assertOpen("kvDelete");
-        this.assertKey(key, "kvDelete");
+        this.assertOpen('kvDelete');
+        this.assertKey(key, 'kvDelete');
 
         if (this.overlay) {
             const exists = this.existsInView(key);
@@ -242,10 +238,10 @@ export class StorageEngine {
 
     /** 开启事务 */
     public begin(): void {
-        this.assertOpen("begin");
+        this.assertOpen('begin');
         if (this.overlay) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "a transaction is already active", {
-                operation: "begin",
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'a transaction is already active', {
+                operation: 'begin',
             });
         }
         this.overlay = new Map();
@@ -255,9 +251,9 @@ export class StorageEngine {
      * 提交事务
      */
     public async commit(): Promise<void> {
-        this.assertOpen("commit");
+        this.assertOpen('commit');
         if (!this.overlay) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "no active transaction", { operation: "commit" });
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'no active transaction', { operation: 'commit' });
         }
 
         const pending = this.overlay;
@@ -279,9 +275,9 @@ export class StorageEngine {
 
     /** 回滚事务 */
     public rollback(): void {
-        this.assertOpen("rollback");
+        this.assertOpen('rollback');
         if (!this.overlay) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "no active transaction", { operation: "rollback" });
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'no active transaction', { operation: 'rollback' });
         }
         this.overlay = null;
     }
@@ -290,10 +286,10 @@ export class StorageEngine {
      * 执行检查点
      */
     public async checkpoint(): Promise<CheckpointResult> {
-        this.assertOpen("checkpoint");
+        this.assertOpen('checkpoint');
         if (this.overlay) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "cannot checkpoint during a transaction", {
-                operation: "checkpoint",
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'cannot checkpoint during a transaction', {
+                operation: 'checkpoint',
             });
         }
 
@@ -306,13 +302,13 @@ export class StorageEngine {
 
     /** 广播 schema 变更，供其它标签页失效本地视图 */
     public notifySchemaChange(): void {
-        this.assertOpen("notifySchemaChange");
-        this.broadcaster.notify({ type: "schema", name: this.databaseName });
+        this.assertOpen('notifySchemaChange');
+        this.broadcaster.notify({ type: 'schema', name: this.databaseName });
     }
 
     /** 统计信息 */
     public getStats(): StorageEngineStats {
-        this.assertOpen("stats");
+        this.assertOpen('stats');
         return {
             name: this.databaseName,
             lsn: this.lastLsn,
@@ -334,7 +330,7 @@ export class StorageEngine {
         this.closed = true;
         this.overlay = null;
 
-        this.broadcaster.notify({ type: "close", name: this.databaseName });
+        this.broadcaster.notify({ type: 'close', name: this.databaseName });
         this.broadcaster.close();
 
         try {
@@ -375,7 +371,7 @@ export class StorageEngine {
             }
         }
 
-        this.broadcaster.notify({ type: "commit", name: this.databaseName, lsn: this.lastLsn.toString() });
+        this.broadcaster.notify({ type: 'commit', name: this.databaseName, lsn: this.lastLsn.toString() });
 
         if (this.options.autoCheckpoint && this.wal.byteSize >= this.options.walThreshold) {
             await this.checkpoint();
@@ -412,7 +408,7 @@ export class StorageEngine {
      */
     private assertKey(key: string, operation: string): void {
         if (key.length === 0) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "key must not be empty", { operation });
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'key must not be empty', { operation });
         }
     }
 }

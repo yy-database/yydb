@@ -5,7 +5,7 @@
  * 避免调用方持有内部字节数组造成校验和与快照不一致。
  */
 
-import { BinaryUtils } from "../codec";
+import { BinaryUtils } from '../codec';
 
 /**
  * 内存记录存储

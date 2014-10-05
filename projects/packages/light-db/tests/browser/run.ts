@@ -6,23 +6,23 @@
  * 不下载托管浏览器，也不引入打包器。
  */
 
-import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
-import type { AddressInfo } from "node:net";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { chromium } from "playwright-core";
-import type { Browser, BrowserContext, Page } from "playwright-core";
-import ts from "typescript";
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import type { AddressInfo } from 'node:net';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright-core';
+import type { Browser, BrowserContext, Page } from 'playwright-core';
+import ts from 'typescript';
 
 /** 当前目录：`tests/browser` */
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** 包根目录 */
-const PACKAGE_ROOT = path.resolve(HERE, "../..");
+const PACKAGE_ROOT = path.resolve(HERE, '../..');
 
 /** 浏览器启动通道，可用环境变量覆盖 */
-const BROWSER_CHANNEL = process.env.LIGHT_DB_BROWSER_CHANNEL ?? "chrome";
+const BROWSER_CHANNEL = process.env.LIGHT_DB_BROWSER_CHANNEL ?? 'chrome';
 
 /** 单框架类型 */
 type CaseResult = { name: string; ok: boolean; error?: string };
@@ -41,28 +41,28 @@ interface PageScope {
  */
 async function startServer(): Promise<{ origin: string; close: () => Promise<void> }> {
     const server = createServer(async (request, response) => {
-        const url = new URL(request.url ?? "/", "http://127.0.0.1");
+        const url = new URL(request.url ?? '/', 'http://127.0.0.1');
         try {
             const resolved = await resolveAsset(url.pathname);
             if (!resolved) {
-                response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-                response.end("not found");
+                response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+                response.end('not found');
                 return;
             }
-            if (resolved.kind === "redirect") {
+            if (resolved.kind === 'redirect') {
                 response.writeHead(302, { location: resolved.location });
                 response.end();
                 return;
             }
-            response.writeHead(200, { "content-type": resolved.type, "cache-control": "no-store" });
+            response.writeHead(200, { 'content-type': resolved.type, 'cache-control': 'no-store' });
             response.end(resolved.body);
         } catch (error) {
-            response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+            response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
             response.end(error instanceof Error ? error.message : String(error));
         }
     });
 
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const address = server.address() as AddressInfo;
 
     return {
@@ -75,9 +75,7 @@ async function startServer(): Promise<{ origin: string; close: () => Promise<voi
 }
 
 /** 响应内容 */
-type ResolvedAsset =
-    | { kind: "asset"; body: string | Buffer; type: string }
-    | { kind: "redirect"; location: string };
+type ResolvedAsset = { kind: 'asset'; body: string | Buffer; type: string } | { kind: 'redirect'; location: string };
 
 /**
  * 解析请求路径到响应内容
@@ -87,12 +85,12 @@ type ResolvedAsset =
  * @param pathname 请求路径
  */
 async function resolveAsset(pathname: string): Promise<ResolvedAsset | null> {
-    if (pathname === "/" || pathname === "/index.html") {
-        const asset = await readStatic(path.join(HERE, "index.html"));
-        return asset ? { kind: "asset", ...asset } : null;
+    if (pathname === '/' || pathname === '/index.html') {
+        const asset = await readStatic(path.join(HERE, 'index.html'));
+        return asset ? { kind: 'asset', ...asset } : null;
     }
-    if (pathname === "/favicon.ico") {
-        return { kind: "asset", body: "", type: "image/x-icon" };
+    if (pathname === '/favicon.ico') {
+        return { kind: 'asset', body: '', type: 'image/x-icon' };
     }
 
     const decoded = decodeURIComponent(pathname);
@@ -101,19 +99,19 @@ async function resolveAsset(pathname: string): Promise<ResolvedAsset | null> {
         return null;
     }
 
-    if (!candidate.endsWith(".js")) {
+    if (!candidate.endsWith('.js')) {
         const canonical = await canonicalModuleUrl(candidate, decoded);
-        return canonical ? { kind: "redirect", location: canonical } : null;
+        return canonical ? { kind: 'redirect', location: canonical } : null;
     }
 
     const sourceFile = `${candidate.slice(0, -3)}.ts`;
     const source = await tryRead(sourceFile);
     if (source !== null) {
-        return { kind: "asset", body: transpile(source, sourceFile), type: "text/javascript; charset=utf-8" };
+        return { kind: 'asset', body: transpile(source, sourceFile), type: 'text/javascript; charset=utf-8' };
     }
 
     const asset = await readStatic(candidate);
-    return asset ? { kind: "asset", ...asset } : null;
+    return asset ? { kind: 'asset', ...asset } : null;
 }
 
 /**
@@ -125,11 +123,11 @@ async function canonicalModuleUrl(candidate: string, pathname: string): Promise<
     if ((await tryRead(`${candidate}.ts`)) !== null) {
         return `${pathname}.js`;
     }
-    if ((await tryRead(path.join(candidate, "index.ts"))) !== null) {
-        return `${pathname.replace(/\/$/, "")}/index.js`;
+    if ((await tryRead(path.join(candidate, 'index.ts'))) !== null) {
+        return `${pathname.replace(/\/$/, '')}/index.js`;
     }
-    if ((await tryRead(path.join(candidate, "index.js"))) !== null) {
-        return `${pathname.replace(/\/$/, "")}/index.js`;
+    if ((await tryRead(path.join(candidate, 'index.js'))) !== null) {
+        return `${pathname.replace(/\/$/, '')}/index.js`;
     }
     if ((await tryRead(`${candidate}.js`)) !== null) {
         return `${pathname}.js`;
@@ -167,7 +165,7 @@ async function tryRead(file: string): Promise<Buffer | null> {
  * @param fileName 文件名，用于诊断
  */
 function transpile(source: Buffer, fileName: string): string {
-    return ts.transpileModule(source.toString("utf8"), {
+    return ts.transpileModule(source.toString('utf8'), {
         fileName,
         compilerOptions: {
             target: ts.ScriptTarget.ES2022,
@@ -184,14 +182,14 @@ function transpile(source: Buffer, fileName: string): string {
  */
 function mimeType(file: string): string {
     switch (path.extname(file)) {
-        case ".html":
-            return "text/html; charset=utf-8";
-        case ".js":
-            return "text/javascript; charset=utf-8";
-        case ".json":
-            return "application/json; charset=utf-8";
+        case '.html':
+            return 'text/html; charset=utf-8';
+        case '.js':
+            return 'text/javascript; charset=utf-8';
+        case '.json':
+            return 'application/json; charset=utf-8';
         default:
-            return "text/plain; charset=utf-8";
+            return 'text/plain; charset=utf-8';
     }
 }
 
@@ -201,22 +199,18 @@ function mimeType(file: string): string {
  * @param origin 服务源
  */
 async function runPageSuite(page: Page, origin: string): Promise<CaseResult[]> {
-    page.on("console", (message) => {
+    page.on('console', (message) => {
         console.log(`  [page:${message.type()}] ${message.text()}`);
     });
-    page.on("pageerror", (error) => {
+    page.on('pageerror', (error) => {
         console.log(`  [page:error] ${error.message}`);
     });
-    page.on("requestfailed", (request) => {
-        console.log(`  [page:request] ${request.url()} ${request.failure()?.errorText ?? ""}`);
+    page.on('requestfailed', (request) => {
+        console.log(`  [page:request] ${request.url()} ${request.failure()?.errorText ?? ''}`);
     });
 
-    await page.goto(`${origin}/`, { waitUntil: "load" });
-    await page.waitForFunction(
-        () => (globalThis as unknown as PageScope).__lightDbDone === true,
-        undefined,
-        { timeout: 60_000 },
-    );
+    await page.goto(`${origin}/`, { waitUntil: 'load' });
+    await page.waitForFunction(() => (globalThis as unknown as PageScope).__lightDbDone === true, undefined, { timeout: 60_000 });
     return page.evaluate(() => (globalThis as unknown as PageScope).__lightDbResults);
 }
 
@@ -231,51 +225,40 @@ async function runMultitab(context: BrowserContext, origin: string): Promise<Cas
 
     const tabA = await context.newPage();
     const tabB = await context.newPage();
-    await Promise.all([tabA.goto(`${origin}/`, { waitUntil: "load" }), tabB.goto(`${origin}/`, { waitUntil: "load" })]);
+    await Promise.all([tabA.goto(`${origin}/`, { waitUntil: 'load' }), tabB.goto(`${origin}/`, { waitUntil: 'load' })]);
 
     try {
-        const held = await openAndHold(tabA, name, "shared", "v1");
-        push(results, "标签页 A 取得写租约", held.ok, held.code);
+        const held = await openAndHold(tabA, name, 'shared', 'v1');
+        push(results, '标签页 A 取得写租约', held.ok, held.code);
 
         await listenDatabase(tabB, name);
 
-        const blocked = await tryOpenAndRead(tabB, name, "shared");
-        push(
-            results,
-            "标签页 B 打开时得到 lease.unavailable",
-            !blocked.ok && blocked.code === "yydb.lease.unavailable",
-            blocked.code,
-        );
-        push(results, "写租约冲突标记为可重试", blocked.retryable === true, undefined);
+        const blocked = await tryOpenAndRead(tabB, name, 'shared');
+        push(results, '标签页 B 打开时得到 lease.unavailable', !blocked.ok && blocked.code === 'yydb.lease.unavailable', blocked.code);
+        push(results, '写租约冲突标记为可重试', blocked.retryable === true, undefined);
 
-        const rewritten = await writeHeld(tabA, "shared", "v2");
-        push(results, "标签页 A 完成第二次提交", rewritten.ok, rewritten.code);
+        const rewritten = await writeHeld(tabA, 'shared', 'v2');
+        push(results, '标签页 A 完成第二次提交', rewritten.ok, rewritten.code);
 
         await tabB.waitForFunction(
-            () =>
-                ((
-                    globalThis as unknown as { __yydbEvents?: string[] }
-                ).__yydbEvents ?? []).includes("commit"),
+            () => ((globalThis as unknown as { __yydbEvents?: string[] }).__yydbEvents ?? []).includes('commit'),
             undefined,
             { timeout: 10_000 },
         );
         const commitEvents = await collectedEvents(tabB);
-        push(results, "标签页 B 收到 commit 通知", commitEvents.includes("commit"), commitEvents.join(","));
+        push(results, '标签页 B 收到 commit 通知', commitEvents.includes('commit'), commitEvents.join(','));
 
         await closeHeld(tabA);
         await tabB.waitForFunction(
-            () =>
-                ((
-                    globalThis as unknown as { __yydbEvents?: string[] }
-                ).__yydbEvents ?? []).includes("close"),
+            () => ((globalThis as unknown as { __yydbEvents?: string[] }).__yydbEvents ?? []).includes('close'),
             undefined,
             { timeout: 10_000 },
         );
-        push(results, "标签页 B 收到 close 通知", (await collectedEvents(tabB)).includes("close"), undefined);
+        push(results, '标签页 B 收到 close 通知', (await collectedEvents(tabB)).includes('close'), undefined);
 
-        const reopened = await tryOpenAndRead(tabB, name, "shared");
-        push(results, "租约释放后标签页 B 可以打开", reopened.ok, reopened.code);
-        push(results, "标签页 B 读到最后一次提交", reopened.value === "v2", String(reopened.value));
+        const reopened = await tryOpenAndRead(tabB, name, 'shared');
+        push(results, '租约释放后标签页 B 可以打开', reopened.ok, reopened.code);
+        push(results, '标签页 B 读到最后一次提交', reopened.value === 'v2', String(reopened.value));
     } finally {
         await tabA.close();
         await tabB.close();
@@ -294,7 +277,7 @@ async function runMultitab(context: BrowserContext, origin: string): Promise<Cas
 function openAndHold(page: Page, name: string, key: string, value: string): Promise<OpenAttempt> {
     return page.evaluate(
         async (input) => {
-            const module = await import("/tests/browser/multitab.js");
+            const module = await import('/tests/browser/multitab.js');
             return module.openAndHold(input.name, input.key, input.value);
         },
         { name, key, value },
@@ -307,13 +290,10 @@ function openAndHold(page: Page, name: string, key: string, value: string): Prom
  * @param name 数据库名
  */
 async function listenDatabase(page: Page, name: string): Promise<void> {
-    await page.evaluate(
-        async (input) => {
-            const module = await import("/tests/browser/multitab.js");
-            module.listenDatabase(input);
-        },
-        name,
-    );
+    await page.evaluate(async (input) => {
+        const module = await import('/tests/browser/multitab.js');
+        module.listenDatabase(input);
+    }, name);
 }
 
 /**
@@ -325,7 +305,7 @@ async function listenDatabase(page: Page, name: string): Promise<void> {
 function tryOpenAndRead(page: Page, name: string, key: string): Promise<OpenAttempt> {
     return page.evaluate(
         async (input) => {
-            const module = await import("/tests/browser/multitab.js");
+            const module = await import('/tests/browser/multitab.js');
             return module.tryOpenAndRead(input.name, input.key);
         },
         { name, key },
@@ -341,7 +321,7 @@ function tryOpenAndRead(page: Page, name: string, key: string): Promise<OpenAtte
 function writeHeld(page: Page, key: string, value: string): Promise<OpenAttempt> {
     return page.evaluate(
         async (input) => {
-            const module = await import("/tests/browser/multitab.js");
+            const module = await import('/tests/browser/multitab.js');
             return module.writeHeld(input.key, input.value);
         },
         { key, value },
@@ -354,7 +334,7 @@ function writeHeld(page: Page, key: string, value: string): Promise<OpenAttempt>
  */
 async function closeHeld(page: Page): Promise<void> {
     await page.evaluate(async () => {
-        const module = await import("/tests/browser/multitab.js");
+        const module = await import('/tests/browser/multitab.js');
         await module.closeHeld();
     });
 }
@@ -365,7 +345,7 @@ async function closeHeld(page: Page): Promise<void> {
  */
 async function collectedEvents(page: Page): Promise<string[]> {
     return page.evaluate(async () => {
-        const module = await import("/tests/browser/multitab.js");
+        const module = await import('/tests/browser/multitab.js');
         return module.collectedEvents();
     });
 }
@@ -390,9 +370,9 @@ function push(results: CaseResult[], name: string, ok: boolean, detail: string |
  * @param results 全部结果
  */
 function report(results: CaseResult[]): void {
-    console.log("\n========================================");
-    console.log("        Light DB Browser Suite");
-    console.log("========================================\n");
+    console.log('\n========================================');
+    console.log('        Light DB Browser Suite');
+    console.log('========================================\n');
 
     let failed = 0;
     for (const result of results) {

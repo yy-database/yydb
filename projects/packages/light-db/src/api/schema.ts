@@ -5,15 +5,15 @@
  * 版本由文档前导注释 `// @yydb-schema-version: <n>` 决定，默认 1。
  */
 
-import { BinaryUtils } from "../codec";
-import { LightDbError, LightDbErrorCodes } from "../errors";
-import type { SchemaVersion } from "./types";
+import { BinaryUtils } from '../codec';
+import { LightDbError, LightDbErrorCodes } from '../errors';
+import type { SchemaVersion } from './types';
 
 /** Schema 记录在数据库中的保留键 */
-export const SCHEMA_KEY = "__yydb__/schema";
+export const SCHEMA_KEY = '__yydb__/schema';
 
 /** 用户键禁止使用的内部前缀 */
-export const RESERVED_KEY_PREFIX = "__yydb__/";
+export const RESERVED_KEY_PREFIX = '__yydb__/';
 
 /** 版本声明注释 */
 const VERSION_PRAGMA = /^\s*\/\/\s*@yydb-schema-version:\s*(\d+)\s*$/m;
@@ -38,8 +38,8 @@ export function documentVersion(document: string): number {
  */
 export function parseSchemaDocument(document: string): number {
     if (document.trim().length === 0) {
-        throw new LightDbError(LightDbErrorCodes.schemaInvalid, "schema document must not be empty", {
-            operation: "ensureSchema",
+        throw new LightDbError(LightDbErrorCodes.schemaInvalid, 'schema document must not be empty', {
+            operation: 'ensureSchema',
         });
     }
     return documentVersion(document);
@@ -62,15 +62,15 @@ export function decodeSchema(value: Uint8Array): SchemaVersion {
     try {
         parsed = JSON.parse(BinaryUtils.decode(value));
     } catch (error) {
-        throw new LightDbError(LightDbErrorCodes.corrupt, "persisted schema record is not valid JSON", {
-            operation: "schema",
+        throw new LightDbError(LightDbErrorCodes.corrupt, 'persisted schema record is not valid JSON', {
+            operation: 'schema',
             cause: error,
         });
     }
 
     if (!isSchemaVersion(parsed)) {
-        throw new LightDbError(LightDbErrorCodes.corrupt, "persisted schema record has an unexpected shape", {
-            operation: "schema",
+        throw new LightDbError(LightDbErrorCodes.corrupt, 'persisted schema record has an unexpected shape', {
+            operation: 'schema',
         });
     }
 
@@ -82,9 +82,9 @@ export function decodeSchema(value: Uint8Array): SchemaVersion {
  * @param value 待判断值
  */
 function isSchemaVersion(value: unknown): value is SchemaVersion {
-    if (typeof value !== "object" || value === null) {
+    if (typeof value !== 'object' || value === null) {
         return false;
     }
     const record = value as { version?: unknown; document?: unknown };
-    return typeof record.version === "number" && typeof record.document === "string";
+    return typeof record.version === 'number' && typeof record.document === 'string';
 }

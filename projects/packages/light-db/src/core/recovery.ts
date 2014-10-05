@@ -4,12 +4,12 @@
  * 读取最近一次快照，再按 WAL 顺序重放快照之后的记录。
  */
 
-import { ChecksumMismatchError, decodeSnapshot, SnapshotFormatError } from "../codec";
-import type { WalRecord } from "../codec";
-import { WalOperation } from "../codec";
-import { LightDbError, LightDbErrorCodes } from "../errors";
-import type { StorageAdapter } from "../storage/StorageAdapter";
-import type { WalLog } from "./wal";
+import { ChecksumMismatchError, decodeSnapshot, SnapshotFormatError } from '../codec';
+import type { WalRecord } from '../codec';
+import { WalOperation } from '../codec';
+import { LightDbError, LightDbErrorCodes } from '../errors';
+import type { StorageAdapter } from '../storage/StorageAdapter';
+import type { WalLog } from './wal';
 
 /** 恢复结果 */
 export interface RecoveryOutcome {
@@ -76,11 +76,11 @@ export class RecoveryManager {
         lastSnapshotLsn: bigint;
         pagesLoaded: number;
     }> {
-        if (!(await this.adapter.exists("main"))) {
+        if (!(await this.adapter.exists('main'))) {
             return { records: new Map(), lastSnapshotLsn: 0n, pagesLoaded: 0 };
         }
 
-        const handle = await this.adapter.open("main", "read");
+        const handle = await this.adapter.open('main', 'read');
         let data: Uint8Array;
         try {
             const size = await handle.size();
@@ -98,8 +98,8 @@ export class RecoveryManager {
             };
         } catch (error) {
             if (error instanceof SnapshotFormatError || error instanceof ChecksumMismatchError) {
-                throw new LightDbError(LightDbErrorCodes.corrupt, "database snapshot is corrupt", {
-                    operation: "recover",
+                throw new LightDbError(LightDbErrorCodes.corrupt, 'database snapshot is corrupt', {
+                    operation: 'recover',
                     cause: error,
                 });
             }

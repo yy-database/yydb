@@ -4,8 +4,8 @@
  * 快照由一个固定长度头部和若干固定长度页组成，全部基于 `Uint8Array`。
  */
 
-import { ByteReader, ByteWriter, BinaryUtils, ChecksumMismatchError } from "./binary";
-import { crc32 } from "./checksum";
+import { ByteReader, ByteWriter, BinaryUtils, ChecksumMismatchError } from './binary';
+import { crc32 } from './checksum';
 
 /** 快照魔数：`LIGH` */
 export const SNAPSHOT_MAGIC = 0x4c494748;
@@ -66,7 +66,7 @@ export class RecordTooLargeError extends Error {
 
     constructor(size: number, capacity: number) {
         super(`Record needs ${size} bytes but a page only has ${capacity}`);
-        this.name = "RecordTooLargeError";
+        this.name = 'RecordTooLargeError';
         this.size = size;
         this.capacity = capacity;
         Object.setPrototypeOf(this, RecordTooLargeError.prototype);
@@ -80,7 +80,7 @@ export class SnapshotFormatError extends Error {
 
     constructor(reason: string) {
         super(`Snapshot format error: ${reason}`);
-        this.name = "SnapshotFormatError";
+        this.name = 'SnapshotFormatError';
         this.reason = reason;
         Object.setPrototypeOf(this, SnapshotFormatError.prototype);
     }

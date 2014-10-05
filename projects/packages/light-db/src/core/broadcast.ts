@@ -6,7 +6,7 @@
  */
 
 /** 数据库事件类型 */
-export type DatabaseEventType = "commit" | "schema" | "close";
+export type DatabaseEventType = 'commit' | 'schema' | 'close';
 
 /** 数据库事件 */
 export interface DatabaseEvent {
@@ -76,7 +76,6 @@ export function listenDatabaseEvents(name: string, handler: (event: DatabaseEven
  * @param channelName 通道名
  */
 function createChannel(channelName: string): BroadcastChannelLike | null {
-    const constructor = (globalThis as unknown as { BroadcastChannel?: new (name: string) => BroadcastChannelLike })
-        .BroadcastChannel;
+    const constructor = (globalThis as unknown as { BroadcastChannel?: new (name: string) => BroadcastChannelLike }).BroadcastChannel;
     return constructor ? new constructor(channelName) : null;
 }

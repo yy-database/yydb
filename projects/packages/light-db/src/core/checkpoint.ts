@@ -5,9 +5,9 @@
  * 崩溃发生在发布前时旧快照仍然完整，WAL 会在下次打开时重放。
  */
 
-import { encodeSnapshot } from "../codec";
-import { LightDbError, LightDbErrorCodes } from "../errors";
-import type { StorageAdapter } from "../storage/StorageAdapter";
+import { encodeSnapshot } from '../codec';
+import { LightDbError, LightDbErrorCodes } from '../errors';
+import type { StorageAdapter } from '../storage/StorageAdapter';
 
 /**
  * 检查点写入器
@@ -32,13 +32,13 @@ export class CheckpointWriter {
         try {
             data = encodeSnapshot(records, lsn, this.pageSize);
         } catch (error) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "cannot encode database snapshot", {
-                operation: "checkpoint",
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'cannot encode database snapshot', {
+                operation: 'checkpoint',
                 cause: error,
             });
         }
 
-        const temp = await this.adapter.open("main.tmp", "readwrite");
+        const temp = await this.adapter.open('main.tmp', 'readwrite');
         try {
             await temp.truncate(0);
             await temp.write(0, data);
@@ -47,7 +47,7 @@ export class CheckpointWriter {
             await temp.close();
         }
 
-        await this.adapter.rename("main.tmp", "main");
+        await this.adapter.rename('main.tmp', 'main');
         return data.length;
     }
 }

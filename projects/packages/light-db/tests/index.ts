@@ -5,11 +5,11 @@
  * OPFS 与多标签页合同由浏览器端测试单独覆盖。
  */
 
-import { pathToFileURL } from "node:url";
-import { createTestRunner } from "./test-utils";
-import { createAdapterTests } from "./adapters.test";
-import { createCodecTests } from "./codec.test";
-import { createDatabaseTests } from "./database.test";
+import { pathToFileURL } from 'node:url';
+import { createTestRunner } from './test-utils';
+import { createAdapterTests } from './adapters.test';
+import { createCodecTests } from './codec.test';
+import { createDatabaseTests } from './database.test';
 
 /**
  * 运行单元测试

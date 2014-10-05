@@ -6,16 +6,16 @@
  */
 
 /** 逻辑文件名，对外不暴露扩展名与目录结构 */
-export type StorageFile = "main" | "main.tmp" | "wal" | "shm";
+export type StorageFile = 'main' | 'main.tmp' | 'wal' | 'shm';
 
 /** 所有逻辑文件 */
-export const STORAGE_FILES: readonly StorageFile[] = ["main", "main.tmp", "wal", "shm"];
+export const STORAGE_FILES: readonly StorageFile[] = ['main', 'main.tmp', 'wal', 'shm'];
 
 /** 打开模式 */
-export type StorageOpenMode = "read" | "readwrite";
+export type StorageOpenMode = 'read' | 'readwrite';
 
 /** 适配器类型 */
-export type StorageAdapterKind = "opfs" | "indexeddb" | "memory";
+export type StorageAdapterKind = 'opfs' | 'indexeddb' | 'memory';
 
 /**
  * 随机访问句柄

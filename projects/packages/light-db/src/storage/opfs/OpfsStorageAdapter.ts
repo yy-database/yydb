@@ -7,16 +7,16 @@
  * 不把 OPFS 目录结构暴露给上层：上层只认识 `main` / `main.tmp` / `wal` / `shm`。
  */
 
-import { LightDbError, LightDbErrorCodes } from "../../errors";
-import type { StorageAdapter, StorageAdapterFactory, StorageFile, StorageHandle, StorageOpenMode } from "../StorageAdapter";
-import { STORAGE_FILES } from "../StorageAdapter";
+import { LightDbError, LightDbErrorCodes } from '../../errors';
+import type { StorageAdapter, StorageAdapterFactory, StorageFile, StorageHandle, StorageOpenMode } from '../StorageAdapter';
+import { STORAGE_FILES } from '../StorageAdapter';
 
 /** 逻辑文件在 OPFS 中的物理文件名 */
 const PHYSICAL_NAMES: Record<StorageFile, string> = {
-    main: "main.snapshot",
-    "main.tmp": "main.snapshot.tmp",
-    wal: "wal.log",
-    shm: "wal.index",
+    main: 'main.snapshot',
+    'main.tmp': 'main.snapshot.tmp',
+    wal: 'wal.log',
+    shm: 'wal.index',
 };
 
 /** 文件元信息 */
@@ -27,7 +27,7 @@ interface FileLike {
 
 /** 可写流 */
 interface WritableLike {
-    write(options: { type: "write"; position: number; data: Uint8Array }): Promise<void>;
+    write(options: { type: 'write'; position: number; data: Uint8Array }): Promise<void>;
     truncate(size: number): Promise<void>;
     close(): Promise<void>;
 }
@@ -67,7 +67,7 @@ interface StorageManagerLike {
  */
 export function isOpfsAvailable(): boolean {
     const storage = (globalThis as { navigator?: { storage?: StorageManagerLike } }).navigator?.storage;
-    return typeof storage?.getDirectory === "function";
+    return typeof storage?.getDirectory === 'function';
 }
 
 /**
@@ -75,7 +75,7 @@ export function isOpfsAvailable(): boolean {
  */
 export class OpfsStorageAdapterFactory implements StorageAdapterFactory {
     /** 适配器类型 */
-    public readonly kind = "opfs" as const;
+    public readonly kind = 'opfs' as const;
 
     /** 数据持久化 */
     public readonly persistent = true;
@@ -88,7 +88,7 @@ export class OpfsStorageAdapterFactory implements StorageAdapterFactory {
      */
     public async openDatabase(name: string): Promise<StorageAdapter> {
         const root = await this.getRoot();
-        const directory = await this.getDirectory(root, encodeURIComponent(name), "openDatabase");
+        const directory = await this.getDirectory(root, encodeURIComponent(name), 'openDatabase');
         return new OpfsStorageAdapter(name, directory);
     }
 
@@ -98,8 +98,8 @@ export class OpfsStorageAdapterFactory implements StorageAdapterFactory {
     private async getRoot(): Promise<DirectoryHandleLike> {
         const storage = (globalThis as { navigator?: { storage?: StorageManagerLike } }).navigator?.storage;
         if (!storage) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "OPFS is not available in this environment", {
-                operation: "openDatabase",
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'OPFS is not available in this environment', {
+                operation: 'openDatabase',
             });
         }
 
@@ -111,8 +111,8 @@ export class OpfsStorageAdapterFactory implements StorageAdapterFactory {
             return await this.root;
         } catch (error) {
             this.root = null;
-            throw new LightDbError(LightDbErrorCodes.io, "failed to open the OPFS root directory", {
-                operation: "openDatabase",
+            throw new LightDbError(LightDbErrorCodes.io, 'failed to open the OPFS root directory', {
+                operation: 'openDatabase',
                 cause: error,
             });
         }
@@ -141,7 +141,7 @@ export class OpfsStorageAdapterFactory implements StorageAdapterFactory {
  */
 export class OpfsStorageAdapter implements StorageAdapter {
     /** 适配器类型 */
-    public readonly kind = "opfs" as const;
+    public readonly kind = 'opfs' as const;
 
     /** 数据持久化 */
     public readonly persistent = true;
@@ -160,16 +160,16 @@ export class OpfsStorageAdapter implements StorageAdapter {
      * @param file 逻辑文件名
      * @param mode 打开模式
      */
-    public async open(file: StorageFile, mode: StorageOpenMode = "readwrite"): Promise<StorageHandle> {
-        this.assertOpen("storageOpen");
+    public async open(file: StorageFile, mode: StorageOpenMode = 'readwrite'): Promise<StorageHandle> {
+        this.assertOpen('storageOpen');
         const physical = PHYSICAL_NAMES[file];
 
         let handle: FileHandleLike;
         try {
-            handle = await this.directory.getFileHandle(physical, { create: mode === "readwrite" });
+            handle = await this.directory.getFileHandle(physical, { create: mode === 'readwrite' });
         } catch (error) {
             throw new LightDbError(LightDbErrorCodes.io, `failed to open OPFS file "${physical}"`, {
-                operation: "storageOpen",
+                operation: 'storageOpen',
                 cause: error,
             });
         }
@@ -182,7 +182,7 @@ export class OpfsStorageAdapter implements StorageAdapter {
      * @param file 逻辑文件名
      */
     public async exists(file: StorageFile): Promise<boolean> {
-        this.assertOpen("storageExists");
+        this.assertOpen('storageExists');
         try {
             await this.directory.getFileHandle(PHYSICAL_NAMES[file]);
             return true;
@@ -196,7 +196,7 @@ export class OpfsStorageAdapter implements StorageAdapter {
      * @param file 逻辑文件名
      */
     public async delete(file: StorageFile): Promise<void> {
-        this.assertOpen("storageDelete");
+        this.assertOpen('storageDelete');
         try {
             await this.directory.removeEntry(PHYSICAL_NAMES[file]);
         } catch (error) {
@@ -204,7 +204,7 @@ export class OpfsStorageAdapter implements StorageAdapter {
                 return;
             }
             throw new LightDbError(LightDbErrorCodes.io, `failed to delete OPFS file "${PHYSICAL_NAMES[file]}"`, {
-                operation: "storageDelete",
+                operation: 'storageDelete',
                 cause: error,
             });
         }
@@ -216,13 +216,13 @@ export class OpfsStorageAdapter implements StorageAdapter {
      * @param to 目标文件
      */
     public async rename(from: StorageFile, to: StorageFile): Promise<void> {
-        this.assertOpen("storageRename");
+        this.assertOpen('storageRename');
         const fromName = PHYSICAL_NAMES[from];
         const toName = PHYSICAL_NAMES[to];
 
         try {
             const source = await this.directory.getFileHandle(fromName);
-            if (typeof source.move === "function") {
+            if (typeof source.move === 'function') {
                 try {
                     await source.move(toName);
                     return;
@@ -233,14 +233,14 @@ export class OpfsStorageAdapter implements StorageAdapter {
         } catch (error) {
             if (!isNotFound(error)) {
                 throw new LightDbError(LightDbErrorCodes.io, `failed to rename OPFS file "${fromName}"`, {
-                    operation: "storageRename",
+                    operation: 'storageRename',
                     cause: error,
                 });
             }
         }
 
         const data = await this.readAll(from);
-        const target = await this.open(to, "readwrite");
+        const target = await this.open(to, 'readwrite');
         try {
             await target.truncate(0);
             await target.write(0, data);
@@ -255,7 +255,7 @@ export class OpfsStorageAdapter implements StorageAdapter {
      * 列出已存在的文件
      */
     public async list(): Promise<StorageFile[]> {
-        this.assertOpen("storageList");
+        this.assertOpen('storageList');
         const present: StorageFile[] = [];
         for (const file of STORAGE_FILES) {
             if (await this.exists(file)) {
@@ -275,7 +275,7 @@ export class OpfsStorageAdapter implements StorageAdapter {
      * @param file 逻辑文件名
      */
     private async readAll(file: StorageFile): Promise<Uint8Array> {
-        const handle = await this.open(file, "read");
+        const handle = await this.open(file, 'read');
         try {
             return await handle.read(0, await handle.size());
         } finally {
@@ -317,7 +317,7 @@ class OpfsStorageHandle implements StorageHandle {
      * @param length 期望长度
      */
     public async read(position: number, length: number): Promise<Uint8Array> {
-        this.assertOpen("read");
+        this.assertOpen('read');
         if (length <= 0) {
             return new Uint8Array(0);
         }
@@ -343,7 +343,7 @@ class OpfsStorageHandle implements StorageHandle {
      * @param data 数据
      */
     public async write(position: number, data: Uint8Array): Promise<void> {
-        this.assertOpen("write");
+        this.assertOpen('write');
 
         const sync = await this.getSyncHandle();
         if (sync) {
@@ -352,8 +352,8 @@ class OpfsStorageHandle implements StorageHandle {
         }
 
         await this.withWritable(async (writable) => {
-            await writable.write({ type: "write", position, data });
-        }, "write");
+            await writable.write({ type: 'write', position, data });
+        }, 'write');
     }
 
     /**
@@ -361,7 +361,7 @@ class OpfsStorageHandle implements StorageHandle {
      * @param size 目标大小
      */
     public async truncate(size: number): Promise<void> {
-        this.assertOpen("truncate");
+        this.assertOpen('truncate');
 
         const sync = await this.getSyncHandle();
         if (sync) {
@@ -371,12 +371,12 @@ class OpfsStorageHandle implements StorageHandle {
 
         await this.withWritable(async (writable) => {
             await writable.truncate(size);
-        }, "truncate");
+        }, 'truncate');
     }
 
     /** 落盘 */
     public async sync(): Promise<void> {
-        this.assertOpen("sync");
+        this.assertOpen('sync');
         if (this.syncHandle) {
             this.syncHandle.flush();
         }
@@ -385,7 +385,7 @@ class OpfsStorageHandle implements StorageHandle {
 
     /** 当前文件大小 */
     public async size(): Promise<number> {
-        this.assertOpen("size");
+        this.assertOpen('size');
         if (this.syncHandle) {
             return this.syncHandle.getSize();
         }
@@ -415,7 +415,7 @@ class OpfsStorageHandle implements StorageHandle {
             return this.syncHandle;
         }
 
-        if (this.syncProbed || typeof this.handle.createSyncAccessHandle !== "function") {
+        if (this.syncProbed || typeof this.handle.createSyncAccessHandle !== 'function') {
             return null;
         }
 
@@ -474,5 +474,5 @@ class OpfsStorageHandle implements StorageHandle {
  * @param error 错误
  */
 function isNotFound(error: unknown): boolean {
-    return typeof error === "object" && error !== null && (error as { name?: string }).name === "NotFoundError";
+    return typeof error === 'object' && error !== null && (error as { name?: string }).name === 'NotFoundError';
 }

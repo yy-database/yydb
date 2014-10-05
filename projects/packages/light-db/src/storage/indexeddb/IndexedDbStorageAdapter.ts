@@ -10,18 +10,18 @@
  * 原子性，属于兼容后端的已知取舍。
  */
 
-import { LightDbError, LightDbErrorCodes } from "../../errors";
-import type { StorageAdapter, StorageAdapterFactory, StorageFile, StorageHandle, StorageOpenMode } from "../StorageAdapter";
-import { STORAGE_FILES } from "../StorageAdapter";
+import { LightDbError, LightDbErrorCodes } from '../../errors';
+import type { StorageAdapter, StorageAdapterFactory, StorageFile, StorageHandle, StorageOpenMode } from '../StorageAdapter';
+import { STORAGE_FILES } from '../StorageAdapter';
 
 /** 对象仓库名 */
-const STORE_NAME = "files";
+const STORE_NAME = 'files';
 
 /** IndexedDB 数据库版本 */
 const DB_VERSION = 1;
 
 /** 数据库名前缀，避免与宿主自己的对象仓库冲突 */
-const DATABASE_PREFIX = "yydb:light:";
+const DATABASE_PREFIX = 'yydb:light:';
 
 /** IndexedDB 请求的结构化视图 */
 interface IdbRequestLike<T> {
@@ -59,7 +59,7 @@ interface IdbTransactionLike {
 interface IdbDatabaseLike {
     objectStoreNames: { contains(name: string): boolean };
     createObjectStore(name: string): IdbObjectStoreLike;
-    transaction(name: string, mode?: "readonly" | "readwrite"): IdbTransactionLike;
+    transaction(name: string, mode?: 'readonly' | 'readwrite'): IdbTransactionLike;
     close(): void;
 }
 
@@ -73,7 +73,7 @@ interface IdbFactoryLike {
  */
 export function isIndexedDbAvailable(): boolean {
     const factory = (globalThis as { indexedDB?: IdbFactoryLike }).indexedDB;
-    return typeof factory?.open === "function";
+    return typeof factory?.open === 'function';
 }
 
 /**
@@ -81,7 +81,7 @@ export function isIndexedDbAvailable(): boolean {
  */
 export class IndexedDbStorageAdapterFactory implements StorageAdapterFactory {
     /** 适配器类型 */
-    public readonly kind = "indexeddb" as const;
+    public readonly kind = 'indexeddb' as const;
 
     /** 数据持久化 */
     public readonly persistent = true;
@@ -91,7 +91,7 @@ export class IndexedDbStorageAdapterFactory implements StorageAdapterFactory {
      * @param name 数据库名
      */
     public async openDatabase(name: string): Promise<StorageAdapter> {
-        const database = await openIdbDatabase(`${DATABASE_PREFIX}${name}`, "openDatabase");
+        const database = await openIdbDatabase(`${DATABASE_PREFIX}${name}`, 'openDatabase');
         return new IndexedDbStorageAdapter(name, database);
     }
 }
@@ -101,7 +101,7 @@ export class IndexedDbStorageAdapterFactory implements StorageAdapterFactory {
  */
 export class IndexedDbStorageAdapter implements StorageAdapter {
     /** 适配器类型 */
-    public readonly kind = "indexeddb" as const;
+    public readonly kind = 'indexeddb' as const;
 
     /** 数据持久化 */
     public readonly persistent = true;
@@ -120,17 +120,17 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
      * @param file 逻辑文件名
      * @param mode 打开模式
      */
-    public async open(file: StorageFile, mode: StorageOpenMode = "readwrite"): Promise<StorageHandle> {
-        this.assertOpen("storageOpen");
+    public async open(file: StorageFile, mode: StorageOpenMode = 'readwrite'): Promise<StorageHandle> {
+        this.assertOpen('storageOpen');
 
         const data = await this.readFile(file);
-        if (data === null && mode === "read") {
+        if (data === null && mode === 'read') {
             throw new LightDbError(LightDbErrorCodes.io, `storage file "${file}" does not exist in "${this.name}"`, {
-                operation: "storageOpen",
+                operation: 'storageOpen',
             });
         }
 
-        return new IndexedDbStorageHandle(this, file, data ?? new Uint8Array(0), mode === "read");
+        return new IndexedDbStorageHandle(this, file, data ?? new Uint8Array(0), mode === 'read');
     }
 
     /**
@@ -138,7 +138,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
      * @param file 逻辑文件名
      */
     public async exists(file: StorageFile): Promise<boolean> {
-        this.assertOpen("storageExists");
+        this.assertOpen('storageExists');
         return (await this.readFile(file)) !== null;
     }
 
@@ -147,8 +147,8 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
      * @param file 逻辑文件名
      */
     public async delete(file: StorageFile): Promise<void> {
-        this.assertOpen("storageDelete");
-        await this.writeTransaction("storageDelete", (store) => {
+        this.assertOpen('storageDelete');
+        await this.writeTransaction('storageDelete', (store) => {
             store.delete(file);
         });
     }
@@ -159,15 +159,15 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
      * @param to 目标文件
      */
     public async rename(from: StorageFile, to: StorageFile): Promise<void> {
-        this.assertOpen("storageRename");
+        this.assertOpen('storageRename');
         const data = await this.readFile(from);
         if (data === null) {
             throw new LightDbError(LightDbErrorCodes.io, `cannot rename missing storage file "${from}"`, {
-                operation: "storageRename",
+                operation: 'storageRename',
             });
         }
 
-        await this.writeTransaction("storageRename", (store) => {
+        await this.writeTransaction('storageRename', (store) => {
             store.put(toArrayBuffer(data), to);
             store.delete(from);
         });
@@ -177,9 +177,9 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
      * 列出已存在的文件
      */
     public async list(): Promise<StorageFile[]> {
-        this.assertOpen("storageList");
-        const keys = await this.readTransaction("storageList", (store) =>
-            requestResult(store.getAllKeys(), "storageList", `failed to list IndexedDB database "${this.name}"`),
+        this.assertOpen('storageList');
+        const keys = await this.readTransaction('storageList', (store) =>
+            requestResult(store.getAllKeys(), 'storageList', `failed to list IndexedDB database "${this.name}"`),
         );
         return STORAGE_FILES.filter((file) => keys.includes(file));
     }
@@ -193,7 +193,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
         try {
             this.db.close();
         } catch (error) {
-            throw toStorageError(error, "storageClose", `failed to close IndexedDB database "${this.name}"`);
+            throw toStorageError(error, 'storageClose', `failed to close IndexedDB database "${this.name}"`);
         }
     }
 
@@ -203,8 +203,8 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
      * @param data 文件内容
      */
     public async persist(file: StorageFile, data: Uint8Array): Promise<void> {
-        this.assertOpen("write");
-        await this.writeTransaction("write", (store) => {
+        this.assertOpen('write');
+        await this.writeTransaction('write', (store) => {
             store.put(toArrayBuffer(data), file);
         });
     }
@@ -215,8 +215,8 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
      * @returns 内容，文件不存在时返回 null
      */
     private readFile(file: StorageFile): Promise<Uint8Array | null> {
-        return this.readTransaction("read", async (store) => {
-            const buffer = await requestResult(store.get(file), "read", `failed to read storage file "${file}"`);
+        return this.readTransaction('read', async (store) => {
+            const buffer = await requestResult(store.get(file), 'read', `failed to read storage file "${file}"`);
             return buffer === undefined ? null : new Uint8Array(buffer);
         });
     }
@@ -227,7 +227,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
      * @param action 请求构造
      */
     private async readTransaction<T>(operation: string, action: (store: IdbObjectStoreLike) => Promise<T> | T): Promise<T> {
-        const tx = this.beginTransaction("readonly", operation);
+        const tx = this.beginTransaction('readonly', operation);
         const done = awaitTransaction(tx, operation, `IndexedDB transaction failed for "${this.name}"`);
         const result = await action(tx.objectStore(STORE_NAME));
         await done;
@@ -240,7 +240,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
      * @param action 请求构造
      */
     private async writeTransaction(operation: string, action: (store: IdbObjectStoreLike) => void): Promise<void> {
-        const tx = this.beginTransaction("readwrite", operation);
+        const tx = this.beginTransaction('readwrite', operation);
         const done = awaitTransaction(tx, operation, `IndexedDB transaction failed for "${this.name}"`);
         try {
             action(tx.objectStore(STORE_NAME));
@@ -261,7 +261,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
      * @param mode 事务模式
      * @param operation 操作名
      */
-    private beginTransaction(mode: "readonly" | "readwrite", operation: string): IdbTransactionLike {
+    private beginTransaction(mode: 'readonly' | 'readwrite', operation: string): IdbTransactionLike {
         try {
             return this.db.transaction(STORE_NAME, mode);
         } catch (error) {
@@ -308,7 +308,7 @@ class IndexedDbStorageHandle implements StorageHandle {
      * @param length 期望长度
      */
     public async read(position: number, length: number): Promise<Uint8Array> {
-        this.assertOpen("read");
+        this.assertOpen('read');
         if (position >= this.data.length || length <= 0) {
             return new Uint8Array(0);
         }
@@ -321,7 +321,7 @@ class IndexedDbStorageHandle implements StorageHandle {
      * @param data 数据
      */
     public async write(position: number, data: Uint8Array): Promise<void> {
-        this.assertOpen("write");
+        this.assertOpen('write');
         const required = position + data.length;
         if (this.data.length < required) {
             const next = new Uint8Array(required);
@@ -337,7 +337,7 @@ class IndexedDbStorageHandle implements StorageHandle {
      * @param size 目标大小
      */
     public async truncate(size: number): Promise<void> {
-        this.assertOpen("truncate");
+        this.assertOpen('truncate');
         if (size <= this.data.length) {
             this.data = this.data.slice(0, size);
         } else {
@@ -350,7 +350,7 @@ class IndexedDbStorageHandle implements StorageHandle {
 
     /** 写回对象仓库 */
     public async sync(): Promise<void> {
-        this.assertOpen("sync");
+        this.assertOpen('sync');
         if (!this.dirty || this.readOnly) {
             return;
         }
@@ -360,7 +360,7 @@ class IndexedDbStorageHandle implements StorageHandle {
 
     /** 当前文件大小 */
     public async size(): Promise<number> {
-        this.assertOpen("size");
+        this.assertOpen('size');
         return this.data.length;
     }
 
@@ -396,7 +396,7 @@ function openIdbDatabase(name: string, operation: string): Promise<IdbDatabaseLi
         const factory = (globalThis as { indexedDB?: IdbFactoryLike }).indexedDB;
         if (!factory) {
             reject(
-                new LightDbError(LightDbErrorCodes.unsupported, "IndexedDB is not available in this environment", {
+                new LightDbError(LightDbErrorCodes.unsupported, 'IndexedDB is not available in this environment', {
                     operation,
                 }),
             );
@@ -485,7 +485,7 @@ function toArrayBuffer(data: Uint8Array): ArrayBuffer {
  * @param message 失败描述
  */
 function toStorageError(error: unknown, operation: string, message: string): LightDbError {
-    const name = typeof error === "object" && error !== null ? (error as { name?: string }).name : undefined;
-    const code = name === "QuotaExceededError" ? LightDbErrorCodes.quotaExceeded : LightDbErrorCodes.io;
+    const name = typeof error === 'object' && error !== null ? (error as { name?: string }).name : undefined;
+    const code = name === 'QuotaExceededError' ? LightDbErrorCodes.quotaExceeded : LightDbErrorCodes.io;
     return new LightDbError(code, message, { operation, cause: error });
 }

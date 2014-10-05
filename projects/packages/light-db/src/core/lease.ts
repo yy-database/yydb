@@ -5,7 +5,7 @@
  * 首选 Web Locks，缺失时不静默退化成多写者。
  */
 
-import { LightDbError, LightDbErrorCodes } from "../errors";
+import { LightDbError, LightDbErrorCodes } from '../errors';
 
 /** 写租约 */
 export interface WriterLease {
@@ -14,15 +14,11 @@ export interface WriterLease {
 }
 
 /** 租约模式 */
-export type LeaseMode = "web-locks" | "none";
+export type LeaseMode = 'web-locks' | 'none';
 
 /** Web Locks 结构化类型，避免引入 DOM lib */
 interface LockManagerLike {
-    request(
-        name: string,
-        options: { mode: "exclusive"; ifAvailable: true },
-        callback: (lock: unknown) => Promise<void>,
-    ): Promise<void>;
+    request(name: string, options: { mode: 'exclusive'; ifAvailable: true }, callback: (lock: unknown) => Promise<void>): Promise<void>;
 }
 
 /**
@@ -34,22 +30,16 @@ interface LockManagerLike {
  * @returns 写租约
  * @throws LightDbError `yydb.lease.unavailable` 当环境没有 Web Locks 或锁已被占用
  */
-export async function acquireWriterLease(
-    databaseName: string,
-    mode: LeaseMode,
-    locks?: LockManagerLike | null,
-): Promise<WriterLease> {
-    if (mode === "none") {
+export async function acquireWriterLease(databaseName: string, mode: LeaseMode, locks?: LockManagerLike | null): Promise<WriterLease> {
+    if (mode === 'none') {
         return { release: async () => undefined };
     }
 
     const manager = locks === undefined ? getLockManager() : locks;
     if (!manager) {
-        throw new LightDbError(
-            LightDbErrorCodes.leaseUnavailable,
-            "Web Locks is unavailable, refusing to open a second writer",
-            { operation: "acquireWriteLease" },
-        );
+        throw new LightDbError(LightDbErrorCodes.leaseUnavailable, 'Web Locks is unavailable, refusing to open a second writer', {
+            operation: 'acquireWriteLease',
+        });
     }
 
     let releaseHold: () => void = () => undefined;
@@ -63,13 +53,13 @@ export async function acquireWriterLease(
 
     const acquired = new Promise<void>((resolve, reject) => {
         completion = manager
-            .request(`yydb:${databaseName}`, { mode: "exclusive", ifAvailable: true }, async (lock) => {
+            .request(`yydb:${databaseName}`, { mode: 'exclusive', ifAvailable: true }, async (lock) => {
                 if (!lock) {
                     if (!settled) {
                         settled = true;
                         reject(
-                            new LightDbError(LightDbErrorCodes.leaseUnavailable, "database is opened by another writer", {
-                                operation: "acquireWriteLease",
+                            new LightDbError(LightDbErrorCodes.leaseUnavailable, 'database is opened by another writer', {
+                                operation: 'acquireWriteLease',
                             }),
                         );
                     }
@@ -87,8 +77,8 @@ export async function acquireWriterLease(
                 if (!settled) {
                     settled = true;
                     reject(
-                        new LightDbError(LightDbErrorCodes.leaseUnavailable, "failed to acquire the writer lease", {
-                            operation: "acquireWriteLease",
+                        new LightDbError(LightDbErrorCodes.leaseUnavailable, 'failed to acquire the writer lease', {
+                            operation: 'acquireWriteLease',
                             cause: error,
                         }),
                     );

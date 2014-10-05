@@ -4,10 +4,10 @@
  * 事务语义由 `core/engine` 维护，本层只提供异步调用形态与状态跟踪。
  */
 
-import type { StorageEngine } from "../core/engine";
-import { LightDbError, LightDbErrorCodes } from "../errors";
+import type { StorageEngine } from '../core/engine';
+import { LightDbError, LightDbErrorCodes } from '../errors';
 
-export type { TransactionState } from "../core/engine";
+export type { TransactionState } from '../core/engine';
 
 /**
  * 事务句柄
@@ -36,7 +36,7 @@ export class Transaction {
     /** 提交事务，失败时事务仍视为结束 */
     public async commit(): Promise<void> {
         if (!this.active) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "no active transaction", { operation: "commit" });
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'no active transaction', { operation: 'commit' });
         }
 
         try {
@@ -49,7 +49,7 @@ export class Transaction {
     /** 回滚事务 */
     public async rollback(): Promise<void> {
         if (!this.active) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "no active transaction", { operation: "rollback" });
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'no active transaction', { operation: 'rollback' });
         }
 
         try {

@@ -5,20 +5,14 @@
  * 但只暴露浏览器可用的类型：数据库名、`Uint8Array`、结构化错误码。
  */
 
-import { StorageEngine } from "../core/engine";
-import type { CheckpointResult, StorageEngineOptions, StorageEngineStats } from "../core/engine";
-import { LightDbError, LightDbErrorCodes } from "../errors";
-import { isOpfsAvailable, OpfsStorageAdapterFactory } from "../storage/opfs/OpfsStorageAdapter";
-import type { StorageAdapterFactory } from "../storage/StorageAdapter";
-import {
-    decodeSchema,
-    encodeSchema,
-    parseSchemaDocument,
-    RESERVED_KEY_PREFIX,
-    SCHEMA_KEY,
-} from "./schema";
-import { Transaction } from "./transaction";
-import type { LightDatabase, LightDatabaseOptions, SchemaVersion } from "./types";
+import { StorageEngine } from '../core/engine';
+import type { CheckpointResult, StorageEngineOptions, StorageEngineStats } from '../core/engine';
+import { LightDbError, LightDbErrorCodes } from '../errors';
+import { isOpfsAvailable, OpfsStorageAdapterFactory } from '../storage/opfs/OpfsStorageAdapter';
+import type { StorageAdapterFactory } from '../storage/StorageAdapter';
+import { decodeSchema, encodeSchema, parseSchemaDocument, RESERVED_KEY_PREFIX, SCHEMA_KEY } from './schema';
+import { Transaction } from './transaction';
+import type { LightDatabase, LightDatabaseOptions, SchemaVersion } from './types';
 
 /** 数据库名最大长度 */
 const MAX_DATABASE_NAME_LENGTH = 128;
@@ -46,11 +40,9 @@ export class BrowserDatabase implements LightDatabase {
      */
     public static async open(name: string, options: LightDatabaseOptions = {}): Promise<BrowserDatabase> {
         if (name.trim().length === 0 || name.length > MAX_DATABASE_NAME_LENGTH) {
-            throw new LightDbError(
-                LightDbErrorCodes.unsupported,
-                `database name must be 1-${MAX_DATABASE_NAME_LENGTH} characters`,
-                { operation: "open" },
-            );
+            throw new LightDbError(LightDbErrorCodes.unsupported, `database name must be 1-${MAX_DATABASE_NAME_LENGTH} characters`, {
+                operation: 'open',
+            });
         }
 
         const storage = resolveStorageFactory(options);
@@ -94,7 +86,7 @@ export class BrowserDatabase implements LightDatabase {
                 throw new LightDbError(
                     LightDbErrorCodes.schemaConflict,
                     `schema document conflict: stored version ${existing.version}, incoming version ${version}`,
-                    { operation: "ensureSchema" },
+                    { operation: 'ensureSchema' },
                 );
             }
             return;
@@ -109,7 +101,7 @@ export class BrowserDatabase implements LightDatabase {
      * @param key 键
      */
     public async get(key: string): Promise<Uint8Array | null> {
-        return this.engine.get(this.assertUserKey(key, "kvGet"));
+        return this.engine.get(this.assertUserKey(key, 'kvGet'));
     }
 
     /**
@@ -118,7 +110,7 @@ export class BrowserDatabase implements LightDatabase {
      * @param value 值
      */
     public async put(key: string, value: Uint8Array): Promise<void> {
-        await this.engine.put(this.assertUserKey(key, "kvPut"), value);
+        await this.engine.put(this.assertUserKey(key, 'kvPut'), value);
     }
 
     /**
@@ -126,7 +118,7 @@ export class BrowserDatabase implements LightDatabase {
      * @param key 键
      */
     public async delete(key: string): Promise<boolean> {
-        return this.engine.delete(this.assertUserKey(key, "kvDelete"));
+        return this.engine.delete(this.assertUserKey(key, 'kvDelete'));
     }
 
     /** 开始事务 */
@@ -169,14 +161,12 @@ export class BrowserDatabase implements LightDatabase {
      */
     private assertUserKey(key: string, operation: string): string {
         if (key.length === 0) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, "key must not be empty", { operation });
+            throw new LightDbError(LightDbErrorCodes.unsupported, 'key must not be empty', { operation });
         }
         if (key.startsWith(RESERVED_KEY_PREFIX)) {
-            throw new LightDbError(
-                LightDbErrorCodes.unsupported,
-                `key prefix "${RESERVED_KEY_PREFIX}" is reserved for the database`,
-                { operation },
-            );
+            throw new LightDbError(LightDbErrorCodes.unsupported, `key prefix "${RESERVED_KEY_PREFIX}" is reserved for the database`, {
+                operation,
+            });
         }
         return key;
     }
@@ -201,8 +191,8 @@ function resolveStorageFactory(options: LightDatabaseOptions): StorageAdapterFac
     }
 
     if (!isOpfsAvailable()) {
-        throw new LightDbError(LightDbErrorCodes.unsupported, "OPFS is unavailable, pass an explicit storage adapter", {
-            operation: "open",
+        throw new LightDbError(LightDbErrorCodes.unsupported, 'OPFS is unavailable, pass an explicit storage adapter', {
+            operation: 'open',
         });
     }
 

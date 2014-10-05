@@ -5,9 +5,9 @@
  * 不出现本地路径、文件句柄或 Node 专属类型。
  */
 
-import type { LeaseMode } from "../core/lease";
-import type { CheckpointResult, StorageEngineStats } from "../core/engine";
-import type { StorageAdapterFactory } from "../storage/StorageAdapter";
+import type { LeaseMode } from '../core/lease';
+import type { CheckpointResult, StorageEngineStats } from '../core/engine';
+import type { StorageAdapterFactory } from '../storage/StorageAdapter';
 
 /** Schema 版本与文档，与 `@yydb/yydb` 同构 */
 export interface SchemaVersion {

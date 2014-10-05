@@ -5,7 +5,7 @@
  * 验证写租约互斥、关闭通知与重开后的一致性。
  */
 
-import { BrowserDatabase, LightDbError, listenDatabaseEvents, OpfsStorageAdapterFactory } from "../../src/index";
+import { BrowserDatabase, LightDbError, listenDatabaseEvents, OpfsStorageAdapterFactory } from '../../src/index';
 
 /** 页面内保留的数据库与监听器 */
 interface MultitabScope {
@@ -72,7 +72,7 @@ export async function openAndHold(name: string, key: string, value: string): Pro
 export async function writeHeld(key: string, value: string): Promise<OpenAttempt> {
     const db = scopeOf().__yydbHeld;
     if (!db) {
-        return { ok: false, code: "no-held-database" };
+        return { ok: false, code: 'no-held-database' };
     }
     try {
         await db.put(key, encode(value));
