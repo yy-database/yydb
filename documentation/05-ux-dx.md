@@ -43,8 +43,11 @@
 6. wasm 绑定不得假装拥有文件系统能力。能力缺失必须返回 `yydb.unsupported`，不得回落到静默内存模式。
 7. TypeScript 产品面按宿主拆成两个包，不提供同一包内的多运行时入口：
    - Node：`@yydb/yydb`，嵌入引擎与 CLI，原生能力经平台 `.node` 绑定加载，不发布 wasm 入口。
-   - 浏览器：`@yydb/light-db`，纯 TypeScript 实现，只在 Node 文件 IO 或浏览器存储适配器之上运行。
-8. N-API 只导出正交的原子方法（`open`、`ensure_schema`、`record_count`、`journal_mode`、`checkpoint`、`get`、`put` 等），不导出拼装好的 CLI 命令。面向用户的命令组合留在 TypeScript 层。
+   - 浏览器：`@yydb/light-db`，纯 TypeScript 浏览器数据库，不复用 N-API、不含 CLI、不依赖 wasm，也不把 Node 文件系统语义（`fs`、`path`、`FileHandle`、`Buffer`、进程锁）带进运行时路径。
+   - `@yydb/light-db` 的平台边界只有 `StorageAdapter`：OPFS 是默认后端，IndexedDB 是兼容后端，两者共用 `core` 的事务、恢复与检查点语义，不各自实现一套。
+   - 浏览器写锁使用 Web Locks 单写者租约，跨标签页通知使用 `BroadcastChannel`；缺少 Web Locks 时返回 `yydb.lease.unavailable`，不静默退化为多写者。
+8. 浏览器产品的公共类型必须原生化：二进制用 `Uint8Array`，数据库用名称而非本地路径寻址，`close()`、事务、恢复与写锁都是异步 API，不暴露 pager、WAL 文件、文件句柄或 OPFS 目录结构。
+9. N-API 只导出正交的原子方法（`open`、`ensure_schema`、`record_count`、`journal_mode`、`checkpoint`、`get`、`put` 等），不导出拼装好的 CLI 命令。面向用户的命令组合留在 TypeScript 层。
 
 ## 5. 线协议客户端
 

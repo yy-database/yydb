@@ -1,62 +1,110 @@
 # `@yydb/light-db`
 
-**Light DB** — the pure TypeScript database engine for environments without native bindings. Pages, WAL, shared-memory
-index blocks, checkpoints, crash recovery and secondary indexes are implemented in TypeScript, so the same source can
-run in Node and in browsers.
+**Light DB** is the browser edition of YYDB: a database written in pure TypeScript that stores `.yydb`-style
+snapshots, WAL records and checkpoints in browser storage. It has no Node built-ins, no N-API bindings and no WASM in
+its runtime path.
 
-`@yydb/yydb` is the Node product (native engine plus CLI). Light DB is the browser counterpart and is maintained in this
-repository.
+## Product relationship
+
+| Package | Role |
+|---------|------|
+| `@yydb/yydb` | Node product: native Rust engine, N-API, local `.yydb` / `.yydx` files and CLI |
+| `@yydb/light-db` | Browser product: pure TypeScript, OPFS / IndexedDB storage, Web APIs, same author surface |
+| `@yydb/yydb-client` | Remote wire client for a running `yydb serve` |
 
 ## Status
 
-Light DB was transplanted from the standalone `LightDB.ts` project and is not release-ready yet. On Node file I/O the
-current baseline is **300 passing assertions** (`pnpm --filter @yydb/light-db test:unit`).
+Light DB is a migration of the original `LightDB.ts` engine, rebuilt around a browser-native architecture. It is not
+release-ready and should not be published as a stable version yet.
 
-The package exposes two author surfaces:
+Current coverage:
 
-- `LightDB` / `collection()` — typed documents, queries, secondary indexes and transactions.
-- `Database` — the same `open` / `get` / `put` / `getSchema` / `ensureSchema` / `checkpoint` / `close` surface as
-  `@yydb/yydb`, so hosts only switch package names. Schema records and KV values share the storage engine and stable
-  `yydb.*` error codes.
-
-Browser persistence is the next milestone: file access currently goes through a Node `fs` adapter in
-`src/utils/file.ts`, and the planned change is a platform-neutral storage interface with an OPFS adapter
-(worker-backed for positional writes) so the public surface stays identical across hosts.
+- `pnpm test` runs the Node-side runner over codec, adapter and database logic (29 cases).
+- `pnpm test:browser` runs the conformance suite in an installed Chrome (16 cases): OPFS persistence across reopen, WAL
+  recovery, checkpoint truncation, corruption detection, single-writer exclusion, transaction rollback and commit,
+  schema and close notifications, and two-tab lease and broadcast behaviour.
 
 ## Usage
 
 ```ts
-import { Database } from '@yydb/light-db';
+import { LightDbError, openLightDatabase } from '@yydb/light-db';
 
-const db = await Database.open('./data/app');
-await db.put('user:1', 'Ada');
-const schema = await db.getSchema();
+const db = await openLightDatabase('app');
+
+await db.ensureSchema('// @yydb-schema-version: 1\nkv users');
+await db.put('user:1', new TextEncoder().encode('Ada'));
+
+const value = await db.get('user:1');
 await db.checkpoint();
 await db.close();
 ```
 
-Collections stay available for document-style workloads:
+Public data types are browser-native: keys and values use `Uint8Array`, databases are addressed by name rather than by
+file path, and every lifecycle call is asynchronous.
+
+## Author surface
 
 ```ts
-import { openDatabase } from '@yydb/light-db';
+const db: LightDatabase = await openLightDatabase('app', options);
 
-const db = await openDatabase('./data/app', { dbName: 'app' });
-const users = db.collection<{ id: number; name: string }>('users', { primaryKey: 'id' });
-
-await users.insert({ id: 1, name: 'Ada' });
+await db.schema();
+await db.ensureSchema(document);
+await db.get(key);
+await db.put(key, value);
+await db.delete(key);
+await db.begin();
+await db.commit();
+await db.rollback();
 await db.checkpoint();
+db.stats();
 await db.close();
 ```
+
+`schema()` returns the persisted schema version and document. The document is the single source of truth: a second
+`ensureSchema` call must pass the identical document, otherwise it fails with `yydb.schema.conflict`. Keys starting with
+`__yydb__/` are reserved for the database.
+
+## Storage backends
+
+| Adapter | Use |
+|---------|-----|
+| `OpfsStorageAdapterFactory` | Default. Origin Private File System, positional reads and writes, atomic snapshot publication |
+| `IndexedDbStorageAdapterFactory` | Compatibility backend for hosts without OPFS |
+| `MemoryStorageBackend` | Tests and throwaway sessions |
+
+`StorageAdapter` is the only platform boundary. Transactions, recovery and checkpoint semantics live in `core`, so
+backends implement files, not database behaviour.
+
+## Concurrency
+
+A writer holds a session-scoped `Web Locks` lease. A second tab that opens the same database fails with
+`yydb.lease.unavailable` and `retryable: true` instead of silently writing alongside the first one. When a lock manager
+is missing the call fails the same way; it never degrades to multiple writers.
+
+`BroadcastChannel` carries `commit`, `schema` and `close` events so other same-origin contexts can discard stale views
+and retry after the lease is released. `listenDatabaseEvents(name, handler)` subscribes without opening the database.
 
 ## Layout
 
 | Path | Role |
 |------|------|
-| `src/storage/` | `LightFile`, WAL, SHM, checkpoint and recovery managers |
-| `src/indexes/` | B+ tree, primary and secondary indexes |
-| `src/collection/` | Documents, query parser / builder, collection API |
-| `src/performance/` | Columnar storage, buffer pool, RW locks, lazy queries |
-| `src/api/` | `LightDB`, transactions, shared API types |
-| `src/utils/` | Binary encoding and file access |
+| `src/api/` | Public database, transaction, schema and shared types |
+| `src/core/` | Records, WAL, checkpoint, recovery, writer lease and broadcast |
+| `src/storage/` | `StorageAdapter` plus OPFS, IndexedDB and memory backends |
+| `src/codec/` | Page, snapshot and WAL record encoding over `Uint8Array` |
+| `src/errors/` | Stable `yydb.*` error codes |
+
+## Errors
+
+| Code | Meaning |
+|------|---------|
+| `yydb.io` | Storage operation failed |
+| `yydb.corrupt` | Persisted bytes failed validation |
+| `yydb.schema.conflict` | Schema document differs from the stored one |
+| `yydb.schema.invalid` | Schema document is not usable |
+| `yydb.unsupported` | Host or operation is not supported |
+| `yydb.session.closed` | Database or handle is closed |
+| `yydb.lease.unavailable` | Writer lease is held elsewhere or Web Locks is missing (retryable) |
+| `yydb.quota.exceeded` | Browser storage quota is exhausted |
 
 [YYDB overview](https://github.com/yy-database/yydb.rs)

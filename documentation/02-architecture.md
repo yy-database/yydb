@@ -172,6 +172,29 @@ Connection
 - host adapter 按会话注册，一个 peer 的 host micro 不会泄漏给另一个 peer。
 - `yydb-server` 只调用一次 `Connection::open`，之后每个 peer 用 `conn.session()`；禁止每个 peer 重新打开数据库文件。
 
+### 4.3 TypeScript 产品面
+
+Rust 运行时之外有三个 TypeScript 产品，按宿主拆分，不共享同一个包的运行时入口：
+
+```text
+@yydb/yydb          Node 产品：Rust engine + N-API + 本地 .yydb / .yydx + CLI
+@yydb/light-db      浏览器产品：纯 TypeScript + OPFS / IndexedDB + Web API
+@yydb/yydb-client   远程 wire client：连接正在运行的 yydb serve
+```
+
+`@yydb/light-db` 是浏览器数据库，不是 Node 存储层：不引用 `fs`、`path`、`FileHandle`、`Buffer`、进程锁，不链接 N-API，不含 CLI，也不依赖 wasm。它的内部只有四层：
+
+| 层 | 职责 |
+|----|------|
+| `api` | 与 `@yydb/yydb` 同构的作者面：schema、KV、事务、checkpoint、统计、关闭 |
+| `core` | 记录、WAL、检查点、恢复与写租约，不直接调用浏览器 API |
+| `storage` | `StorageAdapter` 是唯一平台边界；OPFS 为默认后端，IndexedDB 为兼容后端，内存后端供测试 |
+| `codec` | 页、快照与 WAL 记录的二进制编解码，只处理 `ArrayBuffer` / `Uint8Array` |
+
+写入协议固定为：读取快照 → 获得 writer lease → 追加 WAL 或写临时块 → 原子发布提交标记 → 更新 checkpoint → 释放 lease。浏览器没有进程级文件锁，多标签页互斥由 Web Locks 的会话级单写者租约承担；缺少 Web Locks 时返回 `yydb.lease.unavailable`，不静默退化为多写者。schema、commit 与 close 经 `BroadcastChannel` 通知其它同源上下文。
+
+WASM 入口只保留到浏览器实现完成验收为止。退役门槛：`@yydb/light-db` 不含 Node 内置模块、`Buffer` 或 N-API 依赖；Node 与浏览器用同一组合同测试；OPFS 重开、WAL 恢复、checkpoint、损坏检测、单写者与多标签页通知全部通过；schema、KV、事务、错误码与关闭语义两端一致；移除 wasm export 后 Node 与 CLI 测试仍全部通过。
+
 ## 5. 门面规则
 
 `yydb` 是总门面。判定标准如下，任一条不满足就不算门面：
