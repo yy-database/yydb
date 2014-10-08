@@ -134,11 +134,7 @@ impl Database {
     /// Read one record, or `null` when the key is absent.
     #[napi]
     pub fn get(&self, key: String) -> Result<Option<Buffer>> {
-        Ok(self
-            .connection
-            .get(&key)
-            .map_err(reason)?
-            .map(Buffer::from))
+        Ok(self.connection.get(&key).map_err(reason)?.map(Buffer::from))
     }
 
     /// Write one record.
