@@ -1,6 +1,6 @@
 {
     "name": "@yydb/yydb-linux-x64",
-    "version": "0.1.0",
+    "version": "0.0.8",
     "description": "YYDB native binding for Linux x64; installed automatically by @yydb/yydb",
     "license": "MPL-2.0",
     "private": true,
