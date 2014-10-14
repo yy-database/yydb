@@ -36,6 +36,7 @@ export default defineConfig({
             '@yydb/yydb-linux-x64',
             '@yydb/yydb-darwin-x64',
             '@yydb/yydb-darwin-arm64',
+            '@yydb/light-db',
             '@yydb/yydb-client',
             '@yydb/yydb-unknown-wasm32',
             '@yydb/yydb',

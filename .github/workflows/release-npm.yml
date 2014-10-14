@@ -129,6 +129,7 @@ jobs:
 
       - run: pnpm --filter @yydb/yydb-client build
       - run: pnpm --filter @yydb/yydb build
+      - run: pnpm --filter @yydb/light-db build
 
       - name: Strip token-style npmrc (OIDC only)
         shell: bash

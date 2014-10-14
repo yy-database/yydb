@@ -14,8 +14,8 @@ its runtime path.
 
 ## Status
 
-Light DB is a migration of the original `LightDB.ts` engine, rebuilt around a browser-native architecture. It is not
-release-ready and should not be published as a stable version yet.
+Light DB is a migration of the original `LightDB.ts` engine, rebuilt around a browser-native architecture. The package
+ships as a pre-1.0 release of the browser product, so the author surface may still change between patch releases.
 
 Current coverage:
 
