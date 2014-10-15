@@ -3,7 +3,6 @@
     "version": "0.0.8",
     "description": "YYDB Node embedded engine and CLI",
     "license": "MPL-2.0",
-    "private": true,
     "type": "module",
     "bin": {
         "yydb": "./dist/cli.js"
@@ -49,8 +48,7 @@
     },
     "dependencies": {
         "@vmz/commander": "^0.2.0",
-        "@voml/vos": "^0.0.1",
-        "@yydb/yydb-client": "workspace:*"
+        "@voml/vos": "^0.0.1"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",

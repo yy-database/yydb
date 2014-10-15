@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { platformKey } from './resolve.js';
 
+/** Schema version returned by N-API Database.schema_version / Client.schema_version. */
+export interface NativeSchemaVersion {
+    version: number;
+    document: string;
+}
+
 /** One open `.yydb` handle exposed by the native binding. */
 export interface NativeDatabase {
     path(): string | null;
@@ -18,6 +24,41 @@ export interface NativeDatabase {
     walFrameCount(): number;
     get(key: string): Uint8Array | null;
     put(key: string, value: Uint8Array): void;
+    registerMicro(
+        name: string,
+        version: number,
+        args: string[],
+        returns: string,
+        hostId: number,
+        functionId: string,
+        handleVersion: number,
+        fingerprint: Uint8Array,
+    ): void;
+    callScalar(name: string, version: number, argsJson: string): string;
+}
+
+/** One remote `yydb serve` handle exposed by the native binding. */
+export interface NativeClient {
+    endpoint(): string;
+    serverVersion(): string;
+    info(): string;
+    schemaVersion(): number | null;
+    schemaDocument(): string | null;
+    ensureSchema(document: string): void;
+    get(key: string): Uint8Array | null;
+    put(key: string, value: Uint8Array): void;
+    registerMicro(
+        name: string,
+        version: number,
+        args: string[],
+        returns: string,
+        hostId: number,
+        functionId: string,
+        handleVersion: number,
+        fingerprint: Uint8Array,
+    ): void;
+    callScalar(name: string, version: number, argsJson: string): string;
+    close(): void;
 }
 
 /** Atomic operations exported by the Node-API binding. */
@@ -25,6 +66,7 @@ export interface YydbNative {
     version(): string;
     serve(dbPath: string, bind: string, insecureBind?: boolean): void;
     Database: { open(dbPath: string): NativeDatabase };
+    Client: { connect(endpoint: string): NativeClient };
 }
 
 function loadModule(specifier: string): YydbNative {
