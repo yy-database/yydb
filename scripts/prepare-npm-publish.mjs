@@ -44,7 +44,6 @@ function writeJson(filePath, data) {
 function preparePackageJson(pkgDir, { workspaceClientToVersion = false } = {}) {
     const pkgPath = path.join(pkgDir, 'package.json');
     const j = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-    delete j.private;
     if (version) {
         j.version = version;
         if (j.optionalDependencies) {

@@ -30,16 +30,4 @@ export default defineConfig({
             environment: 'NPM_PUBLISH',
         },
     },
-    publish: {
-        packages: [
-            '@yydb/yydb-win32-x64',
-            '@yydb/yydb-linux-x64',
-            '@yydb/yydb-darwin-x64',
-            '@yydb/yydb-darwin-arm64',
-            '@yydb/light-db',
-            '@yydb/yydb-client',
-            '@yydb/yydb-unknown-wasm32',
-            '@yydb/yydb',
-        ],
-    },
 });

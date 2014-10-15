@@ -3,7 +3,6 @@
     "version": "0.0.8",
     "description": "YYDB native binding for Apple Silicon macOS; installed automatically by @yydb/yydb",
     "license": "MPL-2.0",
-    "private": true,
     "type": "module",
     "main": "./index.js",
     "exports": {
