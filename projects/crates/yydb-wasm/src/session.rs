@@ -135,6 +135,51 @@ impl MemorySession {
         unit_result_json(self.conn.put(key, value))
     }
 
+    /// Remove a record by key. Returns JSON `{ ok, rows, error }`.
+    #[wasm_bindgen(js_name = delete)]
+    pub fn delete(&self, key: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.write_batch(&[(key.to_owned(), None)]))
+    }
+
+    /// Begin an explicit transaction.
+    #[wasm_bindgen(js_name = begin)]
+    pub fn begin(&self) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.begin())
+    }
+
+    /// Commit the current transaction.
+    #[wasm_bindgen(js_name = commit)]
+    pub fn commit(&self) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.commit())
+    }
+
+    /// Roll back the current transaction.
+    #[wasm_bindgen(js_name = rollback)]
+    pub fn rollback(&self) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.rollback())
+    }
+
+    /// Fold the WAL into the main file (memory sessions are a no-op after flush).
+    #[wasm_bindgen(js_name = checkpoint)]
+    pub fn checkpoint(&self) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.checkpoint())
+    }
+
     /// Current persisted schema, if any. Returns JSON `{ ok, schema, error }`.
     #[wasm_bindgen(js_name = getSchema)]
     pub fn get_schema(&self) -> String {
@@ -247,6 +292,75 @@ impl PersistentSession {
     pub fn put(&self, key: &str, value: &[u8]) -> String {
         match self.volume.as_ref() {
             Some(volume) => run_put_persistent(&self.conn, volume, self.closed, key, value),
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Remove a record by key, then persist the snapshot.
+    #[wasm_bindgen(js_name = delete)]
+    pub fn delete(&self, key: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.volume.as_ref() {
+            Some(volume) => match self.conn.write_batch(&[(key.to_owned(), None)]) {
+                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Begin an explicit transaction (in-memory only, no persistence needed).
+    #[wasm_bindgen(js_name = begin)]
+    pub fn begin(&self) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.begin())
+    }
+
+    /// Commit the current transaction and persist the snapshot.
+    #[wasm_bindgen(js_name = commit)]
+    pub fn commit(&self) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.volume.as_ref() {
+            Some(volume) => match self.conn.commit() {
+                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Roll back the current transaction and persist the rolled-back snapshot.
+    #[wasm_bindgen(js_name = rollback)]
+    pub fn rollback(&self) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.volume.as_ref() {
+            Some(volume) => match self.conn.rollback() {
+                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Run checkpoint (WAL fold) and persist the resulting snapshot.
+    #[wasm_bindgen(js_name = checkpoint)]
+    pub fn checkpoint(&self) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.volume.as_ref() {
+            Some(volume) => match self.conn.checkpoint() {
+                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                Err(error) => unit_result_json(Err(error)),
+            },
             None => unit_result_json(Err(closed_session_error())),
         }
     }
