@@ -1,200 +1,172 @@
-/**
- * 浏览器数据库
- *
- * `@yydb/light-db` 的公开入口。调用形态与 `@yydb/yydb` 的 TypeScript 作者面一致，
- * 但只暴露浏览器可用的类型：数据库名、`Uint8Array`、结构化错误码。
- */
+import {
+    initWasm,
+    openPersistentSession,
+    createMemorySession,
+    type WasmSession,
+} from '@yydb/yydb-unknown-wasm32';
 
-import { StorageEngine } from '../core/engine';
-import type { CheckpointResult, StorageEngineOptions, StorageEngineStats } from '../core/engine';
-import { LightDbError, LightDbErrorCodes } from '../errors';
-import { isOpfsAvailable, OpfsStorageAdapterFactory } from '../storage/opfs/OpfsStorageAdapter';
-import type { StorageAdapterFactory } from '../storage/StorageAdapter';
-import { decodeSchema, encodeSchema, parseSchemaDocument, RESERVED_KEY_PREFIX, SCHEMA_KEY } from './schema';
-import { Transaction } from './transaction';
-import type { LightDatabase, LightDatabaseOptions, SchemaVersion } from './types';
+/** WASM session 通用 JSON 返回形状。 */
+interface WasmResult {
+    ok: boolean;
+    rows?: unknown[];
+    value?: unknown;
+    schema?: { version: number; document: string } | null;
+    error?: string | null;
+    code?: string | null;
+}
 
-/** 数据库名最大长度 */
-const MAX_DATABASE_NAME_LENGTH = 128;
+/** Schema 版本与文档。 */
+export interface SchemaVersion {
+    version: number;
+    document: string;
+}
 
-/**
- * 浏览器数据库实现
- */
-export class BrowserDatabase implements LightDatabase {
-    /** 数据库名 */
+/** 打开浏览器数据库的选项。 */
+export interface LightDatabaseOptions {
+    /** 使用内存 session（测试专用；默认使用 OPFS 持久 session）。 */
+    memory?: boolean;
+}
+
+/** 扩展 WASM session 的浏览器端补充方法（Rust 侧已导出）。 */
+interface ExtendedSession extends WasmSession {
+    delete(key: string): string;
+    begin(): string;
+    commit(): string;
+    rollback(): string;
+    checkpoint(): string;
+}
+
+/** 浏览器侧 YYDB 数据库句柄，委托给 Rust WASM 核心。 */
+export class BrowserDatabase {
+    /** 数据库名（OPFS 路径）。 */
     public readonly name: string;
 
-    private readonly engine: StorageEngine;
-    private readonly transaction: Transaction;
+    private readonly session: ExtendedSession;
 
-    private constructor(name: string, engine: StorageEngine) {
+    private constructor(name: string, session: ExtendedSession) {
         this.name = name;
-        this.engine = engine;
-        this.transaction = new Transaction(engine);
+        this.session = session;
     }
 
-    /**
-     * 打开数据库
-     * @param name 数据库名
-     * @param options 打开选项
-     */
+    /** 初始化 WASM 并打开一个 session（memory 或 OPFS persistent）。 */
     public static async open(name: string, options: LightDatabaseOptions = {}): Promise<BrowserDatabase> {
-        if (name.trim().length === 0 || name.length > MAX_DATABASE_NAME_LENGTH) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, `database name must be 1-${MAX_DATABASE_NAME_LENGTH} characters`, {
-                operation: 'open',
-            });
+        if (!name || name.length === 0) {
+            throw new Error('database name must not be empty');
         }
 
-        const storage = resolveStorageFactory(options);
-        const engineOptions: StorageEngineOptions = {};
-        if (options.pageSize !== undefined) {
-            engineOptions.pageSize = options.pageSize;
-        }
-        if (options.walThreshold !== undefined) {
-            engineOptions.walThreshold = options.walThreshold;
-        }
-        if (options.autoCheckpoint !== undefined) {
-            engineOptions.autoCheckpoint = options.autoCheckpoint;
-        }
-        if (options.lease !== undefined) {
-            engineOptions.lease = options.lease;
-        }
+        await initWasm();
 
-        const engine = await StorageEngine.open(name, storage, engineOptions);
+        const base: WasmSession = options.memory
+            ? createMemorySession()
+            : openPersistentSession(name);
 
-        return new BrowserDatabase(name, engine);
+        return new BrowserDatabase(name, base as ExtendedSession);
     }
 
-    /** 读取已持久化的 schema */
+    /** 读取已持久化的 schema，或 `null`。 */
     public async schema(): Promise<SchemaVersion | null> {
-        const value = await this.engine.get(SCHEMA_KEY);
-        return value ? decodeSchema(value) : null;
+        const raw = JSON.parse(this.session.getSchema()) as WasmResult;
+        if (!raw.ok) {
+            throw new Error(raw.error ?? 'getSchema failed');
+        }
+        if (!raw.schema) {
+            return null;
+        }
+        return raw.schema;
     }
 
-    /**
-     * 声明 schema 文档
-     *
-     * 文档是唯一真相：首次写入后，重复调用必须传入完全相同的文档。
-     * @param document Schema 文档
-     */
+    /** 声明 schema 文档（VOS 自己解析版本）。 */
     public async ensureSchema(document: string): Promise<void> {
-        const version = parseSchemaDocument(document);
-        const existing = await this.schema();
-
-        if (existing) {
-            if (existing.document !== document) {
-                throw new LightDbError(
-                    LightDbErrorCodes.schemaConflict,
-                    `schema document conflict: stored version ${existing.version}, incoming version ${version}`,
-                    { operation: 'ensureSchema' },
-                );
-            }
-            return;
+        const raw = JSON.parse(this.session.ensureSchema(document)) as WasmResult;
+        if (!raw.ok) {
+            throw new Error(raw.error ?? 'ensureSchema failed');
         }
-
-        await this.engine.put(SCHEMA_KEY, encodeSchema({ version, document }));
-        this.engine.notifySchemaChange();
     }
 
-    /**
-     * 读取键
-     * @param key 键
-     */
+    /** 读取键，或 `null`。 */
     public async get(key: string): Promise<Uint8Array | null> {
-        return this.engine.get(this.assertUserKey(key, 'kvGet'));
+        const raw = JSON.parse(this.session.get(key)) as WasmResult;
+        if (!raw.ok) {
+            throw new Error(raw.error ?? `get(${key}) failed`);
+        }
+        if (raw.value === null || raw.value === undefined) {
+            return null;
+        }
+        // WASM JSON 序列化为普通数组 [1, 2, 3, ...]；转回 Uint8Array
+        if (raw.value instanceof Uint8Array) {
+            return raw.value;
+        }
+        if (Array.isArray(raw.value)) {
+            return new Uint8Array(raw.value as number[]);
+        }
+        // 兜底：如果是 base64 字符串等，尝试 new Uint8Array
+        return new Uint8Array(raw.value as ArrayLike<number>);
     }
 
-    /**
-     * 写入键
-     * @param key 键
-     * @param value 值
-     */
+    /** 写入键。 */
     public async put(key: string, value: Uint8Array): Promise<void> {
-        await this.engine.put(this.assertUserKey(key, 'kvPut'), value);
+        const raw = JSON.parse(this.session.put(key, value)) as WasmResult;
+        if (!raw.ok) {
+            throw new Error(raw.error ?? `put(${key}) failed`);
+        }
     }
 
-    /**
-     * 删除键
-     * @param key 键
-     */
+    /** 删除键（底层等价 write_batch([(key, None)])）。 */
     public async delete(key: string): Promise<boolean> {
-        return this.engine.delete(this.assertUserKey(key, 'kvDelete'));
+        const raw = JSON.parse(this.session.delete(key)) as WasmResult;
+        if (!raw.ok) {
+            throw new Error(raw.error ?? `delete(${key}) failed`);
+        }
+        return true;
     }
 
-    /** 开始事务 */
+    /** 开启事务。 */
     public async begin(): Promise<void> {
-        await this.transaction.begin();
+        const raw = JSON.parse(this.session.begin()) as WasmResult;
+        if (!raw.ok) {
+            throw new Error(raw.error ?? 'begin failed');
+        }
     }
 
-    /** 提交事务 */
+    /** 提交事务。 */
     public async commit(): Promise<void> {
-        await this.transaction.commit();
+        const raw = JSON.parse(this.session.commit()) as WasmResult;
+        if (!raw.ok) {
+            throw new Error(raw.error ?? 'commit failed');
+        }
     }
 
-    /** 回滚事务 */
+    /** 回滚事务。 */
     public async rollback(): Promise<void> {
-        await this.transaction.rollback();
+        const raw = JSON.parse(this.session.rollback()) as WasmResult;
+        if (!raw.ok) {
+            throw new Error(raw.error ?? 'rollback failed');
+        }
     }
 
-    /** 执行检查点 */
-    public async checkpoint(): Promise<CheckpointResult> {
-        return this.engine.checkpoint();
+    /** 执行检查点（折叠 WAL）。 */
+    public async checkpoint(): Promise<void> {
+        const raw = JSON.parse(this.session.checkpoint()) as WasmResult;
+        if (!raw.ok) {
+            throw new Error(raw.error ?? 'checkpoint failed');
+        }
     }
 
-    /** 统计信息 */
-    public stats(): StorageEngineStats {
-        return this.engine.getStats();
+    /** 数据库统计（暂不可用）。 */
+    public stats(): never {
+        throw new Error('stats() is not available on the WASM core');
     }
 
-    /** 关闭数据库 */
+    /** 关闭 session。 */
     public async close(): Promise<void> {
-        if (this.transaction.isActive) {
-            await this.transaction.rollback();
-        }
-        await this.engine.close();
-    }
-
-    /**
-     * 校验用户键
-     * @param key 键
-     * @param operation 操作名
-     */
-    private assertUserKey(key: string, operation: string): string {
-        if (key.length === 0) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, 'key must not be empty', { operation });
-        }
-        if (key.startsWith(RESERVED_KEY_PREFIX)) {
-            throw new LightDbError(LightDbErrorCodes.unsupported, `key prefix "${RESERVED_KEY_PREFIX}" is reserved for the database`, {
-                operation,
-            });
-        }
-        return key;
+        this.session.close();
     }
 }
 
-/**
- * 打开浏览器数据库
- * @param name 数据库名
- * @param options 打开选项
- */
-export async function openLightDatabase(name: string, options: LightDatabaseOptions = {}): Promise<LightDatabase> {
+/** 打开浏览器数据库的便捷函数。 */
+export async function openLightDatabase(
+    name: string,
+    options: LightDatabaseOptions = {},
+): Promise<BrowserDatabase> {
     return BrowserDatabase.open(name, options);
-}
-
-/**
- * 解析存储后端
- * @param options 打开选项
- */
-function resolveStorageFactory(options: LightDatabaseOptions): StorageAdapterFactory {
-    if (options.storage) {
-        return options.storage;
-    }
-
-    if (!isOpfsAvailable()) {
-        throw new LightDbError(LightDbErrorCodes.unsupported, 'OPFS is unavailable, pass an explicit storage adapter', {
-            operation: 'open',
-        });
-    }
-
-    return new OpfsStorageAdapterFactory();
 }

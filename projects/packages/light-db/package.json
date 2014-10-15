@@ -37,8 +37,13 @@
         "access": "public"
     },
     "devDependencies": {
+        "@types/node": "^20.19.43",
         "playwright-core": "^1.64.1",
         "tsx": "^4.23.15",
         "typescript": "^5.3.0"
+    },
+    "dependencies": {
+        "@voml/vos": "^0.0.1",
+        "@yydb/yydb-unknown-wasm32": "workspace:*"
     }
 }
