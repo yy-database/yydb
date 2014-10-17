@@ -1,6 +1,6 @@
 {
     "name": "@yydb/yydb-darwin-x64",
-    "version": "0.0.8",
+    "version": "0.0.9",
     "description": "YYDB native binding for Intel macOS; installed automatically by @yydb/yydb",
     "license": "MPL-2.0",
     "type": "module",
