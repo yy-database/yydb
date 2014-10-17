@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+    emitSource,
+    type EmittableItem,
+} from '@voml/vos';
+import {
     defineMicro as buildMicro,
     microFingerprint,
     udfWireKind,
@@ -81,8 +85,34 @@ export class Database {
         return { version, document };
     }
 
-    /** Validate and publish a VOS schema document. */
-    async ensureSchema(version: number, document: string): Promise<void> {
+    /**
+     * Validate and publish a VOS schema document.
+     *
+     * Accepts either a raw `.vos` source string, one `@voml/vos` descriptor
+     * (`v.table()`, `v.class()`) or a list of descriptors. When descriptors
+     * are supplied, they are rendered to source via `emitSource` first.
+     *
+     * ```ts
+     * // Raw source (unchanged behaviour):
+     * await db.ensureSchema('namespace demo { table User { @@id: uuid } }');
+     *
+     * // Zod-like builder — the Vos schema-ecosystem sweet spot:
+     * const User = v.table('User', { id: v.uuid().primary(), name: v.utf8() });
+     * await db.ensureSchema(User);
+     *
+     * // Multiple declarations in one shot:
+     * await db.ensureSchema(TableA, TableB, ClassC);
+     * ```
+     */
+    async ensureSchema(...input: [string] | [string, ...EmittableItem[]] | EmittableItem[]): Promise<void> {
+        let document: string;
+        if (typeof input[0] === 'string') {
+            // Raw source string, optionally followed by descriptors we just ignore.
+            document = input[0];
+        } else {
+            // One or more Vos descriptor items → render to source.
+            document = emitSource(input as EmittableItem[]);
+        }
         this.native.ensureSchema(document);
     }
 
