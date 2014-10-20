@@ -4,6 +4,7 @@ import {
     createMemorySession,
     type WasmSession,
 } from '@yydb/yydb-unknown-wasm32';
+import { emitSource, type EmittableItem } from '@voml/vos';
 
 /** WASM session 通用 JSON 返回形状。 */
 interface WasmResult {
@@ -75,8 +76,12 @@ export class BrowserDatabase {
         return raw.schema;
     }
 
-    /** 声明 schema 文档（VOS 自己解析版本）。 */
-    public async ensureSchema(document: string): Promise<void> {
+    /**
+     * 声明 schema 文档。接受原始 `.vos` 源码字符串，或 `@voml/vos`
+     * descriptor（`v.table()` / `v.class()`），或多个 descriptor。
+     */
+    public async ensureSchema(...input: [string] | EmittableItem[]): Promise<void> {
+        const document = typeof input[0] === 'string' ? input[0] : emitSource(input as EmittableItem[]);
         const raw = JSON.parse(this.session.ensureSchema(document)) as WasmResult;
         if (!raw.ok) {
             throw new Error(raw.error ?? 'ensureSchema failed');
