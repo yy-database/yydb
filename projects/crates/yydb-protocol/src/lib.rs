@@ -708,37 +708,64 @@ pub fn decode_kv_get_ok(body: &[u8]) -> Result<Option<Vec<u8>>> {
     Ok(Some(read_bytes(body, &mut offset, val_len)?.to_vec()))
 }
 
-/// One structured `Error` frame body: stable code plus display message.
+/// One structured `Error` frame body: code plus human-readable message.
+///
+/// See [`Error::to_json`] for the full diagnostic contract (code, operation,
+/// retryable, params, message). [`encode_error_body`] and [`decode_error`]
+/// serialize / deserialize that compact JSON object on the wire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireError {
     /// Stable error code (`yydb.schema.invalid`, …); see [`Error::code`].
     pub code: String,
-    /// Display message reported by the peer. Hosts must not branch on this text.
+    /// Human-readable message reported by the peer. Hosts must not branch on
+    /// this text; branch on [`Self::code`].
     pub message: String,
+    /// High-level operation category (`"schema"`, `"udf"`, …).
+    pub operation: String,
+    /// Whether the caller may retry after backing off.
+    pub retryable: bool,
+    /// Optional structured key/value parameters for catalog templating.
+    pub params: Option<std::collections::BTreeMap<String, String>>,
 }
 
-/// Encode an [`Error`] into an `Error` frame body.
+/// Encode an [`Error`] into an `Error` frame body as compact diagnostic JSON.
 pub fn encode_error_body(error: &Error) -> Vec<u8> {
-    let mut body = Vec::new();
-    push_bytes(&mut body, error.code().as_bytes());
-    push_bytes(&mut body, error.to_string().as_bytes());
-    body
+    let json = serde_json::to_vec(&error.to_json())
+        .expect("YYDB diagnostic JSON must never fail to encode");
+    json
 }
 
-/// Decode an `Error` frame body.
+/// Decode an `Error` frame body from diagnostic JSON.
 pub fn decode_error(body: &[u8]) -> Result<WireError> {
-    let mut offset = 0;
-    let code_len = read_u32(body, &mut offset)?;
-    let code = read_bytes(body, &mut offset, code_len)?;
-    let message_len = read_u32(body, &mut offset)?;
-    let message = read_bytes(body, &mut offset, message_len)?;
-    let code = std::str::from_utf8(code)
-        .map_err(|_| Error::Corrupt("wire error code is not utf-8"))?
+    let value: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|_| Error::Corrupt("wire error body is not valid JSON"))?;
+    let code = value["code"]
+        .as_str()
+        .ok_or_else(|| Error::Corrupt("wire error body missing code"))?
         .to_owned();
-    let message = std::str::from_utf8(message)
-        .map_err(|_| Error::Corrupt("wire error message is not utf-8"))?
+    let message = value["message"]
+        .as_str()
+        .ok_or_else(|| Error::Corrupt("wire error body missing message"))?
         .to_owned();
-    Ok(WireError { code, message })
+    let operation = value["operation"]
+        .as_str()
+        .ok_or_else(|| Error::Corrupt("wire error body missing operation"))?
+        .to_owned();
+    let retryable = value["retryable"]
+        .as_bool()
+        .ok_or_else(|| Error::Corrupt("wire error body missing retryable"))?;
+    let params = value["params"].as_object().map(|obj| {
+        obj.iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+            .collect()
+    });
+    Ok(WireError {
+        code,
+        message,
+        operation,
+        retryable,
+        params,
+    })
 }
 
 /// Split `host:port` / `[::1]:port` into host and port string.

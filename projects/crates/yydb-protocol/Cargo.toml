@@ -13,3 +13,4 @@ categories = ["database-implementations"]
 
 [dependencies]
 yydb-types = { workspace = true }
+serde_json = { workspace = true }

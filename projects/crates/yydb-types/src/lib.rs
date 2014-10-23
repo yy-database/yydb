@@ -203,6 +203,127 @@ impl Error {
             Self::Remote { code, .. } => code,
         }
     }
+
+    /// High-level operation category for diagnostic catalog routing.
+    ///
+    /// One of: `"io"` / `"schema"` / `"udf"` / `"object"` / `"cas"` /
+    /// `"lease"` / `"fencing"` / `"protocol"` / `"session"` / `"quota"` /
+    /// `"unsupported"` / `"remote"`. Hosts use this to pick the right section
+    /// of a locale catalog.
+    pub fn operation(&self) -> &'static str {
+        match self {
+            Self::Io(_) => "io",
+            Self::Corrupt(_) => "object",
+            Self::SchemaConflict { .. } | Self::Schema { .. } => "schema",
+            Self::UdfNotFound { .. }
+            | Self::UdfArity { .. }
+            | Self::Udf { .. }
+            | Self::UdfVersionMismatch { .. } => "udf",
+            Self::ObjectNotFound { .. } | Self::ObjectCorrupt { .. } => "object",
+            Self::Unsupported(_) => "unsupported",
+            Self::Protocol { .. } => "protocol",
+            Self::CasConflict { .. } => "cas",
+            Self::LeaseUnavailable { .. } => "lease",
+            Self::FencingMismatch { .. } => "fencing",
+            Self::LeaseExpired { .. } => "lease",
+            Self::QuotaExceeded { .. } => "quota",
+            Self::SessionClosed => "session",
+            Self::Remote { .. } => "remote",
+        }
+    }
+
+    /// Structured key/value pairs for diagnostic templating, if the variant
+    /// carries machine-readable parameters.
+    ///
+    /// Example: [`Self::UdfArity`] returns `[("name", "…"), ("expected", "3"),
+    /// ("got", "5")]`. Hosts pass these to `@vmz/diagnostic` as the `args` field.
+    pub fn params(&self) -> Option<Vec<(&'static str, String)>> {
+        let p: Vec<(&'static str, String)> = match self {
+            Self::Io(_) | Self::Corrupt(_) | Self::Unsupported(_) | Self::SessionClosed => {
+                return None;
+            }
+            Self::SchemaConflict { expected, found } => vec![
+                ("expected", expected.to_string()),
+                ("found", found.to_string()),
+            ],
+            Self::UdfNotFound { name } | Self::Udf { name, .. } => {
+                vec![("name", name.clone())]
+            }
+            Self::UdfArity {
+                name,
+                expected,
+                got,
+            } => vec![
+                ("name", name.clone()),
+                ("expected", expected.to_string()),
+                ("got", got.to_string()),
+            ],
+            Self::Schema { message } => vec![("message", message.clone())],
+            Self::ObjectNotFound { hash_hex } => vec![("hash", hash_hex.clone())],
+            Self::ObjectCorrupt { message } => vec![("detail", message.clone())],
+            Self::Protocol { message } => vec![("detail", message.clone())],
+            Self::CasConflict { key } => vec![("key", key.clone())],
+            Self::LeaseUnavailable { key } | Self::FencingMismatch { key } => {
+                vec![("key", key.clone())]
+            }
+            Self::LeaseExpired { key } => vec![("key", key.clone())],
+            Self::UdfVersionMismatch {
+                name,
+                expected,
+                got,
+            } => vec![
+                ("name", name.clone()),
+                ("expected", expected.to_string()),
+                ("got", got.to_string()),
+            ],
+            Self::QuotaExceeded { namespace } => vec![("namespace", namespace.clone())],
+            Self::Remote { code, message } => {
+                vec![("code", code.clone()), ("message", message.clone())]
+            }
+        };
+        Some(p)
+    }
+
+    /// Whether the caller may retry the same operation after backing off.
+    ///
+    /// `true` for transient failures (`Io`, `Protocol`, `LeaseUnavailable`,
+    /// `LeaseExpired`). All other variants are non-retryable and require the
+    /// caller to fix the underlying cause.
+    pub fn retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Io(_)
+                | Self::Protocol { .. }
+                | Self::LeaseUnavailable { .. }
+                | Self::LeaseExpired { .. }
+        )
+    }
+
+    /// Encode the full diagnostic contract as a JSON object.
+    ///
+    /// Every boundary surface (N-API, WASM, wire) serializes this object so
+    /// that the host side receives a machine-identifiable error with stable
+    /// keys: `code`, `operation`, `retryable`, `message`, and `params`
+    /// (when present). The `message` field carries the human-readable
+    /// [`Display`](fmt::Display) text so hosts can render it immediately
+    /// without further resolution.
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::{json, Value};
+        let mut obj = json!({
+            "code": self.code(),
+            "operation": self.operation(),
+            "retryable": self.retryable(),
+            "message": self.to_string(),
+        });
+        if let Some(pairs) = self.params() {
+            let mut map = serde_json::Map::new();
+            for (key, value) in pairs {
+                map.insert(key.to_owned(), Value::String(value));
+            }
+            obj["params"] = Value::Object(map);
+        }
+        obj
+    }
 }
 
 /// Monotonic commit counter returned from fenced batch commits.

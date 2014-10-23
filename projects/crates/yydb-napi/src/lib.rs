@@ -3,6 +3,12 @@
 //! The binding exposes one handle per open file plus single-purpose methods.
 //! User-facing commands (`init`, `info`, `serve`) are composed in TypeScript so
 //! this crate never grows CLI aggregate helpers.
+//!
+//! Every `yydb::Error` surface carries the full diagnostic contract: the JS
+//! `Error.message` is a compact JSON object produced by
+//! [`yydb::Error::to_json`]. Hosts that need only the human-readable text must
+//! parse the JSON and pick the `"message"` key; branching logic should prefer
+//! the `"code"` key.
 
 #![deny(missing_docs)]
 
@@ -10,7 +16,9 @@ use napi::bindgen_prelude::{Buffer, Result};
 use napi_derive::napi;
 
 fn reason(error: yydb::Error) -> napi::Error {
-    napi::Error::from_reason(error.to_string())
+    let json = serde_json::to_string(&error.to_json())
+        .unwrap_or_else(|_| error.to_string());
+    napi::Error::from_reason(json)
 }
 
 /// Embedded `yydb` engine version string.

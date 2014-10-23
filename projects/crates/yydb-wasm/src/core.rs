@@ -3,8 +3,17 @@
 use serde_json::{json, Value as JsonValue};
 use yydb::{
     catalog::{self, ExecutionTypeKind},
-    Connection, Result, SchemaVersion, Value,
+    Connection, Error, Result, SchemaVersion, Value,
 };
+
+/// Build the full diagnostic contract JSON object for any error branch.
+///
+/// All `*_json` WASM helpers embed this as the `"error"` field on failed
+/// outcomes, so browser hosts receive `{ code, operation, retryable, message,
+/// params? }` instead of a flattened display string.
+fn err_diag(err: &Error) -> JsonValue {
+    err.to_json()
+}
 
 /// Outcome of validating a VOS schema document.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +100,7 @@ pub fn introspect_schema_json(source: &str) -> String {
             "ok": false,
             "schemaFingerprint": "",
             "tables": [],
-            "error": err.to_string(),
+            "error": err_diag(&err),
         })
         .to_string(),
     }
@@ -103,14 +112,12 @@ pub(crate) fn unit_result_json(result: Result<()>) -> String {
             "ok": true,
             "rows": [],
             "error": JsonValue::Null,
-            "code": JsonValue::Null,
         })
         .to_string(),
         Err(err) => json!({
             "ok": false,
             "rows": [],
-            "error": err.to_string(),
-            "code": err.code(),
+            "error": err_diag(&err),
         })
         .to_string(),
     }
@@ -122,21 +129,18 @@ pub(crate) fn kv_get_json(result: Result<Option<Vec<u8>>>) -> String {
             "ok": true,
             "value": bytes,
             "error": JsonValue::Null,
-            "code": JsonValue::Null,
         })
         .to_string(),
         Ok(None) => json!({
             "ok": true,
             "value": JsonValue::Null,
             "error": JsonValue::Null,
-            "code": JsonValue::Null,
         })
         .to_string(),
         Err(err) => json!({
             "ok": false,
             "value": JsonValue::Null,
-            "error": err.to_string(),
-            "code": err.code(),
+            "error": err_diag(&err),
         })
         .to_string(),
     }
@@ -167,22 +171,19 @@ pub(crate) fn scalar_call_json(result: Result<Value>) -> String {
                 "ok": true,
                 "value": scalar,
                 "error": JsonValue::Null,
-                "code": JsonValue::Null,
             })
             .to_string(),
             Err(err) => json!({
                 "ok": false,
                 "value": JsonValue::Null,
-                "error": err.to_string(),
-                "code": err.code(),
+                "error": err_diag(&err),
             })
             .to_string(),
         },
         Err(err) => json!({
             "ok": false,
             "value": JsonValue::Null,
-            "error": err.to_string(),
-            "code": err.code(),
+            "error": err_diag(&err),
         })
         .to_string(),
     }
@@ -209,21 +210,18 @@ pub(crate) fn schema_get_json(result: Result<Option<SchemaVersion>>) -> String {
                 "document": schema.document,
             },
             "error": JsonValue::Null,
-            "code": JsonValue::Null,
         })
         .to_string(),
         Ok(None) => json!({
             "ok": true,
             "schema": JsonValue::Null,
             "error": JsonValue::Null,
-            "code": JsonValue::Null,
         })
         .to_string(),
         Err(err) => json!({
             "ok": false,
             "schema": JsonValue::Null,
-            "error": err.to_string(),
-            "code": err.code(),
+            "error": err_diag(&err),
         })
         .to_string(),
     }

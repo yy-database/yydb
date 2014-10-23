@@ -47,7 +47,8 @@
         "access": "public"
     },
     "dependencies": {
-        "@vmz/commander": "^0.2.0",
+        "@vmz/commander": "^0.3.5",
+        "@vmz/diagnostic": "^0.3.5",
         "@voml/vos": "^0.0.1"
     },
     "devDependencies": {
@@ -58,9 +59,9 @@
         "node": ">=18"
     },
     "optionalDependencies": {
-        "@yydb/yydb-win32-x64": "workspace:*",
-        "@yydb/yydb-linux-x64": "workspace:*",
+        "@yydb/yydb-darwin-arm64": "workspace:*",
         "@yydb/yydb-darwin-x64": "workspace:*",
-        "@yydb/yydb-darwin-arm64": "workspace:*"
+        "@yydb/yydb-linux-x64": "workspace:*",
+        "@yydb/yydb-win32-x64": "workspace:*"
     }
 }
