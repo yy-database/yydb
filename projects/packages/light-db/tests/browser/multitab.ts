@@ -5,12 +5,12 @@
  * 验证写租约互斥、关闭通知与重开后的一致性。
  */
 
-import { BrowserDatabase, LightDbError, listenDatabaseEvents, OpfsStorageAdapterFactory } from '../../src/index';
+import { Database, LightDbError, listenDatabaseEvents, OpfsStorageAdapterFactory } from '../../src/index';
 
 /** 页面内保留的数据库与监听器 */
 interface MultitabScope {
     __yydbEvents: string[];
-    __yydbHeld: BrowserDatabase | null;
+    __yydbHeld: Database | null;
     __yydbUnsubscribe: (() => void) | null;
 }
 
@@ -55,7 +55,7 @@ export function collectedEvents(): string[] {
 export async function openAndHold(name: string, key: string, value: string): Promise<OpenAttempt> {
     const scope = scopeOf();
     try {
-        const db = await BrowserDatabase.open(name, { storage: new OpfsStorageAdapterFactory() });
+        const db = await Database.open(name, { storage: new OpfsStorageAdapterFactory() });
         await db.put(key, encode(value));
         scope.__yydbHeld = db;
         return { ok: true };
@@ -101,7 +101,7 @@ export async function closeHeld(): Promise<void> {
  */
 export async function tryOpenAndRead(name: string, key: string): Promise<OpenAttempt> {
     try {
-        const db = await BrowserDatabase.open(name, { storage: new OpfsStorageAdapterFactory() });
+        const db = await Database.open(name, { storage: new OpfsStorageAdapterFactory() });
         const value = await db.get(key);
         await db.close();
         return { ok: true, value: value ? new TextDecoder().decode(value) : null };
@@ -118,7 +118,7 @@ export async function tryOpenAndRead(name: string, key: string): Promise<OpenAtt
  */
 export async function openWriteClose(name: string, key: string, value: string): Promise<OpenAttempt> {
     try {
-        const db = await BrowserDatabase.open(name, { storage: new OpfsStorageAdapterFactory() });
+        const db = await Database.open(name, { storage: new OpfsStorageAdapterFactory() });
         await db.put(key, encode(value));
         await db.close();
         return { ok: true };

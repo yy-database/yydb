@@ -26,7 +26,18 @@ export type WasmSession = {
     ensureSchema(document: string): string;
     get(key: string): string;
     put(key: string, value: Uint8Array): string;
+    delete(key: string): string;
+    scanPrefix(prefix: string, after: string | null | undefined, limit: number): string;
+    writeBatch(body: Uint8Array): string;
+    compareExchange(key: string, expected?: Uint8Array | null, replacement?: Uint8Array | null): string;
     getSchema(): string;
+    queryVos(source: string): string;
+    executeVosWrite(source: string): string;
+    migrateSchema(document: string, renames_json?: string | null): string;
+    begin(): string;
+    commit(): string;
+    rollback(): string;
+    checkpoint(): string;
     info(): string;
     setMicroHostInvoker(invoker: (payload: MicroHostInvokePayload) => unknown): void;
     registerMicro(body: Uint8Array): string;

@@ -57,6 +57,8 @@ export function isRetryableYydbCode(code: string): boolean {
 export interface YydbErrorOptions {
     /** Operation that failed (`schemaGet`, `kvPut`, `query`, …). */
     operation?: string;
+    /** Structured parameters for catalog templating (when present). */
+    params?: Readonly<Record<string, string>>;
     /** Underlying failure when this error wraps one. */
     cause?: unknown;
 }
@@ -69,6 +71,8 @@ export class YydbError extends Error {
     readonly operation: string;
     /** Whether the same call may be retried. */
     readonly retryable: boolean;
+    /** Structured parameters for catalog templating (when present). */
+    readonly params?: Readonly<Record<string, string>>;
 
     constructor(code: YydbErrorCode, message: string, options: YydbErrorOptions = {}) {
         super(message, { cause: options.cause });
@@ -76,6 +80,64 @@ export class YydbError extends Error {
         this.code = code;
         this.operation = options.operation ?? 'unknown';
         this.retryable = isRetryableYydbCode(code);
+        this.params = options.params;
+    }
+
+    /**
+     * Parse the diagnostic JSON that N-API and WASM surfaces embed in their
+     * `Error.message`. Every boundary surface (N-API reason field, WASM JSON
+     * envelope, wire protocol) carries the same `{ code, operation, retryable,
+     * message, params? }` contract produced by `yydb::Error::to_json`.
+     *
+     * Returns the parsed {@link YydbError} if `value` is a diagnostic object,
+     * or `null` when the input is plain text. Hosts typically use this as a
+     * fallback in catch blocks:
+     *
+     * ```ts
+     * try {
+     *     await db.put('key', value);
+     * } catch (err) {
+     *     const parsed = YydbError.fromDiagnosticJson(
+     *         err instanceof Error ? err.message : String(err),
+     *     );
+     *     if (parsed) {
+     *         // branch on parsed.code / retryable / operation
+     *     }
+     * }
+     * ```
+     */
+    static fromDiagnosticJson(value: unknown): YydbError | null {
+        let obj: Record<string, unknown>;
+        if (typeof value === 'string') {
+            try {
+                const parsed = JSON.parse(value);
+                if (!parsed || typeof parsed !== 'object') return null;
+                obj = parsed as Record<string, unknown>;
+            } catch {
+                return null;
+            }
+        } else if (value && typeof value === 'object') {
+            obj = value as Record<string, unknown>;
+        } else {
+            return null;
+        }
+        const code = typeof obj.code === 'string' ? obj.code : null;
+        const message = typeof obj.message === 'string' ? obj.message : '';
+        if (!code) return null;
+        const operation = typeof obj.operation === 'string' ? obj.operation : undefined;
+        const retryable = typeof obj.retryable === 'boolean' ? obj.retryable : undefined;
+        const params =
+            obj.params && typeof obj.params === 'object'
+                ? (obj.params as Record<string, string>)
+                : undefined;
+        const err = new YydbError(code as YydbErrorCode, message, {
+            operation,
+            params,
+        });
+        if (typeof retryable === 'boolean') {
+            (err as YydbError & { retryable: boolean }).retryable = retryable;
+        }
+        return err;
     }
 }
 

@@ -5,6 +5,7 @@ import {
     type WasmSession,
 } from '@yydb/yydb-unknown-wasm32';
 import { emitSource, type EmittableItem } from '@voml/vos';
+import { LightDbError } from '../errors/index.js';
 
 /** WASM session 通用 JSON 返回形状。 */
 interface WasmResult {
@@ -12,8 +13,9 @@ interface WasmResult {
     rows?: unknown[];
     value?: unknown;
     schema?: { version: number; document: string } | null;
-    error?: string | null;
-    code?: string | null;
+    success?: boolean;
+    error?: unknown;
+    code?: unknown;
 }
 
 /** Schema 版本与文档。 */
@@ -22,144 +24,279 @@ export interface SchemaVersion {
     document: string;
 }
 
+/** One row from a scan. */
+export interface ScanRow {
+    key: string;
+    value: Uint8Array;
+}
+
+/** Options for scan. */
+export interface ScanOptions {
+    prefix?: string;
+    after?: string | null;
+    limit?: number;
+}
+
+/** One batch change. */
+export interface BatchChange {
+    key: string;
+    value: Uint8Array | string | null;
+}
+
+/** Options for migrateSchema. */
+export interface MigrateOptions {
+    renames?: ReadonlyArray<
+        | { fromType: string; toType: string }
+        | { type: string; fromField: string; toField: string }
+    >;
+}
+
 /** 打开浏览器数据库的选项。 */
-export interface LightDatabaseOptions {
+export interface OpenOptions {
     /** 使用内存 session（测试专用；默认使用 OPFS 持久 session）。 */
     memory?: boolean;
 }
 
-/** 扩展 WASM session 的浏览器端补充方法（Rust 侧已导出）。 */
-interface ExtendedSession extends WasmSession {
-    delete(key: string): string;
-    begin(): string;
-    commit(): string;
-    rollback(): string;
-    checkpoint(): string;
+/** Transaction-local handle for callback-style transactions. */
+export class TransactionHandle {
+    constructor(private readonly session: WasmSession) {}
+
+    private parseResult<T>(raw: string): T {
+        const parsed = JSON.parse(raw) as WasmResult;
+        if (!parsed.ok) {
+            const err = LightDbError.fromDiagnosticJson(parsed.error);
+            throw err ?? new Error(typeof parsed.error === 'string' ? parsed.error : 'wasm error');
+        }
+        return parsed as T;
+    }
+
+    async get(key: string): Promise<Uint8Array | null> {
+        const raw = JSON.parse(this.session.get(key)) as WasmResult;
+        if (!raw.ok) throw new Error(raw.error as string);
+        if (raw.value === null || raw.value === undefined) return null;
+        if (Array.isArray(raw.value)) return new Uint8Array(raw.value as number[]);
+        return new Uint8Array(raw.value as ArrayLike<number>);
+    }
+
+    async put(key: string, value: Uint8Array | string): Promise<void> {
+        const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+        this.parseResult(this.session.put(key, bytes));
+    }
+
+    async delete(key: string): Promise<void> {
+        this.parseResult(this.session.delete(key));
+    }
+
+    async scan(options: ScanOptions = {}): Promise<ScanRow[]> {
+        const raw = JSON.parse(this.session.scanPrefix(options.prefix ?? '', options.after ?? null, options.limit ?? 1000)) as WasmResult;
+        if (!raw.ok) throw new Error(raw.error as string);
+        return (raw.rows as { key: string; value: number[] }[] ?? []).map((r) => ({
+            key: r.key,
+            value: new Uint8Array(r.value),
+        }));
+    }
+
+    async batch(changes: readonly BatchChange[]): Promise<void> {
+        const body = changes.map((c) => ({
+            key: c.key,
+            value: c.value === null ? null : typeof c.value === 'string' ? Array.from(new TextEncoder().encode(c.value)) : Array.from(c.value),
+        }));
+        this.parseResult(this.session.writeBatch(new TextEncoder().encode(JSON.stringify(body))));
+    }
+
+    async compareExchange(
+        key: string, expected: Uint8Array | string | null, replacement: Uint8Array | string | null,
+    ): Promise<boolean> {
+        const toBytes = (v: Uint8Array | string | null): Uint8Array | null =>
+            v === null ? null : typeof v === 'string' ? new TextEncoder().encode(v) : v;
+        const raw = JSON.parse(this.session.compareExchange(key, toBytes(expected), toBytes(replacement))) as WasmResult;
+        if (!raw.ok) throw new Error(raw.error as string);
+        return raw.success ?? false;
+    }
+
+    async query<T = Record<string, unknown>>(source: string): Promise<T[]> {
+        const raw = JSON.parse(this.session.queryVos(source)) as WasmResult;
+        if (!raw.ok) throw new Error(raw.error as string);
+        return (raw.rows ?? []) as T[];
+    }
+
+    async execute(source: string): Promise<void> {
+        this.parseResult(this.session.executeVosWrite(source));
+    }
 }
 
-/** 浏览器侧 YYDB 数据库句柄，委托给 Rust WASM 核心。 */
-export class BrowserDatabase {
+/**
+ * Browser/WASM 侧 YYDB 数据库句柄。
+ *
+ * 与 `@yydb/yydb` 的 {@link Database} 同名——宿主靠 import 来源区分：
+ *
+ * ```ts
+ * import { Database } from '@yydb/yydb';       // Node 原生
+ * import { Database } from '@yydb/light-db';   // 浏览器 WASM
+ * ```
+ */
+export class Database {
     /** 数据库名（OPFS 路径）。 */
     public readonly name: string;
 
-    private readonly session: ExtendedSession;
+    private readonly session: WasmSession;
 
-    private constructor(name: string, session: ExtendedSession) {
+    private constructor(name: string, session: WasmSession) {
         this.name = name;
         this.session = session;
     }
 
     /** 初始化 WASM 并打开一个 session（memory 或 OPFS persistent）。 */
-    public static async open(name: string, options: LightDatabaseOptions = {}): Promise<BrowserDatabase> {
+    public static async open(name: string, options: OpenOptions = {}): Promise<Database> {
         if (!name || name.length === 0) {
             throw new Error('database name must not be empty');
         }
 
         await initWasm();
 
-        const base: WasmSession = options.memory
+        const session: WasmSession = options.memory
             ? createMemorySession()
             : openPersistentSession(name);
 
-        return new BrowserDatabase(name, base as ExtendedSession);
+        return new Database(name, session);
+    }
+
+    /** 解析 WASM JSON 结果，失败时转 LightDbError。 */
+    private parseResult<T>(raw: string): T {
+        const parsed = JSON.parse(raw) as WasmResult;
+        if (!parsed.ok) {
+            const err = LightDbError.fromDiagnosticJson(parsed.error);
+            throw err ?? new Error(typeof parsed.error === 'string' ? parsed.error : 'wasm error');
+        }
+        return parsed as T;
     }
 
     /** 读取已持久化的 schema，或 `null`。 */
-    public async schema(): Promise<SchemaVersion | null> {
-        const raw = JSON.parse(this.session.getSchema()) as WasmResult;
-        if (!raw.ok) {
-            throw new Error(raw.error ?? 'getSchema failed');
-        }
-        if (!raw.schema) {
-            return null;
-        }
+    public async getSchema(): Promise<SchemaVersion | null> {
+        const raw = this.parseResult<WasmResult>(this.session.getSchema());
+        if (!raw.schema) return null;
         return raw.schema;
     }
 
-    /**
-     * 声明 schema 文档。接受原始 `.vos` 源码字符串，或 `@voml/vos`
-     * descriptor（`v.table()` / `v.class()`），或多个 descriptor。
-     */
+    /** 声明 schema 文档。 */
     public async ensureSchema(...input: [string] | EmittableItem[]): Promise<void> {
         const document = typeof input[0] === 'string' ? input[0] : emitSource(input as EmittableItem[]);
-        const raw = JSON.parse(this.session.ensureSchema(document)) as WasmResult;
-        if (!raw.ok) {
-            throw new Error(raw.error ?? 'ensureSchema failed');
-        }
+        this.parseResult(this.session.ensureSchema(document));
     }
 
     /** 读取键，或 `null`。 */
     public async get(key: string): Promise<Uint8Array | null> {
         const raw = JSON.parse(this.session.get(key)) as WasmResult;
-        if (!raw.ok) {
-            throw new Error(raw.error ?? `get(${key}) failed`);
-        }
-        if (raw.value === null || raw.value === undefined) {
-            return null;
-        }
-        // WASM JSON 序列化为普通数组 [1, 2, 3, ...]；转回 Uint8Array
-        if (raw.value instanceof Uint8Array) {
-            return raw.value;
-        }
-        if (Array.isArray(raw.value)) {
-            return new Uint8Array(raw.value as number[]);
-        }
-        // 兜底：如果是 base64 字符串等，尝试 new Uint8Array
+        if (!raw.ok) throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
+        if (raw.value === null || raw.value === undefined) return null;
+        if (Array.isArray(raw.value)) return new Uint8Array(raw.value as number[]);
         return new Uint8Array(raw.value as ArrayLike<number>);
     }
 
     /** 写入键。 */
-    public async put(key: string, value: Uint8Array): Promise<void> {
-        const raw = JSON.parse(this.session.put(key, value)) as WasmResult;
-        if (!raw.ok) {
-            throw new Error(raw.error ?? `put(${key}) failed`);
+    public async put(key: string, value: Uint8Array | string): Promise<void> {
+        const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+        this.parseResult(this.session.put(key, bytes));
+    }
+
+    /** 删除键。 */
+    public async delete(key: string): Promise<void> {
+        this.parseResult(this.session.delete(key));
+    }
+
+    /** 扫描键值对。 */
+    public async scan(options: ScanOptions = {}): Promise<ScanRow[]> {
+        const raw = JSON.parse(this.session.scanPrefix(
+            options.prefix ?? '',
+            options.after ?? null,
+            options.limit ?? 1000,
+        )) as WasmResult;
+        if (!raw.ok) throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
+        return (raw.rows as { key: string; value: number[] }[] ?? []).map((r) => ({
+            key: r.key,
+            value: new Uint8Array(r.value),
+        }));
+    }
+
+    /** 原子批量写入/删除。 */
+    public async batch(changes: readonly BatchChange[]): Promise<void> {
+        const body = changes.map((c) => ({
+            key: c.key,
+            value: c.value === null ? null : typeof c.value === 'string' ? Array.from(new TextEncoder().encode(c.value)) : Array.from(c.value),
+        }));
+        this.parseResult(this.session.writeBatch(new TextEncoder().encode(JSON.stringify(body))));
+    }
+
+    /** Compare-and-swap。 */
+    public async compareExchange(
+        key: string, expected: Uint8Array | string | null, replacement: Uint8Array | string | null,
+    ): Promise<boolean> {
+        const toBytes = (v: Uint8Array | string | null): Uint8Array | null =>
+            v === null ? null : typeof v === 'string' ? new TextEncoder().encode(v) : v;
+        const raw = JSON.parse(this.session.compareExchange(key, toBytes(expected), toBytes(replacement))) as WasmResult;
+        if (!raw.ok) throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
+        return raw.success ?? false;
+    }
+
+    /** Callback-style 事务：自动 begin/commit，异常自动 rollback。 */
+    public async transaction<T>(fn: (tx: TransactionHandle) => Promise<T>): Promise<T> {
+        this.parseResult(this.session.begin());
+        const tx = new TransactionHandle(this.session);
+        try {
+            const result = await fn(tx);
+            this.parseResult(this.session.commit());
+            return result;
+        } catch (err) {
+            try {
+                this.session.rollback();
+            } catch {
+                // don't mask original
+            }
+            throw err;
         }
     }
 
-    /** 删除键（底层等价 write_batch([(key, None)])）。 */
-    public async delete(key: string): Promise<boolean> {
-        const raw = JSON.parse(this.session.delete(key)) as WasmResult;
-        if (!raw.ok) {
-            throw new Error(raw.error ?? `delete(${key}) failed`);
-        }
-        return true;
+    /** 执行 VOS read pipeline，返回 typed rows。 */
+    public async query<T = Record<string, unknown>>(source: string): Promise<T[]> {
+        const raw = JSON.parse(this.session.queryVos(source)) as WasmResult;
+        if (!raw.ok) throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
+        return (raw.rows ?? []) as T[];
     }
 
-    /** 开启事务。 */
-    public async begin(): Promise<void> {
-        const raw = JSON.parse(this.session.begin()) as WasmResult;
-        if (!raw.ok) {
-            throw new Error(raw.error ?? 'begin failed');
-        }
+    /** 执行 VOS write program。 */
+    public async execute(source: string): Promise<void> {
+        this.parseResult(this.session.executeVosWrite(source));
     }
 
-    /** 提交事务。 */
-    public async commit(): Promise<void> {
-        const raw = JSON.parse(this.session.commit()) as WasmResult;
-        if (!raw.ok) {
-            throw new Error(raw.error ?? 'commit failed');
+    /** 发布新 schema 版本。 */
+    public async migrateSchema(
+        documentOrSource: string | EmittableItem,
+        ...rest: (EmittableItem | MigrateOptions)[]
+    ): Promise<void> {
+        let document: string;
+        let options: MigrateOptions = {};
+        const all = [documentOrSource, ...rest];
+        const last = all[all.length - 1];
+        if (
+            last && typeof last === 'object' &&
+            !('table' in (last as Record<string, unknown>)) &&
+            !('class' in (last as Record<string, unknown>)) &&
+            ('renames' in (last as Record<string, unknown>) || Object.keys(last as object).length === 0)
+        ) {
+            options = (all.pop() as MigrateOptions) ?? {};
         }
-    }
-
-    /** 回滚事务。 */
-    public async rollback(): Promise<void> {
-        const raw = JSON.parse(this.session.rollback()) as WasmResult;
-        if (!raw.ok) {
-            throw new Error(raw.error ?? 'rollback failed');
+        if (typeof all[0] === 'string') {
+            document = all[0] as string;
+        } else {
+            document = emitSource(all as EmittableItem[]);
         }
+        const renamesJson = options.renames?.length ? JSON.stringify(options.renames) : null;
+        this.parseResult(this.session.migrateSchema(document, renamesJson));
     }
 
     /** 执行检查点（折叠 WAL）。 */
     public async checkpoint(): Promise<void> {
-        const raw = JSON.parse(this.session.checkpoint()) as WasmResult;
-        if (!raw.ok) {
-            throw new Error(raw.error ?? 'checkpoint failed');
-        }
-    }
-
-    /** 数据库统计（暂不可用）。 */
-    public stats(): never {
-        throw new Error('stats() is not available on the WASM core');
+        this.parseResult(this.session.checkpoint());
     }
 
     /** 关闭 session。 */
@@ -168,10 +305,10 @@ export class BrowserDatabase {
     }
 }
 
-/** 打开浏览器数据库的便捷函数。 */
+/** 打开浏览器数据库的便捷函数（等价于 {@link Database.open}）。 */
 export async function openLightDatabase(
     name: string,
-    options: LightDatabaseOptions = {},
-): Promise<BrowserDatabase> {
-    return BrowserDatabase.open(name, options);
+    options: OpenOptions = {},
+): Promise<Database> {
+    return Database.open(name, options);
 }

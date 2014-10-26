@@ -14,6 +14,7 @@ import {
 } from '../shared/micro.js';
 import { loadNative } from '../native/binding.js';
 import type { UdfScalarDescriptor } from '../shared/udf-types.js';
+import { YydbError } from '../shared/errors.js';
 
 /** Published schema metadata. */
 export interface SchemaVersion {
@@ -25,6 +26,76 @@ export interface SchemaVersion {
 export interface OpenOptions {
     /** Create parent directories when missing (default: true). */
     mkdir?: boolean;
+}
+
+/** One row from a {@link Database.scan}. */
+export interface ScanRow {
+    key: string;
+    value: Uint8Array;
+}
+
+/** Options for {@link Database.scan}. */
+export interface ScanOptions {
+    /** Include this prefix in every returned key; default `""` returns everything. */
+    prefix?: string;
+    /** Exclusive continuation cursor from a previous scan's last row; default `null` starts fresh. */
+    after?: string | null;
+    /** Max rows returned per call; default `1000`. */
+    limit?: number;
+}
+
+/** One change in a {@link Database.batch}. Use `null` to delete. */
+export interface BatchChange {
+    key: string;
+    value: Uint8Array | string | null;
+}
+
+/** Options for {@link Database.migrateSchema}. */
+export interface MigrateOptions {
+    /** Rename entries — `fromType`/`toType` updates a type name; `type`/`fromField`/`toField` updates one field. */
+    renames?: ReadonlyArray<
+        | { fromType: string; toType: string }
+        | { type: string; fromField: string; toField: string }
+    >;
+}
+
+/**
+ * Transaction-local handle passed to {@link Database.transaction} callbacks.
+ * All CRUD methods forward to the underlying native handle while the
+ * transaction is in flight. Commit/rollback are owned by {@link Database}.
+ */
+export class TransactionHandle {
+    constructor(private readonly native: ReturnType<ReturnType<typeof loadNative>['Database']['open']>) {}
+
+    async get(key: string): Promise<Uint8Array | null> { return this.native.get(key); }
+    async put(key: string, value: Uint8Array | string): Promise<void> {
+        const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+        this.native.put(key, bytes);
+    }
+    async delete(key: string): Promise<void> { this.native.delete(key); }
+    async scan(options: ScanOptions = {}): Promise<ScanRow[]> {
+        const rowsJson = this.native.scanPrefix(options.prefix ?? '', options.after ?? null, options.limit ?? 1000);
+        const rows = JSON.parse(rowsJson) as { key: string; value: number[] }[];
+        return rows.map((r) => ({ key: r.key, value: new Uint8Array(r.value) }));
+    }
+    async batch(changes: readonly BatchChange[]): Promise<void> {
+        const body = changes.map((c) => ({
+            key: c.key,
+            value: c.value === null ? null : typeof c.value === 'string' ? Array.from(new TextEncoder().encode(c.value)) : Array.from(c.value),
+        }));
+        this.native.writeBatch(JSON.stringify(body));
+    }
+    async compareExchange(
+        key: string, expected: Uint8Array | string | null, replacement: Uint8Array | string | null,
+    ): Promise<boolean> {
+        const toBytes = (v: Uint8Array | string | null): Uint8Array | null =>
+            v === null ? null : typeof v === 'string' ? new TextEncoder().encode(v) : v;
+        return this.native.compareExchange(key, toBytes(expected), toBytes(replacement));
+    }
+    async query<T = Record<string, unknown>>(source: string): Promise<T[]> {
+        return JSON.parse(this.native.queryVos(source)) as T[];
+    }
+    async execute(source: string): Promise<void> { this.native.executeVosWrite(source); }
 }
 
 /**
@@ -91,26 +162,12 @@ export class Database {
      * Accepts either a raw `.vos` source string, one `@voml/vos` descriptor
      * (`v.table()`, `v.class()`) or a list of descriptors. When descriptors
      * are supplied, they are rendered to source via `emitSource` first.
-     *
-     * ```ts
-     * // Raw source (unchanged behaviour):
-     * await db.ensureSchema('namespace demo { table User { @@id: uuid } }');
-     *
-     * // Zod-like builder — the Vos schema-ecosystem sweet spot:
-     * const User = v.table('User', { id: v.uuid().primary(), name: v.utf8() });
-     * await db.ensureSchema(User);
-     *
-     * // Multiple declarations in one shot:
-     * await db.ensureSchema(TableA, TableB, ClassC);
-     * ```
      */
     async ensureSchema(...input: [string] | [string, ...EmittableItem[]] | EmittableItem[]): Promise<void> {
         let document: string;
         if (typeof input[0] === 'string') {
-            // Raw source string, optionally followed by descriptors we just ignore.
             document = input[0];
         } else {
-            // One or more Vos descriptor items → render to source.
             document = emitSource(input as EmittableItem[]);
         }
         this.native.ensureSchema(document);
@@ -127,9 +184,131 @@ export class Database {
         this.native.put(key, bytes);
     }
 
+    /** Delete one record by key. Silently succeeds when the key is absent. */
+    async delete(key: string): Promise<void> {
+        this.native.delete(key);
+    }
+
+    /** List key/value pairs in lexical order. `prefix` defaults to `""` (all keys). */
+    async scan(options: ScanOptions = {}): Promise<ScanRow[]> {
+        const rowsJson = this.native.scanPrefix(
+            options.prefix ?? '',
+            options.after ?? null,
+            options.limit ?? 1000,
+        );
+        const rows = JSON.parse(rowsJson) as { key: string; value: number[] }[];
+        return rows.map((r) => ({ key: r.key, value: new Uint8Array(r.value) }));
+    }
+
+    /** Atomically write or delete many keys in one call. */
+    async batch(changes: readonly BatchChange[]): Promise<void> {
+        const body = changes.map((c) => ({
+            key: c.key,
+            value:
+                c.value === null
+                    ? null
+                    : typeof c.value === 'string'
+                        ? Array.from(new TextEncoder().encode(c.value))
+                        : Array.from(c.value),
+        }));
+        this.native.writeBatch(JSON.stringify(body));
+    }
+
+    /**
+     * Compare-and-swap: replace or delete `key` only when its current value
+     * exactly equals `expected`. Both `expected` and `replacement` may be
+     * `null` (meaning absent / delete). Returns `true` when the swap applied.
+     */
+    async compareExchange(
+        key: string,
+        expected: Uint8Array | string | null,
+        replacement: Uint8Array | string | null,
+    ): Promise<boolean> {
+        const toBytes = (v: Uint8Array | string | null): Uint8Array | null =>
+            v === null ? null : typeof v === 'string' ? new TextEncoder().encode(v) : v;
+        return this.native.compareExchange(key, toBytes(expected), toBytes(replacement));
+    }
+
     /** Fold the WAL into the main file and truncate the sidecar. */
     async checkpoint(): Promise<void> {
         this.native.checkpoint();
+    }
+
+    /**
+     * Run `fn` inside an explicit transaction. The transaction commits on
+     * normal return and rolls back on throw. Nested calls are not supported.
+     *
+     * ```ts
+     * await db.transaction(async (tx) => {
+     *     await tx.put('a', '1');
+     *     await tx.put('b', '2');
+     * });
+     * ```
+     */
+    async transaction<T>(fn: (tx: TransactionHandle) => Promise<T>): Promise<T> {
+        this.native.begin();
+        const tx = new TransactionHandle(this.native);
+        try {
+            const result = await fn(tx);
+            this.native.commit();
+            return result;
+        } catch (err) {
+            try {
+                this.native.rollback();
+            } catch {
+                // rollback already failed, don't mask the original error
+            }
+            throw YydbError.fromDiagnosticJson(err instanceof Error ? err.message : String(err)) ?? err;
+        }
+    }
+
+    /** Execute a VOS read pipeline and return typed rows. */
+    async query<T = Record<string, unknown>>(source: string): Promise<T[]> {
+        const rowsJson = this.native.queryVos(source);
+        return JSON.parse(rowsJson) as T[];
+    }
+
+    /** Execute a VOS write program. */
+    async execute(source: string): Promise<void> {
+        this.native.executeVosWrite(source);
+    }
+
+    /**
+     * Publish a new schema version, migrating existing records when their
+     * shape no longer matches.
+     *
+     * Accepts raw `.vos` source or `@voml/vos` descriptors (same as
+     * {@link Database.ensureSchema}). Use `renames` to tell the engine which
+     * old type/field names map to the new ones — records that would otherwise
+     * look structurally unrelated get preserved.
+     */
+    async migrateSchema(
+        documentOrSource: string | EmittableItem,
+        ...rest: (EmittableItem | MigrateOptions)[]
+    ): Promise<void> {
+        let document: string;
+        let options: MigrateOptions = {};
+        const all = [documentOrSource, ...rest];
+        const last = all[all.length - 1];
+        if (
+            last &&
+            typeof last === 'object' &&
+            !('table' in (last as Record<string, unknown>)) &&
+            !('class' in (last as Record<string, unknown>)) &&
+            !('emit' in (last as Record<string, unknown>)) &&
+            ('renames' in (last as Record<string, unknown>) || Object.keys(last as object).length === 0)
+        ) {
+            options = (all.pop() as MigrateOptions) ?? {};
+        }
+        if (typeof all[0] === 'string') {
+            document = all[0] as string;
+        } else {
+            document = emitSource(all as EmittableItem[]);
+        }
+        const renamesJson = options.renames?.length
+            ? JSON.stringify(options.renames)
+            : null;
+        this.native.migrateSchema(document, renamesJson);
     }
 
     /** Build a typed session-local micro definition (without registering). */

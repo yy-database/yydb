@@ -24,6 +24,30 @@ export interface NativeDatabase {
     walFrameCount(): number;
     get(key: string): Uint8Array | null;
     put(key: string, value: Uint8Array): void;
+    /** Delete one record by key. */
+    delete(key: string): void;
+    /** Scan keys with a prefix; returns JSON `[{ key, value }, ...]`. */
+    scanPrefix(prefix: string, after: string | null, limit: number): string;
+    /** Atomically write or delete many keys; body is JSON `[{ key, value|null }, ...]`. */
+    writeBatch(changesJson: string): void;
+    /** Compare-and-swap; returns true on success. */
+    compareExchange(
+        key: string,
+        expected: Uint8Array | null,
+        replacement: Uint8Array | null,
+    ): boolean;
+    /** Begin an explicit transaction. */
+    begin(): void;
+    /** Commit the current transaction. */
+    commit(): void;
+    /** Roll back the current transaction. */
+    rollback(): void;
+    /** Execute a VOS read pipeline; returns JSON rows. */
+    queryVos(source: string): string;
+    /** Execute a VOS write program. */
+    executeVosWrite(source: string): void;
+    /** Publish a new schema version, optionally with rename map. */
+    migrateSchema(document: string, renamesJson?: string | null): void;
     registerMicro(
         name: string,
         version: number,

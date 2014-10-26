@@ -2,7 +2,7 @@
  * 浏览器数据库作者面测试
  */
 
-import { BinaryUtils, BrowserDatabase, LightDbError, LightDbErrorCodes, MemoryStorageBackend } from '../src';
+import { BinaryUtils, Database, LightDbError, LightDbErrorCodes, MemoryStorageBackend } from '../src';
 import type { LightDatabaseOptions } from '../src';
 import { assertEqual, assertFalse, assertNull, assertThrows, assertTrue, describe } from './test-utils';
 
@@ -19,14 +19,14 @@ export function createDatabaseTests() {
 
     suite.test('写入、读取与删除在重开后仍然生效', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
 
         await db.put('alpha', BinaryUtils.encode('one'));
         assertEqual(BinaryUtils.decode((await db.get('alpha'))!), 'one');
         assertNull(await db.get('missing'));
         await db.close();
 
-        const reopened = await BrowserDatabase.open('app', options(backend));
+        const reopened = await Database.open('app', options(backend));
         assertEqual(BinaryUtils.decode((await reopened.get('alpha'))!), 'one');
         assertTrue(await reopened.delete('alpha'), 'existing key should be deleted');
         assertFalse(await reopened.delete('alpha'), 'second delete should report false');
@@ -36,19 +36,19 @@ export function createDatabaseTests() {
 
     suite.test('未检查点的写入由 WAL 恢复', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
         await db.put('wal-key', BinaryUtils.encode('durable'));
         assertTrue(db.stats().walBytes > 0, 'write should land in WAL before checkpoint');
         await db.close();
 
-        const reopened = await BrowserDatabase.open('app', options(backend));
+        const reopened = await Database.open('app', options(backend));
         assertEqual(BinaryUtils.decode((await reopened.get('wal-key'))!), 'durable');
         await reopened.close();
     });
 
     suite.test('检查点写入快照并清空 WAL', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
         await db.put('a', BinaryUtils.encode('1'));
         await db.put('b', BinaryUtils.encode('2'));
 
@@ -58,7 +58,7 @@ export function createDatabaseTests() {
         assertEqual(db.stats().walBytes, 0);
         await db.close();
 
-        const reopened = await BrowserDatabase.open('app', options(backend));
+        const reopened = await Database.open('app', options(backend));
         assertEqual(BinaryUtils.decode((await reopened.get('a'))!), '1');
         assertEqual(BinaryUtils.decode((await reopened.get('b'))!), '2');
         await reopened.close();
@@ -66,7 +66,7 @@ export function createDatabaseTests() {
 
     suite.test('事务回滚丢弃未提交写入', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
         await db.put('base', BinaryUtils.encode('0'));
 
         await db.begin();
@@ -77,7 +77,7 @@ export function createDatabaseTests() {
         assertNull(await db.get('draft'));
         await db.close();
 
-        const reopened = await BrowserDatabase.open('app', options(backend));
+        const reopened = await Database.open('app', options(backend));
         assertNull(await reopened.get('draft'));
         assertEqual(BinaryUtils.decode((await reopened.get('base'))!), '0');
         await reopened.close();
@@ -85,7 +85,7 @@ export function createDatabaseTests() {
 
     suite.test('事务提交一次性落盘', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
 
         await db.begin();
         await db.put('x', BinaryUtils.encode('1'));
@@ -96,14 +96,14 @@ export function createDatabaseTests() {
         assertEqual(db.stats().transactionState, 'idle');
         await db.close();
 
-        const reopened = await BrowserDatabase.open('app', options(backend));
+        const reopened = await Database.open('app', options(backend));
         assertEqual(BinaryUtils.decode((await reopened.get('y'))!), '2');
         await reopened.close();
     });
 
     suite.test('事务中的删除在提交后生效', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
         await db.put('gone', BinaryUtils.encode('x'));
 
         await db.begin();
@@ -117,7 +117,7 @@ export function createDatabaseTests() {
 
     suite.test('事务期间禁止检查点', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
         await db.begin();
         const error = await assertThrows(() => db.checkpoint(), LightDbError);
         assertEqual(error.code, LightDbErrorCodes.unsupported);
@@ -127,7 +127,7 @@ export function createDatabaseTests() {
 
     suite.test('Schema 文档是唯一真相', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
         const doc = '// @yydb-schema-version: 3\nentity User { id: u64 }\n';
 
         assertNull(await db.schema(), 'new database has no schema');
@@ -147,18 +147,18 @@ export function createDatabaseTests() {
     suite.test('Schema 在重开后保持', async () => {
         const backend = new MemoryStorageBackend();
         const doc = '// @yydb-schema-version: 2\nentity Note { id: u64 }\n';
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
         await db.ensureSchema(doc);
         await db.close();
 
-        const reopened = await BrowserDatabase.open('app', options(backend));
+        const reopened = await Database.open('app', options(backend));
         assertEqual((await reopened.schema())?.document, doc);
         await reopened.close();
     });
 
     suite.test('拒绝空的与保留前缀的用户键', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
 
         const empty = await assertThrows(() => db.put('', new Uint8Array([1])), LightDbError);
         assertEqual(empty.code, LightDbErrorCodes.unsupported);
@@ -170,7 +170,7 @@ export function createDatabaseTests() {
 
     suite.test('关闭后拒绝继续访问', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
         await db.close();
 
         const error = await assertThrows(() => db.get('a'), LightDbError);
@@ -185,13 +185,13 @@ export function createDatabaseTests() {
         await handle.close();
         await adapter.close();
 
-        const error = await assertThrows(() => BrowserDatabase.open('app', options(backend)), LightDbError);
+        const error = await assertThrows(() => Database.open('app', options(backend)), LightDbError);
         assertEqual(error.code, LightDbErrorCodes.corrupt);
     });
 
     suite.test('统计信息反映记录数与事务状态', async () => {
         const backend = new MemoryStorageBackend();
-        const db = await BrowserDatabase.open('app', options(backend));
+        const db = await Database.open('app', options(backend));
         await db.put('a', new Uint8Array([1]));
         await db.put('b', new Uint8Array([2]));
 

@@ -64,7 +64,7 @@ export type {
 
 // 作者面
 export {
-    BrowserDatabase,
+    Database,
     openLightDatabase,
     Transaction,
     SCHEMA_KEY,
@@ -74,4 +74,4 @@ export {
     encodeSchema,
     decodeSchema,
 } from './api';
-export type { LightDatabase, LightDatabaseOptions, SchemaVersion } from './api';
+export type { OpenOptions, ScanRow, ScanOptions, BatchChange, MigrateOptions, LightDatabase, LightDatabaseOptions, SchemaVersion } from './api';
