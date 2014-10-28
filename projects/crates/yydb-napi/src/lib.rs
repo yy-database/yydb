@@ -151,6 +151,187 @@ impl Database {
         self.connection.put(key, value.as_ref()).map_err(reason)
     }
 
+    /// Delete one record. Idempotent — absent keys silently succeed.
+    #[napi]
+    pub fn delete(&self, key: String) -> Result<()> {
+        self.connection
+            .write_batch(&[(key, None)])
+            .map_err(reason)
+    }
+
+    /// Scan keys in lexical order with `prefix` (use `""` for all keys).
+    /// `after` is an exclusive continuation cursor (pass `null` for the first page).
+    /// Returns a JSON array string: `[{ "key": "...", "value": [...] }, ...]`.
+    #[napi]
+    pub fn scan_prefix(
+        &self,
+        prefix: String,
+        after: Option<String>,
+        limit: u32,
+    ) -> Result<String> {
+        let rows = self
+            .connection
+            .scan_prefix(&prefix, after.as_deref(), limit as usize)
+            .map_err(reason)?;
+        let json_rows: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|(k, v)| {
+                serde_json::json!({
+                    "key": k,
+                    "value": v,
+                })
+            })
+            .collect();
+        serde_json::to_string(&json_rows)
+            .map_err(|e| napi::Error::from_reason(format!("encode scan rows: {e}")))
+    }
+
+    /// Atomically write or delete many keys.
+    /// `changes_json` is `[{ "key": "...", "value": bytes | null }, ...]`.
+    #[napi]
+    pub fn write_batch(&self, changes_json: String) -> Result<()> {
+        let changes: Vec<serde_json::Value> = serde_json::from_str(&changes_json)
+            .map_err(|e| napi::Error::from_reason(format!("invalid batch JSON: {e}")))?;
+        let mut parsed: Vec<(String, Option<Vec<u8>>)> = Vec::with_capacity(changes.len());
+        for entry in changes {
+            let obj = entry
+                .as_object()
+                .ok_or_else(|| napi::Error::from_reason("batch entry must be an object"))?;
+            let key = obj
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| napi::Error::from_reason("batch entry missing string `key`"))?
+                .to_owned();
+            let value = match obj.get("value") {
+                Some(serde_json::Value::Null) | None => None,
+                Some(v) => {
+                    let bytes: Vec<u8> = v
+                        .as_array()
+                        .and_then(|arr| {
+                            arr.iter()
+                                .map(|x| x.as_i64().and_then(|n| u8::try_from(n).ok()))
+                                .collect()
+                        })
+                        .ok_or_else(|| {
+                            napi::Error::from_reason(
+                                "batch `value` must be null or a byte array",
+                            )
+                        })?;
+                    Some(bytes)
+                }
+            };
+            parsed.push((key, value));
+        }
+        self.connection.write_batch(&parsed).map_err(reason)
+    }
+
+    /// Compare-and-swap: replace or delete `key` only if it currently matches `expected`.
+    /// Both are JSON arrays of bytes (from `Buffer`) or `null`.
+    /// Returns `true` on success, `false` if the current value did not match.
+    #[napi]
+    pub fn compare_exchange(
+        &self,
+        key: String,
+        expected: Option<Buffer>,
+        replacement: Option<Buffer>,
+    ) -> Result<bool> {
+        self.connection
+            .compare_exchange(&key, expected.as_deref(), replacement.as_deref())
+            .map_err(reason)
+    }
+
+    /// Begin an explicit transaction. Must be balanced with `commit` or `rollback`.
+    /// The Node facade wraps these with a callback-style `transaction()` helper.
+    #[napi]
+    pub fn begin(&self) -> Result<()> {
+        self.connection.begin().map_err(reason)
+    }
+
+    /// Commit the current transaction.
+    #[napi]
+    pub fn commit(&self) -> Result<()> {
+        self.connection.commit().map_err(reason)
+    }
+
+    /// Roll back the current transaction.
+    #[napi]
+    pub fn rollback(&self) -> Result<()> {
+        self.connection.rollback().map_err(reason)
+    }
+
+    /// Execute a VOS read pipeline and return the resulting rows.
+    #[napi]
+    pub fn query_vos(&self, source: String) -> Result<String> {
+        let rows = self.connection.query_vos(&source).map_err(reason)?;
+        let mapped: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|row| {
+                let mut map = serde_json::Map::new();
+                for (k, v) in row {
+                    map.insert(k, value_to_json(v));
+                }
+                serde_json::Value::Object(map)
+            })
+            .collect();
+        serde_json::to_string(&mapped)
+            .map_err(|e| napi::Error::from_reason(format!("encode rows: {e}")))
+    }
+
+    /// Execute a VOS write program (INSERT / schema macros).
+    #[napi]
+    pub fn execute_vos_write(&self, source: String) -> Result<()> {
+        self.connection.execute_vos_write(&source).map_err(reason)
+    }
+
+    /// Publish a new schema version with an optional rename map.
+    ///
+    /// `renames_json` is `[{ "fromType": "...", "toType": "..." }, { "type": "...",
+    /// "fromField": "...", "toField": "..." }]` or `null` when the migration drops
+    /// no fields. Entries with `fromType`/`toType` update the type name; entries
+    /// with `type`/`fromField`/`toField` update a specific field.
+    #[napi]
+    pub fn migrate_schema(
+        &self,
+        document: String,
+        renames_json: Option<String>,
+    ) -> Result<()> {
+        let mut renames = yydb::catalog::RenameMap::default();
+        if let Some(json) = renames_json {
+            let arr: Vec<serde_json::Value> = serde_json::from_str(&json)
+                .map_err(|e| napi::Error::from_reason(format!("invalid renames JSON: {e}")))?;
+            for entry in arr {
+                let obj = entry.as_object().ok_or_else(|| {
+                    napi::Error::from_reason("rename entry must be an object")
+                })?;
+                if let (Some(from), Some(to)) = (
+                    obj.get("fromType").and_then(|v| v.as_str()),
+                    obj.get("toType").and_then(|v| v.as_str()),
+                ) {
+                    renames.types.insert(from.to_owned(), to.to_owned());
+                } else if let (Some(type_name), Some(from_field), Some(to_field)) = (
+                    obj.get("type").and_then(|v| v.as_str()),
+                    obj.get("fromField").and_then(|v| v.as_str()),
+                    obj.get("toField").and_then(|v| v.as_str()),
+                ) {
+                    renames.fields.insert(
+                        yydb::catalog::FieldPath {
+                            type_name: type_name.to_owned(),
+                            field_name: from_field.to_owned(),
+                        },
+                        to_field.to_owned(),
+                    );
+                } else {
+                    return Err(napi::Error::from_reason(
+                        "rename entry must have {fromType,toType} or {type,fromField,toField}",
+                    ));
+                }
+            }
+        }
+        self.connection
+            .migrate_schema(&document, &renames)
+            .map_err(reason)
+    }
+
     /// Install a session-local host micro definition.
     ///
     /// `args` is an array of UDF type tags (`null`, `bool`, `i64`, `text`).

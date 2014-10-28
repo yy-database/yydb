@@ -5,13 +5,100 @@ use wasm_bindgen::prelude::*;
 use yydb::{protocol as wire, Connection, Error};
 
 use crate::core::{
-    connection_info, kv_get_json, scalar_call_json, schema_get_json, unit_result_json,
+    compare_exchange_json, connection_info, kv_get_json, query_rows_json, scan_prefix_json,
+    scalar_call_json, schema_get_json, unit_result_json,
 };
 use crate::host_js::JsHostAdapter;
 use crate::opfs::{open_persistent, OpfsCapabilities, OpfsPersistentVolume};
 
 fn closed_session_error() -> Error {
     Error::SessionClosed
+}
+
+/// Parse a write-batch JSON body: `[{ "key": "...", "value": bytes | null }, ...]`.
+fn parse_write_batch(body: &[u8]) -> yydb::Result<Vec<(String, Option<Vec<u8>>)>> {
+    let array: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|_| Error::Protocol {
+            message: "writeBatch body must be a JSON array".to_string(),
+        })?;
+    let arr = array.as_array().ok_or_else(|| Error::Protocol {
+        message: "writeBatch body must be a JSON array".to_string(),
+    })?;
+    arr.iter()
+        .map(|entry| {
+            let obj = entry.as_object().ok_or_else(|| Error::Protocol {
+                message: "writeBatch entry must be an object".to_string(),
+            })?;
+            let key = obj
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| Error::Protocol {
+                    message: "writeBatch entry missing string `key`".to_string(),
+                })?
+                .to_owned();
+            let value = match obj.get("value") {
+                Some(serde_json::Value::Null) | None => None,
+                Some(v) => {
+                    let bytes: Vec<u8> = v
+                        .as_array()
+                        .and_then(|arr| {
+                            arr.iter()
+                                .map(|x| x.as_i64().and_then(|n| u8::try_from(n).ok()))
+                                .collect()
+                        })
+                        .ok_or_else(|| Error::Protocol {
+                            message: "writeBatch `value` must be null or a byte array".to_string(),
+                        })?;
+                    Some(bytes)
+                }
+            };
+            Ok((key, value))
+        })
+        .collect()
+}
+
+/// Parse a rename-map JSON body (same shape as the N-API layer accepts).
+/// Returns `Ok` with an empty RenameMap when `json` is `None`, empty, or `"null"`.
+fn parse_rename_map(json: Option<&str>) -> yydb::Result<yydb::catalog::RenameMap> {
+    let Some(json) = json else {
+        return Ok(yydb::catalog::RenameMap::default());
+    };
+    if json.is_empty() || json == "null" {
+        return Ok(yydb::catalog::RenameMap::default());
+    }
+    let arr: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|_| Error::Protocol {
+        message: "migrateSchema renames must be a JSON array".to_string(),
+    })?;
+    let mut renames = yydb::catalog::RenameMap::default();
+    for entry in arr {
+        let obj = entry.as_object().ok_or_else(|| Error::Protocol {
+            message: "migrateSchema rename entry must be an object".to_string(),
+        })?;
+        if let (Some(from), Some(to)) = (
+            obj.get("fromType").and_then(|v| v.as_str()),
+            obj.get("toType").and_then(|v| v.as_str()),
+        ) {
+            renames.types.insert(from.to_owned(), to.to_owned());
+        } else if let (Some(type_name), Some(from_field), Some(to_field)) = (
+            obj.get("type").and_then(|v| v.as_str()),
+            obj.get("fromField").and_then(|v| v.as_str()),
+            obj.get("toField").and_then(|v| v.as_str()),
+        ) {
+            renames.fields.insert(
+                yydb::catalog::FieldPath {
+                    type_name: type_name.to_owned(),
+                    field_name: from_field.to_owned(),
+                },
+                to_field.to_owned(),
+            );
+        } else {
+            return Err(Error::Protocol {
+                message: "migrateSchema entry needs {fromType,toType} or {type,fromField,toField}"
+                    .to_string(),
+            });
+        }
+    }
+    Ok(renames)
 }
 
 fn run_ensure_schema(conn: &Connection, closed: bool, document: &str) -> String {
@@ -142,6 +229,83 @@ impl MemorySession {
             return unit_result_json(Err(closed_session_error()));
         }
         unit_result_json(self.conn.write_batch(&[(key.to_owned(), None)]))
+    }
+
+    /// Scan keys in lexical order with a prefix, optional continuation cursor, and limit.
+    /// Returns JSON `{ ok, rows: [{ key, value }], error }`.
+    #[wasm_bindgen(js_name = scanPrefix)]
+    pub fn scan_prefix(&self, prefix: &str, after: Option<String>, limit: u32) -> String {
+        if self.closed {
+            return scan_prefix_json(Err(closed_session_error()));
+        }
+        scan_prefix_json(self.conn.scan_prefix(prefix, after.as_deref(), limit as usize))
+    }
+
+    /// Commit a batch of writes or deletes atomically.
+    /// Body is a JSON array: `[{ "key": "...", "value": bytes | null }, ...]`.
+    /// `null` value deletes. Returns JSON `{ ok, rows, error }`.
+    #[wasm_bindgen(js_name = writeBatch)]
+    pub fn write_batch(&self, body: &[u8]) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match parse_write_batch(body) {
+            Ok(changes) => unit_result_json(self.conn.write_batch(&changes)),
+            Err(err) => unit_result_json(Err(err)),
+        }
+    }
+
+    /// Compare-and-swap: replace or delete `key` only if it currently matches `expected`.
+    /// Both `expected` and `replacement` are either bytes or null (null means absent / delete).
+    /// Returns JSON `{ ok, success, error }` where `success=false` means CAS lost the race.
+    #[wasm_bindgen(js_name = compareExchange)]
+    pub fn compare_exchange(
+        &self,
+        key: &str,
+        expected: Option<Vec<u8>>,
+        replacement: Option<Vec<u8>>,
+    ) -> String {
+        if self.closed {
+            return compare_exchange_json(Err(closed_session_error()));
+        }
+        compare_exchange_json(
+            self.conn
+                .compare_exchange(key, expected.as_deref(), replacement.as_deref()),
+        )
+    }
+
+    /// Execute a VOS read pipeline and return the resulting rows.
+    /// Returns JSON `{ ok, rows: [{ field: value, ... }], error }`.
+    #[wasm_bindgen(js_name = queryVos)]
+    pub fn query_vos(&self, source: &str) -> String {
+        if self.closed {
+            return query_rows_json(Err(closed_session_error()));
+        }
+        query_rows_json(self.conn.query_vos(source))
+    }
+
+    /// Execute a VOS write program (INSERT / schema macros).
+    /// Returns JSON `{ ok, rows, error }`.
+    #[wasm_bindgen(js_name = executeVosWrite)]
+    pub fn execute_vos_write(&self, source: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.execute_vos_write(source))
+    }
+
+    /// Publish a new schema version with an optional rename map.
+    ///
+    /// `renames_json` is a JSON array of rename entries (same shape as the
+    /// N-API layer accepts), or an empty string / `"null"` when there are no
+    /// renames. Returns JSON `{ ok, error }`.
+    #[wasm_bindgen(js_name = migrateSchema)]
+    pub fn migrate_schema(&self, document: &str, renames_json: Option<String>) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        let renames = parse_rename_map(renames_json.as_deref());
+        unit_result_json(renames.and_then(|r| self.conn.migrate_schema(document, &r)))
     }
 
     /// Begin an explicit transaction.
@@ -304,6 +468,99 @@ impl PersistentSession {
         }
         match self.volume.as_ref() {
             Some(volume) => match self.conn.write_batch(&[(key.to_owned(), None)]) {
+                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Scan keys in lexical order; no persistence needed (read-only).
+    #[wasm_bindgen(js_name = scanPrefix)]
+    pub fn scan_prefix(&self, prefix: &str, after: Option<String>, limit: u32) -> String {
+        if self.closed {
+            return scan_prefix_json(Err(closed_session_error()));
+        }
+        scan_prefix_json(self.conn.scan_prefix(prefix, after.as_deref(), limit as usize))
+    }
+
+    /// Commit a batch atomically, then persist the snapshot.
+    #[wasm_bindgen(js_name = writeBatch)]
+    pub fn write_batch(&self, body: &[u8]) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        let changes = match parse_write_batch(body) {
+            Ok(c) => c,
+            Err(err) => return unit_result_json(Err(err)),
+        };
+        match self.volume.as_ref() {
+            Some(volume) => match self.conn.write_batch(&changes) {
+                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Compare-and-swap, then persist the snapshot when the CAS succeeds.
+    #[wasm_bindgen(js_name = compareExchange)]
+    pub fn compare_exchange(
+        &self,
+        key: &str,
+        expected: Option<Vec<u8>>,
+        replacement: Option<Vec<u8>>,
+    ) -> String {
+        if self.closed {
+            return compare_exchange_json(Err(closed_session_error()));
+        }
+        match self.conn.compare_exchange(key, expected.as_deref(), replacement.as_deref()) {
+            Ok(true) => match self.volume.as_ref() {
+                Some(volume) => compare_exchange_json(persist_persistent_connection(&self.conn, volume).map(|_| true)),
+                None => compare_exchange_json(Err(closed_session_error())),
+            },
+            Ok(false) => compare_exchange_json(Ok(false)),
+            Err(err) => compare_exchange_json(Err(err)),
+        }
+    }
+
+    /// Execute a VOS read pipeline; read-only, no persistence needed.
+    #[wasm_bindgen(js_name = queryVos)]
+    pub fn query_vos(&self, source: &str) -> String {
+        if self.closed {
+            return query_rows_json(Err(closed_session_error()));
+        }
+        query_rows_json(self.conn.query_vos(source))
+    }
+
+    /// Execute a VOS write program, then persist the snapshot on success.
+    #[wasm_bindgen(js_name = executeVosWrite)]
+    pub fn execute_vos_write(&self, source: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.volume.as_ref() {
+            Some(volume) => match self.conn.execute_vos_write(source) {
+                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Publish a new schema version with an optional rename map, then persist.
+    #[wasm_bindgen(js_name = migrateSchema)]
+    pub fn migrate_schema(&self, document: &str, renames_json: Option<String>) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        let Ok(renames) = parse_rename_map(renames_json.as_deref()) else {
+            return unit_result_json(Err(Error::Protocol {
+                message: "invalid renames JSON".to_string(),
+            }));
+        };
+        match self.volume.as_ref() {
+            Some(volume) => match self.conn.migrate_schema(document, &renames) {
                 Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
                 Err(error) => unit_result_json(Err(error)),
             },

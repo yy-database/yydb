@@ -16,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 blake3 = { workspace = true }
 serde_json = { workspace = true }
 yydb = { workspace = true }
+yydb-query = { workspace = true }
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 getrandom = { workspace = true }

@@ -226,3 +226,60 @@ pub(crate) fn schema_get_json(result: Result<Option<SchemaVersion>>) -> String {
         .to_string(),
     }
 }
+
+pub(crate) fn scan_prefix_json(result: Result<Vec<(String, Vec<u8>)>>) -> String {
+    match result {
+        Ok(rows) => json!({
+            "ok": true,
+            "rows": rows.into_iter().map(|(k, v)| json!({ "key": k, "value": v })).collect::<Vec<JsonValue>>(),
+            "error": JsonValue::Null,
+        })
+        .to_string(),
+        Err(err) => json!({
+            "ok": false,
+            "rows": [],
+            "error": err_diag(&err),
+        })
+        .to_string(),
+    }
+}
+
+pub(crate) fn compare_exchange_json(result: Result<bool>) -> String {
+    match result {
+        Ok(success) => json!({
+            "ok": true,
+            "success": success,
+            "error": JsonValue::Null,
+        })
+        .to_string(),
+        Err(err) => json!({
+            "ok": false,
+            "success": false,
+            "error": err_diag(&err),
+        })
+        .to_string(),
+    }
+}
+
+pub(crate) fn query_rows_json(result: Result<Vec<yydb_query::QueryRow>>) -> String {
+    match result {
+        Ok(rows) => json!({
+            "ok": true,
+            "rows": rows.into_iter().map(|row| {
+                let mut map = serde_json::Map::new();
+                for (k, v) in row {
+                    map.insert(k, scalar_value_json(&v).unwrap_or(JsonValue::Null));
+                }
+                JsonValue::Object(map)
+            }).collect::<Vec<JsonValue>>(),
+            "error": JsonValue::Null,
+        })
+        .to_string(),
+        Err(err) => json!({
+            "ok": false,
+            "rows": [],
+            "error": err_diag(&err),
+        })
+        .to_string(),
+    }
+}
