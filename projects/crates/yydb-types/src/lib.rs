@@ -20,6 +20,54 @@ pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
 /// Convenient alias used across YYDB APIs.
 pub type Result<T = ()> = result::Result<T, Error>;
 
+/// Machine-readable diagnostic envelope. Every boundary surface (N-API reason,
+/// WASM JSON error field, wire error body) serializes to this shape so hosts
+/// can parse it without knowing which variant produced it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DiagnosticEnvelope {
+    /// Stable dotted code (`yydb.schema.invalid`).
+    pub code: String,
+    /// Operation category (`io`, `schema`, `udf`, …).
+    pub operation: String,
+    /// Whether the caller may retry with the same arguments.
+    pub retryable: bool,
+    /// Human-readable display text (locale-aware only at render time; do not
+    /// branch on this string).
+    pub message: String,
+    /// Structured parameters for catalog templating.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<std::collections::BTreeMap<String, String>>,
+}
+
+impl DiagnosticEnvelope {
+    /// Build from an [`Error`].
+    pub fn from_error(error: &Error) -> Self {
+        let params = error.params().map(|pairs| {
+            pairs
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v))
+                .collect()
+        });
+        Self {
+            code: error.code().to_owned(),
+            operation: error.operation().to_owned(),
+            retryable: error.retryable(),
+            message: error.to_string(),
+            params,
+        }
+    }
+
+    /// Serialize to a compact JSON string.
+    pub fn to_string(&self) -> String {
+        serde_json::to_string(self).expect("DiagnosticEnvelope serialize cannot fail")
+    }
+
+    /// Parse from a JSON string. Returns `Err` on malformed input.
+    pub fn from_string(json: &str) -> std::result::Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+}
+
 /// Errors produced by YYDB open / read / write / UDF / object paths.
 #[derive(Debug)]
 pub enum Error {
@@ -308,21 +356,13 @@ impl Error {
     /// [`Display`](fmt::Display) text so hosts can render it immediately
     /// without further resolution.
     pub fn to_json(&self) -> serde_json::Value {
-        use serde_json::{json, Value};
-        let mut obj = json!({
-            "code": self.code(),
-            "operation": self.operation(),
-            "retryable": self.retryable(),
-            "message": self.to_string(),
-        });
-        if let Some(pairs) = self.params() {
-            let mut map = serde_json::Map::new();
-            for (key, value) in pairs {
-                map.insert(key.to_owned(), Value::String(value));
-            }
-            obj["params"] = Value::Object(map);
-        }
-        obj
+        serde_json::to_value(DiagnosticEnvelope::from_error(self))
+            .expect("DiagnosticEnvelope serialize cannot fail")
+    }
+
+    /// Serialize as a JSON string (compact, no whitespace).
+    pub fn to_diagnostic_json_string(&self) -> String {
+        DiagnosticEnvelope::from_error(self).to_string()
     }
 }
 
@@ -672,5 +712,56 @@ mod hex {
             out.push(HEX[(byte & 0xf) as usize] as char);
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every Error variant roundtrips through DiagnosticEnvelope preserving stable fields.
+    #[test]
+    fn diagnostic_envelope_roundtrip_preserves_code_and_retryable() {
+        let err_non_retryable = Error::UdfArity {
+            name: "my_fn".into(),
+            expected: 3,
+            got: 5,
+        };
+        let envelope = DiagnosticEnvelope::from_error(&err_non_retryable);
+        assert_eq!(envelope.code, "yydb.udf.arity");
+        assert_eq!(envelope.operation, "udf");
+        assert!(!envelope.retryable);
+        let params = envelope.params.as_ref().expect("UdfArity must carry params");
+        assert_eq!(params.get("name"), Some(&"my_fn".to_owned()));
+        assert_eq!(params.get("expected"), Some(&"3".to_owned()));
+        assert_eq!(params.get("got"), Some(&"5".to_owned()));
+
+        let json = envelope.to_string();
+        let parsed = DiagnosticEnvelope::from_string(&json).expect("roundtrip parse");
+        assert_eq!(parsed, envelope);
+
+        let err_retryable = Error::LeaseUnavailable { key: "lock".into() };
+        let env2 = DiagnosticEnvelope::from_error(&err_retryable);
+        assert_eq!(env2.code, "yydb.lease.unavailable");
+        assert!(env2.retryable);
+        let json2 = env2.to_string();
+        let parsed2 = DiagnosticEnvelope::from_string(&json2).expect("roundtrip parse");
+        assert_eq!(parsed2, env2);
+
+        let err_io = Error::Io(io::Error::new(io::ErrorKind::PermissionDenied, "no permission"));
+        let env3 = DiagnosticEnvelope::from_error(&err_io);
+        assert_eq!(env3.code, "yydb.io");
+        assert_eq!(env3.operation, "io");
+        assert!(env3.retryable);
+        assert!(env3.params.is_none(), "Io must not carry params");
+    }
+
+    /// `Error::to_json()` must produce exactly the DiagnosticEnvelope Value.
+    #[test]
+    fn to_json_matches_envelope() {
+        let err = Error::Schema { message: "bad schema".into() };
+        let via_method = err.to_json();
+        let via_env = serde_json::to_value(DiagnosticEnvelope::from_error(&err)).unwrap();
+        assert_eq!(via_method, via_env);
     }
 }

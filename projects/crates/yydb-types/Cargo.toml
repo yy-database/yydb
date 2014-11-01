@@ -14,4 +14,5 @@ path = "src/lib.rs"
 
 [dependencies]
 uuid = { workspace = true }
+serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
