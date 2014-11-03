@@ -31,7 +31,7 @@ export type {
 } from './wire.js';
 export type { MicroHostHandler } from './transport.js';
 export { MsgType, encodeFrame, decodeFrame, encodeErrorBody, decodeErrorBody } from './wire.js';
-export { YydbError, YydbErrorCodes, isRetryableYydbCode, isYydbError } from './errors.js';
+export { YydbError, YydbErrorCodes, YydbClientErrorCodes, isYydbError } from './errors.js';
 export type { YydbErrorCode, YydbErrorOptions } from './errors.js';
 
 export interface ConnectOptions {
@@ -86,6 +86,7 @@ export class Client {
         } catch (cause) {
             throw new YydbError(YydbErrorCodes.clientTransportFailure, `connect ${endpoint}: transport failed`, {
                 operation: 'connect',
+                retryable: true,
                 cause,
             });
         }
@@ -173,7 +174,7 @@ export class Client {
                 body,
             });
         } catch (cause) {
-            throw new YydbError(YydbErrorCodes.clientTransportFailure, `${operation}: transport failed`, { operation, cause });
+            throw new YydbError(YydbErrorCodes.clientTransportFailure, `${operation}: transport failed`, { operation, retryable: true, cause });
         }
         if (response.requestId !== requestId) {
             throw new YydbError(

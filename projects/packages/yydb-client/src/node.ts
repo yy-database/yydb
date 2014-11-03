@@ -19,7 +19,7 @@ export {
     decodeErrorBody,
 } from './wire.js';
 export type { Frame, MsgTypeCode, SchemaVersion, WireErrorBody } from './wire.js';
-export { YydbError, YydbErrorCodes, isRetryableYydbCode, isYydbError } from './errors.js';
+export { YydbError, YydbErrorCodes, YydbClientErrorCodes, isYydbError } from './errors.js';
 export type { YydbErrorCode, YydbErrorOptions } from './errors.js';
 export type { MicroHostHandler, Transport } from './transport.js';
 
