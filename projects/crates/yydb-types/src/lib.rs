@@ -431,7 +431,8 @@ pub struct EvictBudget {
 }
 
 /// Severity for a [`DoctorIssue`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DoctorSeverity {
     /// Non-fatal inconsistency or lag.
     Warn,
@@ -440,7 +441,7 @@ pub enum DoctorSeverity {
 }
 
 /// One consistency finding from [`DoctorReport`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DoctorIssue {
     /// How severe the finding is.
     pub severity: DoctorSeverity,
@@ -453,7 +454,7 @@ pub struct DoctorIssue {
 }
 
 /// Per-namespace usage included in [`DoctorReport`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DoctorNamespaceStats {
     /// Namespace prefix.
     pub prefix: String,
@@ -470,7 +471,7 @@ pub struct DoctorNamespaceStats {
 }
 
 /// Read-only consistency report from `Connection::doctor`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DoctorReport {
     /// Filesystem path when file-backed.
     pub file_path: Option<String>,
@@ -491,14 +492,14 @@ pub struct DoctorReport {
 }
 
 /// Summary of CAS objects removed by orphan reclamation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ReclaimReport {
     /// Objects deleted from the store.
     pub reclaimed_objects: u64,
 }
 
 /// Summary of a v0 `.yydx` compaction pass (checkpoint + safe orphan reclaim).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct CompactReport {
     /// Whether WAL was folded into the main file.
     pub checkpointed: bool,
