@@ -332,6 +332,41 @@ impl Database {
             .map_err(reason)
     }
 
+    /// Checkpoint then copy a self-contained `.yydb` main file to `dest`.
+    ///
+    /// WAL mode connections are checkpointed so the backup needs no `-wal` /
+    /// `-shm` sidecars. In-memory connections return an error because there is
+    /// nothing to copy.
+    #[napi]
+    pub fn backup(&self, dest: String) -> Result<()> {
+        self.connection.backup_to(&dest).map_err(reason)
+    }
+
+    /// Copy the main file and any present `-wal` / `-shm` sidecars without
+    /// checkpoint. Opening `dest` replays the copied WAL tail against the main
+    /// image.
+    #[napi]
+    pub fn backup_with_wal(&self, dest: String) -> Result<()> {
+        self.connection.backup_with_wal_to(&dest).map_err(reason)
+    }
+
+    /// Run read-only consistency probes. Returns the `DoctorReport` as JSON.
+    #[napi]
+    pub fn doctor(&self) -> Result<String> {
+        let report = self.connection.doctor().map_err(reason)?;
+        serde_json::to_string(&report)
+            .map_err(|e| napi::Error::from_reason(format!("serialize doctor report: {e}")))
+    }
+
+    /// Fold WAL into the main file and reclaim safe orphan blobs (`.yydx` layouts only).
+    /// Returns the `CompactReport` as JSON.
+    #[napi]
+    pub fn compact_yydx(&self) -> Result<String> {
+        let report = self.connection.compact_yydx().map_err(reason)?;
+        serde_json::to_string(&report)
+            .map_err(|e| napi::Error::from_reason(format!("serialize compact report: {e}")))
+    }
+
     /// Install a session-local host micro definition.
     ///
     /// `args` is an array of UDF type tags (`null`, `bool`, `i64`, `text`).

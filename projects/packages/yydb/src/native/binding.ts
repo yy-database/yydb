@@ -48,6 +48,14 @@ export interface NativeDatabase {
     executeVosWrite(source: string): void;
     /** Publish a new schema version, optionally with rename map. */
     migrateSchema(document: string, renamesJson?: string | null): void;
+    /** Checkpoint + copy self-contained `.yydb` main file (no WAL sidecars). */
+    backup(dest: string): void;
+    /** Copy main + WAL + SHM without checkpoint (opening replays the tail). */
+    backupWithWal(dest: string): void;
+    /** Read-only consistency probe; returns DoctorReport JSON. */
+    doctor(): string;
+    /** Fold WAL + reclaim orphan blobs (`.yydx` only); returns CompactReport JSON. */
+    compactYydx(): string;
     registerMicro(
         name: string,
         version: number,

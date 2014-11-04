@@ -59,6 +59,42 @@ export interface MigrateOptions {
     >;
 }
 
+/** One consistency finding from {@link Database.doctor}. */
+export interface DoctorIssue {
+    severity: 'warn' | 'error';
+    code: string;
+    message: string;
+    key_hint?: string | null;
+}
+
+/** Per-namespace usage snapshot from {@link Database.doctor}. */
+export interface DoctorNamespaceStats {
+    prefix: string;
+    record_count: number;
+    bytes_used: number;
+    object_bytes: number;
+    quota_max_bytes?: number | null;
+    ttl_expired_pending: number;
+}
+
+/** Read-only consistency report. */
+export interface DoctorReport {
+    file_path?: string | null;
+    last_commit_sequence: number;
+    last_checkpoint_sequence: number;
+    checkpoint_lag_records: number;
+    wal_bytes_uncheckpointed: number;
+    orphan_object_count: number;
+    namespaces: DoctorNamespaceStats[];
+    issues: DoctorIssue[];
+}
+
+/** Summary of a v0 `.yydx` compaction pass. */
+export interface CompactReport {
+    checkpointed: boolean;
+    orphans_reclaimed: number;
+}
+
 /**
  * Transaction-local handle passed to {@link Database.transaction} callbacks.
  * All CRUD methods forward to the underlying native handle while the
@@ -232,6 +268,26 @@ export class Database {
     /** Fold the WAL into the main file and truncate the sidecar. */
     async checkpoint(): Promise<void> {
         this.native.checkpoint();
+    }
+
+    /** Checkpoint then copy a self-contained `.yydb` main file to `dest`. */
+    async backup(dest: string): Promise<void> {
+        this.native.backup(dest);
+    }
+
+    /** Copy main + WAL + SHM without checkpoint; opening `dest` replays the WAL tail. */
+    async backupWithWal(dest: string): Promise<void> {
+        this.native.backupWithWal(dest);
+    }
+
+    /** Run read-only consistency probes against the database. */
+    async doctor(): Promise<DoctorReport> {
+        return JSON.parse(this.native.doctor()) as DoctorReport;
+    }
+
+    /** Fold WAL + reclaim orphan blobs (`.yydx` layouts only). */
+    async compactYydx(): Promise<CompactReport> {
+        return JSON.parse(this.native.compactYydx()) as CompactReport;
     }
 
     /**
