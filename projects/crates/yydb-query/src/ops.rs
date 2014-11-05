@@ -18,29 +18,65 @@ pub enum CmpOp {
     Ge,
 }
 
-/// Literal kind for [`Pred::FieldCmp`].
+/// Bound value: either a literal baked into the plan at prepare time, or a
+/// named/slot parameter resolved at bind time.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BoundValue {
+    Literal(Value),
+    Slot {
+        /// Positional index into the bound parameter slice.
+        index: u32,
+        /// Declared type from the parameter descriptor. Used at exec time to
+        /// assert the caller-supplied value matches.
+        expected_ty: SlotTy,
+    },
+}
+
+/// Declared type for a parameter slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LiteralKind {
+pub enum SlotTy {
     Bool,
-    Int,
-    Str,
+    I64,
+    Text,
     Null,
 }
 
+/// Convert a `SlotTy` to the display string used in parameter errors.
+impl SlotTy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bool => "bool",
+            Self::I64 => "i64",
+            Self::Text => "text",
+            Self::Null => "null",
+        }
+    }
+
+    /// Returns true iff `value.ty()` matches this slot type.
+    pub fn matches(self, value: &Value) -> bool {
+        match (self, value) {
+            (Self::Bool, Value::Bool(_)) => true,
+            (Self::I64, Value::I64(_)) => true,
+            (Self::Text, Value::Text(_)) => true,
+            (Self::Null, Value::Null) => true,
+            _ => false,
+        }
+    }
+}
+
 /// Backend-neutral filter predicate (Phase 1 subset).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Pred {
     True,
     False,
     FieldBool {
         path: Vec<String>,
-        value: bool,
+        value: BoundValue,
     },
     FieldCmp {
         path: Vec<String>,
         op: CmpOp,
-        literal: String,
-        kind: LiteralKind,
+        value: BoundValue,
     },
     And(Box<Pred>, Box<Pred>),
     Or(Box<Pred>, Box<Pred>),
@@ -73,13 +109,13 @@ pub struct SortKey {
 }
 
 /// Closed physical op set for Phase 1 read pipelines.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum QueryOp {
     Scan { table: String },
     Filter { predicate: Pred },
     Project { fields: Vec<ProjectField> },
     Sort { keys: Vec<SortKey> },
-    Skip { count: u64 },
-    Take { count: u64 },
+    Skip { count: BoundValue },
+    Take { count: BoundValue },
     Collect,
 }

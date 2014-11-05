@@ -7,10 +7,11 @@ use yydb_types::{Error, Result, Value};
 
 use super::catalog::table_row_key_name;
 use super::lower;
-use super::ops::{CmpOp, LiteralKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow};
+use super::ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow};
 use super::resolve;
 use super::store;
 
+/// Execute a VOS source directly (convenience wrapper). Parses + lowers + runs.
 pub fn execute(
     source: &str,
     contract: Option<&ResolvedContract>,
@@ -20,13 +21,17 @@ pub fn execute(
         message: diagnostics,
     })?;
     let ops = lower::lower_program(&program)?;
-    execute_ops(&ops, contract, records)
+    execute_ops(&ops, contract, records, &[])
 }
 
+/// Execute a pre-lowered op list. `bound_values` supplies parameters for
+/// `BoundValue::Slot { index }` entries; pass `&[]` when all values are
+/// `BoundValue::Literal`.
 pub fn execute_ops(
     ops: &[QueryOp],
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
 ) -> Result<Vec<QueryRow>> {
     let mut rows: Vec<QueryRow> = Vec::new();
     let mut current_table: Option<String> = None;
@@ -44,7 +49,7 @@ pub fn execute_ops(
                 let table = current_table.as_deref().ok_or_else(|| Error::Schema {
                     message: "filter without a preceding table scan".into(),
                 })?;
-                rows.retain(|row| eval_pred(predicate, row, table, contract, records));
+                rows.retain(|row| eval_pred(predicate, row, table, contract, records, bound_values));
             }
             QueryOp::Project { fields } => {
                 let table = current_table.as_deref().ok_or_else(|| Error::Schema {
@@ -70,16 +75,42 @@ pub fn execute_ops(
                 });
             }
             QueryOp::Skip { count } => {
-                let skip = (*count as usize).min(rows.len());
+                let skip = match resolve_bound_value(count, bound_values)? {
+                    Value::I64(n) => (n as usize).min(rows.len()),
+                    _ => return Err(query_runtime_error("Skip/Take count must be an integer")),
+                };
                 rows = rows.into_iter().skip(skip).collect();
             }
             QueryOp::Take { count } => {
-                rows.truncate(*count as usize);
+                let take = match resolve_bound_value(count, bound_values)? {
+                    Value::I64(n) => n as usize,
+                    _ => return Err(query_runtime_error("Skip/Take count must be an integer")),
+                };
+                rows.truncate(take);
             }
             QueryOp::Collect => {}
         }
     }
     Ok(rows)
+}
+
+fn query_runtime_error(message: impl Into<String>) -> Error {
+    Error::Schema { message: message.into() }
+}
+
+/// Resolve a BoundValue either to the baked-in literal or to the bound
+/// parameter at `index`. Returns an error for Slot references that exceed
+/// the caller-supplied slice (bind-time contract violation).
+fn resolve_bound_value(bv: &BoundValue, bound_values: &[Value]) -> Result<Value> {
+    match bv {
+        BoundValue::Literal(v) => Ok(v.clone()),
+        BoundValue::Slot { index, .. } => bound_values
+            .get(*index as usize)
+            .cloned()
+            .ok_or_else(|| Error::Schema {
+                message: format!("bound parameter index {} out of range", index),
+            }),
+    }
 }
 
 fn project_row(
@@ -129,31 +160,34 @@ fn eval_pred(
     table: &str,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
 ) -> bool {
     match pred {
         Pred::True => true,
         Pred::False => false,
         Pred::FieldBool { path, value } => {
             let left = read_path(path, row, table, contract, records);
-            matches!(left, Value::Bool(b) if b == *value)
+            let right = match resolve_bound_value(value, bound_values) {
+                Ok(v) => v,
+                Err(_) => return false, // unresolved slot → predicate fails safe
+            };
+            matches!((&left, &right), (Value::Bool(a), Value::Bool(b)) if a == b)
         }
-        Pred::FieldCmp {
-            path,
-            op,
-            literal,
-            kind,
-        } => {
+        Pred::FieldCmp { path, op, value } => {
             let left = read_path(path, row, table, contract, records);
-            let right = decode_literal(literal, *kind);
+            let right = match resolve_bound_value(value, bound_values) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
             cmp_values(&left, *op, &right)
         }
         Pred::And(left, right) => {
-            eval_pred(left, row, table, contract, records)
-                && eval_pred(right, row, table, contract, records)
+            eval_pred(left, row, table, contract, records, bound_values)
+                && eval_pred(right, row, table, contract, records, bound_values)
         }
         Pred::Or(left, right) => {
-            eval_pred(left, row, table, contract, records)
-                || eval_pred(right, row, table, contract, records)
+            eval_pred(left, row, table, contract, records, bound_values)
+                || eval_pred(right, row, table, contract, records, bound_values)
         }
     }
 }
@@ -173,15 +207,6 @@ fn read_path(
             .unwrap_or(Value::Null);
     }
     Value::Null
-}
-
-fn decode_literal(text: &str, kind: LiteralKind) -> Value {
-    match kind {
-        LiteralKind::Null => Value::Null,
-        LiteralKind::Bool => Value::Bool(text == "true"),
-        LiteralKind::Int => Value::I64(text.parse().unwrap_or(0)),
-        LiteralKind::Str => Value::Text(text.to_string()),
-    }
 }
 
 fn compare_values(left: &Value, right: &Value) -> std::cmp::Ordering {

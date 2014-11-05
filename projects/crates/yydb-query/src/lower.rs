@@ -6,7 +6,7 @@ use vos::syntax::{
 
 use yydb_types::{Error, Result};
 
-use super::ops::{CmpOp, LiteralKind, Pred, ProjectExpr, ProjectField, QueryOp, SortKey};
+use super::ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, SlotTy, SortKey};
 
 fn query_error(message: impl Into<String>) -> Error {
     Error::Schema {
@@ -170,12 +170,12 @@ fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[VosExpr]) -> Result
             Ok(())
         }
         "skip" => {
-            let count = literal_u64(args.first(), method)?;
+            let count = literal_count(args.first(), method)?;
             ops.push(QueryOp::Skip { count });
             Ok(())
         }
         "take" => {
-            let count = literal_u64(args.first(), method)?;
+            let count = literal_count(args.first(), method)?;
             ops.push(QueryOp::Take { count });
             Ok(())
         }
@@ -199,6 +199,7 @@ fn lower_predicate(expr: &VosExpr) -> Result<Pred> {
 }
 
 fn lower_pred_body(expr: &VosExpr, param: Option<&str>) -> Result<Pred> {
+    use yydb_types::Value;
     match expr {
         VosExpr::Literal(VosLiteral::Bool(true)) => Ok(Pred::True),
         VosExpr::Literal(VosLiteral::Bool(false)) => Ok(Pred::False),
@@ -229,21 +230,28 @@ fn lower_pred_body(expr: &VosExpr, param: Option<&str>) -> Result<Pred> {
                     "Phase 1 filters must compare a field access on the left",
                 ));
             }
-            let (literal, kind) = match right.as_ref() {
-                VosExpr::Literal(VosLiteral::Bool(b)) => (b.to_string(), LiteralKind::Bool),
-                VosExpr::Literal(VosLiteral::Int(t)) => (t.clone(), LiteralKind::Int),
-                VosExpr::Literal(VosLiteral::String(s)) => (s.clone(), LiteralKind::Str),
-                VosExpr::Literal(VosLiteral::Null) => ("null".into(), LiteralKind::Null),
-                VosExpr::Literal(VosLiteral::Float(t)) => (t.clone(), LiteralKind::Str),
+            let value = match right.as_ref() {
+                VosExpr::Literal(VosLiteral::Bool(b)) => BoundValue::Literal(Value::Bool(*b)),
+                VosExpr::Literal(VosLiteral::Int(t)) => {
+                    let n: i64 = t.parse().map_err(|_| query_error(format!("invalid integer literal `{t}`")))?;
+                    BoundValue::Literal(Value::I64(n))
+                }
+                VosExpr::Literal(VosLiteral::String(s)) => BoundValue::Literal(Value::Text(s.clone())),
+                VosExpr::Literal(VosLiteral::Null) => BoundValue::Literal(Value::Null),
+                VosExpr::Literal(VosLiteral::Float(_)) => {
+                    return Err(query_error("Phase 1 does not support float literals in filters"));
+                }
                 _ => {
                     return Err(query_error(
-                        "Phase 1 filters require a literal right-hand side",
+                        "Phase 1 filters require a literal right-hand side (parameters become supported after PreparedStatement lands)",
                     ));
                 }
             };
-            if matches!(op, VosBinaryOp::Eq) && kind == LiteralKind::Bool {
-                let value = literal == "true";
-                return Ok(Pred::FieldBool { path, value });
+            if matches!(op, VosBinaryOp::Eq) {
+                if let BoundValue::Literal(Value::Bool(b)) = &value {
+                    let value = *b;
+                    return Ok(Pred::FieldBool { path, value: BoundValue::Literal(Value::Bool(value)) });
+                }
             }
             let cmp = match op {
                 VosBinaryOp::Eq => CmpOp::Eq,
@@ -254,19 +262,14 @@ fn lower_pred_body(expr: &VosExpr, param: Option<&str>) -> Result<Pred> {
                 VosBinaryOp::Ge => CmpOp::Ge,
                 _ => return Err(query_error("unsupported comparison in filter")),
             };
-            Ok(Pred::FieldCmp {
-                path,
-                op: cmp,
-                literal,
-                kind,
-            })
+            Ok(Pred::FieldCmp { path, op: cmp, value })
         }
         _ => {
             let path = lower_field_path(expr, param)?;
             if path.is_empty() {
                 return Err(query_error("unsupported predicate shape"));
             }
-            Ok(Pred::FieldBool { path, value: true })
+            Ok(Pred::FieldBool { path, value: BoundValue::Literal(Value::Bool(true)) })
         }
     }
 }
@@ -369,16 +372,18 @@ fn lower_project_expr(expr: &VosExpr, param: Option<&str>) -> Result<ProjectExpr
     }
 }
 
-fn literal_u64(expr: Option<&VosExpr>, method: &str) -> Result<u64> {
+fn literal_count(expr: Option<&VosExpr>, method: &str) -> Result<BoundValue> {
+    use yydb_types::Value;
     let Some(expr) = expr else {
         return Err(query_error(format!(
             "`.{method}` requires a count argument"
         )));
     };
     match expr {
-        VosExpr::Literal(VosLiteral::Int(t)) => t
-            .parse::<u64>()
-            .map_err(|_| query_error(format!("invalid `{method}` count"))),
+        VosExpr::Literal(VosLiteral::Int(t)) => {
+            let n: i64 = t.parse().map_err(|_| query_error(format!("invalid `{method}` count")))?;
+            Ok(BoundValue::Literal(Value::I64(n)))
+        }
         _ => Err(query_error(format!(
             "`.{method}` count must be an integer literal"
         ))),
