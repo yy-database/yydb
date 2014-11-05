@@ -4,8 +4,22 @@
     "cli.cmd.init": "Initialize a new YYDB database file",
     "cli.cmd.info": "Show database metadata",
     "cli.cmd.serve": "Start the HTTP API server",
+    "cli.cmd.verify": "Run read-only consistency probes and report findings",
     "cli.opt.schema-file": "VOS schema document to embed at init time",
     "cli.opt.bind": "Listen address (default: 127.0.0.1:7700)",
     "cli.opt.insecure-bind": "Allow binding to non-loopback addresses",
-    "cli.env.native": "Override the platform .node binding path (YYDB_NATIVE)"
+    "cli.opt.doctor": "Include doctor consistency probes in info output",
+    "cli.env.native": "Override the platform .node binding path (YYDB_NATIVE)",
+    "cli.err.open_failed": "Cannot open database at {path}: {reason}",
+    "cli.err.schema_load": "Schema file not found: {path}",
+    "cli.err.no_positionals": "Command '{cmd}' requires a database path argument",
+    "yydb.doctor.half_batch": "Batch {seq} incomplete — {n} rows written but batch aborted",
+    "yydb.doctor.cas_orphan": "CAS object missing metadata reference: {hash}",
+    "yydb.doctor.wal_overlap": "WAL frame {seq} overlaps the main file region",
+    "yydb.doctor.wal_lost": "Last checkpoint {cp_seq} newer than last WAL frame {wal_seq}",
+    "yydb.doctor.corrupt_slot": "Record slot {key} payload CRC mismatch",
+    "yydb.doctor.schema_desync": "Schema version {db_ver} newer than embedded descriptor {doc_ver}",
+    "yydb.verify.passed": "Database is clean — no consistency issues found.",
+    "yydb.verify.has_warnings": "Doctor found {n} warning(s). The database is readable but should be inspected.",
+    "yydb.verify.has_errors": "Doctor found {n} error(s). The database may be corrupt."
 }
