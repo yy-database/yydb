@@ -6,7 +6,7 @@ use vos::syntax::{
 
 use yydb_types::{Error, Result};
 
-use super::ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, SlotTy, SortKey};
+use super::ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, SortKey};
 
 fn query_error(message: impl Into<String>) -> Error {
     Error::Schema {
