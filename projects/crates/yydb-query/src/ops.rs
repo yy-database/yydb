@@ -32,19 +32,21 @@ pub enum BoundValue {
     },
 }
 
-/// Declared type for a parameter slot.
+/// Declared type for a parameter slot. `Any` means the caller-supplied value
+/// is accepted as-is at bind time with no compile-time type constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotTy {
+    Any,
     Bool,
     I64,
     Text,
     Null,
 }
 
-/// Convert a `SlotTy` to the display string used in parameter errors.
 impl SlotTy {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Any => "any",
             Self::Bool => "bool",
             Self::I64 => "i64",
             Self::Text => "text",
@@ -52,14 +54,14 @@ impl SlotTy {
         }
     }
 
-    /// Returns true iff `value.ty()` matches this slot type.
+    /// Returns true iff `value.ty()` matches this slot type. `Any` accepts everything.
     pub fn matches(self, value: &Value) -> bool {
-        match (self, value) {
-            (Self::Bool, Value::Bool(_)) => true,
-            (Self::I64, Value::I64(_)) => true,
-            (Self::Text, Value::Text(_)) => true,
-            (Self::Null, Value::Null) => true,
-            _ => false,
+        match self {
+            Self::Any => true,
+            Self::Bool => matches!(value, Value::Bool(_)),
+            Self::I64 => matches!(value, Value::I64(_) | Value::U64(_)),
+            Self::Text => matches!(value, Value::Text(_)),
+            Self::Null => matches!(value, Value::Null),
         }
     }
 }

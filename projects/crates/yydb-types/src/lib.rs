@@ -125,6 +125,14 @@ pub enum Error {
         /// Protocol error message.
         message: String,
     },
+    /// Parameter binding error on a prepared statement: missing / extra /
+    /// wrong-type values.
+    QueryBind {
+        /// Parameter name (always set).
+        parameter: String,
+        /// Human-readable detail for diagnostics.
+        message: String,
+    },
     /// Independent compare-and-set failed.
     CasConflict {
         /// Key that failed the compare.
@@ -198,6 +206,9 @@ impl fmt::Display for Error {
             Self::ObjectCorrupt { message } => write!(f, "object corrupt: {message}"),
             Self::Unsupported(feature) => write!(f, "unsupported: {feature}"),
             Self::Protocol { message } => write!(f, "protocol: {message}"),
+            Self::QueryBind { parameter, message } => {
+                write!(f, "query bind `${parameter}: {message}")
+            }
             Self::CasConflict { key } => write!(f, "CAS conflict on key {key}"),
             Self::LeaseUnavailable { key } => write!(f, "lease unavailable on key {key}"),
             Self::FencingMismatch { key } => {
@@ -241,6 +252,7 @@ impl Error {
             Self::ObjectCorrupt { .. } => "yydb.object.corrupt",
             Self::Unsupported(_) => "yydb.unsupported",
             Self::Protocol { .. } => "yydb.protocol",
+            Self::QueryBind { .. } => "yydb.query.bind",
             Self::CasConflict { .. } => "yydb.cas.conflict",
             Self::LeaseUnavailable { .. } => "yydb.lease.unavailable",
             Self::FencingMismatch { .. } => "yydb.fencing.mismatch",
@@ -270,6 +282,7 @@ impl Error {
             Self::ObjectNotFound { .. } | Self::ObjectCorrupt { .. } => "object",
             Self::Unsupported(_) => "unsupported",
             Self::Protocol { .. } => "protocol",
+            Self::QueryBind { .. } => "query",
             Self::CasConflict { .. } => "cas",
             Self::LeaseUnavailable { .. } => "lease",
             Self::FencingMismatch { .. } => "fencing",
@@ -310,6 +323,10 @@ impl Error {
             Self::ObjectNotFound { hash_hex } => vec![("hash", hash_hex.clone())],
             Self::ObjectCorrupt { message } => vec![("detail", message.clone())],
             Self::Protocol { message } => vec![("detail", message.clone())],
+            Self::QueryBind { parameter, message } => vec![
+                ("parameter", parameter.clone()),
+                ("detail", message.clone()),
+            ],
             Self::CasConflict { key } => vec![("key", key.clone())],
             Self::LeaseUnavailable { key } | Self::FencingMismatch { key } => {
                 vec![("key", key.clone())]
