@@ -384,6 +384,11 @@ fn literal_count(expr: Option<&VosExpr>, method: &str) -> Result<BoundValue> {
             let n: i64 = t.parse().map_err(|_| query_error(format!("invalid `{method}` count")))?;
             Ok(BoundValue::Literal(Value::I64(n)))
         }
+        // String literal is allowed as a placeholder slot — rewrite_placeholders_in_ops
+        // in prepare() converts these to BoundValue::Slot.
+        VosExpr::Literal(VosLiteral::String(s)) => {
+            Ok(BoundValue::Literal(Value::Text(s.clone())))
+        }
         _ => Err(query_error(format!(
             "`.{method}` count must be an integer literal"
         ))),

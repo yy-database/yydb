@@ -289,3 +289,132 @@ fn fingerprint(source: &str) -> String {
     out.push_str(&format!("{h:016x}"));
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use yydb_types::Value;
+
+    #[test]
+    fn prepare_extracts_dollar_named_parameters_in_order() {
+        // First verify VOS parser accepts the no-lambda query shape.
+        let source = r#"User.all().take($limit).collect()"#;
+        let (parameters, rewritten) = scan_and_rewrite(source).expect("scan");
+        eprintln!("rewritten = {}", rewritten);
+        assert!(
+            vos::parse_program(&rewritten).is_ok(),
+            "rewritten must parse: {}",
+            rewritten
+        );
+        let stmt = prepare(source).expect("prepare");
+        assert_eq!(stmt.parameters.len(), 1);
+        assert_eq!(stmt.parameters[0].name, "limit");
+        assert_eq!(stmt.parameters[0].index, 0);
+    }
+
+    #[test]
+    fn prepare_deduplicates_repeated_parameter() {
+        let source = "User.all().take($limit).skip($limit).collect()";
+        let stmt = prepare(source).expect("prepare");
+        assert_eq!(stmt.parameters.len(), 1);
+        assert_eq!(stmt.parameters[0].name, "limit");
+        // Two occurrences → usage_count = 2
+        assert_eq!(stmt.parameters[0].usage_count, 2);
+    }
+
+    #[test]
+    fn prepare_same_source_gives_same_fingerprint() {
+        let a = prepare("User.all().take($limit).collect()").unwrap();
+        let b = prepare("User.all().take($limit).collect()").unwrap();
+        assert_eq!(a.source_fingerprint, b.source_fingerprint);
+        assert!(a.source_fingerprint.len() >= 8);
+    }
+
+    #[test]
+    fn execute_prepared_reuses_plan_for_different_bindings() {
+        let source = "User.all().take($limit).collect()";
+        let stmt = prepare(source).unwrap();
+
+        let bound_a = bind_named(&stmt, &BTreeMap::from([
+            ("limit".into(), Value::I64(100)),
+        ]))
+        .expect("bind a");
+        assert_eq!(bound_a.len(), 1);
+        assert_eq!(bound_a[0], Value::I64(100));
+
+        let bound_b = bind_named(&stmt, &BTreeMap::from([
+            ("limit".into(), Value::I64(1)),
+        ]))
+        .expect("bind b");
+        assert_eq!(bound_b[0], Value::I64(1));
+    }
+
+    #[test]
+    fn bind_named_rejects_missing_parameter() {
+        let stmt = prepare("User.all().take($limit).collect()").unwrap();
+        let err = bind_named(&stmt, &BTreeMap::from([])).unwrap_err();
+        assert_eq!(err.code(), "yydb.query.bind");
+        assert_eq!(err.operation(), "query");
+        let params = err.params().expect("QueryBind has params");
+        let names: Vec<_> = params.iter().map(|(k, _)| *k).collect();
+        assert!(names.contains(&"parameter"));
+        let param_value = params
+            .iter()
+            .find(|(k, _)| *k == "parameter")
+            .map(|(_, v)| v.as_str())
+            .expect("parameter exists");
+        // scan_and_rewrite strips the leading `$`, so the stored name is just `limit`.
+        assert_eq!(param_value, "limit");
+    }
+
+    #[test]
+    fn bind_named_rejects_extraneous_parameter() {
+        let stmt = prepare("User.all().take($limit).collect()").unwrap();
+        let err = bind_named(&stmt, &BTreeMap::from([
+            ("limit".into(), Value::I64(10)),
+            ("unreferenced".into(), Value::Text("oops".into())),
+        ]))
+        .unwrap_err();
+        assert_eq!(err.code(), "yydb.query.bind");
+    }
+
+    #[test]
+    fn prepare_works_with_no_parameters() {
+        let stmt = prepare("User.all().collect()").unwrap();
+        assert!(stmt.parameters.is_empty());
+        let bound = bind_named(&stmt, &BTreeMap::new()).unwrap();
+        assert!(bound.is_empty());
+    }
+
+    #[test]
+    fn prepare_fails_on_vos_syntax_error() {
+        let err = prepare("this is not valid VOS").unwrap_err();
+        assert_eq!(err.code(), "yydb.schema.invalid");
+    }
+
+    #[test]
+    fn scan_and_rewrite_extracts_params_and_rewrites() {
+        let (params, rewritten) =
+            scan_and_rewrite("User.all().take($k).skip($j).collect()").unwrap();
+        assert_eq!(params.len(), 2);
+        assert!(rewritten.contains("\"__YYDB_PARAM_0\""));
+        assert!(rewritten.contains("\"__YYDB_PARAM_1\""));
+    }
+
+    #[test]
+    fn take_and_skip_can_both_be_bound() {
+        let source = "User.all().skip($offset).take($limit).collect()";
+        let stmt = prepare(source).unwrap();
+        assert_eq!(stmt.parameters.len(), 2);
+        assert_eq!(stmt.parameters[0].name, "offset");
+        assert_eq!(stmt.parameters[1].name, "limit");
+
+        let bound = bind_named(&stmt, &BTreeMap::from([
+            ("offset".into(), Value::I64(50)),
+            ("limit".into(), Value::I64(10)),
+        ]))
+        .unwrap();
+        assert_eq!(bound, vec![Value::I64(50), Value::I64(10)]);
+    }
+}
