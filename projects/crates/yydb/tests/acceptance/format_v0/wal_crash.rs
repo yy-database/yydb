@@ -2,15 +2,11 @@
 
 use std::fs;
 
-use yydb::{journal::wal_path, Connection, OpenFlags};
-use yydb_formats::{parse_wal, strip_trailing_txn_commit, FilePager};
+use yydb::{Connection, OpenFlags, journal::wal_path};
+use yydb_formats::{FilePager, parse_wal, strip_trailing_txn_commit};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "yydb-formats-v0-wal-crash-{}-{}.yydb",
-        std::process::id(),
-        label
-    ))
+    std::env::temp_dir().join(format!("yydb-formats-v0-wal-crash-{}-{}.yydb", std::process::id(), label))
 }
 
 #[test]
@@ -23,10 +19,7 @@ fn yydb_formats_v0_wal_crash() {
     let conn = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     conn.put("baseline", b"ok").unwrap();
     conn.checkpoint().unwrap();
-    assert!(
-        !wal.exists(),
-        "checkpoint must remove the WAL sidecar before the crash txn"
-    );
+    assert!(!wal.exists(), "checkpoint must remove the WAL sidecar before the crash txn");
     drop(conn);
 
     let mut pager = FilePager::open(&path, true).unwrap();
@@ -36,21 +29,13 @@ fn yydb_formats_v0_wal_crash() {
     let wal_bytes = fs::read(&wal).unwrap();
     let parsed = parse_wal(&wal_bytes).unwrap();
     assert_eq!(
-        parsed
-            .frames
-            .iter()
-            .filter(|frame| frame.frame_type == 0x04)
-            .count(),
+        parsed.frames.iter().filter(|frame| frame.frame_type == 0x04).count(),
         1,
         "expected exactly one committed WAL txn before crash injection"
     );
     let crashed = strip_trailing_txn_commit(&wal_bytes).unwrap();
     assert!(
-        parse_wal(&crashed)
-            .unwrap()
-            .frames
-            .iter()
-            .all(|frame| frame.frame_type != 0x04),
+        parse_wal(&crashed).unwrap().frames.iter().all(|frame| frame.frame_type != 0x04),
         "crash injection must drop TxnCommit"
     );
     fs::write(&wal, crashed).unwrap();

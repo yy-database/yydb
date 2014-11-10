@@ -5,11 +5,12 @@ use std::collections::BTreeMap;
 use vos::types::ResolvedContract;
 use yydb_types::{Error, Result, Value};
 
-use super::catalog::table_row_key_name;
-use super::lower;
-use super::ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow};
-use super::resolve;
-use super::store;
+use super::{
+    catalog::table_row_key_name,
+    lower,
+    ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow},
+    resolve, store,
+};
 
 /// Execute a VOS source directly (convenience wrapper). Parses + lowers + runs.
 pub fn execute(
@@ -17,9 +18,7 @@ pub fn execute(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Vec<QueryRow>> {
-    let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema {
-        message: diagnostics,
-    })?;
+    let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
     let ops = lower::lower_program(&program)?;
     execute_ops(&ops, contract, records, &[])
 }
@@ -46,19 +45,16 @@ pub fn execute_ops(
                 rows = store::load_table(records, &storage_table)?;
             }
             QueryOp::Filter { predicate } => {
-                let table = current_table.as_deref().ok_or_else(|| Error::Schema {
-                    message: "filter without a preceding table scan".into(),
-                })?;
+                let table = current_table
+                    .as_deref()
+                    .ok_or_else(|| Error::Schema { message: "filter without a preceding table scan".into() })?;
                 rows.retain(|row| eval_pred(predicate, row, table, contract, records, bound_values));
             }
             QueryOp::Project { fields } => {
-                let table = current_table.as_deref().ok_or_else(|| Error::Schema {
-                    message: "project without a preceding table scan".into(),
-                })?;
-                rows = rows
-                    .into_iter()
-                    .map(|row| project_row(fields, &row, table, contract, records))
-                    .collect();
+                let table = current_table
+                    .as_deref()
+                    .ok_or_else(|| Error::Schema { message: "project without a preceding table scan".into() })?;
+                rows = rows.into_iter().map(|row| project_row(fields, &row, table, contract, records)).collect();
             }
             QueryOp::Sort { keys } => {
                 rows.sort_by(|left, right| {
@@ -107,9 +103,7 @@ fn resolve_bound_value(bv: &BoundValue, bound_values: &[Value]) -> Result<Value>
         BoundValue::Slot { index, .. } => bound_values
             .get(*index as usize)
             .cloned()
-            .ok_or_else(|| Error::Schema {
-                message: format!("bound parameter index {} out of range", index),
-            }),
+            .ok_or_else(|| Error::Schema { message: format!("bound parameter index {} out of range", index) }),
     }
 }
 
@@ -127,24 +121,13 @@ fn project_row(
                 let value = read_path(path, row, table, contract, records);
                 out.insert(field.name.clone(), value);
             }
-            ProjectExpr::Nested {
-                path,
-                fields: nested,
-            } => {
+            ProjectExpr::Nested { path, fields: nested } => {
                 let nested_value = match contract {
-                    Some(contract) => {
-                        resolve::resolve_row_at_path(path, row, table, contract, records)
-                            .map(|(nested_row, nested_table)| {
-                                Value::Row(project_row(
-                                    nested,
-                                    &nested_row,
-                                    &nested_table,
-                                    Some(contract),
-                                    records,
-                                ))
-                            })
-                            .unwrap_or(Value::Null)
-                    }
+                    Some(contract) => resolve::resolve_row_at_path(path, row, table, contract, records)
+                        .map(|(nested_row, nested_table)| {
+                            Value::Row(project_row(nested, &nested_row, &nested_table, Some(contract), records))
+                        })
+                        .unwrap_or(Value::Null),
                     None => Value::Null,
                 };
                 out.insert(field.name.clone(), nested_value);
@@ -203,8 +186,7 @@ fn read_path(
         return row.get(&path[0]).cloned().unwrap_or(Value::Null);
     }
     if let Some(contract) = contract {
-        return resolve::resolve_field_path(path, row, table, contract, records)
-            .unwrap_or(Value::Null);
+        return resolve::resolve_field_path(path, row, table, contract, records).unwrap_or(Value::Null);
     }
     Value::Null
 }

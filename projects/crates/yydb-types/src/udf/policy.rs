@@ -94,9 +94,6 @@ impl UdfPolicy {
 
     /// Returns whether row-at-a-time execution is allowed by default.
     pub fn allows_scalar_row_execution(&self) -> bool {
-        matches!(
-            self.effect,
-            Effect::Pure | Effect::ReadLocal | Effect::ReadFile
-        )
+        matches!(self.effect, Effect::Pure | Effect::ReadLocal | Effect::ReadFile)
     }
 }

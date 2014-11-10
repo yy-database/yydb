@@ -11,17 +11,17 @@
 use std::{
     fmt,
     net::TcpStream,
-    sync::atomic::{AtomicU32, Ordering},
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
 };
 
-pub use yydb_types::udf::HostMicroDefinition;
-pub use yydb_types::{Error, Result, SchemaVersion, Value};
+pub use yydb_types::{Error, Result, SchemaVersion, Value, udf::HostMicroDefinition};
 
 use yydb_protocol::{
-    decode_error, decode_kv_get_ok, decode_scalar_call_ok, decode_schema_get_ok, encode_kv_get,
-    encode_kv_put, encode_micro_register, encode_scalar_call, encode_schema_ensure, read_frame,
-    split_bind, write_frame, Frame, MessageType,
+    Frame, MessageType, decode_error, decode_kv_get_ok, decode_scalar_call_ok, decode_schema_get_ok, encode_kv_get,
+    encode_kv_put, encode_micro_register, encode_scalar_call, encode_schema_ensure, read_frame, split_bind, write_frame,
 };
 
 /// Handle to a remote YYDB server started with `yydb serve`.
@@ -39,11 +39,7 @@ impl Client {
     pub fn connect(endpoint: impl Into<String>) -> Result<Self> {
         let endpoint = normalize_endpoint(endpoint.into())?;
         let stream = TcpStream::connect(&endpoint)?;
-        let client = Self {
-            endpoint,
-            stream: Mutex::new(stream),
-            next_id: AtomicU32::new(1),
-        };
+        let client = Self { endpoint, stream: Mutex::new(stream), next_id: AtomicU32::new(1) };
         let _ = client.hello()?;
         Ok(client)
     }
@@ -67,8 +63,7 @@ impl Client {
 
     /// Ensure the remote schema (VOS document).
     pub fn ensure_schema(&self, document: &str) -> Result<()> {
-        let response =
-            self.round_trip(MessageType::SchemaEnsure, encode_schema_ensure(0, document))?;
+        let response = self.round_trip(MessageType::SchemaEnsure, encode_schema_ensure(0, document))?;
         expect_type(&response, MessageType::SchemaEnsureOk)?;
         Ok(())
     }
@@ -96,20 +91,14 @@ impl Client {
 
     /// Register a session-local host micro contract on the remote engine.
     pub fn register_host_micro(&self, definition: &HostMicroDefinition) -> Result<()> {
-        let response = self.round_trip(
-            MessageType::MicroRegister,
-            encode_micro_register(definition),
-        )?;
+        let response = self.round_trip(MessageType::MicroRegister, encode_micro_register(definition))?;
         expect_type(&response, MessageType::MicroRegisterOk)?;
         Ok(())
     }
 
     /// Invoke a registered scalar UDF on the remote engine.
     pub fn call_scalar_version(&self, name: &str, version: u32, args: &[Value]) -> Result<Value> {
-        let response = self.round_trip(
-            MessageType::ScalarCall,
-            encode_scalar_call(name, version, args)?,
-        )?;
+        let response = self.round_trip(MessageType::ScalarCall, encode_scalar_call(name, version, args)?)?;
         expect_type(&response, MessageType::ScalarCallOk)?;
         decode_scalar_call_ok(&response.body)
     }
@@ -123,10 +112,7 @@ impl Client {
     fn round_trip(&self, msg_type: MessageType, body: Vec<u8>) -> Result<Frame> {
         let request_id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let request = Frame::new(msg_type, request_id, body);
-        let mut stream = self
-            .stream
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut stream = self.stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         write_frame(&mut *stream, &request)?;
         let response = read_frame(&mut *stream)?;
         if response.request_id != request_id {
@@ -134,21 +120,14 @@ impl Client {
         }
         if response.msg_type == MessageType::Error {
             let error = decode_error(&response.body)?;
-            return Err(Error::Remote {
-                code: error.code,
-                message: error.message,
-            });
+            return Err(Error::Remote { code: error.code, message: error.message });
         }
         Ok(response)
     }
 }
 
 fn expect_type(frame: &Frame, expected: MessageType) -> Result<()> {
-    if frame.msg_type == expected {
-        Ok(())
-    } else {
-        Err(Error::Corrupt("unexpected wire response type"))
-    }
+    if frame.msg_type == expected { Ok(()) } else { Err(Error::Corrupt("unexpected wire response type")) }
 }
 
 fn normalize_endpoint(endpoint: String) -> Result<String> {
@@ -169,9 +148,7 @@ fn normalize_endpoint(endpoint: String) -> Result<String> {
 
 impl fmt::Debug for Client {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Client")
-            .field("endpoint", &self.endpoint)
-            .finish_non_exhaustive()
+        f.debug_struct("Client").field("endpoint", &self.endpoint).finish_non_exhaustive()
     }
 }
 

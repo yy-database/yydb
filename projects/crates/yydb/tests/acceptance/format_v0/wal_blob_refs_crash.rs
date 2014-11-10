@@ -1,17 +1,15 @@
 //! fixture: format_v0.wal_blob_refs_crash
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-use yydb::{journal::wal_path, Batch, Connection, ObjectKind, ObjectStore, OpenFlags};
-use yydb_formats::{parse_wal, strip_trailing_txn_commit, FRAME_BLOB_REFS};
+use yydb::{Batch, Connection, ObjectKind, ObjectStore, OpenFlags, journal::wal_path};
+use yydb_formats::{FRAME_BLOB_REFS, parse_wal, strip_trailing_txn_commit};
 
 fn temp_yydx(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "yydb-formats-v0-wal-blob-refs-crash-{}-{}.yydx",
-        std::process::id(),
-        label
-    ))
+    std::env::temp_dir().join(format!("yydb-formats-v0-wal-blob-refs-crash-{}-{}.yydx", std::process::id(), label))
 }
 
 fn cleanup(path: &Path) {
@@ -44,29 +42,16 @@ fn yydb_formats_v0_wal_blob_refs_crash() {
     let wal = wal_path(&path);
     let wal_bytes = fs::read(&wal).unwrap();
     let parsed = parse_wal(&wal_bytes).unwrap();
-    assert!(
-        parsed
-            .frames
-            .iter()
-            .any(|frame| frame.frame_type == FRAME_BLOB_REFS),
-        "crash txn must include BlobRefs"
-    );
+    assert!(parsed.frames.iter().any(|frame| frame.frame_type == FRAME_BLOB_REFS), "crash txn must include BlobRefs");
     let crashed = strip_trailing_txn_commit(&wal_bytes).unwrap();
     assert!(
-        parse_wal(&crashed)
-            .unwrap()
-            .frames
-            .iter()
-            .all(|frame| frame.frame_type != 0x04),
+        parse_wal(&crashed).unwrap().frames.iter().all(|frame| frame.frame_type != 0x04),
         "crash injection must drop TxnCommit after BlobRefs"
     );
     fs::write(&wal, crashed).unwrap();
 
     let reopened = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
-    assert_eq!(
-        reopened.get("blobs/baseline").unwrap(),
-        Some(format!("yydb:object:{}", baseline.hash_hex()).into_bytes())
-    );
+    assert_eq!(reopened.get("blobs/baseline").unwrap(), Some(format!("yydb:object:{}", baseline.hash_hex()).into_bytes()));
     assert_eq!(reopened.get("blobs/lost").unwrap(), None);
     assert!(reopened.objects().path_for(&lost).exists());
 

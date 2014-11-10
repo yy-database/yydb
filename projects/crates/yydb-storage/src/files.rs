@@ -1,7 +1,6 @@
 //! File lifecycle helpers shared by backup and compaction paths.
 
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 use yydb_types::Result;
 
@@ -34,7 +33,8 @@ pub fn copy_tree(src: &Path, dest: &Path) -> Result<()> {
         let target = dest.join(entry.file_name());
         if entry.file_type()?.is_dir() {
             copy_tree(&entry.path(), &target)?;
-        } else {
+        }
+        else {
             fs::copy(entry.path(), target)?;
         }
     }

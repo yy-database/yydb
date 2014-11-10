@@ -1,12 +1,15 @@
 //! TCP-backed [`HostRuntimeAdapter`] for `yydb serve` wire peers.
 
-use std::net::TcpStream;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::{
+    net::TcpStream,
+    sync::{
+        Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
+};
 
 use yydb_protocol::{
-    decode_error, decode_micro_host_invoke_ok, encode_micro_host_invoke, read_frame, write_frame,
-    Frame, MessageType,
+    Frame, MessageType, decode_error, decode_micro_host_invoke_ok, encode_micro_host_invoke, read_frame, write_frame,
 };
 use yydb_types::Error;
 use yydb_udf::{HostFunctionHandle, HostRuntimeAdapter, Result as UdfResult, UdfError, UdfValue};
@@ -20,46 +23,25 @@ pub struct TcpWireHostAdapter {
 impl TcpWireHostAdapter {
     /// Creates an adapter that shares the client TCP connection with the serve loop.
     pub fn new(stream: TcpStream) -> Self {
-        Self {
-            stream: Mutex::new(stream),
-            next_id: AtomicU32::new(1_000_000),
-        }
+        Self { stream: Mutex::new(stream), next_id: AtomicU32::new(1_000_000) }
     }
 
-    fn roundtrip_invoke(
-        &self,
-        handle: &HostFunctionHandle,
-        args: &[UdfValue],
-    ) -> UdfResult<UdfValue> {
+    fn roundtrip_invoke(&self, handle: &HostFunctionHandle, args: &[UdfValue]) -> UdfResult<UdfValue> {
         let request_id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let request = Frame::new(
-            MessageType::MicroHostInvoke,
-            request_id,
-            encode_micro_host_invoke(handle, args),
-        );
-        let mut stream = self
-            .stream
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let request = Frame::new(MessageType::MicroHostInvoke, request_id, encode_micro_host_invoke(handle, args));
+        let mut stream = self.stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         write_frame(&mut *stream, &request).map_err(map_wire_error)?;
         let response = read_frame(&mut *stream).map_err(map_wire_error)?;
         if response.msg_type == MessageType::Error {
             let error = decode_error(&response.body).map_err(map_wire_error)?;
-            return Err(UdfError::ExecutionFailed {
-                message: error.message,
-            });
+            return Err(UdfError::ExecutionFailed { message: error.message });
         }
         if response.request_id != request_id {
-            return Err(UdfError::ExecutionFailed {
-                message: "wire micro host invoke response id mismatch".into(),
-            });
+            return Err(UdfError::ExecutionFailed { message: "wire micro host invoke response id mismatch".into() });
         }
         if response.msg_type != MessageType::MicroHostInvokeOk {
             return Err(UdfError::ExecutionFailed {
-                message: format!(
-                    "unexpected wire response type {}",
-                    response.msg_type.as_u16()
-                ),
+                message: format!("unexpected wire response type {}", response.msg_type.as_u16()),
             });
         }
         decode_micro_host_invoke_ok(&response.body).map_err(map_wire_error)
@@ -71,17 +53,11 @@ impl HostRuntimeAdapter for TcpWireHostAdapter {
         self.roundtrip_invoke(handle, args)
     }
 
-    fn invoke_batch(
-        &self,
-        _handle: &HostFunctionHandle,
-        _batches: &[Vec<UdfValue>],
-    ) -> UdfResult<Vec<UdfValue>> {
+    fn invoke_batch(&self, _handle: &HostFunctionHandle, _batches: &[Vec<UdfValue>]) -> UdfResult<Vec<UdfValue>> {
         Err(UdfError::UnsupportedType)
     }
 }
 
 fn map_wire_error(error: Error) -> UdfError {
-    UdfError::ExecutionFailed {
-        message: error.to_string(),
-    }
+    UdfError::ExecutionFailed { message: error.to_string() }
 }

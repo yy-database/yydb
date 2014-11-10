@@ -6,10 +6,9 @@
 
 use yydb_execution::ValidatedUdf;
 
-use crate::runtime::{from_execution, into_execution, UdfContext, UdfImplementation};
 use crate::{
-    ImplementationKind, Placement, Result, Signature, UdfDefinition, UdfError, UdfIdentity,
-    UdfPolicy, UdfValue,
+    ImplementationKind, Placement, Result, Signature, UdfDefinition, UdfError, UdfIdentity, UdfPolicy, UdfValue,
+    runtime::{UdfContext, UdfImplementation, from_execution, into_execution},
 };
 
 /// YYDB-internal product wrapping a validated execution program for registration.
@@ -70,23 +69,15 @@ impl UdfImplementation for ExecutionProgramImplementation {
     }
 
     fn invoke(&self, context: &mut UdfContext, args: &[UdfValue]) -> Result<UdfValue> {
-        self.binding
-            .signature
-            .ensure_args(&UdfValue::argument_types(args))?;
+        self.binding.signature.ensure_args(&UdfValue::argument_types(args))?;
         context.check_cancelled()?;
         context.charge(1)?;
-        let execution_args = args
-            .iter()
-            .cloned()
-            .map(into_execution)
-            .collect::<Result<Vec<_>>>()?;
+        let execution_args = args.iter().cloned().map(into_execution).collect::<Result<Vec<_>>>()?;
         let result = self
             .binding
             .program
             .evaluate(&[], &execution_args)
-            .map_err(|error| UdfError::ExecutionFailed {
-                message: format!("{error:?}"),
-            })?;
+            .map_err(|error| UdfError::ExecutionFailed { message: format!("{error:?}") })?;
         from_execution(&result)
     }
 }

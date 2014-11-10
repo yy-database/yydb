@@ -11,10 +11,7 @@ fn yydb_object_batch_attach() {
     let mut committed = Batch::new();
     committed.attach_object(&live, "pages/live");
     committed.commit(&conn).unwrap();
-    assert_eq!(
-        conn.get("pages/live").unwrap(),
-        Some(format!("yydb:object:{}", live.hash_hex()).into_bytes())
-    );
+    assert_eq!(conn.get("pages/live").unwrap(), Some(format!("yydb:object:{}", live.hash_hex()).into_bytes()));
     assert_eq!(conn.get_object(&live).unwrap().as_ref(), b"live-payload");
 
     let orphan = conn.put_chunk(ObjectKind::Blob, b"orphan-payload").unwrap();
@@ -23,10 +20,7 @@ fn yydb_object_batch_attach() {
     aborted.abort();
     assert_eq!(conn.get("pages/draft").unwrap(), None);
     assert!(
-        conn.scan_orphans("pages/")
-            .unwrap()
-            .iter()
-            .any(|object| object.hash_hex() == orphan.hash_hex()),
+        conn.scan_orphans("pages/").unwrap().iter().any(|object| object.hash_hex() == orphan.hash_hex()),
         "fixture yydb.object.batch_attach expected aborted attach to stay orphan"
     );
     cleanup(&path);

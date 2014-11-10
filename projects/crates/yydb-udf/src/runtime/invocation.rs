@@ -25,11 +25,7 @@ pub struct UdfInvocation {
 impl UdfInvocation {
     /// Creates a scalar invocation.
     pub fn scalar(identity: UdfIdentity, args: Vec<UdfValue>) -> Self {
-        Self {
-            identity,
-            args,
-            mode: InvocationMode::Scalar,
-        }
+        Self { identity, args, mode: InvocationMode::Scalar }
     }
 
     /// Verifies that the argument count matches `expected_arity`.
@@ -76,10 +72,7 @@ pub struct UdfContext {
 impl UdfContext {
     /// Creates a fresh invocation context.
     pub fn new(budget: Budget) -> Self {
-        Self {
-            cancelled: false,
-            budget,
-        }
+        Self { cancelled: false, budget }
     }
 
     /// Returns an error when cancellation was requested.

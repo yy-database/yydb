@@ -3,8 +3,10 @@
 //! Host-testable gates and an in-process logical I/O backend. Browser OPFS sync handles
 //! will replace the default backend without changing error semantics.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Mutex, OnceLock},
+};
 
 use yydb::{DoctorIssue, DoctorReport, DoctorSeverity, Error, Result};
 
@@ -30,9 +32,7 @@ impl PersistentStorageMode {
         if path.ends_with(".yydb") {
             return Ok(Self::Yydb);
         }
-        Err(Error::Unsupported(
-            "persistent OPFS path must end with .yydb or .yydx",
-        ))
+        Err(Error::Unsupported("persistent OPFS path must end with .yydb or .yydx"))
     }
 }
 
@@ -74,36 +74,19 @@ impl OpfsCapabilities {
 
     /// All capabilities required for persistent `.yydx` on OPFS.
     pub fn full_yydx_profile() -> Self {
-        Self {
-            range_read: true,
-            ..Self::full_yydb_profile()
-        }
+        Self { range_read: true, ..Self::full_yydb_profile() }
     }
 }
 
 /// Validate capabilities for the requested storage mode without opening I/O.
-pub fn validate_opfs_capabilities(
-    caps: &OpfsCapabilities,
-    mode: PersistentStorageMode,
-) -> Result<()> {
+pub fn validate_opfs_capabilities(caps: &OpfsCapabilities, mode: PersistentStorageMode) -> Result<()> {
     if caps.memory_only {
-        return Err(Error::Unsupported(
-            "persistent OPFS open rejected: host profile is memory_only",
-        ));
+        return Err(Error::Unsupported("persistent OPFS open rejected: host profile is memory_only"));
     }
-    require(
-        caps.persistent_open,
-        "missing OPFS capability: persistent_open",
-    )?;
+    require(caps.persistent_open, "missing OPFS capability: persistent_open")?;
     require(caps.single_writer, "missing OPFS capability: single_writer")?;
-    require(
-        caps.atomic_publish,
-        "missing OPFS capability: atomic_publish",
-    )?;
-    require(
-        caps.durability_sync,
-        "missing OPFS capability: durability_sync",
-    )?;
+    require(caps.atomic_publish, "missing OPFS capability: atomic_publish")?;
+    require(caps.durability_sync, "missing OPFS capability: durability_sync")?;
     require(caps.file_lock, "missing OPFS capability: file_lock")?;
     require(caps.quota_report, "missing OPFS capability: quota_report")?;
     if mode == PersistentStorageMode::Yydx {
@@ -113,11 +96,7 @@ pub fn validate_opfs_capabilities(
 }
 
 fn require(present: bool, message: &'static str) -> Result<()> {
-    if present {
-        Ok(())
-    } else {
-        Err(Error::Unsupported(message))
-    }
+    if present { Ok(()) } else { Err(Error::Unsupported(message)) }
 }
 
 /// Exclusive writer lease for one logical OPFS database path (Living `08` §4).
@@ -140,14 +119,10 @@ pub fn claim_opfs_writer(path: &str, caps: &OpfsCapabilities) -> Result<OpfsWrit
 
     let mut locks = writer_locks().lock().unwrap_or_else(|p| p.into_inner());
     if locks.contains(path) {
-        return Err(Error::LeaseUnavailable {
-            key: path.to_string(),
-        });
+        return Err(Error::LeaseUnavailable { key: path.to_string() });
     }
     locks.insert(path.to_string());
-    Ok(OpfsWriterLease {
-        path: path.to_string(),
-    })
+    Ok(OpfsWriterLease { path: path.to_string() })
 }
 
 /// Open handle to a logical OPFS-backed database after capability and writer checks.
@@ -219,9 +194,7 @@ impl OpfsPersistentVolume {
     /// Publish one immutable blob chunk (`.yydx` only).
     pub fn publish_blob(&self, blob_hash: &str, body: &[u8]) -> Result<()> {
         if self.mode != PersistentStorageMode::Yydx {
-            return Err(Error::Unsupported(
-                "blob publish requires a .yydx logical path",
-            ));
+            return Err(Error::Unsupported("blob publish requires a .yydx logical path"));
         }
         crate::opfs_io::publish_blob_atomic(&self.path, blob_hash, body)?;
         crate::opfs_io::sync_logical_root(&self.path)?;
@@ -231,9 +204,7 @@ impl OpfsPersistentVolume {
     /// Read a published blob chunk (`.yydx` only).
     pub fn read_blob(&self, blob_hash: &str) -> Result<Option<Vec<u8>>> {
         if self.mode != PersistentStorageMode::Yydx {
-            return Err(Error::Unsupported(
-                "blob read requires a .yydx logical path",
-            ));
+            return Err(Error::Unsupported("blob read requires a .yydx logical path"));
         }
         crate::opfs_io::read_blob(&self.path, blob_hash)
     }
@@ -244,11 +215,7 @@ pub fn open_persistent(path: &str, caps: &OpfsCapabilities) -> Result<OpfsPersis
     let mode = PersistentStorageMode::from_path(path)?;
     validate_opfs_capabilities(caps, mode)?;
     let lease = claim_opfs_writer(path, caps)?;
-    Ok(OpfsPersistentVolume {
-        path: path.to_string(),
-        mode,
-        lease,
-    })
+    Ok(OpfsPersistentVolume { path: path.to_string(), mode, lease })
 }
 
 /// In-memory committed-generation stub for OPFS gate tests (Living `08` §5).
@@ -283,9 +250,7 @@ impl OpfsCommittedVolume {
     pub fn publish_generation(&mut self, body: &[u8]) -> Result<()> {
         let next_used = self.quota_used + body.len() as u64;
         if next_used > self.quota_limit {
-            return Err(Error::QuotaExceeded {
-                namespace: format!("opfs:{path}", path = self.path),
-            });
+            return Err(Error::QuotaExceeded { namespace: format!("opfs:{path}", path = self.path) });
         }
         self.quota_used = next_used;
         self.committed = body.to_vec();
@@ -307,19 +272,12 @@ pub struct OpfsBlobPublication {
 impl OpfsBlobPublication {
     /// Open a logical `.yydx` volume with an initial committed blob set.
     pub fn new(path: &str, initial_committed_refs: &[&str]) -> Self {
-        let committed_refs: HashSet<String> = initial_committed_refs
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
+        let committed_refs: HashSet<String> = initial_committed_refs.iter().map(|s| (*s).to_string()).collect();
         let published_blobs = committed_refs.clone();
         for hash in &published_blobs {
             track_blob(path, hash);
         }
-        Self {
-            path: path.to_string(),
-            published_blobs,
-            committed_refs,
-        }
+        Self { path: path.to_string(), published_blobs, committed_refs }
     }
 
     /// Publish a blob chunk (step 2). Does not advance the committed catalog.
@@ -332,9 +290,7 @@ impl OpfsBlobPublication {
     pub fn commit_catalog(&mut self, refs: &[&str]) -> Result<()> {
         for hash in refs {
             if !self.published_blobs.contains(*hash) {
-                return Err(Error::ObjectNotFound {
-                    hash_hex: (*hash).to_string(),
-                });
+                return Err(Error::ObjectNotFound { hash_hex: (*hash).to_string() });
             }
         }
         self.committed_refs = refs.iter().map(|s| (*s).to_string()).collect();
@@ -350,22 +306,14 @@ impl OpfsBlobPublication {
 
     /// Published blobs not yet referenced by the committed catalog (orphans after crash).
     pub fn orphan_blobs(&self) -> Vec<String> {
-        let mut orphans = self
-            .published_blobs
-            .difference(&self.committed_refs)
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut orphans = self.published_blobs.difference(&self.committed_refs).cloned().collect::<Vec<_>>();
         orphans.sort();
         orphans
     }
 
     /// Committed references without a published blob (forbidden dangling state).
     pub fn dangling_references(&self) -> Vec<String> {
-        let mut dangling = self
-            .committed_refs
-            .difference(&self.published_blobs)
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut dangling = self.committed_refs.difference(&self.published_blobs).cloned().collect::<Vec<_>>();
         dangling.sort();
         dangling
     }
@@ -404,18 +352,13 @@ pub fn opfs_commit_and_sync(
     catalog_body: &[u8],
 ) -> Result<OpfsDurableSnapshot> {
     publication.commit_catalog(refs)?;
-    let generation = opfs_reopen(path)
-        .map(|snapshot| snapshot.generation + 1)
-        .unwrap_or(1);
+    let generation = opfs_reopen(path).map(|snapshot| snapshot.generation + 1).unwrap_or(1);
     let snapshot = OpfsDurableSnapshot {
         generation,
         catalog_body: catalog_body.to_vec(),
         committed_refs: refs.iter().map(|hash| (*hash).to_string()).collect(),
     };
-    durable_snapshots()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .insert(path.to_string(), snapshot.clone());
+    durable_snapshots().lock().unwrap_or_else(|p| p.into_inner()).insert(path.to_string(), snapshot.clone());
     Ok(snapshot)
 }
 
@@ -445,13 +388,9 @@ fn track_blob(path: &str, blob_hash: &str) {
 
 /// Simulate user or browser eviction of a published blob from OPFS storage.
 pub fn opfs_evict_blob(path: &str, blob_hash: &str) {
-    blob_inventory()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .entry(path.to_string())
-        .and_modify(|blobs| {
-            blobs.remove(blob_hash);
-        });
+    blob_inventory().lock().unwrap_or_else(|p| p.into_inner()).entry(path.to_string()).and_modify(|blobs| {
+        blobs.remove(blob_hash);
+    });
 }
 
 /// Read-only OPFS consistency probe for committed catalog vs blob inventory (`yydb.opfs.doctor_missing_blob`).

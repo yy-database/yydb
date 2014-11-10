@@ -1,10 +1,11 @@
 //! Layered UDF registry: catalog, session, host, and built-ins.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::runtime::{Budget, UdfContext, UdfImplementation, UdfInvocation};
-use crate::{Result, UdfDefinition, UdfError, UdfIdentity, UdfValue};
+use crate::{
+    Result, UdfDefinition, UdfError, UdfIdentity, UdfValue,
+    runtime::{Budget, UdfContext, UdfImplementation, UdfInvocation},
+};
 
 /// Catalog-visible metadata without host callbacks.
 #[derive(Debug, Clone)]
@@ -79,17 +80,14 @@ impl CatalogUdfRegistry {
 
     /// Returns registered logical function names.
     pub fn names(&self) -> Vec<String> {
-        self.entries
-            .values()
-            .map(|entry| entry.definition.identity.name().to_owned())
-            .collect()
+        self.entries.values().map(|entry| entry.definition.identity.name().to_owned()).collect()
     }
 
     /// Returns the version registered for `name`, if any.
     pub fn version_for_name(&self, name: &str) -> Option<u32> {
-        self.entries.values().find_map(|entry| {
-            (entry.definition.identity.name() == name).then_some(entry.definition.identity.version)
-        })
+        self.entries
+            .values()
+            .find_map(|entry| (entry.definition.identity.name() == name).then_some(entry.definition.identity.version))
     }
 }
 
@@ -104,13 +102,7 @@ impl SessionUdfRegistry {
     pub fn register(&mut self, definition: UdfDefinition, options: RegisterOptions) -> Result<()> {
         definition.validate()?;
         let key = logical_key(&definition.identity);
-        self.entries.insert(
-            key,
-            SessionUdfEntry {
-                definition,
-                shadow: options.shadow,
-            },
-        );
+        self.entries.insert(key, SessionUdfEntry { definition, shadow: options.shadow });
         Ok(())
     }
 
@@ -121,17 +113,14 @@ impl SessionUdfRegistry {
 
     /// Returns registered logical function names.
     pub fn names(&self) -> Vec<String> {
-        self.entries
-            .values()
-            .map(|entry| entry.definition.identity.name().to_owned())
-            .collect()
+        self.entries.values().map(|entry| entry.definition.identity.name().to_owned()).collect()
     }
 
     /// Returns the version registered for `name`, if any.
     pub fn version_for_name(&self, name: &str) -> Option<u32> {
-        self.entries.values().find_map(|entry| {
-            (entry.definition.identity.name() == name).then_some(entry.definition.identity.version)
-        })
+        self.entries
+            .values()
+            .find_map(|entry| (entry.definition.identity.name() == name).then_some(entry.definition.identity.version))
     }
 
     /// Removes a session entry by logical function name.
@@ -142,10 +131,7 @@ impl SessionUdfRegistry {
             .find(|(_, entry)| entry.definition.identity.name() == name)
             .map(|(key, _)| key.clone())
             .ok_or(UdfError::NotFound)?;
-        self.entries
-            .remove(&key)
-            .map(|entry| entry.definition.identity)
-            .ok_or(UdfError::NotFound)
+        self.entries.remove(&key).map(|entry| entry.definition.identity).ok_or(UdfError::NotFound)
     }
 }
 
@@ -162,13 +148,7 @@ impl ImplementationRegistry {
         if self.entries.contains_key(&key) {
             return Err(UdfError::NameConflict);
         }
-        self.entries.insert(
-            key,
-            ImplementationEntry {
-                identity: implementation.identity().clone(),
-                implementation,
-            },
-        );
+        self.entries.insert(key, ImplementationEntry { identity: implementation.identity().clone(), implementation });
         Ok(())
     }
 
@@ -214,14 +194,9 @@ impl UdfRegistry {
     }
 
     /// Registers a session UDF and rejects silent catalog shadowing.
-    pub fn register_session(
-        &mut self,
-        definition: UdfDefinition,
-        options: RegisterOptions,
-    ) -> Result<()> {
+    pub fn register_session(&mut self, definition: UdfDefinition, options: RegisterOptions) -> Result<()> {
         if !options.shadow
-            && (self.catalog.get(&definition.identity).is_some()
-                || self.builtins.get(&definition.identity).is_some())
+            && (self.catalog.get(&definition.identity).is_some() || self.builtins.get(&definition.identity).is_some())
         {
             return Err(UdfError::NameConflict);
         }
@@ -250,10 +225,7 @@ impl UdfRegistry {
     }
 
     /// Installs an implementation after verifying catalog or session metadata exists.
-    pub fn bind_implementation(
-        &mut self,
-        implementation: Arc<dyn UdfImplementation>,
-    ) -> Result<()> {
+    pub fn bind_implementation(&mut self, implementation: Arc<dyn UdfImplementation>) -> Result<()> {
         let identity = implementation.identity();
         if self.resolve_definition(identity).is_none() {
             return Err(UdfError::InvalidDefinition);
@@ -303,10 +275,7 @@ impl UdfRegistry {
 
     /// Invokes a UDF through the implementation registry.
     pub fn invoke(&self, invocation: &UdfInvocation, budget: Budget) -> Result<UdfValue> {
-        let binding = self
-            .implementations
-            .get(&invocation.identity)
-            .ok_or(UdfError::ImplementationUnavailable)?;
+        let binding = self.implementations.get(&invocation.identity).ok_or(UdfError::ImplementationUnavailable)?;
         if binding.identity.version != invocation.identity.version {
             return Err(UdfError::VersionMismatch);
         }
@@ -318,8 +287,6 @@ impl UdfRegistry {
         }
         signature.ensure_args(&UdfValue::argument_types(&invocation.args))?;
         let mut context = UdfContext::new(budget);
-        binding
-            .implementation
-            .invoke(&mut context, &invocation.args)
+        binding.implementation.invoke(&mut context, &invocation.args)
     }
 }

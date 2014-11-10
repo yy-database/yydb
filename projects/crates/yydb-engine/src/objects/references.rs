@@ -10,10 +10,7 @@ pub(crate) fn encode_object_ref(object: &ObjectRef) -> Vec<u8> {
     format!("yydb:object:{}", object.hash_hex()).into_bytes()
 }
 
-pub(crate) fn referenced_hashes(
-    records: &BTreeMap<String, Vec<u8>>,
-    namespace_prefix: &str,
-) -> HashSet<[u8; 32]> {
+pub(crate) fn referenced_hashes(records: &BTreeMap<String, Vec<u8>>, namespace_prefix: &str) -> HashSet<[u8; 32]> {
     let mut hashes = HashSet::new();
     for (key, value) in records {
         if key.starts_with("__yydb/") || !key.starts_with(namespace_prefix) {

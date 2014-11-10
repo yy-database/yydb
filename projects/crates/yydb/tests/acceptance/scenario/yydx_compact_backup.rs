@@ -23,14 +23,8 @@ fn yydb_scenario_yydx_compact_backup() {
     drop(conn);
 
     let restored = Connection::open_yydx(&backup).expect("restore");
-    assert_eq!(
-        restored.get("assets/live").expect("get"),
-        Some(format!("yydb:object:{}", live.hash_hex()).into_bytes())
-    );
-    assert_eq!(
-        restored.get_object(&live).expect("read blob").as_ref(),
-        b"payload"
-    );
+    assert_eq!(restored.get("assets/live").expect("get"), Some(format!("yydb:object:{}", live.hash_hex()).into_bytes()));
+    assert_eq!(restored.get_object(&live).expect("read blob").as_ref(), b"payload");
 
     cleanup(&path);
     cleanup(&backup);

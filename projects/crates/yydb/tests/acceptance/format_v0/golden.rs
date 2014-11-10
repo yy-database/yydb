@@ -2,15 +2,10 @@
 
 use std::path::PathBuf;
 
-use yydb_formats::{
-    committed_transactions, crc32c, parse_blob_header, parse_page0, parse_shm, parse_wal,
-    BLOB_HEADER_BYTES,
-};
+use yydb_formats::{BLOB_HEADER_BYTES, committed_transactions, crc32c, parse_blob_header, parse_page0, parse_shm, parse_wal};
 
 fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../yydb-formats/tests/fixtures/format-v0")
-        .join(name)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../yydb-formats/tests/fixtures/format-v0").join(name)
 }
 
 #[test]

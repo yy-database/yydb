@@ -1,7 +1,9 @@
 //! Cross-process exclusive writer lock for file-backed databases.
 
-use std::fs::{File, OpenOptions};
-use std::path::{Path, PathBuf};
+use std::{
+    fs::{File, OpenOptions},
+    path::{Path, PathBuf},
+};
 
 use yydb_types::{Error, Result};
 
@@ -17,12 +19,7 @@ impl WriterLock {
             std::fs::create_dir_all(parent)?;
         }
         let lock_path = lock_sidecar_path(db_path);
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)?;
+        let file = OpenOptions::new().create(true).read(true).write(true).truncate(false).open(&lock_path)?;
         lock_exclusive(&file)?;
         Ok(Self { file })
     }
@@ -57,23 +54,14 @@ fn lock_exclusive(file: &File) -> Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::Foundation::{
-            GetLastError, ERROR_IO_PENDING, ERROR_LOCK_VIOLATION,
-        };
-        use windows_sys::Win32::Storage::FileSystem::{
-            LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
+        use windows_sys::Win32::{
+            Foundation::{ERROR_IO_PENDING, ERROR_LOCK_VIOLATION, GetLastError},
+            Storage::FileSystem::{LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, LockFileEx},
         };
         let handle = file.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
         let ok = unsafe {
             let mut overlapped = std::mem::zeroed::<windows_sys::Win32::System::IO::OVERLAPPED>();
-            LockFileEx(
-                handle,
-                LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
-                0,
-                u32::MAX,
-                u32::MAX,
-                &mut overlapped,
-            )
+            LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, u32::MAX, u32::MAX, &mut overlapped)
         };
         if ok != 0 {
             return Ok(());
@@ -87,9 +75,7 @@ fn lock_exclusive(file: &File) -> Result<()> {
     #[cfg(not(any(unix, windows)))]
     {
         let _ = file;
-        Err(Error::Unsupported(
-            "cross-process writer lock is not implemented on this platform",
-        ))
+        Err(Error::Unsupported("cross-process writer lock is not implemented on this platform"))
     }
 }
 
@@ -112,8 +98,5 @@ fn unlock_exclusive(file: &File) {
 }
 
 fn writer_locked() -> Error {
-    Error::Io(std::io::Error::new(
-        std::io::ErrorKind::WouldBlock,
-        "database writer lock held by another process",
-    ))
+    Error::Io(std::io::Error::new(std::io::ErrorKind::WouldBlock, "database writer lock held by another process"))
 }

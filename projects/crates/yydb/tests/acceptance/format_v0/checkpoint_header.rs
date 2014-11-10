@@ -3,14 +3,10 @@
 use std::fs;
 
 use yydb::{Connection, OpenFlags};
-use yydb_formats::{parse_page0, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B};
+use yydb_formats::{SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B, parse_page0};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "yydb-formats-v0-checkpoint-header-{}-{}.yydb",
-        std::process::id(),
-        label
-    ))
+    std::env::temp_dir().join(format!("yydb-formats-v0-checkpoint-header-{}-{}.yydb", std::process::id(), label))
 }
 
 #[test]

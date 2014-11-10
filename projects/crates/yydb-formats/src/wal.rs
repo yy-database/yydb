@@ -84,14 +84,7 @@ pub fn parse_frame(bytes: &[u8], offset: usize) -> Result<(WalFrame, usize)> {
     if crc32c(frame_without_checksum) != stored_checksum {
         return Err(Error::Corrupt("wal frame checksum mismatch"));
     }
-    Ok((
-        WalFrame {
-            frame_type,
-            frame_lsn,
-            body: bytes[body_start..body_end].to_vec(),
-        },
-        checksum_end - offset,
-    ))
+    Ok((WalFrame { frame_type, frame_lsn, body: bytes[body_start..body_end].to_vec() }, checksum_end - offset))
 }
 
 /// Parse a complete WAL file.
@@ -124,12 +117,7 @@ pub fn parse_wal_recover(bytes: &[u8]) -> Result<WalFile> {
 
 /// Highest `frame_lsn` among committed transactions in `wal`.
 pub fn committed_tail_lsn(wal: &WalFile) -> u64 {
-    wal.frames
-        .iter()
-        .filter(|frame| frame.frame_type == 0x04)
-        .map(|frame| frame.frame_lsn)
-        .max()
-        .unwrap_or(0)
+    wal.frames.iter().filter(|frame| frame.frame_type == 0x04).map(|frame| frame.frame_lsn).max().unwrap_or(0)
 }
 
 /// Byte offsets of each frame start after the WAL header.
@@ -146,8 +134,5 @@ pub fn wal_frame_offsets(bytes: &[u8]) -> Result<Vec<usize>> {
 
 /// Return committed transaction count (`TxnCommit` frames with valid prefixes).
 pub fn committed_transactions(wal: &WalFile) -> usize {
-    wal.frames
-        .iter()
-        .filter(|frame| frame.frame_type == 0x04)
-        .count()
+    wal.frames.iter().filter(|frame| frame.frame_type == 0x04).count()
 }

@@ -8,14 +8,7 @@ use yydb::LeaseExpectation;
 #[test]
 fn yydb_lease_renew_extends() {
     let (conn, path) = open_temp_db("lease-renew-extends");
-    let token = conn
-        .claim_lease(
-            "frontier/item-2",
-            "worker-a",
-            Duration::from_secs(2),
-            LeaseExpectation::Queued,
-        )
-        .unwrap();
+    let token = conn.claim_lease("frontier/item-2", "worker-a", Duration::from_secs(2), LeaseExpectation::Queued).unwrap();
     let initial = conn.lease_until_millis("frontier/item-2").unwrap().unwrap();
     let extended = initial + 5_000;
     conn.renew_lease(&token, extended).unwrap();

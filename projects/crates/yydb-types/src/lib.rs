@@ -5,8 +5,7 @@
 
 #![deny(missing_docs)]
 
-use std::collections::BTreeMap;
-use std::{error, fmt, io, result, sync::Arc};
+use std::{collections::BTreeMap, error, fmt, io, result, sync::Arc};
 
 /// Pure UDF identity, signature, policy, values, and host metadata.
 pub mod udf;
@@ -42,12 +41,7 @@ pub struct DiagnosticEnvelope {
 impl DiagnosticEnvelope {
     /// Build from an [`Error`].
     pub fn from_error(error: &Error) -> Self {
-        let params = error.params().map(|pairs| {
-            pairs
-                .into_iter()
-                .map(|(k, v)| (k.to_owned(), v))
-                .collect()
-        });
+        let params = error.params().map(|pairs| pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect());
         Self {
             code: error.code().to_owned(),
             operation: error.operation().to_owned(),
@@ -184,20 +178,12 @@ impl fmt::Display for Error {
             Self::Io(error) => write!(f, "I/O error: {error}"),
             Self::Corrupt(message) => write!(f, "corrupt YYDB file: {message}"),
             Self::SchemaConflict { expected, found } => {
-                write!(
-                    f,
-                    "schema version conflict: expected {expected}, found {found}"
-                )
+                write!(f, "schema version conflict: expected {expected}, found {found}")
             }
             Self::UdfNotFound { name } => write!(f, "UDF not found: {name}"),
-            Self::UdfArity {
-                name,
-                expected,
-                got,
-            } => write!(
-                f,
-                "UDF {name} arity mismatch: expected {expected} args, got {got}"
-            ),
+            Self::UdfArity { name, expected, got } => {
+                write!(f, "UDF {name} arity mismatch: expected {expected} args, got {got}")
+            }
             Self::Udf { name, message } => write!(f, "UDF {name}: {message}"),
             Self::Schema { message } => write!(f, "VOS schema: {message}"),
             Self::ObjectNotFound { hash_hex } => {
@@ -215,14 +201,9 @@ impl fmt::Display for Error {
                 write!(f, "fencing mismatch on key {key}")
             }
             Self::LeaseExpired { key } => write!(f, "lease expired on key {key}"),
-            Self::UdfVersionMismatch {
-                name,
-                expected,
-                got,
-            } => write!(
-                f,
-                "UDF {name} version mismatch: expected {expected}, got {got}"
-            ),
+            Self::UdfVersionMismatch { name, expected, got } => {
+                write!(f, "UDF {name} version mismatch: expected {expected}, got {got}")
+            }
             Self::QuotaExceeded { namespace } => {
                 write!(f, "quota exceeded for namespace {namespace}")
             }
@@ -275,10 +256,7 @@ impl Error {
             Self::Io(_) => "io",
             Self::Corrupt(_) => "object",
             Self::SchemaConflict { .. } | Self::Schema { .. } => "schema",
-            Self::UdfNotFound { .. }
-            | Self::UdfArity { .. }
-            | Self::Udf { .. }
-            | Self::UdfVersionMismatch { .. } => "udf",
+            Self::UdfNotFound { .. } | Self::UdfArity { .. } | Self::Udf { .. } | Self::UdfVersionMismatch { .. } => "udf",
             Self::ObjectNotFound { .. } | Self::ObjectCorrupt { .. } => "object",
             Self::Unsupported(_) => "unsupported",
             Self::Protocol { .. } => "protocol",
@@ -303,44 +281,26 @@ impl Error {
             Self::Io(_) | Self::Corrupt(_) | Self::Unsupported(_) | Self::SessionClosed => {
                 return None;
             }
-            Self::SchemaConflict { expected, found } => vec![
-                ("expected", expected.to_string()),
-                ("found", found.to_string()),
-            ],
+            Self::SchemaConflict { expected, found } => vec![("expected", expected.to_string()), ("found", found.to_string())],
             Self::UdfNotFound { name } | Self::Udf { name, .. } => {
                 vec![("name", name.clone())]
             }
-            Self::UdfArity {
-                name,
-                expected,
-                got,
-            } => vec![
-                ("name", name.clone()),
-                ("expected", expected.to_string()),
-                ("got", got.to_string()),
-            ],
+            Self::UdfArity { name, expected, got } => {
+                vec![("name", name.clone()), ("expected", expected.to_string()), ("got", got.to_string())]
+            }
             Self::Schema { message } => vec![("message", message.clone())],
             Self::ObjectNotFound { hash_hex } => vec![("hash", hash_hex.clone())],
             Self::ObjectCorrupt { message } => vec![("detail", message.clone())],
             Self::Protocol { message } => vec![("detail", message.clone())],
-            Self::QueryBind { parameter, message } => vec![
-                ("parameter", parameter.clone()),
-                ("detail", message.clone()),
-            ],
+            Self::QueryBind { parameter, message } => vec![("parameter", parameter.clone()), ("detail", message.clone())],
             Self::CasConflict { key } => vec![("key", key.clone())],
             Self::LeaseUnavailable { key } | Self::FencingMismatch { key } => {
                 vec![("key", key.clone())]
             }
             Self::LeaseExpired { key } => vec![("key", key.clone())],
-            Self::UdfVersionMismatch {
-                name,
-                expected,
-                got,
-            } => vec![
-                ("name", name.clone()),
-                ("expected", expected.to_string()),
-                ("got", got.to_string()),
-            ],
+            Self::UdfVersionMismatch { name, expected, got } => {
+                vec![("name", name.clone()), ("expected", expected.to_string()), ("got", got.to_string())]
+            }
             Self::QuotaExceeded { namespace } => vec![("namespace", namespace.clone())],
             Self::Remote { code, message } => {
                 vec![("code", code.clone()), ("message", message.clone())]
@@ -355,13 +315,7 @@ impl Error {
     /// `LeaseExpired`). All other variants are non-retryable and require the
     /// caller to fix the underlying cause.
     pub fn retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Io(_)
-                | Self::Protocol { .. }
-                | Self::LeaseUnavailable { .. }
-                | Self::LeaseExpired { .. }
-        )
+        matches!(self, Self::Io(_) | Self::Protocol { .. } | Self::LeaseUnavailable { .. } | Self::LeaseExpired { .. })
     }
 
     /// Encode the full diagnostic contract as a JSON object.
@@ -373,8 +327,7 @@ impl Error {
     /// [`Display`](fmt::Display) text so hosts can render it immediately
     /// without further resolution.
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::to_value(DiagnosticEnvelope::from_error(self))
-            .expect("DiagnosticEnvelope serialize cannot fail")
+        serde_json::to_value(DiagnosticEnvelope::from_error(self)).expect("DiagnosticEnvelope serialize cannot fail")
     }
 
     /// Serialize as a JSON string (compact, no whitespace).
@@ -661,9 +614,8 @@ impl Vector {
     /// Create a vector; `data.len()` must fit in `u32` and becomes `dim`.
     pub fn new(data: impl Into<Arc<[f32]>>) -> Result<Self> {
         let data = data.into();
-        let dim = u32::try_from(data.len()).map_err(|_| Error::ObjectCorrupt {
-            message: "vector dimension exceeds u32".into(),
-        })?;
+        let dim =
+            u32::try_from(data.len()).map_err(|_| Error::ObjectCorrupt { message: "vector dimension exceeds u32".into() })?;
         Ok(Self { dim, data })
     }
 
@@ -679,9 +631,7 @@ impl Vector {
     /// Decode little-endian `f32` bytes.
     pub fn from_le_bytes(bytes: &[u8]) -> Result<Self> {
         if !bytes.len().is_multiple_of(4) {
-            return Err(Error::ObjectCorrupt {
-                message: "vector payload length not multiple of 4".into(),
-            });
+            return Err(Error::ObjectCorrupt { message: "vector payload length not multiple of 4".into() });
         }
         let mut data = Vec::with_capacity(bytes.len() / 4);
         for chunk in bytes.as_chunks::<4>().0 {
@@ -740,11 +690,7 @@ mod tests {
     /// Every Error variant roundtrips through DiagnosticEnvelope preserving stable fields.
     #[test]
     fn diagnostic_envelope_roundtrip_preserves_code_and_retryable() {
-        let err_non_retryable = Error::UdfArity {
-            name: "my_fn".into(),
-            expected: 3,
-            got: 5,
-        };
+        let err_non_retryable = Error::UdfArity { name: "my_fn".into(), expected: 3, got: 5 };
         let envelope = DiagnosticEnvelope::from_error(&err_non_retryable);
         assert_eq!(envelope.code, "yydb.udf.arity");
         assert_eq!(envelope.operation, "udf");

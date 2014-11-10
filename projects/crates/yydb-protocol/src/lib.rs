@@ -7,8 +7,10 @@
 
 use std::io::{Read, Write};
 
-use yydb_types::udf::{HostFunctionHandle, UdfValue};
-use yydb_types::{Error, Result, SchemaVersion, Value};
+use yydb_types::{
+    Error, Result, SchemaVersion, Value,
+    udf::{HostFunctionHandle, UdfValue},
+};
 
 /// Product magic for YYDB hosts (self-claim; same wire as `YYDS`).
 pub const MAGIC_YYDB: &[u8; 4] = b"YYDB";
@@ -143,12 +145,7 @@ pub struct Frame {
 impl Frame {
     /// Build a frame with empty flags.
     pub fn new(msg_type: MessageType, request_id: u32, body: impl Into<Vec<u8>>) -> Self {
-        Self {
-            msg_type,
-            flags: 0,
-            request_id,
-            body: body.into(),
-        }
+        Self { msg_type, flags: 0, request_id, body: body.into() }
     }
 
     /// Encode into the on-wire byte layout (product magic `YYDB`).
@@ -159,9 +156,7 @@ impl Frame {
     /// Encode with an explicit product magic (`YYDB` or `YYDS`).
     pub fn encode_as(&self, product: &[u8; 4]) -> Result<Vec<u8>> {
         if product != MAGIC_YYDB && product != MAGIC_YYDS {
-            return Err(Error::Unsupported(
-                "wire product magic must be YYDB or YYDS",
-            ));
+            return Err(Error::Unsupported("wire product magic must be YYDB or YYDS"));
         }
         if self.body.len() > MAX_BODY_LEN as usize {
             return Err(Error::Unsupported("wire body too large"));
@@ -195,12 +190,7 @@ impl Frame {
         if bytes.len() < need {
             return Err(Error::Corrupt("wire frame truncated body"));
         }
-        Ok(Self {
-            msg_type,
-            flags,
-            request_id,
-            body: bytes[HEADER_LEN..need].to_vec(),
-        })
+        Ok(Self { msg_type, flags, request_id, body: bytes[HEADER_LEN..need].to_vec() })
     }
 }
 
@@ -211,9 +201,7 @@ fn check_prefix(prefix: &[u8]) -> Result<()> {
     let magic = &prefix[0..4];
     let version = &prefix[4..8];
     if magic != MAGIC_YYDB && magic != MAGIC_YYDS {
-        return Err(Error::Corrupt(
-            "wire frame bad product magic (want YYDB|YYDS)",
-        ));
+        return Err(Error::Corrupt("wire frame bad product magic (want YYDB|YYDS)"));
     }
     if version != WIRE_VERSION {
         return Err(Error::Unsupported("wire version not supported (want 0000)"));
@@ -252,12 +240,7 @@ fn read_u32(buf: &[u8], offset: &mut usize) -> Result<u32> {
     if *offset + 4 > buf.len() {
         return Err(Error::Corrupt("wire body truncated u32"));
     }
-    let value = u32::from_le_bytes([
-        buf[*offset],
-        buf[*offset + 1],
-        buf[*offset + 2],
-        buf[*offset + 3],
-    ]);
+    let value = u32::from_le_bytes([buf[*offset], buf[*offset + 1], buf[*offset + 2], buf[*offset + 3]]);
     *offset += 4;
     Ok(value)
 }
@@ -305,9 +288,7 @@ pub fn decode_schema_ensure(body: &[u8]) -> Result<(u32, String)> {
     let version = read_u32(body, &mut offset)?;
     let doc_len = read_u32(body, &mut offset)?;
     let doc = read_bytes(body, &mut offset, doc_len)?;
-    let document = std::str::from_utf8(doc)
-        .map_err(|_| Error::Corrupt("schema document is not utf-8"))?
-        .to_owned();
+    let document = std::str::from_utf8(doc).map_err(|_| Error::Corrupt("schema document is not utf-8"))?.to_owned();
     Ok((version, document))
 }
 
@@ -316,9 +297,7 @@ pub fn decode_kv_get(body: &[u8]) -> Result<String> {
     let mut offset = 0;
     let key_len = read_u32(body, &mut offset)?;
     let key = read_bytes(body, &mut offset, key_len)?;
-    Ok(std::str::from_utf8(key)
-        .map_err(|_| Error::Corrupt("kv key is not utf-8"))?
-        .to_owned())
+    Ok(std::str::from_utf8(key).map_err(|_| Error::Corrupt("kv key is not utf-8"))?.to_owned())
 }
 
 /// Decode a `KvPut` body.
@@ -326,9 +305,7 @@ pub fn decode_kv_put(body: &[u8]) -> Result<(String, Vec<u8>)> {
     let mut offset = 0;
     let key_len = read_u32(body, &mut offset)?;
     let key = read_bytes(body, &mut offset, key_len)?;
-    let key = std::str::from_utf8(key)
-        .map_err(|_| Error::Corrupt("kv key is not utf-8"))?
-        .to_owned();
+    let key = std::str::from_utf8(key).map_err(|_| Error::Corrupt("kv key is not utf-8"))?.to_owned();
     let val_len = read_u32(body, &mut offset)?;
     let value = read_bytes(body, &mut offset, val_len)?.to_vec();
     Ok((key, value))
@@ -459,9 +436,7 @@ fn decode_udf_value(body: &[u8], offset: &mut usize) -> Result<UdfValue> {
         3 => {
             let len = read_u32(body, offset)?;
             let bytes = read_bytes(body, offset, len)?;
-            let text = std::str::from_utf8(bytes)
-                .map_err(|_| Error::Corrupt("wire text value is not utf-8"))?
-                .to_owned();
+            let text = std::str::from_utf8(bytes).map_err(|_| Error::Corrupt("wire text value is not utf-8"))?.to_owned();
             Ok(UdfValue::Text(text))
         }
         _ => Err(Error::Corrupt("wire scalar value has invalid type tag")),
@@ -506,9 +481,7 @@ fn runtime_value_to_udf(value: &Value) -> Result<UdfValue> {
         Value::Bool(value) => Ok(UdfValue::Bool(*value)),
         Value::I64(value) => Ok(UdfValue::I64(*value)),
         Value::Text(value) => Ok(UdfValue::Text(value.clone())),
-        _ => Err(Error::Unsupported(
-            "scalar call value type is outside the Phase-1 wire subset",
-        )),
+        _ => Err(Error::Unsupported("scalar call value type is outside the Phase-1 wire subset")),
     }
 }
 
@@ -529,18 +502,10 @@ pub fn decode_micro_host_invoke(body: &[u8]) -> Result<(HostFunctionHandle, Vec<
     let handle_version = read_u32(body, &mut offset)?;
     let function_id_len = read_u32(body, &mut offset)?;
     let function_id = read_bytes(body, &mut offset, function_id_len)?;
-    let function_id = std::str::from_utf8(function_id)
-        .map_err(|_| Error::Corrupt("micro host invoke function_id is not utf-8"))?
-        .to_owned();
+    let function_id =
+        std::str::from_utf8(function_id).map_err(|_| Error::Corrupt("micro host invoke function_id is not utf-8"))?.to_owned();
     let args = decode_udf_values(body, &mut offset)?;
-    Ok((
-        HostFunctionHandle {
-            host_id,
-            function_id,
-            version: handle_version,
-        },
-        args,
-    ))
+    Ok((HostFunctionHandle { host_id, function_id, version: handle_version }, args))
 }
 
 /// Encode a `MicroHostInvokeOk` body.
@@ -575,9 +540,7 @@ pub fn decode_scalar_call(body: &[u8]) -> Result<(String, u32, Vec<Value>)> {
     let version = read_u32(body, &mut offset)?;
     let name_len = read_u32(body, &mut offset)?;
     let name = read_bytes(body, &mut offset, name_len)?;
-    let name = std::str::from_utf8(name)
-        .map_err(|_| Error::Corrupt("scalar call name is not utf-8"))?
-        .to_owned();
+    let name = std::str::from_utf8(name).map_err(|_| Error::Corrupt("scalar call name is not utf-8"))?.to_owned();
     let udf_args = decode_udf_values(body, &mut offset)?;
     let mut args = Vec::with_capacity(udf_args.len());
     for value in udf_args {
@@ -623,13 +586,11 @@ pub fn decode_micro_register(body: &[u8]) -> Result<yydb_types::udf::HostMicroDe
     let udf_version = read_u32(body, &mut offset)?;
     let name_len = read_u32(body, &mut offset)?;
     let name = read_bytes(body, &mut offset, name_len)?;
-    let name = std::str::from_utf8(name)
-        .map_err(|_| Error::Corrupt("micro register name is not utf-8"))?;
+    let name = std::str::from_utf8(name).map_err(|_| Error::Corrupt("micro register name is not utf-8"))?;
     let function_id_len = read_u32(body, &mut offset)?;
     let function_id = read_bytes(body, &mut offset, function_id_len)?;
-    let function_id = std::str::from_utf8(function_id)
-        .map_err(|_| Error::Corrupt("micro register function_id is not utf-8"))?
-        .to_owned();
+    let function_id =
+        std::str::from_utf8(function_id).map_err(|_| Error::Corrupt("micro register function_id is not utf-8"))?.to_owned();
     if offset >= body.len() {
         return Err(Error::Corrupt("micro register missing arg count"));
     }
@@ -663,10 +624,7 @@ pub fn decode_micro_register(body: &[u8]) -> Result<yydb_types::udf::HostMicroDe
         handle_version,
         fingerprint,
     )
-    .map_err(|error| Error::Udf {
-        name: name.to_owned(),
-        message: error.to_string(),
-    })
+    .map_err(|error| Error::Udf { name: name.to_owned(), message: error.to_string() })
 }
 
 /// Encode a `KvPut` body.
@@ -689,9 +647,7 @@ pub fn decode_schema_get_ok(body: &[u8]) -> Result<Option<SchemaVersion>> {
     let version = read_u32(body, &mut offset)?;
     let doc_len = read_u32(body, &mut offset)?;
     let doc = read_bytes(body, &mut offset, doc_len)?;
-    let document = std::str::from_utf8(doc)
-        .map_err(|_| Error::Corrupt("schema document is not utf-8"))?
-        .to_owned();
+    let document = std::str::from_utf8(doc).map_err(|_| Error::Corrupt("schema document is not utf-8"))?.to_owned();
     Ok(Some(SchemaVersion { version, document }))
 }
 
@@ -730,61 +686,33 @@ pub struct WireError {
 
 /// Encode an [`Error`] into an `Error` frame body as compact diagnostic JSON.
 pub fn encode_error_body(error: &Error) -> Vec<u8> {
-    let json = serde_json::to_vec(&error.to_json())
-        .expect("YYDB diagnostic JSON must never fail to encode");
+    let json = serde_json::to_vec(&error.to_json()).expect("YYDB diagnostic JSON must never fail to encode");
     json
 }
 
 /// Decode an `Error` frame body from diagnostic JSON.
 pub fn decode_error(body: &[u8]) -> Result<WireError> {
-    let value: serde_json::Value = serde_json::from_slice(body)
-        .map_err(|_| Error::Corrupt("wire error body is not valid JSON"))?;
-    let code = value["code"]
-        .as_str()
-        .ok_or_else(|| Error::Corrupt("wire error body missing code"))?
-        .to_owned();
-    let message = value["message"]
-        .as_str()
-        .ok_or_else(|| Error::Corrupt("wire error body missing message"))?
-        .to_owned();
-    let operation = value["operation"]
-        .as_str()
-        .ok_or_else(|| Error::Corrupt("wire error body missing operation"))?
-        .to_owned();
-    let retryable = value["retryable"]
-        .as_bool()
-        .ok_or_else(|| Error::Corrupt("wire error body missing retryable"))?;
-    let params = value["params"].as_object().map(|obj| {
-        obj.iter()
-            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
-            .collect()
-    });
-    Ok(WireError {
-        code,
-        message,
-        operation,
-        retryable,
-        params,
-    })
+    let value: serde_json::Value =
+        serde_json::from_slice(body).map_err(|_| Error::Corrupt("wire error body is not valid JSON"))?;
+    let code = value["code"].as_str().ok_or_else(|| Error::Corrupt("wire error body missing code"))?.to_owned();
+    let message = value["message"].as_str().ok_or_else(|| Error::Corrupt("wire error body missing message"))?.to_owned();
+    let operation = value["operation"].as_str().ok_or_else(|| Error::Corrupt("wire error body missing operation"))?.to_owned();
+    let retryable = value["retryable"].as_bool().ok_or_else(|| Error::Corrupt("wire error body missing retryable"))?;
+    let params = value["params"]
+        .as_object()
+        .map(|obj| obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned()))).collect());
+    Ok(WireError { code, message, operation, retryable, params })
 }
 
 /// Split `host:port` / `[::1]:port` into host and port string.
 pub fn split_bind(bind: &str) -> Result<(String, u16)> {
     let bind = bind.trim();
     if let Some(rest) = bind.strip_prefix('[') {
-        let (host, port) = rest
-            .split_once("]:")
-            .ok_or(Error::Unsupported("bind must look like [host]:port"))?;
-        let port: u16 = port
-            .parse()
-            .map_err(|_| Error::Unsupported("bind port is not a u16"))?;
+        let (host, port) = rest.split_once("]:").ok_or(Error::Unsupported("bind must look like [host]:port"))?;
+        let port: u16 = port.parse().map_err(|_| Error::Unsupported("bind port is not a u16"))?;
         return Ok((host.to_owned(), port));
     }
-    let (host, port) = bind
-        .rsplit_once(':')
-        .ok_or(Error::Unsupported("bind must look like host:port"))?;
-    let port: u16 = port
-        .parse()
-        .map_err(|_| Error::Unsupported("bind port is not a u16"))?;
+    let (host, port) = bind.rsplit_once(':').ok_or(Error::Unsupported("bind must look like host:port"))?;
+    let port: u16 = port.parse().map_err(|_| Error::Unsupported("bind port is not a u16"))?;
     Ok((host.to_owned(), port))
 }

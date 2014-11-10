@@ -4,11 +4,9 @@
 
 #![deny(missing_docs)]
 
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
-use pyo3::exceptions::PyRuntimeError;
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyRuntimeError, prelude::*};
 
 fn map_err(error: impl ToString) -> PyErr {
     PyRuntimeError::new_err(error.to_string())
@@ -24,8 +22,7 @@ fn version() -> String {
 #[pyfunction]
 #[pyo3(signature = (db_path, bind, insecure_bind=None))]
 fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> PyResult<()> {
-    yydb::server::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
-        .map_err(map_err)?;
+    yydb::server::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false)).map_err(map_err)?;
     Ok(())
 }
 
@@ -48,26 +45,19 @@ fn init_db(db_path: String, schema_document: Option<String>) -> PyResult<()> {
 #[pyfunction]
 fn info_text(db_path: String) -> PyResult<String> {
     let conn = yydb::Connection::open(&db_path).map_err(map_err)?;
-    let path_display = conn
-        .path()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "<memory>".to_owned());
+    let path_display = conn.path().map(|path| path.display().to_string()).unwrap_or_else(|| "<memory>".to_owned());
     let mut lines = vec![format!("path={path_display}")];
     match conn.schema().map_err(map_err)? {
         Some(schema) => {
             lines.push(format!("schema.version={}", schema.version));
-            lines.push(format!(
-                "schema.document={}",
-                summarize_document(&schema.document)
-            ));
+            lines.push(format!("schema.document={}", summarize_document(&schema.document)));
         }
         None => lines.push("schema=(none)".to_owned()),
     }
     lines.push(format!("records={}", conn.record_count().map_err(map_err)?));
     lines.push(format!("journal_mode={}", conn.journal_mode().as_str()));
     if let (Some(wal), Some(shm)) = (conn.wal_path(), conn.shm_path()) {
-        let (wal_on, shm_on, frames) =
-            yydb::journal::sidecar_status(conn.path().expect("file-backed")).map_err(map_err)?;
+        let (wal_on, shm_on, frames) = yydb::journal::sidecar_status(conn.path().expect("file-backed")).map_err(map_err)?;
         lines.push(format!("wal={} exists={wal_on}", wal.display()));
         lines.push(format!("shm={} exists={shm_on}", shm.display()));
         lines.push(format!("wal_frames={frames}"));

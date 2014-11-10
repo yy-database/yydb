@@ -76,11 +76,7 @@ impl PartialEq for VectorValue {
     fn eq(&self, other: &Self) -> bool {
         self.metric == other.metric
             && self.values.len() == other.values.len()
-            && self
-                .values
-                .iter()
-                .zip(&other.values)
-                .all(|(left, right)| left.to_bits() == right.to_bits())
+            && self.values.iter().zip(&other.values).all(|(left, right)| left.to_bits() == right.to_bits())
     }
 }
 
@@ -100,10 +96,7 @@ impl VectorValue {
 
     /// Returns the vector dimension.
     pub fn dimension(&self) -> u32 {
-        self.values
-            .len()
-            .try_into()
-            .expect("validated vector dimension")
+        self.values.len().try_into().expect("validated vector dimension")
     }
 
     /// Returns the finite vector components.
@@ -135,24 +128,14 @@ pub struct FieldHandle {
 
 impl FieldHandle {
     /// Creates a field handle with non-zero schema and field identities.
-    pub fn new(
-        schema_id: u64,
-        field_id: u64,
-        index: u32,
-        ty: Type,
-    ) -> Result<Self, FieldHandleError> {
+    pub fn new(schema_id: u64, field_id: u64, index: u32, ty: Type) -> Result<Self, FieldHandleError> {
         if schema_id == 0 {
             return Err(FieldHandleError::InvalidSchemaId);
         }
         if field_id == 0 {
             return Err(FieldHandleError::InvalidFieldId);
         }
-        Ok(Self {
-            schema_id,
-            field_id,
-            index,
-            ty,
-        })
+        Ok(Self { schema_id, field_id, index, ty })
     }
 
     /// Returns the schema identity owning this field.
@@ -213,18 +196,10 @@ impl RecordLayout {
             if field.field_id == 0 {
                 return Err(RecordLayoutError::InvalidFieldId);
             }
-            if fields[..position]
-                .iter()
-                .any(|prior| prior.field_id == field.field_id)
-            {
-                return Err(RecordLayoutError::DuplicateFieldId {
-                    field_id: field.field_id,
-                });
+            if fields[..position].iter().any(|prior| prior.field_id == field.field_id) {
+                return Err(RecordLayoutError::DuplicateFieldId { field_id: field.field_id });
             }
-            if fields[..position]
-                .iter()
-                .any(|prior| prior.index == field.index)
-            {
+            if fields[..position].iter().any(|prior| prior.index == field.index) {
                 return Err(RecordLayoutError::DuplicateIndex { index: field.index });
             }
         }
@@ -341,17 +316,10 @@ impl Value {
             Self::Text(_) => Type::Text,
             Self::Bytes(_) => Type::Bytes,
             Self::File(_) => Type::File,
-            Self::Vector(value) => Type::Vector {
-                dimension: value.dimension(),
-                metric: value.metric,
-            },
+            Self::Vector(value) => Type::Vector { dimension: value.dimension(), metric: value.metric },
             Self::Record(value) => Type::Record {
                 schema_id: value.schema_id,
-                field_count: value
-                    .fields
-                    .len()
-                    .try_into()
-                    .expect("validated record field count"),
+                field_count: value.fields.len().try_into().expect("validated record field count"),
             },
         }
     }
@@ -546,10 +514,7 @@ impl ValidatedProgram {
     }
 
     /// Validates a program and its record field handles against published layouts.
-    pub fn validate_with_layouts(
-        program: Program,
-        layouts: &[RecordLayout],
-    ) -> Result<Self, ValidationError> {
+    pub fn validate_with_layouts(program: Program, layouts: &[RecordLayout]) -> Result<Self, ValidationError> {
         validate_program(&program)?;
         validate_layout_bindings(&program, layouts)?;
         Ok(Self(program))
@@ -692,24 +657,13 @@ pub enum EvalError {
     IntegerOverflow,
 }
 
-fn reference_type(
-    types: &[Type],
-    node: NodeId,
-    reference: NodeId,
-) -> Result<Type, ValidationError> {
-    types
-        .get(reference as usize)
-        .copied()
-        .ok_or(ValidationError::ReferenceOutOfOrder { node, reference })
+fn reference_type(types: &[Type], node: NodeId, reference: NodeId) -> Result<Type, ValidationError> {
+    types.get(reference as usize).copied().ok_or(ValidationError::ReferenceOutOfOrder { node, reference })
 }
 
 fn require_type(node: NodeId, expected: Type, found: Type) -> Result<(), ValidationError> {
     if expected != found {
-        return Err(ValidationError::TypeMismatch {
-            node,
-            expected,
-            found,
-        });
+        return Err(ValidationError::TypeMismatch { node, expected, found });
     }
     Ok(())
 }
@@ -722,9 +676,7 @@ fn validate_program(program: &Program) -> Result<(), ValidationError> {
         return Err(ValidationError::TooManyNodes);
     }
     if program.output as usize >= program.nodes.len() {
-        return Err(ValidationError::OutputOutOfBounds {
-            output: program.output,
-        });
+        return Err(ValidationError::OutputOutOfBounds { output: program.output });
     }
     let mut types = Vec::with_capacity(program.nodes.len());
     for (position, expression) in program.nodes.iter().enumerate() {
@@ -732,54 +684,38 @@ fn validate_program(program: &Program) -> Result<(), ValidationError> {
         let inferred = match expression {
             Node::Literal(value) => value.ty(),
             Node::Parameter { index, ty } => {
-                let expected = program.parameters.get(*index as usize).copied().ok_or(
-                    ValidationError::ParameterOutOfBounds {
-                        node,
-                        index: *index,
-                    },
-                )?;
+                let expected = program
+                    .parameters
+                    .get(*index as usize)
+                    .copied()
+                    .ok_or(ValidationError::ParameterOutOfBounds { node, index: *index })?;
                 require_type(node, expected, *ty)?;
                 expected
             }
             Node::Input { index, ty } => {
-                let expected = program.inputs.get(*index as usize).copied().ok_or(
-                    ValidationError::InputOutOfBounds {
-                        node,
-                        index: *index,
-                    },
-                )?;
+                let expected = program
+                    .inputs
+                    .get(*index as usize)
+                    .copied()
+                    .ok_or(ValidationError::InputOutOfBounds { node, index: *index })?;
                 require_type(node, expected, *ty)?;
                 expected
             }
             Node::ReadField { record, field } => {
                 let record_type = reference_type(&types, node, *record)?;
-                let Type::Record {
-                    schema_id,
-                    field_count,
-                } = record_type
+                let Type::Record { schema_id, field_count } = record_type
                 else {
                     return Err(ValidationError::TypeMismatch {
                         node,
-                        expected: Type::Record {
-                            schema_id: 0,
-                            field_count: 0,
-                        },
+                        expected: Type::Record { schema_id: 0, field_count: 0 },
                         found: record_type,
                     });
                 };
                 if schema_id != field.schema_id {
-                    return Err(ValidationError::FieldSchemaMismatch {
-                        node,
-                        expected: field.schema_id,
-                        found: schema_id,
-                    });
+                    return Err(ValidationError::FieldSchemaMismatch { node, expected: field.schema_id, found: schema_id });
                 }
                 if field.index >= field_count {
-                    return Err(ValidationError::FieldOutOfBounds {
-                        node,
-                        index: field.index,
-                        field_count,
-                    });
+                    return Err(ValidationError::FieldOutOfBounds { node, index: field.index, field_count });
                 }
                 field.ty
             }
@@ -789,11 +725,7 @@ fn validate_program(program: &Program) -> Result<(), ValidationError> {
                 Type::I64
             }
             Node::Equal { left, right } => {
-                require_type(
-                    node,
-                    reference_type(&types, node, *left)?,
-                    reference_type(&types, node, *right)?,
-                )?;
+                require_type(node, reference_type(&types, node, *left)?, reference_type(&types, node, *right)?)?;
                 Type::Bool
             }
         };
@@ -801,38 +733,27 @@ fn validate_program(program: &Program) -> Result<(), ValidationError> {
     }
     let found = types[program.output as usize];
     if found != program.output_type {
-        return Err(ValidationError::OutputTypeMismatch {
-            expected: program.output_type,
-            found,
-        });
+        return Err(ValidationError::OutputTypeMismatch { expected: program.output_type, found });
     }
     Ok(())
 }
 
-fn validate_layout_bindings(
-    program: &Program,
-    layouts: &[RecordLayout],
-) -> Result<(), ValidationError> {
+fn validate_layout_bindings(program: &Program, layouts: &[RecordLayout]) -> Result<(), ValidationError> {
     for (position, node) in program.nodes.iter().enumerate() {
         let node_id = position as NodeId;
-        let Node::ReadField { field, .. } = node else {
+        let Node::ReadField { field, .. } = node
+        else {
             continue;
         };
         let layout = layouts
             .iter()
             .find(|layout| layout.schema_id == field.schema_id)
-            .ok_or(ValidationError::RecordLayoutNotFound {
-                node: node_id,
-                schema_id: field.schema_id,
-            })?;
+            .ok_or(ValidationError::RecordLayoutNotFound { node: node_id, schema_id: field.schema_id })?;
         let layout_field = layout
             .fields
             .iter()
             .find(|layout_field| layout_field.field_id == field.field_id)
-            .ok_or(ValidationError::LayoutFieldNotFound {
-                node: node_id,
-                field_id: field.field_id,
-            })?;
+            .ok_or(ValidationError::LayoutFieldNotFound { node: node_id, field_id: field.field_id })?;
         if layout_field.index != field.index || layout_field.ty != field.ty {
             return Err(ValidationError::LayoutFieldMismatch {
                 node: node_id,
@@ -847,22 +768,12 @@ fn validate_layout_bindings(
     Ok(())
 }
 
-fn evaluate_program(
-    program: &Program,
-    parameters: &[Value],
-    inputs: &[Value],
-) -> Result<Value, EvalError> {
+fn evaluate_program(program: &Program, parameters: &[Value], inputs: &[Value]) -> Result<Value, EvalError> {
     if parameters.len() != program.parameters.len() {
-        return Err(EvalError::ParameterArity {
-            expected: program.parameters.len(),
-            got: parameters.len(),
-        });
+        return Err(EvalError::ParameterArity { expected: program.parameters.len(), got: parameters.len() });
     }
     if inputs.len() != program.inputs.len() {
-        return Err(EvalError::InputArity {
-            expected: program.inputs.len(),
-            got: inputs.len(),
-        });
+        return Err(EvalError::InputArity { expected: program.inputs.len(), got: inputs.len() });
     }
     for (value, expected) in parameters.iter().zip(&program.parameters) {
         ensure_type(value, *expected)?;
@@ -875,19 +786,11 @@ fn evaluate_program(
     for node in &program.nodes {
         let value = match node {
             Node::Literal(value) => value.clone(),
-            Node::Parameter { index, .. } => {
-                parameters[usize::try_from(*index).expect("validated parameter index")].clone()
-            }
-            Node::Input { index, .. } => {
-                inputs[usize::try_from(*index).expect("validated input index")].clone()
-            }
+            Node::Parameter { index, .. } => parameters[usize::try_from(*index).expect("validated parameter index")].clone(),
+            Node::Input { index, .. } => inputs[usize::try_from(*index).expect("validated input index")].clone(),
             Node::ReadField { record, field } => {
-                let record =
-                    as_record(&values[usize::try_from(*record).expect("validated node index")]);
-                let value = record
-                    .field(field.index)
-                    .expect("validated record field index")
-                    .clone();
+                let record = as_record(&values[usize::try_from(*record).expect("validated node index")]);
+                let value = record.field(field.index).expect("validated record field index").clone();
                 ensure_type(&value, field.ty)?;
                 value
             }
@@ -930,12 +833,8 @@ fn as_i64(value: &Value) -> i64 {
 fn as_record(value: &Value) -> &RecordValue {
     match value {
         Value::Record(value) => value,
-        Value::Null
-        | Value::Bool(_)
-        | Value::I64(_)
-        | Value::Text(_)
-        | Value::Bytes(_)
-        | Value::File(_)
-        | Value::Vector(_) => unreachable!("validated record operand"),
+        Value::Null | Value::Bool(_) | Value::I64(_) | Value::Text(_) | Value::Bytes(_) | Value::File(_) | Value::Vector(_) => {
+            unreachable!("validated record operand")
+        }
     }
 }

@@ -1,16 +1,14 @@
 //! fixture: format_v0.blob_publish_orphan
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use yydb::{Batch, Connection, DoctorSeverity, ObjectKind, ObjectStore};
 
 fn temp_yydx(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "yydb-formats-v0-blob-orphan-{}-{}.yydx",
-        std::process::id(),
-        label
-    ))
+    std::env::temp_dir().join(format!("yydb-formats-v0-blob-orphan-{}-{}.yydx", std::process::id(), label))
 }
 
 fn cleanup(path: &Path) {
@@ -36,46 +34,30 @@ fn yydb_formats_v0_blob_publish_orphan() {
     drop(conn);
 
     let reopened = Connection::open_yydx(&path).unwrap();
-    assert_eq!(
-        reopened.get("blobs/live").unwrap(),
-        Some(format!("yydb:object:{}", live.hash_hex()).into_bytes())
-    );
-    assert_eq!(
-        reopened.get_object(&live).unwrap().as_ref(),
-        b"live-payload"
-    );
+    assert_eq!(reopened.get("blobs/live").unwrap(), Some(format!("yydb:object:{}", live.hash_hex()).into_bytes()));
+    assert_eq!(reopened.get_object(&live).unwrap().as_ref(), b"live-payload");
     assert_eq!(reopened.get("blobs/orphan").unwrap(), None);
 
     let orphans = reopened.scan_orphans("blobs/").unwrap();
     assert!(
-        orphans
-            .iter()
-            .any(|object| object.hash_hex() == orphan.hash_hex()),
+        orphans.iter().any(|object| object.hash_hex() == orphan.hash_hex()),
         "published orphan must remain off-catalog after reopen"
     );
 
     let report = reopened.doctor().unwrap();
     assert!(
-        report
-            .issues
-            .iter()
-            .all(|issue| issue.code != "yydb.doctor.missing_blob"),
+        report.issues.iter().all(|issue| issue.code != "yydb.doctor.missing_blob"),
         "committed catalog must not reference unpublished blobs: {:?}",
         report.issues
     );
     assert!(
-        !report
-            .issues
-            .iter()
-            .any(|issue| issue.severity == DoctorSeverity::Error),
+        !report.issues.iter().any(|issue| issue.severity == DoctorSeverity::Error),
         "doctor reported errors: {:?}",
         report.issues
     );
     assert!(report.orphan_object_count >= 1);
 
-    let reclaim = reopened
-        .reclaim_orphans(std::slice::from_ref(&orphan))
-        .unwrap();
+    let reclaim = reopened.reclaim_orphans(std::slice::from_ref(&orphan)).unwrap();
     assert_eq!(reclaim.reclaimed_objects, 1);
     assert!(reopened.get_object(&live).is_ok());
     assert!(!reopened.objects().path_for(&orphan).exists());

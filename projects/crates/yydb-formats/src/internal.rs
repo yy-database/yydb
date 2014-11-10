@@ -2,8 +2,10 @@
 
 use yydb_types::{Error, Result};
 
-use crate::key::TreeKey;
-use crate::page::{encode_page, PageHeader, PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL};
+use crate::{
+    key::TreeKey,
+    page::{PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL, PageHeader, encode_page},
+};
 
 /// One child pointer in an internal page.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,21 +31,11 @@ pub struct InternalPage {
 
 impl InternalPage {
     /// Create an internal page with at least two children.
-    pub fn new(
-        page_id: u32,
-        page_generation: u64,
-        tree_id: u8,
-        entries: Vec<InternalEntry>,
-    ) -> Result<Self> {
+    pub fn new(page_id: u32, page_generation: u64, tree_id: u8, entries: Vec<InternalEntry>) -> Result<Self> {
         if entries.len() < 2 {
             return Err(Error::Corrupt("internal page needs two children"));
         }
-        Ok(Self {
-            page_id,
-            page_generation,
-            tree_id,
-            entries,
-        })
+        Ok(Self { page_id, page_generation, tree_id, entries })
     }
 
     /// Parse an internal page image.
@@ -69,29 +61,18 @@ impl InternalPage {
             if cursor + 6 > payload.len() {
                 return Err(Error::Corrupt("internal entry truncated"));
             }
-            let separator_len =
-                u16::from_le_bytes(payload[cursor..cursor + 2].try_into().unwrap()) as usize;
-            let child_page_id =
-                u32::from_le_bytes(payload[cursor + 2..cursor + 6].try_into().unwrap());
+            let separator_len = u16::from_le_bytes(payload[cursor..cursor + 2].try_into().unwrap()) as usize;
+            let child_page_id = u32::from_le_bytes(payload[cursor + 2..cursor + 6].try_into().unwrap());
             cursor += 6;
             let end = cursor + separator_len;
             if end > payload.len() {
                 return Err(Error::Corrupt("internal separator truncated"));
             }
-            let separator = TreeKey::from_bytes(&payload[cursor..end])
-                .ok_or(Error::Corrupt("internal separator invalid"))?;
+            let separator = TreeKey::from_bytes(&payload[cursor..end]).ok_or(Error::Corrupt("internal separator invalid"))?;
             cursor = end;
-            entries.push(InternalEntry {
-                separator,
-                child_page_id,
-            });
+            entries.push(InternalEntry { separator, child_page_id });
         }
-        Ok(Self {
-            page_id,
-            page_generation: header.page_generation,
-            tree_id: header.tree_id,
-            entries,
-        })
+        Ok(Self { page_id, page_generation: header.page_generation, tree_id: header.tree_id, entries })
     }
 
     /// Encode to a full page image.
@@ -110,13 +91,7 @@ impl InternalPage {
         if payload.len() > PAGE_PAYLOAD_LEN {
             return Err(Error::Corrupt("internal page too large"));
         }
-        encode_page(
-            PAGE_TYPE_INTERNAL,
-            self.page_id,
-            self.page_generation,
-            self.tree_id,
-            &payload,
-        )
+        encode_page(PAGE_TYPE_INTERNAL, self.page_id, self.page_generation, self.tree_id, &payload)
     }
 
     /// Pick child index for `key` (last separator <= key).
@@ -137,22 +112,11 @@ impl InternalPage {
     }
 
     /// Insert a new child after `child_idx`. Returns `false` when the page is full.
-    pub fn insert_child(
-        &mut self,
-        child_idx: usize,
-        separator: TreeKey,
-        child_page_id: u32,
-    ) -> Result<bool> {
+    pub fn insert_child(&mut self, child_idx: usize, separator: TreeKey, child_page_id: u32) -> Result<bool> {
         if child_idx >= self.entries.len() {
             return Err(Error::Corrupt("internal child index out of range"));
         }
-        self.entries.insert(
-            child_idx + 1,
-            InternalEntry {
-                separator,
-                child_page_id,
-            },
-        );
+        self.entries.insert(child_idx + 1, InternalEntry { separator, child_page_id });
         match self.encode() {
             Ok(_) => Ok(true),
             Err(Error::Corrupt("internal page too large")) => {
@@ -171,12 +135,8 @@ impl InternalPage {
         let split_at = self.entries.len() / 2;
         let right_entries = self.entries.split_off(split_at);
         let separator = right_entries[0].separator.clone();
-        let right = InternalPage {
-            page_id: 0,
-            page_generation: self.page_generation,
-            tree_id: self.tree_id,
-            entries: right_entries,
-        };
+        let right =
+            InternalPage { page_id: 0, page_generation: self.page_generation, tree_id: self.tree_id, entries: right_entries };
         Ok((separator, right))
     }
 }

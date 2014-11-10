@@ -3,9 +3,8 @@ use std::fs;
 use crate::fixtures::yydb::{cleanup, objects_sidecar, temp_db, temp_yydx};
 
 use yydb::{
+    Connection, Error, INLINE_BYTES_MAX, JournalMode, ObjectKind, ObjectStore, OpenFlags, Tier, Value, Vector,
     journal::{shm_path, wal_path},
-    Connection, Error, JournalMode, ObjectKind, ObjectStore, OpenFlags, Tier, Value, Vector,
-    INLINE_BYTES_MAX,
 };
 
 #[test]
@@ -19,10 +18,7 @@ fn stores_schema_and_records_in_one_reopenable_file() {
     let reopened = Connection::open(&path).unwrap();
     assert_eq!(reopened.schema().unwrap().unwrap().version, 1);
     assert_eq!(reopened.record_count().unwrap(), 1);
-    assert_eq!(
-        reopened.get("project/meta").unwrap(),
-        Some(b"Spark".to_vec())
-    );
+    assert_eq!(reopened.get("project/meta").unwrap(), Some(b"Spark".to_vec()));
     cleanup(&path);
 }
 
@@ -44,10 +40,7 @@ fn atomically_replaces_main_image_without_leaving_temp_files() {
     assert_eq!(leftovers, 0);
 
     let reopened = Connection::open(&path).unwrap();
-    assert_eq!(
-        reopened.get("project/meta").unwrap(),
-        Some(b"Spark".to_vec())
-    );
+    assert_eq!(reopened.get("project/meta").unwrap(), Some(b"Spark".to_vec()));
     drop(reopened);
     cleanup(&path);
 }
@@ -73,12 +66,8 @@ fn batch_compare_exchange_and_prefix_scan_are_atomic_on_connection() {
     ])
     .unwrap();
     assert_eq!(conn.scan_prefix("frontier/", None, 10).unwrap().len(), 2);
-    assert!(conn
-        .compare_exchange("frontier/a", Some(b"queued"), Some(b"claimed"))
-        .unwrap());
-    assert!(!conn
-        .compare_exchange("frontier/a", Some(b"queued"), Some(b"stale"))
-        .unwrap());
+    assert!(conn.compare_exchange("frontier/a", Some(b"queued"), Some(b"claimed")).unwrap());
+    assert!(!conn.compare_exchange("frontier/a", Some(b"queued"), Some(b"stale")).unwrap());
     assert_eq!(conn.get("frontier/a").unwrap(), Some(b"claimed".to_vec()));
 }
 
@@ -87,30 +76,14 @@ fn rust_scalar_udf_create_and_call() {
     let conn = Connection::open_in_memory().unwrap();
     conn.create_scalar("double", 1, |args| match args {
         [Value::I64(n)] => Ok(Value::I64(n * 2)),
-        _ => Err(yydb::Error::Udf {
-            name: "double".into(),
-            message: "expected i64".into(),
-        }),
+        _ => Err(yydb::Error::Udf { name: "double".into(), message: "expected i64".into() }),
     })
     .unwrap();
-    assert_eq!(
-        conn.call_scalar("double", &[Value::I64(21)]).unwrap(),
-        Value::I64(42)
-    );
-    assert!(matches!(
-        conn.call_scalar("double", &[]),
-        Err(yydb::Error::UdfArity {
-            expected: 1,
-            got: 0,
-            ..
-        })
-    ));
+    assert_eq!(conn.call_scalar("double", &[Value::I64(21)]).unwrap(), Value::I64(42));
+    assert!(matches!(conn.call_scalar("double", &[]), Err(yydb::Error::UdfArity { expected: 1, got: 0, .. })));
     assert_eq!(conn.list_scalars(), vec!["double".to_owned()]);
     conn.remove_scalar("double").unwrap();
-    assert!(matches!(
-        conn.call_scalar("double", &[Value::I64(1)]),
-        Err(yydb::Error::UdfNotFound { .. })
-    ));
+    assert!(matches!(conn.call_scalar("double", &[Value::I64(1)]), Err(yydb::Error::UdfNotFound { .. })));
 }
 
 #[test]
@@ -118,16 +91,8 @@ fn wal_and_shm_sidecars_recover_without_checkpoint() {
     let path = temp_db("wal");
     let conn = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     assert_eq!(conn.journal_mode(), JournalMode::Wal);
-    assert!(conn
-        .wal_path()
-        .unwrap()
-        .to_string_lossy()
-        .ends_with(".yydb-wal"));
-    assert!(conn
-        .shm_path()
-        .unwrap()
-        .to_string_lossy()
-        .ends_with(".yydb-shm"));
+    assert!(conn.wal_path().unwrap().to_string_lossy().ends_with(".yydb-wal"));
+    assert!(conn.shm_path().unwrap().to_string_lossy().ends_with(".yydb-shm"));
     conn.ensure_schema("table T { @@id: uuid }").unwrap();
     conn.put("a", b"1").unwrap();
     conn.put("b", b"2").unwrap();
@@ -177,9 +142,7 @@ fn open_yydb_rejects_chunked_files() {
     let path = temp_db("no-chunk");
     let conn = Connection::open(&path).unwrap();
     let payload = vec![0_u8; 2000];
-    let err = conn
-        .put_file_chunked(std::io::Cursor::new(payload), 500)
-        .unwrap_err();
+    let err = conn.put_file_chunked(std::io::Cursor::new(payload), 500).unwrap_err();
     assert!(matches!(err, Error::Unsupported(_)));
     cleanup(&path);
 }
@@ -190,18 +153,10 @@ fn open_yydx_uses_objects_root_and_allows_chunked_files() {
     let blob_root = ObjectStore::yydx_objects_root(&path);
     let conn = Connection::open_yydx(&path).unwrap();
     let payload: Vec<u8> = (0..2000u16).map(|v| (v % 256) as u8).collect();
-    let manifest = conn
-        .put_file_chunked(std::io::Cursor::new(payload.clone()), 500)
-        .unwrap();
+    let manifest = conn.put_file_chunked(std::io::Cursor::new(payload.clone()), 500).unwrap();
     assert!(manifest.chunks.len() >= 4);
     assert!(blob_root.is_dir());
-    assert!(
-        conn.objects()
-            .path_for(&manifest.chunks[0])
-            .extension()
-            .and_then(|ext| ext.to_str())
-            == Some("blob")
-    );
+    assert!(conn.objects().path_for(&manifest.chunks[0]).extension().and_then(|ext| ext.to_str()) == Some("blob"));
     assert!(!objects_sidecar(&path).exists());
     cleanup(&path);
 }
@@ -223,12 +178,7 @@ fn open_in_memory_does_not_create_temp_object_dirs() {
         std::fs::read_dir(&temp)
             .unwrap()
             .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("yydb-mem-objects-")
-            })
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("yydb-mem-objects-"))
             .count()
     };
     let before = count_yydb_mem_dirs();
@@ -258,9 +208,7 @@ fn cas_objects_hash2_path_and_hot_cold() {
 fn chunked_file_range_read() {
     let conn = Connection::open_in_memory().unwrap();
     let payload: Vec<u8> = (0..2000u16).map(|v| (v % 256) as u8).collect();
-    let manifest = conn
-        .put_file_chunked(std::io::Cursor::new(payload.clone()), 500)
-        .unwrap();
+    let manifest = conn.put_file_chunked(std::io::Cursor::new(payload.clone()), 500).unwrap();
     assert!(manifest.chunks.len() >= 4);
     assert_eq!(manifest.total_size, 2000);
     let mid = conn.read_file_range(&manifest, 500, 500).unwrap();

@@ -1,8 +1,10 @@
 //! Logical UDF identity separate from host implementation objects.
 
-use super::policy::{Determinism, Effect, Placement};
-use super::signature::Signature;
-use super::{Result, UdfError};
+use super::{
+    Result, UdfError,
+    policy::{Determinism, Effect, Placement},
+    signature::Signature,
+};
 
 /// Stable logical identity for a catalog or session UDF.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -17,11 +19,7 @@ pub struct UdfIdentity {
 
 impl UdfIdentity {
     /// Creates a new identity after validating non-empty fields.
-    pub fn new(
-        namespace: impl Into<String>,
-        name: impl Into<String>,
-        version: u32,
-    ) -> Result<Self> {
+    pub fn new(namespace: impl Into<String>, name: impl Into<String>, version: u32) -> Result<Self> {
         let namespace = namespace.into();
         let name = name.into();
         if name.is_empty() {
@@ -30,11 +28,7 @@ impl UdfIdentity {
         if version == 0 {
             return Err(UdfError::VersionMismatch);
         }
-        Ok(Self {
-            namespace,
-            name,
-            version,
-        })
+        Ok(Self { namespace, name, version })
     }
 
     /// Returns the bare function name.
@@ -46,7 +40,8 @@ impl UdfIdentity {
     pub fn logical_id(&self) -> String {
         if self.namespace.is_empty() {
             format!("{}@{}", self.name, self.version)
-        } else {
+        }
+        else {
             format!("{}/{}@{}", self.namespace, self.name, self.version)
         }
     }
@@ -55,7 +50,8 @@ impl UdfIdentity {
     pub fn uri(&self) -> String {
         if self.namespace.is_empty() {
             format!("yydb://{}@{}", self.name, self.version)
-        } else {
+        }
+        else {
             format!("yydb://{}/{}@{}", self.namespace, self.name, self.version)
         }
     }

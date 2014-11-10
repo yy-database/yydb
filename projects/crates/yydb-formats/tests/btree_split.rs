@@ -1,6 +1,4 @@
-use yydb_formats::{
-    InternalPage, MemoryPager, PageHeader, TreeKey, PAGE_TYPE_INTERNAL, TREE_RECORD,
-};
+use yydb_formats::{InternalPage, MemoryPager, PAGE_TYPE_INTERNAL, PageHeader, TREE_RECORD, TreeKey};
 
 #[test]
 fn memory_pager_kv_leaf_split() {
@@ -19,11 +17,7 @@ fn memory_pager_kv_leaf_split() {
 
     for i in (0..40).step_by(7) {
         let key = format!("record/{i:04}");
-        assert_eq!(
-            pager.get_kv(&key).unwrap(),
-            Some(payload.clone()),
-            "missing {key}"
-        );
+        assert_eq!(pager.get_kv(&key).unwrap(), Some(payload.clone()), "missing {key}");
     }
 }
 
@@ -32,9 +26,7 @@ fn leaf_split_halves_cells() {
     let mut leaf = yydb_formats::LeafPage::empty(1, 1, TREE_RECORD);
     let value = vec![0_u8; 100];
     for i in 0..20_u32 {
-        assert!(leaf
-            .upsert(TreeKey::user_record(format!("k{i:03}")), value.clone())
-            .unwrap());
+        assert!(leaf.upsert(TreeKey::user_record(format!("k{i:03}")), value.clone()).unwrap());
     }
     let (separator, right) = leaf.split().unwrap();
     assert!(!leaf.get(&separator).is_some() || leaf.get(&separator).is_some());
@@ -45,20 +37,14 @@ fn leaf_split_halves_cells() {
 
 #[test]
 fn internal_page_roundtrip() {
-    use yydb_formats::{InternalEntry, TreeKey, TREE_RECORD};
+    use yydb_formats::{InternalEntry, TREE_RECORD, TreeKey};
     let page = InternalPage::new(
         2,
         1,
         TREE_RECORD,
         vec![
-            InternalEntry {
-                separator: TreeKey::min_separator(TREE_RECORD),
-                child_page_id: 1,
-            },
-            InternalEntry {
-                separator: TreeKey::user_record("m"),
-                child_page_id: 3,
-            },
+            InternalEntry { separator: TreeKey::min_separator(TREE_RECORD), child_page_id: 1 },
+            InternalEntry { separator: TreeKey::user_record("m"), child_page_id: 3 },
         ],
     )
     .unwrap();

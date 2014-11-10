@@ -32,10 +32,7 @@
 //!     conn.ensure_schema("table Project { @@id: uuid, title: utf8 }")?;
 //!     conn.create_scalar("double", 1, |args| match args {
 //!         [Value::I64(n)] => Ok(Value::I64(n * 2)),
-//!         _ => Err(yydb::Error::Udf {
-//!             name: "double".into(),
-//!             message: "expected i64".into(),
-//!         }),
+//!         _ => Err(yydb::Error::Udf { name: "double".into(), message: "expected i64".into() }),
 //!     })?;
 //!     conn.checkpoint()?;
 //!     Ok(())
@@ -116,27 +113,22 @@ pub use connection::Connection;
 pub use journal::{JournalMode, OpenFlags};
 pub use objects::ObjectStore;
 pub use udf::{
-    HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, ScalarUdf, UdfError, UdfRegistry,
-    UdfType, UdfValue,
+    HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, ScalarUdf, UdfError, UdfRegistry, UdfType, UdfValue,
 };
 
 /// Result alias for UDF host functions and registry operations.
 pub type UdfResult<T = UdfValue> = yydb_udf::Result<T>;
 
 pub use types::{
-    ChunkManifest, CommitSequence, CompactReport, DoctorIssue, DoctorReport, DoctorSeverity, Error,
-    EvictBudget, EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken,
-    NamespaceQuota, NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion,
-    ReleaseOutcome, Result, SchemaVersion, Tier, Value, Vector, DEFAULT_CHUNK_SIZE,
-    INLINE_BYTES_MAX,
+    ChunkManifest, CommitSequence, CompactReport, DEFAULT_CHUNK_SIZE, DoctorIssue, DoctorReport, DoctorSeverity, Error,
+    EvictBudget, EvictReport, EvictionPolicy, HashAlgo, INLINE_BYTES_MAX, LeaseExpectation, LeaseToken, NamespaceQuota,
+    NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion, ReleaseOutcome, Result, SchemaVersion, Tier, Value,
+    Vector,
 };
 
 /// Common embed imports (`use yydb::prelude::*`).
 pub mod prelude {
-    pub use crate::{
-        Batch, Connection, Error, JournalMode, ObjectRef, ObjectStore, OpenFlags, Result,
-        SchemaVersion, Value,
-    };
+    pub use crate::{Batch, Connection, Error, JournalMode, ObjectRef, ObjectStore, OpenFlags, Result, SchemaVersion, Value};
 }
 
 /// Library version string (Cargo package version).

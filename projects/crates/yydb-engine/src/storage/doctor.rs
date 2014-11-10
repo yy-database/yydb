@@ -3,14 +3,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use yydb_types::{
-    DoctorIssue, DoctorNamespaceStats, DoctorReport, DoctorSeverity, EvictionPolicy,
-    NamespaceQuota, ObjectRef, Result,
+    DoctorIssue, DoctorNamespaceStats, DoctorReport, DoctorSeverity, EvictionPolicy, NamespaceQuota, ObjectRef, Result,
 };
 
-use crate::kv::lease::{read_u64_meta, write_u64_meta, META_COMMIT_SEQ};
-use crate::kv::retention::{self as ttl, QUOTA_PREFIX, TTL_PREFIX};
-use crate::objects::references as refs;
-use crate::objects::ObjectStore;
+use crate::{
+    kv::{
+        lease::{META_COMMIT_SEQ, read_u64_meta, write_u64_meta},
+        retention::{self as ttl, QUOTA_PREFIX, TTL_PREFIX},
+    },
+    objects::{ObjectStore, references as refs},
+};
 
 pub(crate) const META_CHECKPOINT_SEQ: &str = "__yydb/meta/checkpoint_sequence";
 pub(crate) const PENDING_BATCH_KEY: &str = "__yydb/batch/pending";
@@ -72,11 +74,8 @@ pub(crate) fn diagnose(
             }
         }
     }
-    let orphans: Vec<ObjectRef> = objects
-        .list_objects()?
-        .into_iter()
-        .filter(|object| !referenced.contains(&object.hash))
-        .collect();
+    let orphans: Vec<ObjectRef> =
+        objects.list_objects()?.into_iter().filter(|object| !referenced.contains(&object.hash)).collect();
     let orphan_object_count = orphans.len() as u64;
 
     let namespaces = collect_namespace_stats(records);
@@ -119,9 +118,7 @@ fn collect_namespace_stats(records: &BTreeMap<String, Vec<u8>>) -> Vec<DoctorNam
         .into_iter()
         .map(|prefix| {
             let stats = ttl::namespace_stats(records, &prefix);
-            let quota = records
-                .get(&format!("{QUOTA_PREFIX}{prefix}"))
-                .and_then(|bytes| decode_quota(bytes).ok());
+            let quota = records.get(&format!("{QUOTA_PREFIX}{prefix}")).and_then(|bytes| decode_quota(bytes).ok());
             let ttl_expired_pending = records
                 .keys()
                 .filter(|key| !ttl::is_reserved_key(key) && key.starts_with(&prefix))
@@ -142,13 +139,7 @@ fn collect_namespace_stats(records: &BTreeMap<String, Vec<u8>>) -> Vec<DoctorNam
 fn ttl_deadline(records: &BTreeMap<String, Vec<u8>>, key: &str) -> Option<u64> {
     records
         .get(&format!("{TTL_PREFIX}{key}"))
-        .and_then(|bytes| {
-            if bytes.len() == 8 {
-                Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap()))
-            } else {
-                None
-            }
-        })
+        .and_then(|bytes| if bytes.len() == 8 { Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap())) } else { None })
 }
 
 fn decode_quota(bytes: &[u8]) -> Result<NamespaceQuota> {
@@ -162,9 +153,5 @@ fn decode_quota(bytes: &[u8]) -> Result<NamespaceQuota> {
         1 => EvictionPolicy::TtlFirst,
         _ => return Err(yydb_types::Error::Corrupt("unknown eviction policy tag")),
     };
-    Ok(NamespaceQuota {
-        max_bytes,
-        max_records,
-        eviction_policy,
-    })
+    Ok(NamespaceQuota { max_bytes, max_records, eviction_policy })
 }

@@ -2,15 +2,13 @@
 
 use std::sync::Arc;
 
-use crate::runtime::{UdfContext, UdfImplementation};
 use crate::{
-    ImplementationKind, Placement, Result, Signature, UdfDefinition, UdfError, UdfIdentity,
-    UdfPolicy, UdfValue,
+    ImplementationKind, Placement, Result, Signature, UdfDefinition, UdfError, UdfIdentity, UdfPolicy, UdfValue,
+    runtime::{UdfContext, UdfImplementation},
 };
 
 /// Native handler invoked through the UDF boundary.
-pub type NativeHandler =
-    Arc<dyn Fn(&mut UdfContext, &[UdfValue]) -> Result<UdfValue> + Send + Sync>;
+pub type NativeHandler = Arc<dyn Fn(&mut UdfContext, &[UdfValue]) -> Result<UdfValue> + Send + Sync>;
 
 /// Registration contract for a Rust native UDF.
 #[derive(Clone)]
@@ -71,9 +69,7 @@ impl UdfImplementation for NativeImplementation {
     }
 
     fn invoke(&self, context: &mut UdfContext, args: &[UdfValue]) -> Result<UdfValue> {
-        self.definition
-            .signature
-            .ensure_args(&UdfValue::argument_types(args))?;
+        self.definition.signature.ensure_args(&UdfValue::argument_types(args))?;
         context.check_cancelled()?;
         context.charge(1)?;
         (self.definition.handler)(context, args)

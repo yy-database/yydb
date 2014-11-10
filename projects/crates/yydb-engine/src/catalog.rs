@@ -9,11 +9,13 @@
 
 use std::collections::BTreeMap;
 
-use vos::types::{
-    FieldIdentity, IdentityBoundProjection, IdentityHistory, IdentityManifest, ResolvedContract,
-    SchemaProjection, TypeIdentity, IDENTITY_HISTORY_FORMAT_VERSION, IDENTITY_MANIFEST_VERSION,
+use vos::{
+    bind_identity, evolve_identity, resolve_contract_from_bound as vos_resolve_contract,
+    types::{
+        FieldIdentity, IDENTITY_HISTORY_FORMAT_VERSION, IDENTITY_MANIFEST_VERSION, IdentityBoundProjection, IdentityHistory,
+        IdentityManifest, ResolvedContract, SchemaProjection, TypeIdentity,
+    },
 };
-use vos::{bind_identity, evolve_identity, resolve_contract_from_bound as vos_resolve_contract};
 use yydb_execution::{FieldHandle, LayoutField, RecordLayout, RecordLayoutError, Type};
 use yydb_types::{Error, Result};
 
@@ -26,9 +28,7 @@ pub const VOS_GIT_DEV: &str = "https://github.com/voml/vos-language.git#branch=d
 /// projection becomes database truth.
 pub(crate) fn project_schema(document: &str) -> Result<SchemaProjection> {
     if document.contains('\0') {
-        return Err(Error::Schema {
-            message: "VOS schema document must not contain NUL bytes".into(),
-        });
+        return Err(Error::Schema { message: "VOS schema document must not contain NUL bytes".into() });
     }
     vos::validate_schema(document).map_err(|message| Error::Schema { message })
 }
@@ -57,10 +57,7 @@ pub(crate) fn allocate_initial_manifest(projection: &SchemaProjection) -> Identi
             fields,
         });
     }
-    IdentityManifest {
-        format_version: IDENTITY_MANIFEST_VERSION.to_owned(),
-        types,
-    }
+    IdentityManifest { format_version: IDENTITY_MANIFEST_VERSION.to_owned(), types }
 }
 
 /// Rebuilds an identity manifest from a durable identity snapshot.
@@ -95,40 +92,28 @@ pub(crate) fn empty_history() -> IdentityHistory {
         manifest_version: IDENTITY_MANIFEST_VERSION.to_owned(),
         revision: 0,
         layout_epoch: 0,
-        snapshot: IdentityBoundProjection {
-            manifest_version: IDENTITY_MANIFEST_VERSION.to_owned(),
-            types: Vec::new(),
-        },
+        snapshot: IdentityBoundProjection { manifest_version: IDENTITY_MANIFEST_VERSION.to_owned(), types: Vec::new() },
         retired_types: Vec::new(),
         retired_fields: Vec::new(),
     }
 }
 
 /// Binds an explicit identity manifest to a projection.
-pub(crate) fn bind(
-    projection: &SchemaProjection,
-    manifest: &IdentityManifest,
-) -> Result<IdentityBoundProjection> {
-    bind_identity(projection, manifest).map_err(|diagnostics| Error::Schema {
-        message: format!("VOS identity binding failed: {diagnostics:?}"),
-    })
+pub(crate) fn bind(projection: &SchemaProjection, manifest: &IdentityManifest) -> Result<IdentityBoundProjection> {
+    bind_identity(projection, manifest)
+        .map_err(|diagnostics| Error::Schema { message: format!("VOS identity binding failed: {diagnostics:?}") })
 }
 
 /// Applies an explicitly bound snapshot to durable identity history.
-pub(crate) fn evolve(
-    previous: &IdentityHistory,
-    current: IdentityBoundProjection,
-) -> Result<IdentityHistory> {
-    evolve_identity(previous, current).map_err(|diagnostics| Error::Schema {
-        message: format!("VOS identity evolution failed: {diagnostics:?}"),
-    })
+pub(crate) fn evolve(previous: &IdentityHistory, current: IdentityBoundProjection) -> Result<IdentityHistory> {
+    evolve_identity(previous, current)
+        .map_err(|diagnostics| Error::Schema { message: format!("VOS identity evolution failed: {diagnostics:?}") })
 }
 
 /// Resolves an already-bound projection into the strict YYDB-consumed contract.
 pub(crate) fn resolve_contract(bound: &IdentityBoundProjection) -> Result<ResolvedContract> {
-    vos_resolve_contract(bound).map_err(|diagnostics| Error::Schema {
-        message: format!("VOS name resolution failed: {diagnostics:?}"),
-    })
+    vos_resolve_contract(bound)
+        .map_err(|diagnostics| Error::Schema { message: format!("VOS name resolution failed: {diagnostics:?}") })
 }
 
 /// A type-qualified field path used by [`RenameMap`].
@@ -159,41 +144,24 @@ impl RenameMap {
     }
 
     fn field_target(&self, type_name: &str, field_name: &str) -> Option<&str> {
-        self.fields
-            .get(&FieldPath {
-                type_name: type_name.to_owned(),
-                field_name: field_name.to_owned(),
-            })
-            .map(String::as_str)
+        self.fields.get(&FieldPath { type_name: type_name.to_owned(), field_name: field_name.to_owned() }).map(String::as_str)
     }
 }
 
 fn validate_renames(snapshot: &IdentityBoundProjection, renames: &RenameMap) -> Result<()> {
     for old_type in renames.types.keys() {
-        if !snapshot
-            .types
-            .iter()
-            .any(|item| item.canonical_path.last() == Some(old_type))
-        {
-            return Err(Error::Schema {
-                message: format!("rename map refers to unknown type `{old_type}`"),
-            });
+        if !snapshot.types.iter().any(|item| item.canonical_path.last() == Some(old_type)) {
+            return Err(Error::Schema { message: format!("rename map refers to unknown type `{old_type}`") });
         }
     }
     for path in renames.fields.keys() {
         let known = snapshot.types.iter().any(|item| {
             item.canonical_path.last() == Some(&path.type_name)
-                && item
-                    .fields
-                    .iter()
-                    .any(|field| field.canonical_name == path.field_name)
+                && item.fields.iter().any(|field| field.canonical_name == path.field_name)
         });
         if !known {
             return Err(Error::Schema {
-                message: format!(
-                    "rename map refers to unknown field `{}.{}`",
-                    path.type_name, path.field_name
-                ),
+                message: format!("rename map refers to unknown field `{}.{}`", path.type_name, path.field_name),
             });
         }
     }
@@ -223,11 +191,7 @@ pub(crate) fn migration_manifest(
     validate_renames(snapshot, renames)?;
 
     let mut next_type_id = next_durable_id(
-        snapshot
-            .types
-            .iter()
-            .map(|item| item.type_id)
-            .chain(history.retired_types.iter().map(|item| item.type_id)),
+        snapshot.types.iter().map(|item| item.type_id).chain(history.retired_types.iter().map(|item| item.type_id)),
     );
     let mut next_field_id = next_durable_id(
         snapshot
@@ -240,14 +204,11 @@ pub(crate) fn migration_manifest(
 
     let mut types = Vec::with_capacity(projection.types.len());
     for projected in &projection.types {
-        let projected_name =
-            projected
-                .canonical_path
-                .last()
-                .cloned()
-                .ok_or_else(|| Error::Schema {
-                    message: "VOS type has an empty canonical path".into(),
-                })?;
+        let projected_name = projected
+            .canonical_path
+            .last()
+            .cloned()
+            .ok_or_else(|| Error::Schema { message: "VOS type has an empty canonical path".into() })?;
         let previous = snapshot.types.iter().find(|item| {
             item.canonical_path
                 .last()
@@ -282,19 +243,11 @@ pub(crate) fn migration_manifest(
             let previous_field = previous_type.and_then(|previous| {
                 previous.fields.iter().find(|candidate| {
                     let previous_name = candidate.canonical_name.as_str();
-                    let type_name = previous
-                        .canonical_path
-                        .last()
-                        .map(String::as_str)
-                        .unwrap_or_default();
-                    let target = renames
-                        .field_target(type_name, previous_name)
-                        .unwrap_or(previous_name);
+                    let type_name = previous.canonical_path.last().map(String::as_str).unwrap_or_default();
+                    let target = renames.field_target(type_name, previous_name).unwrap_or(previous_name);
                     target == field.canonical_name
                         && !used_field_ids.contains(&candidate.field_id)
-                        && candidate
-                            .virtual_field_index
-                            .is_none_or(|slot| !used_slots.contains(&slot))
+                        && candidate.virtual_field_index.is_none_or(|slot| !used_slots.contains(&slot))
                 })
             });
             let identity = match previous_field {
@@ -323,17 +276,9 @@ pub(crate) fn migration_manifest(
             };
             fields.push(identity);
         }
-        types.push(TypeIdentity {
-            canonical_path: projected.canonical_path.clone(),
-            type_id,
-            kind: projected.kind,
-            fields,
-        });
+        types.push(TypeIdentity { canonical_path: projected.canonical_path.clone(), type_id, kind: projected.kind, fields });
     }
-    Ok(IdentityManifest {
-        format_version: IDENTITY_MANIFEST_VERSION.to_owned(),
-        types,
-    })
+    Ok(IdentityManifest { format_version: IDENTITY_MANIFEST_VERSION.to_owned(), types })
 }
 
 /// Initial execution-facing catalog built from one validated VOS document.
@@ -385,11 +330,7 @@ impl ExecutionType {
             self.schema_id,
             self.fields
                 .iter()
-                .map(|field| LayoutField {
-                    field_id: field.field_id,
-                    index: field.virtual_field,
-                    ty: field.handle.ty(),
-                })
+                .map(|field| LayoutField { field_id: field.field_id, index: field.virtual_field, ty: field.handle.ty() })
                 .collect(),
         )
     }
@@ -412,14 +353,9 @@ pub fn execution_catalog(document: &str) -> Result<ExecutionCatalog> {
 ///
 /// This is the downstream path for new integrations. It does not parse source,
 /// inspect a VOS syntax AST, or infer identities from declaration order.
-pub fn execution_catalog_from_resolved_contract(
-    contract: &vos::ResolvedContract,
-) -> Result<ExecutionCatalog> {
+pub fn execution_catalog_from_resolved_contract(contract: &vos::ResolvedContract) -> Result<ExecutionCatalog> {
     contract.validate().map_err(|error| Error::Schema {
-        message: format!(
-            "invalid resolved VOS contract {}: {}",
-            error.code, error.message
-        ),
+        message: format!("invalid resolved VOS contract {}: {}", error.code, error.message),
     })?;
     let mut types = Vec::with_capacity(contract.types.len());
     for item in &contract.types {
@@ -431,22 +367,15 @@ pub fn execution_catalog_from_resolved_contract(
             .canonical_path
             .last()
             .cloned()
-            .ok_or_else(|| Error::Schema {
-                message: "resolved VOS type has an empty canonical path".into(),
-            })?;
+            .ok_or_else(|| Error::Schema { message: "resolved VOS type has an empty canonical path".into() })?;
         let mut fields = Vec::with_capacity(item.fields.len());
         for field in &item.fields {
             let virtual_field_index = field.virtual_field_index.ok_or_else(|| Error::Schema {
-                message: format!(
-                    "resolved VOS field `{}` has no durable virtual slot",
-                    field.canonical_name
-                ),
+                message: format!("resolved VOS field `{}` has no durable virtual slot", field.canonical_name),
             })?;
             let ty = resolved_execution_type(&field.canonical_type)?;
             let handle = FieldHandle::new(item.type_id, field.field_id, virtual_field_index, ty)
-                .map_err(|_| Error::Schema {
-                    message: "resolved VOS contract emitted an invalid field identity".into(),
-                })?;
+                .map_err(|_| Error::Schema { message: "resolved VOS contract emitted an invalid field identity".into() })?;
             fields.push(ExecutionField {
                 field_id: field.field_id,
                 virtual_field: virtual_field_index,
@@ -454,12 +383,7 @@ pub fn execution_catalog_from_resolved_contract(
                 handle,
             });
         }
-        types.push(ExecutionType {
-            schema_id: item.type_id,
-            name,
-            kind,
-            fields,
-        });
+        types.push(ExecutionType { schema_id: item.type_id, name, kind, fields });
     }
     Ok(ExecutionCatalog { types })
 }
@@ -472,16 +396,14 @@ fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Typ
         ResolvedCanonicalType::Builtin(path) if path == &["utf8"] => Ok(Type::Text),
         ResolvedCanonicalType::Builtin(path) if path == &["bytes"] => Ok(Type::Bytes),
         ResolvedCanonicalType::Builtin(path) if path == &["file"] => Ok(Type::File),
-        ResolvedCanonicalType::Builtin(_) => Err(Error::Unsupported(
-            "resolved VOS scalar type is not in the execution slice",
-        )),
+        ResolvedCanonicalType::Builtin(_) => Err(Error::Unsupported("resolved VOS scalar type is not in the execution slice")),
         ResolvedCanonicalType::Optional(_)
         | ResolvedCanonicalType::Reference(_)
         | ResolvedCanonicalType::List(_)
         | ResolvedCanonicalType::User { .. }
-        | ResolvedCanonicalType::Generic { .. } => Err(Error::Unsupported(
-            "resolved VOS composite type is not in the execution slice",
-        )),
+        | ResolvedCanonicalType::Generic { .. } => {
+            Err(Error::Unsupported("resolved VOS composite type is not in the execution slice"))
+        }
     }
 }
 
@@ -513,9 +435,7 @@ pub fn validate_migration_version(document: &str, expected: u32) -> Result<()> {
     if let Some(declared) = document_version(document) {
         if declared != expected {
             return Err(Error::Schema {
-                message: format!(
-                    "document declares schema version {declared}, migration expects {expected}"
-                ),
+                message: format!("document declares schema version {declared}, migration expects {expected}"),
             });
         }
     }
@@ -527,11 +447,7 @@ pub fn validate_migration_version(document: &str, expected: u32) -> Result<()> {
 /// Uses Oak parsing and VOS semantic projection before persistence.
 pub fn validate_document(document: &str) -> Result<()> {
     if document.contains('\0') {
-        return Err(Error::Schema {
-            message: "VOS schema document must not contain NUL bytes".into(),
-        });
+        return Err(Error::Schema { message: "VOS schema document must not contain NUL bytes".into() });
     }
-    vos::validate_schema(document)
-        .map(|_| ())
-        .map_err(|message| Error::Schema { message })
+    vos::validate_schema(document).map(|_| ()).map_err(|message| Error::Schema { message })
 }

@@ -3,8 +3,10 @@
 //! Browser builds will replace this backend with OPFS sync-handle bindings. The logical
 //! path layout matches local fs: `app.yydb`, `app.yydb-wal`, `<stem>-objects/<hash>.blob`.
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
 
 use yydb::{Error, Result};
 
@@ -24,11 +26,7 @@ fn staging_key(db_path: &str, suffix: &str) -> String {
 /// Read a logical file under `db_path` (empty `suffix` is the main database file).
 pub(crate) fn read_logical_file(db_path: &str, suffix: &str) -> Result<Option<Vec<u8>>> {
     let key = logical_key(db_path, suffix);
-    Ok(logical_store()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .get(&key)
-        .cloned())
+    Ok(logical_store().lock().unwrap_or_else(|p| p.into_inner()).get(&key).cloned())
 }
 
 /// Atomically publish `body` as the visible logical file (staging → verify → swap).
@@ -57,10 +55,7 @@ pub(crate) fn sync_logical_root(db_path: &str) -> Result<()> {
 /// Remove a logical sidecar file when present.
 pub(crate) fn remove_logical_file(db_path: &str, suffix: &str) -> Result<()> {
     let key = logical_key(db_path, suffix);
-    logical_store()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .remove(&key);
+    logical_store().lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
     Ok(())
 }
 
@@ -87,9 +82,5 @@ pub(crate) fn publish_blob_atomic(db_path: &str, blob_hash: &str, body: &[u8]) -
 /// Read a published blob chunk, if present.
 pub(crate) fn read_blob(db_path: &str, blob_hash: &str) -> Result<Option<Vec<u8>>> {
     let key = yydx_blob_key(db_path, blob_hash);
-    Ok(logical_store()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .get(&key)
-        .cloned())
+    Ok(logical_store().lock().unwrap_or_else(|p| p.into_inner()).get(&key).cloned())
 }

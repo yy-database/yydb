@@ -13,14 +13,10 @@ use yydb_types::{Result, Value};
 /// Validates a local read-only execution body before UDF registration.
 pub(crate) fn validate_local_execution_body(body: &ValidatedUdf) -> Result<()> {
     if body.effect() != UdfEffect::Read || body.placement() != UdfPlacement::Local {
-        return Err(yydb_types::Error::Unsupported(
-            "local scalar execution requires a local read-only UDF",
-        ));
+        return Err(yydb_types::Error::Unsupported("local scalar execution requires a local read-only UDF"));
     }
     if !body.parameter_types().is_empty() {
-        return Err(yydb_types::Error::Unsupported(
-            "local scalar execution does not bind captured parameters",
-        ));
+        return Err(yydb_types::Error::Unsupported("local scalar execution does not bind captured parameters"));
     }
     Ok(())
 }
@@ -39,8 +35,7 @@ pub type ScalarFn = dyn Fn(&[Value]) -> Result<Value> + Send + Sync;
 
 /// Registry, host adapters, and contract types from `yydb-udf`.
 pub use yydb_udf::{
-    CatalogUdfEntry, CatalogUdfRegistry, HostFunctionHandle, HostMicroDefinition,
-    HostMicroImplementation, HostRuntimeAdapter, ImplementationEntry, ImplementationRegistry,
-    RegisterOptions, SessionUdfEntry, SessionUdfRegistry, Signature, UdfDefinition, UdfError,
-    UdfIdentity, UdfRegistry, UdfType, UdfValue,
+    CatalogUdfEntry, CatalogUdfRegistry, HostFunctionHandle, HostMicroDefinition, HostMicroImplementation, HostRuntimeAdapter,
+    ImplementationEntry, ImplementationRegistry, RegisterOptions, SessionUdfEntry, SessionUdfRegistry, Signature,
+    UdfDefinition, UdfError, UdfIdentity, UdfRegistry, UdfType, UdfValue,
 };

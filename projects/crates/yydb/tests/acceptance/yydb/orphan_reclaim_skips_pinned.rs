@@ -10,10 +10,7 @@ fn yydb_orphan_reclaim_skips_pinned() {
     conn.pin_object(&orphan).unwrap();
 
     let report = conn.reclaim_orphans(std::slice::from_ref(&orphan)).unwrap();
-    assert_eq!(
-        report.reclaimed_objects, 0,
-        "reclaim must skip pinned orphan objects"
-    );
+    assert_eq!(report.reclaimed_objects, 0, "reclaim must skip pinned orphan objects");
     assert!(conn.get_object(&orphan).is_ok());
 
     conn.evict_object(&orphan).unwrap();

@@ -22,11 +22,7 @@ pub struct TreeKey {
 impl TreeKey {
     /// Build a user KV key in the record tree.
     pub fn user_record(name: impl AsRef<[u8]>) -> Self {
-        Self {
-            tree_id: TREE_RECORD,
-            key_kind: KEY_KIND_USER,
-            encoded: name.as_ref().to_vec(),
-        }
+        Self { tree_id: TREE_RECORD, key_kind: KEY_KIND_USER, encoded: name.as_ref().to_vec() }
     }
 
     /// Serialize to on-disk cell key bytes.
@@ -40,11 +36,7 @@ impl TreeKey {
 
     /// Lower-bound separator for the first child in an internal page.
     pub fn min_separator(tree_id: u8) -> Self {
-        Self {
-            tree_id,
-            key_kind: 0,
-            encoded: Vec::new(),
-        }
+        Self { tree_id, key_kind: 0, encoded: Vec::new() }
     }
 
     /// Parse cell key bytes.
@@ -52,10 +44,6 @@ impl TreeKey {
         if bytes.len() < 2 {
             return None;
         }
-        Some(Self {
-            tree_id: bytes[0],
-            key_kind: bytes[1],
-            encoded: bytes[2..].to_vec(),
-        })
+        Some(Self { tree_id: bytes[0], key_kind: bytes[1], encoded: bytes[2..].to_vec() })
     }
 }

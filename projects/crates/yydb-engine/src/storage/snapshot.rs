@@ -6,13 +6,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use yydb_storage::Snapshot;
-use yydb_storage::{BlobManifestDelta, BLOB_REF_OP_DELETE, BLOB_REF_OP_PUT};
+use yydb_storage::{BLOB_REF_OP_DELETE, BLOB_REF_OP_PUT, BlobManifestDelta, Snapshot};
 use yydb_types::{Error, Result};
 
-use crate::connection::State;
-use crate::objects::references::OBJECT_REF_PREFIX;
-use crate::objects::ObjectStore;
+use crate::{
+    connection::State,
+    objects::{ObjectStore, references::OBJECT_REF_PREFIX},
+};
 
 const META_SCHEMA: &[u8] = b"__yydb/meta/schema";
 const META_IDENTITY: &[u8] = b"__yydb/meta/identity";
@@ -30,31 +30,21 @@ pub(crate) fn state_from_snapshot(snapshot: &Snapshot) -> Result<State> {
         .filter(|(key, _)| !key.starts_with(META_PREFIX))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    Ok(State {
-        schema,
-        identity_history,
-        resolved_contract,
-        records,
-    })
+    Ok(State { schema, identity_history, resolved_contract, records })
 }
 
 /// Encode engine [`State`] into a durable snapshot.
 pub(crate) fn snapshot_from_state(state: &State) -> Result<Snapshot> {
     let mut metadata = BTreeMap::new();
     metadata.insert(META_SCHEMA.to_vec(), encode_schema(&state.schema)?);
-    metadata.insert(
-        META_IDENTITY.to_vec(),
-        encode_identity(&state.identity_history)?,
-    );
-    metadata.insert(
-        META_CONTRACT.to_vec(),
-        encode_contract(&state.resolved_contract)?,
-    );
+    metadata.insert(META_IDENTITY.to_vec(), encode_identity(&state.identity_history)?);
+    metadata.insert(META_CONTRACT.to_vec(), encode_contract(&state.resolved_contract)?);
     let mut records = BTreeMap::new();
     for (key, value) in &state.records {
         if key.starts_with(META_PREFIX) {
             metadata.insert(key.as_bytes().to_vec(), value.clone());
-        } else {
+        }
+        else {
             records.insert(key.clone(), value.clone());
         }
     }
@@ -76,11 +66,7 @@ pub(crate) fn blob_deltas(
             continue;
         }
         if before_ref.is_some() && after_ref.is_none() {
-            deltas.push(BlobManifestDelta {
-                manifest_key: key.clone(),
-                op: BLOB_REF_OP_DELETE,
-                chunks: Vec::new(),
-            });
+            deltas.push(BlobManifestDelta { manifest_key: key.clone(), op: BLOB_REF_OP_DELETE, chunks: Vec::new() });
         }
         if let Some(hash) = after_ref {
             deltas.push(BlobManifestDelta {
@@ -156,9 +142,7 @@ fn encode_identity(history: &Option<vos::types::IdentityHistory>) -> Result<Vec<
     match history {
         None => Ok(vec![0]),
         Some(history) => {
-            let encoded = history
-                .to_json()
-                .map_err(|_| Error::Corrupt("catalog serialization failed"))?;
+            let encoded = history.to_json().map_err(|_| Error::Corrupt("catalog serialization failed"))?;
             let mut bytes = Vec::with_capacity(1 + 4 + encoded.len());
             bytes.push(1);
             bytes.extend((encoded.len() as u32).to_le_bytes());
@@ -183,8 +167,7 @@ fn decode_identity(bytes: Option<Vec<u8>>) -> Result<Option<vos::types::Identity
             }
             Ok(Some(
                 vos::types::IdentityHistory::from_json(
-                    std::str::from_utf8(&bytes[5..end])
-                        .map_err(|_| Error::Corrupt("catalog meta is not UTF-8"))?,
+                    std::str::from_utf8(&bytes[5..end]).map_err(|_| Error::Corrupt("catalog meta is not UTF-8"))?,
                 )
                 .map_err(|_| Error::Corrupt("catalog meta is invalid"))?,
             ))
@@ -197,8 +180,7 @@ fn encode_contract(contract: &Option<vos::ResolvedContract>) -> Result<Vec<u8>> 
     match contract {
         None => Ok(vec![0]),
         Some(contract) => {
-            let encoded = serde_json::to_vec(contract)
-                .map_err(|_| Error::Corrupt("resolved contract serialization failed"))?;
+            let encoded = serde_json::to_vec(contract).map_err(|_| Error::Corrupt("resolved contract serialization failed"))?;
             let mut bytes = Vec::with_capacity(1 + 4 + encoded.len());
             bytes.push(1);
             bytes.extend((encoded.len() as u32).to_le_bytes());
@@ -223,8 +205,7 @@ fn decode_contract(bytes: Option<Vec<u8>>) -> Result<Option<vos::ResolvedContrac
             }
             Ok(Some(
                 vos::ResolvedContract::from_json(
-                    &String::from_utf8(bytes[5..end].to_vec())
-                        .map_err(|_| Error::Corrupt("resolved contract is not UTF-8"))?,
+                    &String::from_utf8(bytes[5..end].to_vec()).map_err(|_| Error::Corrupt("resolved contract is not UTF-8"))?,
                 )
                 .map_err(|_| Error::Corrupt("resolved contract meta is invalid"))?,
             ))

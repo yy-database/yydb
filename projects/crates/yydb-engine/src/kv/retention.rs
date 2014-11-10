@@ -2,10 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use yydb_types::{
-    Error, EvictBudget, EvictReport, EvictionPolicy, NamespaceQuota, NamespaceStats, RecordVersion,
-    Result,
-};
+use yydb_types::{Error, EvictBudget, EvictReport, EvictionPolicy, NamespaceQuota, NamespaceStats, RecordVersion, Result};
 
 use super::lease::{now_millis, read_u64_meta, write_u64_meta};
 
@@ -56,11 +53,7 @@ fn decode_quota(bytes: &[u8]) -> Result<NamespaceQuota> {
         1 => EvictionPolicy::TtlFirst,
         _ => return Err(Error::Corrupt("unknown eviction policy tag")),
     };
-    Ok(NamespaceQuota {
-        max_bytes,
-        max_records,
-        eviction_policy,
-    })
+    Ok(NamespaceQuota { max_bytes, max_records, eviction_policy })
 }
 
 fn matching_namespace(records: &BTreeMap<String, Vec<u8>>, key: &str) -> Option<String> {
@@ -73,10 +66,7 @@ fn matching_namespace(records: &BTreeMap<String, Vec<u8>>, key: &str) -> Option<
         .map(str::to_owned)
 }
 
-pub(crate) fn namespace_stats(
-    records: &BTreeMap<String, Vec<u8>>,
-    namespace: &str,
-) -> NamespaceStats {
+pub(crate) fn namespace_stats(records: &BTreeMap<String, Vec<u8>>, namespace: &str) -> NamespaceStats {
     let mut stats = NamespaceStats::default();
     for (key, value) in records {
         if is_reserved_key(key) || !key.starts_with(namespace) {
@@ -88,24 +78,12 @@ pub(crate) fn namespace_stats(
     stats
 }
 
-pub(crate) fn set_namespace_quota(
-    records: &mut BTreeMap<String, Vec<u8>>,
-    namespace: &str,
-    quota: NamespaceQuota,
-) {
+pub(crate) fn set_namespace_quota(records: &mut BTreeMap<String, Vec<u8>>, namespace: &str, quota: NamespaceQuota) {
     records.insert(quota_meta_key(namespace), encode_quota(&quota));
 }
 
-fn read_namespace_quota(
-    records: &BTreeMap<String, Vec<u8>>,
-    namespace: &str,
-) -> Option<NamespaceQuota> {
-    records
-        .get(&quota_meta_key(namespace))
-        .map(|bytes| decode_quota(bytes))
-        .transpose()
-        .ok()
-        .flatten()
+fn read_namespace_quota(records: &BTreeMap<String, Vec<u8>>, namespace: &str) -> Option<NamespaceQuota> {
+    records.get(&quota_meta_key(namespace)).map(|bytes| decode_quota(bytes)).transpose().ok().flatten()
 }
 
 fn touch_lru(records: &mut BTreeMap<String, Vec<u8>>, key: &str) {
@@ -121,10 +99,7 @@ fn bump_record_version(records: &mut BTreeMap<String, Vec<u8>>, key: &str) -> Re
 }
 
 fn remove_record(records: &mut BTreeMap<String, Vec<u8>>, key: &str) -> u64 {
-    let bytes = records
-        .remove(key)
-        .map(|value| value.len() as u64)
-        .unwrap_or(0);
+    let bytes = records.remove(key).map(|value| value.len() as u64).unwrap_or(0);
     records.remove(&ttl_meta_key(key));
     records.remove(&lru_meta_key(key));
     records.remove(&version_meta_key(key));
@@ -132,63 +107,46 @@ fn remove_record(records: &mut BTreeMap<String, Vec<u8>>, key: &str) -> u64 {
 }
 
 fn candidate_keys(records: &BTreeMap<String, Vec<u8>>, namespace: &str) -> Vec<String> {
-    records
-        .keys()
-        .filter(|key| !is_reserved_key(key) && key.starts_with(namespace))
-        .cloned()
-        .collect()
+    records.keys().filter(|key| !is_reserved_key(key) && key.starts_with(namespace)).cloned().collect()
 }
 
-fn pick_victim(
-    records: &BTreeMap<String, Vec<u8>>,
-    namespace: &str,
-    policy: EvictionPolicy,
-) -> Option<String> {
+fn pick_victim(records: &BTreeMap<String, Vec<u8>>, namespace: &str, policy: EvictionPolicy) -> Option<String> {
     let keys = candidate_keys(records, namespace);
     match policy {
-        EvictionPolicy::Lru => keys.into_iter().min_by_key(|key| {
-            records
-                .get(&lru_meta_key(key))
-                .and_then(|bytes| {
-                    if bytes.len() == 8 {
-                        Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap()))
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(0)
-        }),
-        EvictionPolicy::TtlFirst => keys.into_iter().min_by_key(|key| {
-            records
-                .get(&ttl_meta_key(key))
-                .and_then(|bytes| {
-                    if bytes.len() == 8 {
-                        Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap()))
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(u64::MAX)
-        }),
+        EvictionPolicy::Lru => {
+            keys.into_iter().min_by_key(|key| {
+                records
+                    .get(&lru_meta_key(key))
+                    .and_then(|bytes| {
+                        if bytes.len() == 8 { Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap())) } else { None }
+                    })
+                    .unwrap_or(0)
+            })
+        }
+        EvictionPolicy::TtlFirst => {
+            keys.into_iter().min_by_key(|key| {
+                records
+                    .get(&ttl_meta_key(key))
+                    .and_then(|bytes| {
+                        if bytes.len() == 8 { Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap())) } else { None }
+                    })
+                    .unwrap_or(u64::MAX)
+            })
+        }
     }
 }
 
-pub(crate) fn enforce_namespace_quota(
-    records: &mut BTreeMap<String, Vec<u8>>,
-    namespace: &str,
-) -> Result<EvictReport> {
-    let Some(quota) = read_namespace_quota(records, namespace) else {
+pub(crate) fn enforce_namespace_quota(records: &mut BTreeMap<String, Vec<u8>>, namespace: &str) -> Result<EvictReport> {
+    let Some(quota) = read_namespace_quota(records, namespace)
+    else {
         return Ok(EvictReport::default());
     };
     let mut report = EvictReport::default();
     while namespace_stats(records, namespace).records_used > quota.max_records
         || namespace_stats(records, namespace).bytes_used > quota.max_bytes
     {
-        let victim = pick_victim(records, namespace, quota.eviction_policy).ok_or_else(|| {
-            Error::QuotaExceeded {
-                namespace: namespace.to_owned(),
-            }
-        })?;
+        let victim = pick_victim(records, namespace, quota.eviction_policy)
+            .ok_or_else(|| Error::QuotaExceeded { namespace: namespace.to_owned() })?;
         report.evicted_bytes += remove_record(records, &victim);
         report.evicted_records += 1;
     }
@@ -212,11 +170,7 @@ pub(crate) fn put_with_ttl(
     Ok(version)
 }
 
-pub(crate) fn put_record(
-    records: &mut BTreeMap<String, Vec<u8>>,
-    key: &str,
-    value: &[u8],
-) -> Result<()> {
+pub(crate) fn put_record(records: &mut BTreeMap<String, Vec<u8>>, key: &str, value: &[u8]) -> Result<()> {
     records.insert(key.to_owned(), value.to_vec());
     touch_lru(records, key);
     if let Some(namespace) = matching_namespace(records, key) {
@@ -238,11 +192,7 @@ pub(crate) fn evict_expired(
             break;
         }
         let expires_at = records.get(&ttl_meta_key(&key)).and_then(|bytes| {
-            if bytes.len() == 8 {
-                Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap()))
-            } else {
-                None
-            }
+            if bytes.len() == 8 { Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap())) } else { None }
         });
         if expires_at.is_some_and(|deadline| deadline <= now) {
             report.evicted_bytes += remove_record(records, &key);
@@ -256,12 +206,6 @@ pub(crate) fn is_expired(records: &BTreeMap<String, Vec<u8>>, key: &str) -> bool
     let now = now_millis();
     records
         .get(&ttl_meta_key(key))
-        .and_then(|bytes| {
-            if bytes.len() == 8 {
-                Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap()))
-            } else {
-                None
-            }
-        })
+        .and_then(|bytes| if bytes.len() == 8 { Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap())) } else { None })
         .is_some_and(|deadline| deadline <= now)
 }

@@ -21,11 +21,9 @@ enum ObjectStoreRoot {
     OnDisk(BlobStore),
 }
 
-use yydb_storage::BlobStore;
-use yydb_storage::{blob_chunk_hash, BlobChunkRef};
+use yydb_storage::{BlobChunkRef, BlobStore, blob_chunk_hash};
 use yydb_types::{
-    ChunkManifest, Error, HashAlgo, ObjectKind, ObjectRef, Result, Tier, Vector,
-    DEFAULT_CHUNK_SIZE, INLINE_BYTES_MAX,
+    ChunkManifest, DEFAULT_CHUNK_SIZE, Error, HashAlgo, INLINE_BYTES_MAX, ObjectKind, ObjectRef, Result, Tier, Vector,
 };
 
 /// Soft inline size guidance (re-exported for callers).
@@ -67,10 +65,7 @@ impl ObjectStore {
     /// Resolve `<app-name>-objects/` beside `app.yydx`.
     pub fn yydx_objects_root(main_path: &Path) -> PathBuf {
         let parent = main_path.parent().unwrap_or_else(|| Path::new("."));
-        let stem = main_path
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .unwrap_or("app");
+        let stem = main_path.file_stem().and_then(|name| name.to_str()).unwrap_or("app");
         parent.join(format!("{stem}-objects"))
     }
 
@@ -106,9 +101,7 @@ impl ObjectStore {
         match &self.root {
             ObjectStoreRoot::Ephemeral => {
                 let prefix: String = hash_hex.chars().take(2).collect();
-                self.cas_root()
-                    .join(prefix)
-                    .join(format!("{hash_hex}.blob"))
+                self.cas_root().join(prefix).join(format!("{hash_hex}.blob"))
             }
             ObjectStoreRoot::OnDisk(store) => store.path_for_hash(hash_hex),
         }
@@ -127,24 +120,13 @@ impl ObjectStore {
     /// Write one CAS chunk / object; returns its [`ObjectRef`].
     pub fn put_chunk(&self, kind: ObjectKind, bytes: &[u8]) -> Result<ObjectRef> {
         let hash_bytes = blob_chunk_hash(bytes);
-        let object = ObjectRef {
-            algo: HashAlgo::Blake3,
-            hash: hash_bytes,
-            size: bytes.len() as u64,
-            kind,
-        };
+        let object = ObjectRef { algo: HashAlgo::Blake3, hash: hash_bytes, size: bytes.len() as u64, kind };
         if let ObjectStoreRoot::OnDisk(store) = &self.root {
             store.put(&object.hash_hex(), bytes)?;
         }
-        self.hot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(hash_bytes, Arc::<[u8]>::from(bytes.to_vec()));
+        self.hot.lock().unwrap_or_else(|p| p.into_inner()).insert(hash_bytes, Arc::<[u8]>::from(bytes.to_vec()));
         if !self.persist_to_disk() {
-            self.catalog
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .insert(hash_bytes, object.clone());
+            self.catalog.lock().unwrap_or_else(|p| p.into_inner()).insert(hash_bytes, object.clone());
         }
         Ok(object)
     }
@@ -160,44 +142,30 @@ impl ObjectStore {
         if let ObjectStoreRoot::OnDisk(store) = &self.root {
             let payload = store.read(&object.hash_hex(), object.size)?;
             let arc: Arc<[u8]> = Arc::from(payload.into_boxed_slice());
-            self.hot
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .insert(object.hash, Arc::clone(&arc));
+            self.hot.lock().unwrap_or_else(|p| p.into_inner()).insert(object.hash, Arc::clone(&arc));
             return Ok(arc);
         }
         let cold = self.cold.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(bytes) = cold.get(&object.hash) {
             return Ok(Arc::clone(bytes));
         }
-        Err(Error::ObjectNotFound {
-            hash_hex: object.hash_hex(),
-        })
+        Err(Error::ObjectNotFound { hash_hex: object.hash_hex() })
     }
 
     /// Pin an object in the hot set (tier hint: [`Tier::Hot`]).
     pub fn pin_object(&self, object: &ObjectRef) -> Result<Tier> {
         let _ = self.get_object(object)?;
-        self.pinned
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(object.hash);
+        self.pinned.lock().unwrap_or_else(|p| p.into_inner()).insert(object.hash);
         Ok(Tier::Hot)
     }
 
     /// Drop pin and remove from hot cache when not pinned.
     pub fn evict_object(&self, object: &ObjectRef) -> Result<Tier> {
-        self.pinned
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&object.hash);
+        self.pinned.lock().unwrap_or_else(|p| p.into_inner()).remove(&object.hash);
         let mut hot = self.hot.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(bytes) = hot.remove(&object.hash) {
             if !self.persist_to_disk() {
-                self.cold
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .insert(object.hash, bytes);
+                self.cold.lock().unwrap_or_else(|p| p.into_inner()).insert(object.hash, bytes);
             }
         }
         Ok(Tier::Cold)
@@ -209,24 +177,13 @@ impl ObjectStore {
         if pinned {
             return Tier::Hot;
         }
-        let hot = self
-            .hot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .contains_key(&object.hash);
-        if hot {
-            Tier::Hot
-        } else {
-            Tier::Cold
-        }
+        let hot = self.hot.lock().unwrap_or_else(|p| p.into_inner()).contains_key(&object.hash);
+        if hot { Tier::Hot } else { Tier::Cold }
     }
 
     /// Whether an object is pinned against GC reclaim.
     pub fn is_pinned(&self, object: &ObjectRef) -> bool {
-        self.pinned
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .contains(&object.hash)
+        self.pinned.lock().unwrap_or_else(|p| p.into_inner()).contains(&object.hash)
     }
 
     /// Whether chunk bytes are still present in this store.
@@ -234,26 +191,13 @@ impl ObjectStore {
         if self.persist_to_disk() {
             return self.path_for(object).exists();
         }
-        if self
-            .catalog
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .contains_key(&object.hash)
-        {
+        if self.catalog.lock().unwrap_or_else(|p| p.into_inner()).contains_key(&object.hash) {
             return true;
         }
-        if self
-            .hot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .contains_key(&object.hash)
-        {
+        if self.hot.lock().unwrap_or_else(|p| p.into_inner()).contains_key(&object.hash) {
             return true;
         }
-        self.cold
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .contains_key(&object.hash)
+        self.cold.lock().unwrap_or_else(|p| p.into_inner()).contains_key(&object.hash)
     }
 
     /// Write a vector payload into CAS.
@@ -264,28 +208,17 @@ impl ObjectStore {
     /// Read a vector payload from CAS.
     pub fn get_vector(&self, object: &ObjectRef) -> Result<Vector> {
         if object.kind != ObjectKind::VectorPayload {
-            return Err(Error::ObjectCorrupt {
-                message: "object kind is not VectorPayload".into(),
-            });
+            return Err(Error::ObjectCorrupt { message: "object kind is not VectorPayload".into() });
         }
         let bytes = self.get_object(object)?;
         Vector::from_le_bytes(&bytes)
     }
 
     /// Chunk a logical file into CAS objects and return a manifest.
-    pub fn put_file_chunked(
-        &self,
-        mut reader: impl Read,
-        chunk_size: usize,
-    ) -> Result<ChunkManifest> {
-        let chunk_size = if chunk_size == 0 {
-            DEFAULT_CHUNK_SIZE
-        } else {
-            chunk_size
-        };
-        let chunk_size_u32 = u32::try_from(chunk_size).map_err(|_| Error::ObjectCorrupt {
-            message: "chunk_size exceeds u32".into(),
-        })?;
+    pub fn put_file_chunked(&self, mut reader: impl Read, chunk_size: usize) -> Result<ChunkManifest> {
+        let chunk_size = if chunk_size == 0 { DEFAULT_CHUNK_SIZE } else { chunk_size };
+        let chunk_size_u32 =
+            u32::try_from(chunk_size).map_err(|_| Error::ObjectCorrupt { message: "chunk_size exceeds u32".into() })?;
         let mut chunks = Vec::new();
         let mut total_size = 0_u64;
         let mut buf = vec![0_u8; chunk_size];
@@ -311,54 +244,35 @@ impl ObjectStore {
             // Empty file: one zero-length chunk for a stable manifest.
             chunks.push(self.put_chunk(ObjectKind::Blob, &[])?);
         }
-        Ok(ChunkManifest {
-            chunk_size: chunk_size_u32,
-            total_size,
-            chunks,
-        })
+        Ok(ChunkManifest { chunk_size: chunk_size_u32, total_size, chunks })
     }
 
     /// Read a byte range from a chunked file without assembling the whole file.
-    pub fn read_file_range(
-        &self,
-        manifest: &ChunkManifest,
-        offset: u64,
-        len: usize,
-    ) -> Result<Vec<u8>> {
+    pub fn read_file_range(&self, manifest: &ChunkManifest, offset: u64, len: usize) -> Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
         }
         if offset > manifest.total_size {
-            return Err(Error::ObjectCorrupt {
-                message: "read offset past end of file".into(),
-            });
+            return Err(Error::ObjectCorrupt { message: "read offset past end of file".into() });
         }
         let end = offset
             .checked_add(len as u64)
-            .ok_or(Error::ObjectCorrupt {
-                message: "read range overflow".into(),
-            })?
+            .ok_or(Error::ObjectCorrupt { message: "read range overflow".into() })?
             .min(manifest.total_size);
         let need = (end - offset) as usize;
         let chunk_size = manifest.chunk_size as u64;
         if chunk_size == 0 {
-            return Err(Error::ObjectCorrupt {
-                message: "manifest chunk_size is zero".into(),
-            });
+            return Err(Error::ObjectCorrupt { message: "manifest chunk_size is zero".into() });
         }
         let mut out = Vec::with_capacity(need);
         let mut cursor = offset;
         while cursor < end {
             let index = (cursor / chunk_size) as usize;
-            let chunk = manifest.chunks.get(index).ok_or(Error::ObjectCorrupt {
-                message: format!("missing chunk {index}"),
-            })?;
+            let chunk = manifest.chunks.get(index).ok_or(Error::ObjectCorrupt { message: format!("missing chunk {index}") })?;
             let data = self.get_object(chunk)?;
             let into_chunk = (cursor % chunk_size) as usize;
             if into_chunk >= data.len() {
-                return Err(Error::ObjectCorrupt {
-                    message: "chunk shorter than expected".into(),
-                });
+                return Err(Error::ObjectCorrupt { message: "chunk shorter than expected".into() });
             }
             let take = ((end - cursor) as usize).min(data.len() - into_chunk);
             out.extend_from_slice(&data[into_chunk..into_chunk + take]);
@@ -370,40 +284,24 @@ impl ObjectStore {
     /// Enumerate every `.blob` segment under the store root.
     pub fn list_objects(&self) -> Result<Vec<ObjectRef>> {
         if !self.persist_to_disk() {
-            return Ok(self
-                .catalog
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .values()
-                .cloned()
-                .collect());
+            return Ok(self.catalog.lock().unwrap_or_else(|p| p.into_inner()).values().cloned().collect());
         }
-        let ObjectStoreRoot::OnDisk(store) = &self.root else {
+        let ObjectStoreRoot::OnDisk(store) = &self.root
+        else {
             return Ok(Vec::new());
         };
         store
             .list()?
             .into_iter()
             .map(|(hash_hex, size)| {
-                Ok(ObjectRef {
-                    algo: HashAlgo::Blake3,
-                    hash: decode_hash_hex(&hash_hex)?,
-                    size,
-                    kind: ObjectKind::Blob,
-                })
+                Ok(ObjectRef { algo: HashAlgo::Blake3, hash: decode_hash_hex(&hash_hex)?, size, kind: ObjectKind::Blob })
             })
             .collect()
     }
 
     /// Read the `YYBB` header fields for a chunk already stored in this CAS.
     pub(crate) fn chunk_ref(&self, hash: &[u8; 32]) -> Result<BlobChunkRef> {
-        let hash_hex = ObjectRef {
-            algo: HashAlgo::Blake3,
-            hash: *hash,
-            size: 0,
-            kind: ObjectKind::Blob,
-        }
-        .hash_hex();
+        let hash_hex = ObjectRef { algo: HashAlgo::Blake3, hash: *hash, size: 0, kind: ObjectKind::Blob }.hash_hex();
         match &self.root {
             ObjectStoreRoot::OnDisk(store) => store.chunk_ref(&hash_hex),
             ObjectStoreRoot::Ephemeral => Err(Error::ObjectNotFound { hash_hex }),
@@ -415,22 +313,10 @@ impl ObjectStore {
         if let ObjectStoreRoot::OnDisk(store) = &self.root {
             store.remove(&object.hash_hex())?;
         }
-        self.hot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&object.hash);
-        self.cold
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&object.hash);
-        self.catalog
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&object.hash);
-        self.pinned
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&object.hash);
+        self.hot.lock().unwrap_or_else(|p| p.into_inner()).remove(&object.hash);
+        self.cold.lock().unwrap_or_else(|p| p.into_inner()).remove(&object.hash);
+        self.catalog.lock().unwrap_or_else(|p| p.into_inner()).remove(&object.hash);
+        self.pinned.lock().unwrap_or_else(|p| p.into_inner()).remove(&object.hash);
         Ok(())
     }
 }
@@ -439,15 +325,10 @@ fn decode_hash_hex(hash_hex: &str) -> Result<[u8; 32]> {
     let mut hash = [0_u8; 32];
     for (index, chunk) in hash_hex.as_bytes().chunks(2).enumerate() {
         if chunk.len() != 2 {
-            return Err(Error::ObjectCorrupt {
-                message: "hash hex has odd length".into(),
-            });
+            return Err(Error::ObjectCorrupt { message: "hash hex has odd length".into() });
         }
-        let byte = u8::from_str_radix(&String::from_utf8_lossy(chunk), 16).map_err(|_| {
-            Error::ObjectCorrupt {
-                message: "hash hex is not valid".into(),
-            }
-        })?;
+        let byte = u8::from_str_radix(&String::from_utf8_lossy(chunk), 16)
+            .map_err(|_| Error::ObjectCorrupt { message: "hash hex is not valid".into() })?;
         hash[index] = byte;
     }
     Ok(hash)

@@ -8,11 +8,7 @@ pub fn crc32c(data: &[u8]) -> u32 {
     for byte in data {
         crc ^= *byte as u32;
         for _ in 0..8 {
-            crc = if crc & 1 != 0 {
-                (crc >> 1) ^ POLY
-            } else {
-                crc >> 1
-            };
+            crc = if crc & 1 != 0 { (crc >> 1) ^ POLY } else { crc >> 1 };
         }
     }
     crc ^ 0xFFFF_FFFF

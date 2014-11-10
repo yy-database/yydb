@@ -1,9 +1,9 @@
 //! Host-testable WASM shared surface (no wasm-bindgen).
 
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 use yydb::{
-    catalog::{self, ExecutionTypeKind},
     Connection, Error, Result, SchemaVersion, Value,
+    catalog::{self, ExecutionTypeKind},
 };
 
 /// Build the full diagnostic contract JSON object for any error branch.
@@ -42,27 +42,12 @@ fn schema_fingerprint(document: &str) -> String {
 pub fn check_schema_source(source: &str) -> SchemaCheck {
     match catalog::execution_catalog(source) {
         Ok(catalog) => {
-            let table_count = u32::try_from(
-                catalog
-                    .types
-                    .iter()
-                    .filter(|entry| entry.kind == ExecutionTypeKind::Table)
-                    .count(),
-            )
-            .unwrap_or(u32::MAX);
-            SchemaCheck {
-                ok: true,
-                table_count,
-                schema_fingerprint: schema_fingerprint(source),
-                error: None,
-            }
+            let table_count =
+                u32::try_from(catalog.types.iter().filter(|entry| entry.kind == ExecutionTypeKind::Table).count())
+                    .unwrap_or(u32::MAX);
+            SchemaCheck { ok: true, table_count, schema_fingerprint: schema_fingerprint(source), error: None }
         }
-        Err(err) => SchemaCheck {
-            ok: false,
-            table_count: 0,
-            schema_fingerprint: String::new(),
-            error: Some(err.to_string()),
-        },
+        Err(err) => SchemaCheck { ok: false, table_count: 0, schema_fingerprint: String::new(), error: Some(err.to_string()) },
     }
 }
 
@@ -158,10 +143,7 @@ pub(crate) fn connection_info(conn: &Connection, path: Option<&str>) -> String {
         Err(_) => "schema.version=".to_owned(),
     };
     let records = conn.record_count().unwrap_or(0);
-    format!(
-        "path={path}\n{schema_line}\nrecords={records}\njournal_mode={}\n",
-        conn.journal_mode().as_str()
-    )
+    format!("path={path}\n{schema_line}\nrecords={records}\njournal_mode={}\n", conn.journal_mode().as_str())
 }
 
 pub(crate) fn scalar_call_json(result: Result<Value>) -> String {
@@ -195,9 +177,7 @@ fn scalar_value_json(value: &Value) -> Result<JsonValue> {
         Value::Bool(value) => Ok(json!(value)),
         Value::I64(value) => Ok(json!(value)),
         Value::Text(value) => Ok(json!(value)),
-        _ => Err(yydb::Error::Unsupported(
-            "scalar call value type is outside the Phase-1 wire subset",
-        )),
+        _ => Err(yydb::Error::Unsupported("scalar call value type is outside the Phase-1 wire subset")),
     }
 }
 

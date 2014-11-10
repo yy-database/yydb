@@ -1,18 +1,14 @@
 //! fixture: format_v0.blob_publish_orphan_wal
 
-use std::fs;
-use std::path::{Path, PathBuf};
-
-use yydb::{
-    journal::wal_path, Batch, Connection, DoctorSeverity, ObjectKind, ObjectStore, OpenFlags,
+use std::{
+    fs,
+    path::{Path, PathBuf},
 };
 
+use yydb::{Batch, Connection, DoctorSeverity, ObjectKind, ObjectStore, OpenFlags, journal::wal_path};
+
 fn temp_yydx(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "yydb-formats-v0-blob-orphan-wal-{}-{}.yydx",
-        std::process::id(),
-        label
-    ))
+    std::env::temp_dir().join(format!("yydb-formats-v0-blob-orphan-wal-{}-{}.yydx", std::process::id(), label))
 }
 
 fn cleanup(path: &Path) {
@@ -39,26 +35,18 @@ fn yydb_formats_v0_blob_publish_orphan_wal() {
     drop(conn);
 
     let reopened = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
-    assert_eq!(
-        reopened.get("blobs/live").unwrap(),
-        Some(format!("yydb:object:{}", live.hash_hex()).into_bytes())
-    );
+    assert_eq!(reopened.get("blobs/live").unwrap(), Some(format!("yydb:object:{}", live.hash_hex()).into_bytes()));
     assert_eq!(reopened.get("blobs/orphan").unwrap(), None);
 
     let orphans = reopened.scan_orphans("blobs/").unwrap();
     assert!(
-        orphans
-            .iter()
-            .any(|object| object.hash_hex() == orphan.hash_hex()),
+        orphans.iter().any(|object| object.hash_hex() == orphan.hash_hex()),
         "WAL mode must keep blob publish orphans off-catalog after reopen"
     );
 
     let report = reopened.doctor().unwrap();
     assert!(
-        !report
-            .issues
-            .iter()
-            .any(|issue| issue.severity == DoctorSeverity::Error),
+        !report.issues.iter().any(|issue| issue.severity == DoctorSeverity::Error),
         "doctor reported errors: {:?}",
         report.issues
     );

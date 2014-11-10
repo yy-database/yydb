@@ -98,11 +98,14 @@ pub fn parse_page0(bytes: &[u8]) -> Result<DatabaseHeader> {
         (Ok(a), Ok(b)) => {
             let pick = if a.generation > b.generation {
                 a
-            } else if b.generation > a.generation {
+            }
+            else if b.generation > a.generation {
                 b
-            } else if a.checkpoint_lsn >= b.checkpoint_lsn {
+            }
+            else if a.checkpoint_lsn >= b.checkpoint_lsn {
                 a
-            } else {
+            }
+            else {
                 b
             };
             Ok(DatabaseHeader { slot: pick })
@@ -114,20 +117,12 @@ pub fn parse_page0(bytes: &[u8]) -> Result<DatabaseHeader> {
 
 /// Byte offset of a header slot on page 0.
 pub fn slot_offset_for_kind(slot_kind: u8) -> usize {
-    if slot_kind == SLOT_KIND_B {
-        SLOT_BYTES
-    } else {
-        0
-    }
+    if slot_kind == SLOT_KIND_B { SLOT_BYTES } else { 0 }
 }
 
 /// Offset of the inactive header slot paired with `active_offset`.
 pub fn inactive_slot_offset(active_offset: usize) -> usize {
-    if active_offset == 0 {
-        SLOT_BYTES
-    } else {
-        0
-    }
+    if active_offset == 0 { SLOT_BYTES } else { 0 }
 }
 
 /// Invalidate the checksum of one header slot (crash-injection helper for tests).

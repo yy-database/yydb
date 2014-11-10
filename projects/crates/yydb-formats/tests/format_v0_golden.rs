@@ -4,14 +4,12 @@
 use std::path::PathBuf;
 
 use yydb_formats::{
-    committed_tail_lsn, committed_transactions, crc32c, parse_blob_header, parse_page0, parse_shm,
-    parse_wal, parse_wal_recover, strip_trailing_txn_commit, BLOB_HEADER_BYTES,
+    BLOB_HEADER_BYTES, committed_tail_lsn, committed_transactions, crc32c, parse_blob_header, parse_page0, parse_shm,
+    parse_wal, parse_wal_recover, strip_trailing_txn_commit,
 };
 
 fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/format-v0")
-        .join(name)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/format-v0").join(name)
 }
 
 #[test]
@@ -98,11 +96,7 @@ fn format_v0_strip_trailing_commit() {
     assert_eq!(committed_transactions(&parse_wal(&bytes).unwrap()), 1);
     let stripped = strip_trailing_txn_commit(&bytes).unwrap();
     let wal = parse_wal(&stripped).unwrap();
-    assert!(
-        wal.frames.iter().all(|frame| frame.frame_type != 0x04),
-        "stripped wal still has commit frames: {:?}",
-        wal.frames
-    );
+    assert!(wal.frames.iter().all(|frame| frame.frame_type != 0x04), "stripped wal still has commit frames: {:?}", wal.frames);
     assert_eq!(wal.frames.len(), 2);
 }
 

@@ -7,14 +7,16 @@ use std::{
 };
 
 use yydb_formats::{
-    main_bytes_from_memory_pager, memory_pager_from_main_bytes, parse_wal, BlobManifestDelta,
-    FilePager, MemoryPager, PAGE_MAGIC, WAL_MAGIC,
+    BlobManifestDelta, FilePager, MemoryPager, PAGE_MAGIC, WAL_MAGIC, main_bytes_from_memory_pager,
+    memory_pager_from_main_bytes, parse_wal,
 };
 use yydb_types::{Error, Result};
 
-use crate::journal::{wal_path, JournalMode};
-use crate::lock::WriterLock;
-use crate::snapshot::{read_snapshot, write_snapshot, Snapshot};
+use crate::{
+    journal::{JournalMode, wal_path},
+    lock::WriterLock,
+    snapshot::{Snapshot, read_snapshot, write_snapshot},
+};
 
 /// An open, exclusively locked file-backed database image.
 pub struct Database {
@@ -43,15 +45,11 @@ impl Database {
                 pager.disable_wal()?;
             }
             pager
-        } else {
+        }
+        else {
             FilePager::open(&path, enable_wal)?
         };
-        Ok(Self {
-            path,
-            _writer_lock: writer_lock,
-            pager,
-            journal_mode,
-        })
+        Ok(Self { path, _writer_lock: writer_lock, pager, journal_mode })
     }
 
     /// Filesystem path of the main database image.
@@ -84,8 +82,7 @@ impl Database {
 
     /// Commit a snapshot, publishing `blob_refs` into the WAL transaction when set.
     pub fn commit(&mut self, snapshot: &Snapshot, blob_refs: &[BlobManifestDelta]) -> Result<()> {
-        self.pager
-            .mutate_with_publish_blob_refs(|inner| write_snapshot(inner, snapshot), blob_refs)
+        self.pager.mutate_with_publish_blob_refs(|inner| write_snapshot(inner, snapshot), blob_refs)
     }
 
     /// Fold WAL frames into the main file.
@@ -108,9 +105,7 @@ impl Database {
 
     /// Uncheckpointed WAL bytes on disk (0 when the sidecar is absent).
     pub fn wal_bytes(&self) -> u64 {
-        fs::metadata(wal_path(&self.path))
-            .map(|meta| meta.len())
-            .unwrap_or(0)
+        fs::metadata(wal_path(&self.path)).map(|meta| meta.len()).unwrap_or(0)
     }
 }
 
@@ -126,11 +121,7 @@ pub fn file_is_ydpg(path: &Path) -> Result<bool> {
 }
 
 /// Render a snapshot as a checkpointed in-memory `YDPG` main-file image.
-pub fn snapshot_to_main_bytes(
-    snapshot: &Snapshot,
-    database_id: [u8; 16],
-    page_size: u8,
-) -> Result<Vec<u8>> {
+pub fn snapshot_to_main_bytes(snapshot: &Snapshot, database_id: [u8; 16], page_size: u8) -> Result<Vec<u8>> {
     let mut pager = MemoryPager::new_empty(database_id, page_size);
     write_snapshot(&mut pager, snapshot)?;
     main_bytes_from_memory_pager(&pager)

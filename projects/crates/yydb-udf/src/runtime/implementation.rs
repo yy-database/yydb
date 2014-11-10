@@ -15,11 +15,7 @@ pub trait UdfImplementation: Send + Sync {
     fn invoke(&self, context: &mut UdfContext, args: &[UdfValue]) -> Result<UdfValue>;
 
     /// Invokes the UDF with a bounded batch when supported.
-    fn invoke_batch(
-        &self,
-        context: &mut UdfContext,
-        batches: &[Vec<UdfValue>],
-    ) -> Result<Vec<UdfValue>> {
+    fn invoke_batch(&self, context: &mut UdfContext, batches: &[Vec<UdfValue>]) -> Result<Vec<UdfValue>> {
         let _ = context;
         let _ = batches;
         Err(UdfError::UnsupportedEffect)

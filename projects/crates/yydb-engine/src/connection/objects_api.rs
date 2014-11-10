@@ -28,26 +28,15 @@ impl Connection {
     }
 
     /// Chunk a logical file into CAS objects.
-    pub fn put_file_chunked(
-        &self,
-        reader: impl std::io::Read,
-        chunk_size: usize,
-    ) -> Result<ChunkManifest> {
+    pub fn put_file_chunked(&self, reader: impl std::io::Read, chunk_size: usize) -> Result<ChunkManifest> {
         if self.is_single_file_yydb() {
-            return Err(Error::Unsupported(
-                "chunked file objects require a .yydx layout; .yydb single-file mode rejects them",
-            ));
+            return Err(Error::Unsupported("chunked file objects require a .yydx layout; .yydb single-file mode rejects them"));
         }
         self.objects.put_file_chunked(reader, chunk_size)
     }
 
     /// Range-read a chunked file without assembling the whole payload.
-    pub fn read_file_range(
-        &self,
-        manifest: &ChunkManifest,
-        offset: u64,
-        len: usize,
-    ) -> Result<Vec<u8>> {
+    pub fn read_file_range(&self, manifest: &ChunkManifest, offset: u64, len: usize) -> Result<Vec<u8>> {
         self.objects.read_file_range(manifest, offset, len)
     }
 

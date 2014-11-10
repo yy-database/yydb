@@ -11,12 +11,11 @@ mod opfs;
 mod opfs_io;
 mod session;
 
-pub use core::{check_schema_source, introspect_schema_json, yydb_version, SchemaCheck};
+pub use core::{SchemaCheck, check_schema_source, introspect_schema_json, yydb_version};
 pub use opfs::{
-    claim_opfs_writer, open_persistent, opfs_commit_and_sync, opfs_doctor, opfs_evict_blob,
-    opfs_reopen, validate_opfs_capabilities, OpfsBlobPublication, OpfsCapabilities,
-    OpfsCommittedVolume, OpfsDurableSnapshot, OpfsPersistentVolume, OpfsWriterLease,
-    PersistentStorageMode,
+    OpfsBlobPublication, OpfsCapabilities, OpfsCommittedVolume, OpfsDurableSnapshot, OpfsPersistentVolume, OpfsWriterLease,
+    PersistentStorageMode, claim_opfs_writer, open_persistent, opfs_commit_and_sync, opfs_doctor, opfs_evict_blob, opfs_reopen,
+    validate_opfs_capabilities,
 };
 pub use session::open_persistent_session;
 
@@ -39,12 +38,7 @@ pub struct CheckSchemaResult {
 
 impl From<SchemaCheck> for CheckSchemaResult {
     fn from(value: SchemaCheck) -> Self {
-        Self {
-            ok: value.ok,
-            table_count: value.table_count,
-            schema_fingerprint: value.schema_fingerprint,
-            error: value.error,
-        }
+        Self { ok: value.ok, table_count: value.table_count, schema_fingerprint: value.schema_fingerprint, error: value.error }
     }
 }
 

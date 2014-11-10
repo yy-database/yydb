@@ -9,10 +9,6 @@ fn yydb_object_dedup_fingerprint() {
     let payload = b"same-bytes-same-hash";
     let first = conn.put_chunk(ObjectKind::Blob, payload).unwrap();
     let second = conn.put_chunk(ObjectKind::Blob, payload).unwrap();
-    assert_eq!(
-        first.hash_hex(),
-        second.hash_hex(),
-        "fixture yydb.object.dedup_fingerprint hash mismatch"
-    );
+    assert_eq!(first.hash_hex(), second.hash_hex(), "fixture yydb.object.dedup_fingerprint hash mismatch");
     cleanup(&path);
 }

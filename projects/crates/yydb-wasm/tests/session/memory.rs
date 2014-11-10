@@ -1,7 +1,7 @@
 //! Stateful [`MemorySession`] JSON envelopes.
 
 use crate::fixtures::{assert_ok_true, parse_json};
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 use yydb_wasm::MemorySession;
 
 #[test]

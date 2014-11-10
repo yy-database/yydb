@@ -1,7 +1,7 @@
 // fixture: yydb.opfs.quota_exhausted
 
 use yydb::Error;
-use yydb_wasm::{claim_opfs_writer, OpfsCapabilities, OpfsCommittedVolume};
+use yydb_wasm::{OpfsCapabilities, OpfsCommittedVolume, claim_opfs_writer};
 
 #[test]
 fn yydb_opfs_quota_exhausted() {
@@ -13,15 +13,8 @@ fn yydb_opfs_quota_exhausted() {
 
     let oversized = b"generation-2-with-too-many-bytes-for-quota";
     let error = volume.publish_generation(oversized).unwrap_err();
-    assert!(
-        matches!(error, Error::QuotaExceeded { .. }),
-        "expected QuotaExceeded, got {error}"
-    );
-    assert_eq!(
-        volume.read_committed(),
-        b"generation-1",
-        "committed generation must remain readable after aborted publish"
-    );
+    assert!(matches!(error, Error::QuotaExceeded { .. }), "expected QuotaExceeded, got {error}");
+    assert_eq!(volume.read_committed(), b"generation-1", "committed generation must remain readable after aborted publish");
 }
 
 #[test]

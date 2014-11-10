@@ -6,14 +6,14 @@ use vos::types::ResolvedContract;
 
 use yydb_types::{Error, Result, Value};
 
-use super::catalog::{field_on_table, reference_target_storage_name, table_type_by_name};
-use super::ops::QueryRow;
-use super::store;
+use super::{
+    catalog::{field_on_table, reference_target_storage_name, table_type_by_name},
+    ops::QueryRow,
+    store,
+};
 
 fn resolve_error(message: impl Into<String>) -> Error {
-    Error::Schema {
-        message: message.into(),
-    }
+    Error::Schema { message: message.into() }
 }
 
 fn value_to_pk(value: &Value) -> Result<String> {
@@ -24,9 +24,7 @@ fn value_to_pk(value: &Value) -> Result<String> {
         Value::Bool(flag) => flag.to_string(),
         Value::Null => return Err(resolve_error("reference key cannot be null")),
         _ => {
-            return Err(resolve_error(
-                "reference key must be text, uuid, integer, or bool",
-            ))
+            return Err(resolve_error("reference key must be text, uuid, integer, or bool"));
         }
     })
 }

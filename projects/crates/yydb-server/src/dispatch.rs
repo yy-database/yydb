@@ -4,16 +4,13 @@
 
 use yydb_engine::Connection;
 use yydb_protocol::{
-    decode_kv_get, decode_kv_put, decode_micro_register, decode_scalar_call, decode_schema_ensure,
-    encode_kv_get_ok, encode_scalar_call_ok, encode_schema_ok, error_frame, Frame, MessageType,
+    Frame, MessageType, decode_kv_get, decode_kv_put, decode_micro_register, decode_scalar_call, decode_schema_ensure,
+    encode_kv_get_ok, encode_scalar_call_ok, encode_schema_ok, error_frame,
 };
 use yydb_types::{Error, Result};
 
 fn info_body(conn: &Connection) -> Result<Vec<u8>> {
-    let path = conn
-        .path()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<memory>".to_owned());
+    let path = conn.path().map(|p| p.display().to_string()).unwrap_or_else(|| "<memory>".to_owned());
     let schema_line = match conn.schema()? {
         Some(schema) => format!("schema.version={}", schema.version),
         None => "schema.version=".to_owned(),
@@ -30,11 +27,7 @@ fn info_body(conn: &Connection) -> Result<Vec<u8>> {
 pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
     let id = request.request_id;
     match request.msg_type {
-        MessageType::Hello => Frame::new(
-            MessageType::HelloOk,
-            id,
-            env!("CARGO_PKG_VERSION").as_bytes().to_vec(),
-        ),
+        MessageType::Hello => Frame::new(MessageType::HelloOk, id, env!("CARGO_PKG_VERSION").as_bytes().to_vec()),
         MessageType::Info => match info_body(conn) {
             Ok(body) => Frame::new(MessageType::InfoOk, id, body),
             Err(error) => error_frame(id, &error),
@@ -73,9 +66,7 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
         },
         MessageType::ScalarCall => match decode_scalar_call(&request.body) {
             Ok((name, version, args)) => match conn.call_scalar_version(&name, version, &args) {
-                Ok(value) => {
-                    Frame::new(MessageType::ScalarCallOk, id, encode_scalar_call_ok(value))
-                }
+                Ok(value) => Frame::new(MessageType::ScalarCallOk, id, encode_scalar_call_ok(value)),
                 Err(error) => error_frame(id, &error),
             },
             Err(error) => error_frame(id, &error),
@@ -90,26 +81,13 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
         | MessageType::MicroHostInvoke
         | MessageType::MicroHostInvokeOk
         | MessageType::ScalarCallOk
-        | MessageType::Error => error_frame(
-            id,
-            &Error::Protocol {
-                message: "unexpected client message type".to_owned(),
-            },
-        ),
-        MessageType::Unknown(code) => error_frame(
-            id,
-            &Error::Protocol {
-                message: format!("unknown msg_type {code}"),
-            },
-        ),
+        | MessageType::Error => error_frame(id, &Error::Protocol { message: "unexpected client message type".to_owned() }),
+        MessageType::Unknown(code) => error_frame(id, &Error::Protocol { message: format!("unknown msg_type {code}") }),
     }
 }
 
 /// Whether a `--bind` host is loopback (product-safe default).
 pub fn is_loopback_host(host: &str) -> bool {
     let host = host.trim().trim_start_matches('[').trim_end_matches(']');
-    matches!(
-        host.to_ascii_lowercase().as_str(),
-        "127.0.0.1" | "::1" | "localhost" | "0:0:0:0:0:0:0:1"
-    )
+    matches!(host.to_ascii_lowercase().as_str(), "127.0.0.1" | "::1" | "localhost" | "0:0:0:0:0:0:0:1")
 }

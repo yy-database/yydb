@@ -14,10 +14,7 @@ fn yydb_opfs_persistent_session_publishes_ydpg_main() {
     session.close();
 
     let volume = open_persistent(path, &caps).expect("open volume");
-    let bytes = volume
-        .read_main()
-        .expect("read main")
-        .expect("main bytes present");
+    let bytes = volume.read_main().expect("read main").expect("main bytes present");
     assert_eq!(&bytes[0..5], b"YDPG\x00");
 
     let memory = yydb::Connection::open_in_memory().expect("memory");

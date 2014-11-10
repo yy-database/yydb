@@ -5,14 +5,8 @@ use crate::fixtures::yydb::{cleanup, open_temp_db, reopen};
 #[test]
 fn yydb_batch_commit_visible() {
     let (conn, path) = open_temp_db("batch-commit-visible");
-    let changes: Vec<(String, Option<Vec<u8>>)> = (0..20)
-        .map(|i| {
-            (
-                format!("batch/k{:02}", i),
-                Some(format!("v{}", i).into_bytes()),
-            )
-        })
-        .collect();
+    let changes: Vec<(String, Option<Vec<u8>>)> =
+        (0..20).map(|i| (format!("batch/k{:02}", i), Some(format!("v{}", i).into_bytes()))).collect();
     conn.write_batch(&changes).unwrap();
     drop(conn);
 

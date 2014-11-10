@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::{Error, Result};
-use yydb_query::{prepare as prepare_source, PreparedStatement, QueryRow};
+use yydb_query::{PreparedStatement, QueryRow, prepare as prepare_source};
 use yydb_types::Value;
 
 use super::Connection;
@@ -19,10 +19,7 @@ impl Connection {
     ///
     /// Requires no schema binding; plan building is a pure parse + lower pass.
     pub fn prepare_vos(&self, source: &str) -> Result<PreparedStatement> {
-        let _guard = self
-            .operation_lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         prepare_source(source)
     }
 
@@ -34,24 +31,12 @@ impl Connection {
     /// match the declared slot types.
     ///
     /// Requires [`Self::ensure_schema`] first.
-    pub fn query_prepared(
-        &self,
-        stmt: &PreparedStatement,
-        named: &BTreeMap<String, Value>,
-    ) -> Result<Vec<QueryRow>> {
-        let _guard = self
-            .operation_lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    pub fn query_prepared(&self, stmt: &PreparedStatement, named: &BTreeMap<String, Value>) -> Result<Vec<QueryRow>> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let state = self.active_state_unlocked()?;
         let contract = resolved_contract(&state)?;
         let values = yydb_query::bind_named(stmt, named)?;
-        yydb_query::execute_prepared(
-            stmt,
-            &values,
-            Some(&contract),
-            &state.records,
-        )
+        yydb_query::execute_prepared(stmt, &values, Some(&contract), &state.records)
     }
 
     /// Convenience wrapper: prepare → bind → execute in one call.
@@ -60,11 +45,7 @@ impl Connection {
     /// on the same connection. Prefer this when you only intend to run the
     /// source once with a single parameter set; use the explicit
     /// prepare-then-bind path when you need to re-run the same source.
-    pub fn query_vos_with_params(
-        &self,
-        source: &str,
-        named: &BTreeMap<String, Value>,
-    ) -> Result<Vec<QueryRow>> {
+    pub fn query_vos_with_params(&self, source: &str, named: &BTreeMap<String, Value>) -> Result<Vec<QueryRow>> {
         let stmt = self.prepare_vos(source)?;
         self.query_prepared(&stmt, named)
     }
@@ -85,10 +66,7 @@ impl Connection {
     /// Mutates the active connection state. When a transaction is open, changes
     /// stay in the snapshot until [`Self::commit`] or [`Self::rollback`].
     pub fn execute_vos_write(&self, source: &str) -> Result<()> {
-        let _guard = self
-            .operation_lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         self.mutate_active_state_unlocked(|state| {
             let contract = resolved_contract(state)?;
             let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
@@ -101,7 +79,5 @@ fn resolved_contract(state: &super::State) -> Result<vos::ResolvedContract> {
     state
         .resolved_contract
         .clone()
-        .ok_or_else(|| Error::Schema {
-            message: "VOS query requires ensure_schema before execution".into(),
-        })
+        .ok_or_else(|| Error::Schema { message: "VOS query requires ensure_schema before execution".into() })
 }

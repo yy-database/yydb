@@ -2,8 +2,7 @@
 
 use yydb_types::{Error, Result};
 
-use crate::crc32c::crc32c;
-use crate::header::PAGE_SIZE;
+use crate::{crc32c::crc32c, header::PAGE_SIZE};
 
 /// Bytes before the slotted payload.
 pub const PAGE_HEADER_LEN: usize = 16;
@@ -60,13 +59,7 @@ impl PageHeader {
 }
 
 /// Build a full page image from header fields and payload bytes.
-pub fn encode_page(
-    page_type: u8,
-    page_id: u32,
-    page_generation: u64,
-    tree_id: u8,
-    payload: &[u8],
-) -> Result<Vec<u8>> {
+pub fn encode_page(page_type: u8, page_id: u32, page_generation: u64, tree_id: u8, payload: &[u8]) -> Result<Vec<u8>> {
     if payload.len() > PAGE_PAYLOAD_LEN {
         return Err(Error::Corrupt("page payload too large"));
     }

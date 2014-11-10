@@ -2,11 +2,13 @@
 
 use yydb_types::{Error, Result};
 
-use crate::internal::{InternalEntry, InternalPage};
-use crate::key::{TreeKey, TREE_RECORD};
-use crate::leaf::LeafPage;
-use crate::page::{PageHeader, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF};
-use crate::pager::PageStore;
+use crate::{
+    internal::{InternalEntry, InternalPage},
+    key::{TREE_RECORD, TreeKey},
+    leaf::LeafPage,
+    page::{PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF, PageHeader},
+    pager::PageStore,
+};
 
 /// Result of inserting into a leaf that may have split.
 struct LeafInsert {
@@ -52,14 +54,8 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
                     1,
                     TREE_RECORD,
                     vec![
-                        InternalEntry {
-                            separator: TreeKey::min_separator(TREE_RECORD),
-                            child_page_id: root,
-                        },
-                        InternalEntry {
-                            separator,
-                            child_page_id: right_id,
-                        },
+                        InternalEntry { separator: TreeKey::min_separator(TREE_RECORD), child_page_id: root },
+                        InternalEntry { separator, child_page_id: right_id },
                     ],
                 )?;
                 self.pager.put_page(internal_id, internal.encode()?)?;
@@ -90,13 +86,9 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
     }
 
     fn get_at(&mut self, page_id: u32, key: &TreeKey) -> Result<Option<Vec<u8>>> {
-        let page = self
-            .load_page(page_id)?
-            .ok_or(Error::Corrupt("missing tree page"))?;
+        let page = self.load_page(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
         match page.0.page_type {
-            PAGE_TYPE_LEAF => Ok(LeafPage::decode(page_id, &page.1)?
-                .get(key)
-                .map(|v| v.to_vec())),
+            PAGE_TYPE_LEAF => Ok(LeafPage::decode(page_id, &page.1)?.get(key).map(|v| v.to_vec())),
             PAGE_TYPE_INTERNAL => {
                 let node = InternalPage::decode(page_id, &page.1)?;
                 let child = node.child_page_id(node.child_index_for(key));
@@ -106,15 +98,8 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
         }
     }
 
-    fn insert_at(
-        &mut self,
-        page_id: u32,
-        key: TreeKey,
-        value: Vec<u8>,
-    ) -> Result<Option<(TreeKey, u32)>> {
-        let page = self
-            .load_page(page_id)?
-            .ok_or(Error::Corrupt("missing tree page"))?;
+    fn insert_at(&mut self, page_id: u32, key: TreeKey, value: Vec<u8>) -> Result<Option<(TreeKey, u32)>> {
+        let page = self.load_page(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
         match page.0.page_type {
             PAGE_TYPE_LEAF => {
                 let leaf = self.insert_leaf(page_id, key, value)?;
@@ -145,18 +130,13 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
 
     fn insert_leaf(&mut self, page_id: u32, key: TreeKey, value: Vec<u8>) -> Result<LeafInsert> {
         let mut leaf = match self.load_page(page_id)? {
-            Some((header, bytes)) if header.page_type == PAGE_TYPE_LEAF => {
-                LeafPage::decode(page_id, &bytes)?
-            }
+            Some((header, bytes)) if header.page_type == PAGE_TYPE_LEAF => LeafPage::decode(page_id, &bytes)?,
             Some(_) => return Err(Error::Corrupt("expected leaf page")),
             None => LeafPage::empty(page_id, 1, TREE_RECORD),
         };
         if leaf.upsert(key.clone(), value.clone())? {
             self.pager.put_page(page_id, leaf.encode()?)?;
-            return Ok(LeafInsert {
-                page_id,
-                split: None,
-            });
+            return Ok(LeafInsert { page_id, split: None });
         }
         let (separator, mut right) = leaf.split()?;
         let right_id = self.pager.alloc_page_id()?;
@@ -165,28 +145,25 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
             if !right.upsert(key, value)? {
                 return Err(Error::Corrupt("right leaf full after split"));
             }
-        } else if !leaf.upsert(key, value)? {
+        }
+        else if !leaf.upsert(key, value)? {
             return Err(Error::Corrupt("left leaf full after split"));
         }
         self.pager.put_page(page_id, leaf.encode()?)?;
         self.pager.put_page(right_id, right.encode()?)?;
-        Ok(LeafInsert {
-            page_id,
-            split: Some((separator, right_id)),
-        })
+        Ok(LeafInsert { page_id, split: Some((separator, right_id)) })
     }
 
     fn delete_at(&mut self, page_id: u32, key: &TreeKey) -> Result<bool> {
-        let page = self
-            .load_page(page_id)?
-            .ok_or(Error::Corrupt("missing tree page"))?;
+        let page = self.load_page(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
         match page.0.page_type {
             PAGE_TYPE_LEAF => {
                 let mut leaf = LeafPage::decode(page_id, &page.1)?;
                 if leaf.delete(key) {
                     self.pager.put_page(page_id, leaf.encode()?)?;
                     Ok(true)
-                } else {
+                }
+                else {
                     Ok(false)
                 }
             }
@@ -200,9 +177,7 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
     }
 
     fn scan_page(&mut self, page_id: u32, out: &mut Vec<(TreeKey, Vec<u8>)>) -> Result<()> {
-        let page = self
-            .load_page(page_id)?
-            .ok_or(Error::Corrupt("missing tree page"))?;
+        let page = self.load_page(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
         match page.0.page_type {
             PAGE_TYPE_LEAF => {
                 let leaf = LeafPage::decode(page_id, &page.1)?;
@@ -223,7 +198,8 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
 
     fn load_page(&mut self, page_id: u32) -> Result<Option<(PageHeader, Vec<u8>)>> {
         let page = self.pager.get_page(page_id)?;
-        let Some(bytes) = page else {
+        let Some(bytes) = page
+        else {
             return Ok(None);
         };
         Ok(Some((PageHeader::parse(&bytes)?, bytes)))

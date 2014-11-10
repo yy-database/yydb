@@ -84,16 +84,8 @@ fn tcp_roundtrip_against_local_dispatch_server() {
 
     conn.create_scalar("double", 1, |args| match args {
         [Value::I64(n)] => Ok(Value::I64(n * 2)),
-        _ => Err(Error::Udf {
-            name: "double".into(),
-            message: "expected i64".into(),
-        }),
+        _ => Err(Error::Udf { name: "double".into(), message: "expected i64".into() }),
     })
     .unwrap();
-    assert_eq!(
-        client
-            .call_scalar_version("double", 1, &[Value::I64(21)])
-            .unwrap(),
-        Value::I64(42)
-    );
+    assert_eq!(client.call_scalar_version("double", 1, &[Value::I64(21)]).unwrap(), Value::I64(42));
 }

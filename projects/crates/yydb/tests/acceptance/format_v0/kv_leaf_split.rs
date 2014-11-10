@@ -1,6 +1,6 @@
 // fixture: format_v0.kv_leaf_split
 
-use yydb_formats::{MemoryPager, PageHeader, PAGE_TYPE_INTERNAL};
+use yydb_formats::{MemoryPager, PAGE_TYPE_INTERNAL, PageHeader};
 
 #[test]
 fn yydb_formats_v0_kv_leaf_split() {
@@ -11,9 +11,7 @@ fn yydb_formats_v0_kv_leaf_split() {
         pager.put_kv(format!("k/{i:03}"), &payload).unwrap();
     }
     let root = pager.header().unwrap().slot.record_root;
-    let root_type = PageHeader::parse(&pager.get_page(root).unwrap().unwrap())
-        .unwrap()
-        .page_type;
+    let root_type = PageHeader::parse(&pager.get_page(root).unwrap().unwrap()).unwrap().page_type;
     assert_eq!(root_type, PAGE_TYPE_INTERNAL);
     assert_eq!(pager.get_kv("k/017").unwrap(), Some(payload));
 }

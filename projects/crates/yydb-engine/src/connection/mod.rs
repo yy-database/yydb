@@ -1,16 +1,19 @@
 //! [`Connection`] open paths, storage backends, and state I/O.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
-use crate::journal::{shm_path, wal_path, OpenFlags};
-use crate::objects::ObjectStore;
-use crate::storage::snapshot;
-use crate::udf::UdfSubsystem;
-use crate::INLINE_BYTES_MAX;
-use crate::{Error, Result, SchemaVersion};
-use yydb_storage::{snapshot_from_main_bytes, snapshot_to_main_bytes, Database};
+use crate::{
+    Error, INLINE_BYTES_MAX, Result, SchemaVersion,
+    journal::{OpenFlags, shm_path, wal_path},
+    objects::ObjectStore,
+    storage::snapshot,
+    udf::UdfSubsystem,
+};
+use yydb_storage::{Database, snapshot_from_main_bytes, snapshot_to_main_bytes};
 
 mod backup;
 mod compact;
@@ -34,13 +37,8 @@ pub(crate) struct State {
 }
 
 pub(crate) enum Backend {
-    File {
-        path: PathBuf,
-        database: Mutex<Database>,
-    },
-    Memory {
-        state: Mutex<State>,
-    },
+    File { path: PathBuf, database: Mutex<Database> },
+    Memory { state: Mutex<State> },
 }
 
 pub(crate) fn is_yydx_main_path(path: &Path) -> bool {
@@ -49,9 +47,7 @@ pub(crate) fn is_yydx_main_path(path: &Path) -> bool {
 
 /// Stable database id for process-local in-memory pagers.
 pub(crate) fn in_memory_database_id() -> [u8; 16] {
-    [
-        0xAA, 0xBB, 0xCC, 0xDD, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1,
-    ]
+    [0xAA, 0xBB, 0xCC, 0xDD, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1]
 }
 
 /// A connection to a YYDB database (file-backed or in-memory).
@@ -77,9 +73,7 @@ impl Connection {
     pub fn open_yydx(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         if path.extension().and_then(|ext| ext.to_str()) != Some("yydx") {
-            return Err(Error::Unsupported(
-                "open_yydx requires a .yydx main file path",
-            ));
+            return Err(Error::Unsupported("open_yydx requires a .yydx main file path"));
         }
         Self::open(path)
     }
@@ -94,14 +88,12 @@ impl Connection {
         let connection = Self {
             operation_lock: std::sync::Arc::new(Mutex::new(())),
             txn: Mutex::new(None),
-            backend: std::sync::Arc::new(Backend::File {
-                path: path.clone(),
-                database: Mutex::new(database),
-            }),
+            backend: std::sync::Arc::new(Backend::File { path: path.clone(), database: Mutex::new(database) }),
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: std::sync::Arc::new(if is_yydx_main_path(&path) {
                 ObjectStore::open_yydx_blob_root(ObjectStore::yydx_objects_root(&path))?
-            } else {
+            }
+            else {
                 ObjectStore::open_ephemeral()
             }),
         };
@@ -116,9 +108,7 @@ impl Connection {
         Ok(Self {
             operation_lock: std::sync::Arc::new(Mutex::new(())),
             txn: Mutex::new(None),
-            backend: std::sync::Arc::new(Backend::Memory {
-                state: Mutex::new(State::default()),
-            }),
+            backend: std::sync::Arc::new(Backend::Memory { state: Mutex::new(State::default()) }),
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: std::sync::Arc::new(ObjectStore::open_ephemeral()),
         })
@@ -145,11 +135,7 @@ impl Connection {
         match self.backend.as_ref() {
             Backend::Memory { .. } => {
                 let state = self.read_state()?;
-                snapshot_to_main_bytes(
-                    &snapshot::snapshot_from_state(&state)?,
-                    in_memory_database_id(),
-                    0x01,
-                )
+                snapshot_to_main_bytes(&snapshot::snapshot_from_state(&state)?, in_memory_database_id(), 0x01)
             }
             Backend::File { path, .. } => {
                 self.checkpoint()?;
@@ -166,9 +152,7 @@ impl Connection {
                 let state = snapshot::state_from_snapshot(&snapshot)?;
                 self.write_state(&state)
             }
-            Backend::File { .. } => Err(Error::Unsupported(
-                "load_main_snapshot is only supported on in-memory connections",
-            )),
+            Backend::File { .. } => Err(Error::Unsupported("load_main_snapshot is only supported on in-memory connections")),
         }
     }
 

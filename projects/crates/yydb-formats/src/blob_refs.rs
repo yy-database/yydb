@@ -78,7 +78,8 @@ fn encode_manifest_delta(out: &mut Vec<u8>, delta: &BlobManifestDelta) -> Result
             out.extend_from_slice(&chunk.chunk_hash);
             out.extend_from_slice(&chunk.logical_offset.to_le_bytes());
         }
-    } else if delta.op != BLOB_REF_OP_DELETE {
+    }
+    else if delta.op != BLOB_REF_OP_DELETE {
         return Err(Error::Corrupt("unknown blob ref op"));
     }
     out.extend_from_slice(key);

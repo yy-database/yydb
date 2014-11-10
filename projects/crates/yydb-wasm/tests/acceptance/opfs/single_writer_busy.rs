@@ -1,17 +1,14 @@
 // fixture: yydb.opfs.single_writer_busy
 
 use yydb::Error;
-use yydb_wasm::{claim_opfs_writer, OpfsCapabilities};
+use yydb_wasm::{OpfsCapabilities, claim_opfs_writer};
 
 #[test]
 fn yydb_opfs_single_writer_busy() {
     let caps = OpfsCapabilities::full_yydb_profile();
     let first = claim_opfs_writer("single-writer-busy.yydb", &caps).expect("first writer");
     let busy = claim_opfs_writer("single-writer-busy.yydb", &caps).unwrap_err();
-    assert!(
-        matches!(busy, Error::LeaseUnavailable { .. }),
-        "expected LeaseUnavailable, got {busy}"
-    );
+    assert!(matches!(busy, Error::LeaseUnavailable { .. }), "expected LeaseUnavailable, got {busy}");
     drop(first);
     claim_opfs_writer("single-writer-busy.yydb", &caps).expect("writer after release");
 }

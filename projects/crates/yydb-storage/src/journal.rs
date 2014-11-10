@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use yydb_formats::{parse_wal, WAL_MAGIC};
+use yydb_formats::{WAL_MAGIC, parse_wal};
 use yydb_types::{Error, Result};
 
 /// How durable writes are published to disk.
@@ -52,9 +52,7 @@ impl OpenFlags {
 
     /// Enable `YYWL` v0 journaling.
     pub fn wal() -> Self {
-        Self {
-            journal_mode: JournalMode::Wal,
-        }
+        Self { journal_mode: JournalMode::Wal }
     }
 }
 
@@ -82,10 +80,12 @@ pub fn sidecar_status(db: &Path) -> Result<(bool, bool, u32)> {
         let bytes = fs::read(&wal)?;
         if bytes.get(0..5) == Some(WAL_MAGIC.as_slice()) {
             parse_wal(&bytes)?.frames.len() as u32
-        } else {
+        }
+        else {
             return Err(Error::Corrupt("wal magic mismatch"));
         }
-    } else {
+    }
+    else {
         0
     };
     Ok((wal.exists(), shm.exists(), frames))

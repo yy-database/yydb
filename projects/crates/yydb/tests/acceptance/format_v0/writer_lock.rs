@@ -1,16 +1,11 @@
 //! Cross-process writer lock on `{db}-lock`.
 
-use std::fs;
-use std::io::ErrorKind;
+use std::{fs, io::ErrorKind};
 
 use yydb::{Connection, Error, OpenFlags};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "yydb-formats-v0-lock-{}-{}.yydb",
-        std::process::id(),
-        label
-    ))
+    std::env::temp_dir().join(format!("yydb-formats-v0-lock-{}-{}.yydb", std::process::id(), label))
 }
 
 fn lock_path(db: &std::path::Path) -> std::path::PathBuf {

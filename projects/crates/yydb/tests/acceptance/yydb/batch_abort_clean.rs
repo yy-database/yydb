@@ -16,11 +16,7 @@ fn yydb_batch_abort_clean() {
     let conn = reopen(&path);
     for i in 0..5 {
         let key = format!("abort/k{}", i);
-        assert_eq!(
-            conn.get(&key).unwrap(),
-            None,
-            "fixture yydb.batch.abort_clean key {key} should be absent"
-        );
+        assert_eq!(conn.get(&key).unwrap(), None, "fixture yydb.batch.abort_clean key {key} should be absent");
     }
     cleanup(&path);
 }

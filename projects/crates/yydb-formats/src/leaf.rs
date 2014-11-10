@@ -2,8 +2,10 @@
 
 use yydb_types::{Error, Result};
 
-use crate::key::TreeKey;
-use crate::page::{encode_page, PageHeader, PAGE_PAYLOAD_LEN, PAGE_TYPE_LEAF};
+use crate::{
+    key::TreeKey,
+    page::{PAGE_PAYLOAD_LEN, PAGE_TYPE_LEAF, PageHeader, encode_page},
+};
 
 const DIRECTORY_BYTES: usize = 4;
 
@@ -31,12 +33,7 @@ pub struct LeafPage {
 impl LeafPage {
     /// Create an empty leaf page.
     pub fn empty(page_id: u32, page_generation: u64, tree_id: u8) -> Self {
-        Self {
-            page_id,
-            page_generation,
-            tree_id,
-            cells: Vec::new(),
-        }
+        Self { page_id, page_generation, tree_id, cells: Vec::new() }
     }
 
     /// Parse a leaf page image.
@@ -61,10 +58,8 @@ impl LeafPage {
         let mut cells = Vec::with_capacity(slot_count);
         for idx in 0..slot_count {
             let base = DIRECTORY_BYTES + idx * 4;
-            let cell_offset =
-                u16::from_le_bytes(payload[base..base + 2].try_into().unwrap()) as usize;
-            let cell_len =
-                u16::from_le_bytes(payload[base + 2..base + 4].try_into().unwrap()) as usize;
+            let cell_offset = u16::from_le_bytes(payload[base..base + 2].try_into().unwrap()) as usize;
+            let cell_len = u16::from_le_bytes(payload[base + 2..base + 4].try_into().unwrap()) as usize;
             let start = cell_offset;
             let end = start + cell_len;
             if end > free_start || start < directory_end {
@@ -86,39 +81,24 @@ impl LeafPage {
             if value_end != cell.len() {
                 return Err(Error::Corrupt("leaf cell length mismatch"));
             }
-            let key =
-                TreeKey::from_bytes(&cell[8..key_end]).ok_or(Error::Corrupt("leaf key invalid"))?;
+            let key = TreeKey::from_bytes(&cell[8..key_end]).ok_or(Error::Corrupt("leaf key invalid"))?;
             if key.key_kind != key_kind {
                 return Err(Error::Corrupt("leaf key kind mismatch"));
             }
-            cells.push(LeafCell {
-                key,
-                value: cell[key_end..value_end].to_vec(),
-            });
+            cells.push(LeafCell { key, value: cell[key_end..value_end].to_vec() });
         }
         for window in cells.windows(2) {
             if window[0].key >= window[1].key {
                 return Err(Error::Corrupt("leaf keys unsorted"));
             }
         }
-        Ok(Self {
-            page_id,
-            page_generation: header.page_generation,
-            tree_id: header.tree_id,
-            cells,
-        })
+        Ok(Self { page_id, page_generation: header.page_generation, tree_id: header.tree_id, cells })
     }
 
     /// Encode to a full page image.
     pub fn encode(&self) -> Result<Vec<u8>> {
         let payload = self.encode_payload()?;
-        encode_page(
-            PAGE_TYPE_LEAF,
-            self.page_id,
-            self.page_generation,
-            self.tree_id,
-            &payload,
-        )
+        encode_page(PAGE_TYPE_LEAF, self.page_id, self.page_generation, self.tree_id, &payload)
     }
 
     fn encode_payload(&self) -> Result<Vec<u8>> {
@@ -151,10 +131,7 @@ impl LeafPage {
 
     /// Lookup a key in this leaf.
     pub fn get(&self, key: &TreeKey) -> Option<&[u8]> {
-        self.cells
-            .iter()
-            .find(|cell| cell.key == *key)
-            .map(|cell| cell.value.as_slice())
+        self.cells.iter().find(|cell| cell.key == *key).map(|cell| cell.value.as_slice())
     }
 
     /// Insert or replace a key. Returns `false` when the page has no space.
@@ -163,11 +140,7 @@ impl LeafPage {
             cell.value = value;
             return Ok(self.encode_payload().is_ok());
         }
-        let insert_at = self
-            .cells
-            .iter()
-            .position(|cell| cell.key > key)
-            .unwrap_or(self.cells.len());
+        let insert_at = self.cells.iter().position(|cell| cell.key > key).unwrap_or(self.cells.len());
         self.cells.insert(insert_at, LeafCell { key, value });
         match self.encode_payload() {
             Ok(_) => Ok(true),
@@ -184,7 +157,8 @@ impl LeafPage {
         if let Some(idx) = self.cells.iter().position(|cell| &cell.key == key) {
             self.cells.remove(idx);
             true
-        } else {
+        }
+        else {
             false
         }
     }
@@ -212,12 +186,7 @@ impl LeafPage {
         let split_at = self.cells.len() / 2;
         let right_cells = self.cells.split_off(split_at);
         let separator = right_cells[0].key.clone();
-        let right = LeafPage {
-            page_id: 0,
-            page_generation: self.page_generation,
-            tree_id: self.tree_id,
-            cells: right_cells,
-        };
+        let right = LeafPage { page_id: 0, page_generation: self.page_generation, tree_id: self.tree_id, cells: right_cells };
         Ok((separator, right))
     }
 }

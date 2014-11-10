@@ -35,13 +35,7 @@ macro seed_blog() -> unit {
 fn expand_schema_macro_when_vos_supports_document_macros() {
     let contract = resolved_contract_from_document(BLOG_SCHEMA).expect("contract");
     let mut records = BTreeMap::new();
-    execute_write(
-        "seed_blog()",
-        &contract,
-        Some(BLOG_WITH_MACRO),
-        &mut records,
-    )
-    .expect("execute");
+    execute_write("seed_blog()", &contract, Some(BLOG_WITH_MACRO), &mut records).expect("execute");
     assert_eq!(records.len(), 2);
 }
 

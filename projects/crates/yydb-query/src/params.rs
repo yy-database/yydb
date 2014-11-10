@@ -17,8 +17,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use yydb_types::{Error, Result, Value};
 
-use super::exec;
-use super::ops::{BoundValue, QueryOp, QueryRow, SlotTy};
+use super::{
+    exec,
+    ops::{BoundValue, QueryOp, QueryRow, SlotTy},
+};
 
 /// One named parameter extracted during prepare.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,20 +74,13 @@ pub fn prepare(source: &str) -> Result<PreparedStatement> {
     let source_fingerprint = fingerprint(source);
 
     // 3. Parse + lower the rewritten source (placeholders are now string literals).
-    let program = vos::parse_program(&rewritten).map_err(|diagnostics| Error::Schema {
-        message: diagnostics,
-    })?;
+    let program = vos::parse_program(&rewritten).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
     let mut ops = super::lower::lower_program(&program)?;
 
     // 4. Replace placeholder string literals with Slot references.
     rewrite_placeholders_in_ops(&mut ops, &parameters)?;
 
-    Ok(PreparedStatement {
-        ops,
-        parameters,
-        source_fingerprint,
-        source: source.to_owned(),
-    })
+    Ok(PreparedStatement { ops, parameters, source_fingerprint, source: source.to_owned() })
 }
 
 /// Bind a prepared statement to a named parameter map.
@@ -94,10 +89,7 @@ pub fn prepare(source: &str) -> Result<PreparedStatement> {
 ///
 /// * A required parameter is missing from `named`.
 /// * `named` contains a parameter name the statement never references.
-pub fn bind_named(
-    stmt: &PreparedStatement,
-    named: &BTreeMap<String, Value>,
-) -> Result<Vec<Value>> {
+pub fn bind_named(stmt: &PreparedStatement, named: &BTreeMap<String, Value>) -> Result<Vec<Value>> {
     // Detect extraneous parameters before building the positional slice.
     let param_names: BTreeSet<&String> = stmt.parameters.iter().map(|p| &p.name).collect();
     for supplied in named.keys() {
@@ -111,7 +103,8 @@ pub fn bind_named(
 
     let mut values: Vec<Value> = vec![Value::Null; stmt.parameters.len()];
     for param in &stmt.parameters {
-        let Some(value) = named.get(&param.name) else {
+        let Some(value) = named.get(&param.name)
+        else {
             return Err(Error::QueryBind {
                 parameter: param.name.clone(),
                 message: format!("missing required parameter `{}`", param.name),
@@ -130,12 +123,7 @@ pub fn bind_named(
             };
             return Err(Error::QueryBind {
                 parameter: param.name.clone(),
-                message: format!(
-                    "parameter `{}` expects `{}`, got `{}`",
-                    param.name,
-                    param.slot_ty.as_str(),
-                    got,
-                ),
+                message: format!("parameter `{}` expects `{}`, got `{}`", param.name, param.slot_ty.as_str(), got,),
             });
         }
         values[param.index as usize] = value.clone();
@@ -175,10 +163,7 @@ fn scan_and_rewrite(source: &str) -> Result<(Vec<ParameterDescriptor>, String)> 
             }
             if end > start {
                 let name = std::str::from_utf8(&bytes[start..end])
-                    .map_err(|e| Error::QueryBind {
-                        parameter: "(dollar-name)".into(),
-                        message: e.to_string(),
-                    })?
+                    .map_err(|e| Error::QueryBind { parameter: "(dollar-name)".into(), message: e.to_string() })?
                     .to_owned();
                 let index = match name_to_index.get(&name) {
                     Some(&idx) => {
@@ -189,12 +174,7 @@ fn scan_and_rewrite(source: &str) -> Result<(Vec<ParameterDescriptor>, String)> 
                     None => {
                         let idx = parameters.len() as u32;
                         name_to_index.insert(name.clone(), idx);
-                        parameters.push(ParameterDescriptor {
-                            name,
-                            index: idx,
-                            slot_ty: SlotTy::Any,
-                            usage_count: 1,
-                        });
+                        parameters.push(ParameterDescriptor { name, index: idx, slot_ty: SlotTy::Any, usage_count: 1 });
                         idx
                     }
                 };
@@ -225,10 +205,7 @@ fn rewrite_placeholders_in_ops(ops: &mut [QueryOp], parameters: &[ParameterDescr
             QueryOp::Skip { count } | QueryOp::Take { count } => {
                 rewrite_placeholders_in_bound(count, parameters)?;
             }
-            QueryOp::Scan { .. }
-            | QueryOp::Project { .. }
-            | QueryOp::Sort { .. }
-            | QueryOp::Collect => {}
+            QueryOp::Scan { .. } | QueryOp::Project { .. } | QueryOp::Sort { .. } | QueryOp::Collect => {}
         }
     }
     Ok(())
@@ -302,11 +279,7 @@ mod tests {
         let source = r#"User.all().take($limit).collect()"#;
         let (parameters, rewritten) = scan_and_rewrite(source).expect("scan");
         eprintln!("rewritten = {}", rewritten);
-        assert!(
-            vos::parse_program(&rewritten).is_ok(),
-            "rewritten must parse: {}",
-            rewritten
-        );
+        assert!(vos::parse_program(&rewritten).is_ok(), "rewritten must parse: {}", rewritten);
         let stmt = prepare(source).expect("prepare");
         assert_eq!(stmt.parameters.len(), 1);
         assert_eq!(stmt.parameters[0].name, "limit");
@@ -336,17 +309,11 @@ mod tests {
         let source = "User.all().take($limit).collect()";
         let stmt = prepare(source).unwrap();
 
-        let bound_a = bind_named(&stmt, &BTreeMap::from([
-            ("limit".into(), Value::I64(100)),
-        ]))
-        .expect("bind a");
+        let bound_a = bind_named(&stmt, &BTreeMap::from([("limit".into(), Value::I64(100))])).expect("bind a");
         assert_eq!(bound_a.len(), 1);
         assert_eq!(bound_a[0], Value::I64(100));
 
-        let bound_b = bind_named(&stmt, &BTreeMap::from([
-            ("limit".into(), Value::I64(1)),
-        ]))
-        .expect("bind b");
+        let bound_b = bind_named(&stmt, &BTreeMap::from([("limit".into(), Value::I64(1))])).expect("bind b");
         assert_eq!(bound_b[0], Value::I64(1));
     }
 
@@ -359,11 +326,7 @@ mod tests {
         let params = err.params().expect("QueryBind has params");
         let names: Vec<_> = params.iter().map(|(k, _)| *k).collect();
         assert!(names.contains(&"parameter"));
-        let param_value = params
-            .iter()
-            .find(|(k, _)| *k == "parameter")
-            .map(|(_, v)| v.as_str())
-            .expect("parameter exists");
+        let param_value = params.iter().find(|(k, _)| *k == "parameter").map(|(_, v)| v.as_str()).expect("parameter exists");
         // scan_and_rewrite strips the leading `$`, so the stored name is just `limit`.
         assert_eq!(param_value, "limit");
     }
@@ -371,10 +334,10 @@ mod tests {
     #[test]
     fn bind_named_rejects_extraneous_parameter() {
         let stmt = prepare("User.all().take($limit).collect()").unwrap();
-        let err = bind_named(&stmt, &BTreeMap::from([
-            ("limit".into(), Value::I64(10)),
-            ("unreferenced".into(), Value::Text("oops".into())),
-        ]))
+        let err = bind_named(
+            &stmt,
+            &BTreeMap::from([("limit".into(), Value::I64(10)), ("unreferenced".into(), Value::Text("oops".into()))]),
+        )
         .unwrap_err();
         assert_eq!(err.code(), "yydb.query.bind");
     }
@@ -395,8 +358,7 @@ mod tests {
 
     #[test]
     fn scan_and_rewrite_extracts_params_and_rewrites() {
-        let (params, rewritten) =
-            scan_and_rewrite("User.all().take($k).skip($j).collect()").unwrap();
+        let (params, rewritten) = scan_and_rewrite("User.all().take($k).skip($j).collect()").unwrap();
         assert_eq!(params.len(), 2);
         assert!(rewritten.contains("\"__YYDB_PARAM_0\""));
         assert!(rewritten.contains("\"__YYDB_PARAM_1\""));
@@ -410,11 +372,8 @@ mod tests {
         assert_eq!(stmt.parameters[0].name, "offset");
         assert_eq!(stmt.parameters[1].name, "limit");
 
-        let bound = bind_named(&stmt, &BTreeMap::from([
-            ("offset".into(), Value::I64(50)),
-            ("limit".into(), Value::I64(10)),
-        ]))
-        .unwrap();
+        let bound =
+            bind_named(&stmt, &BTreeMap::from([("offset".into(), Value::I64(50)), ("limit".into(), Value::I64(10))])).unwrap();
         assert_eq!(bound, vec![Value::I64(50), Value::I64(10)]);
     }
 }

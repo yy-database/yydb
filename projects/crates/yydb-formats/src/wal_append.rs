@@ -9,10 +9,12 @@ use std::{
 
 use yydb_types::{Error, Result};
 
-use crate::blob_refs::{commit_digest, encode_blob_refs_body, BlobManifestDelta, FRAME_BLOB_REFS};
-use crate::crc32c::crc32c;
-use crate::header::PAGE_SIZE;
-use crate::wal::{parse_frame, parse_header, parse_wal, wal_frame_offsets, WalFile, WAL_MAGIC};
+use crate::{
+    blob_refs::{BlobManifestDelta, FRAME_BLOB_REFS, commit_digest, encode_blob_refs_body},
+    crc32c::crc32c,
+    header::PAGE_SIZE,
+    wal::{WAL_MAGIC, WalFile, parse_frame, parse_header, parse_wal, wal_frame_offsets},
+};
 
 const FRAME_TXN_BEGIN: u8 = 0x01;
 const FRAME_PAGE_IMAGE: u8 = 0x02;
@@ -36,47 +38,24 @@ impl WalWriter {
         if path.exists() {
             let bytes = std::fs::read(&path)?;
             let wal = parse_wal(&bytes)?;
-            next_lsn = wal
-                .frames
-                .iter()
-                .map(|frame| frame.frame_lsn)
-                .max()
-                .unwrap_or(0)
-                + 1;
-            next_txid = wal
-                .frames
-                .iter()
-                .filter(|frame| frame.frame_type == FRAME_TXN_BEGIN)
-                .count() as u64
-                + 1;
-        } else {
+            next_lsn = wal.frames.iter().map(|frame| frame.frame_lsn).max().unwrap_or(0) + 1;
+            next_txid = wal.frames.iter().filter(|frame| frame.frame_type == FRAME_TXN_BEGIN).count() as u64 + 1;
+        }
+        else {
             let header = encode_wal_header(database_id, 0);
             let mut file = File::create(&path)?;
             file.write_all(&header)?;
             file.sync_all()?;
         }
-        Ok(Self {
-            path,
-            database_id,
-            next_lsn,
-            next_txid,
-        })
+        Ok(Self { path, database_id, next_lsn, next_txid })
     }
 
     /// Append one committed transaction that publishes `pages` and optional blob refs.
-    pub fn append_commit(
-        &mut self,
-        pages: &[(u32, Vec<u8>)],
-        blob_refs: &[BlobManifestDelta],
-    ) -> Result<u64> {
+    pub fn append_commit(&mut self, pages: &[(u32, Vec<u8>)], blob_refs: &[BlobManifestDelta]) -> Result<u64> {
         let txid = self.next_txid;
         self.next_txid += 1;
         let mut file = OpenOptions::new().append(true).open(&self.path)?;
-        file.write_all(&encode_frame(
-            FRAME_TXN_BEGIN,
-            self.next_lsn,
-            &txid.to_le_bytes(),
-        )?)?;
+        file.write_all(&encode_frame(FRAME_TXN_BEGIN, self.next_lsn, &txid.to_le_bytes())?)?;
         self.next_lsn += 1;
         for (page_id, image) in pages {
             if image.len() != PAGE_SIZE {
@@ -196,10 +175,7 @@ pub fn strip_trailing_txn_commit(bytes: &[u8]) -> Result<Vec<u8>> {
         return Ok(bytes.to_vec());
     }
     let offsets = wal_frame_offsets(bytes)?;
-    let last_start = offsets
-        .last()
-        .copied()
-        .ok_or(Error::Corrupt("wal missing trailing commit frame"))?;
+    let last_start = offsets.last().copied().ok_or(Error::Corrupt("wal missing trailing commit frame"))?;
     Ok(bytes[0..last_start].to_vec())
 }
 
@@ -224,10 +200,7 @@ pub fn truncate_wal_to_recoverable_prefix(bytes: &[u8]) -> Result<Vec<u8>> {
 /// Truncate WAL bytes immediately after `frame_index` (inclusive).
 pub fn truncate_wal_after_frame(bytes: &[u8], frame_index: usize) -> Result<Vec<u8>> {
     let offsets = wal_frame_offsets(bytes)?;
-    let start = offsets
-        .get(frame_index)
-        .copied()
-        .ok_or(Error::Corrupt("wal frame index out of range"))?;
+    let start = offsets.get(frame_index).copied().ok_or(Error::Corrupt("wal frame index out of range"))?;
     let (_, consumed) = parse_frame(bytes, start)?;
     Ok(bytes[0..start + consumed].to_vec())
 }

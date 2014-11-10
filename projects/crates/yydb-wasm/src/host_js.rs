@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::JsValue;
-use yydb::types::udf::{Result as UdfResult, UdfError, UdfValue};
-use yydb::{HostFunctionHandle, HostRuntimeAdapter};
+use yydb::{
+    HostFunctionHandle, HostRuntimeAdapter,
+    types::udf::{Result as UdfResult, UdfError, UdfValue},
+};
 
 /// Invokes session-local host micros through a JS callback.
 pub struct JsHostAdapter {
@@ -27,24 +29,12 @@ impl JsHostAdapter {
 impl HostRuntimeAdapter for JsHostAdapter {
     fn invoke_scalar(&self, handle: &HostFunctionHandle, args: &[UdfValue]) -> UdfResult<UdfValue> {
         let payload = Object::new();
-        Reflect::set(
-            &payload,
-            &JsValue::from_str("hostId"),
-            &JsValue::from_f64(handle.host_id as f64),
-        )
-        .map_err(map_reflect_error)?;
-        Reflect::set(
-            &payload,
-            &JsValue::from_str("handleVersion"),
-            &JsValue::from_f64(handle.version as f64),
-        )
-        .map_err(map_reflect_error)?;
-        Reflect::set(
-            &payload,
-            &JsValue::from_str("functionId"),
-            &JsValue::from_str(&handle.function_id),
-        )
-        .map_err(map_reflect_error)?;
+        Reflect::set(&payload, &JsValue::from_str("hostId"), &JsValue::from_f64(handle.host_id as f64))
+            .map_err(map_reflect_error)?;
+        Reflect::set(&payload, &JsValue::from_str("handleVersion"), &JsValue::from_f64(handle.version as f64))
+            .map_err(map_reflect_error)?;
+        Reflect::set(&payload, &JsValue::from_str("functionId"), &JsValue::from_str(&handle.function_id))
+            .map_err(map_reflect_error)?;
 
         let js_args = Array::new();
         for arg in args {
@@ -55,17 +45,11 @@ impl HostRuntimeAdapter for JsHostAdapter {
         let result = self
             .invoker
             .call1(&JsValue::NULL, &payload)
-            .map_err(|error| UdfError::ExecutionFailed {
-                message: format!("wasm micro host invoke failed: {:?}", error),
-            })?;
+            .map_err(|error| UdfError::ExecutionFailed { message: format!("wasm micro host invoke failed: {:?}", error) })?;
         js_to_udf_value(&result)
     }
 
-    fn invoke_batch(
-        &self,
-        _handle: &HostFunctionHandle,
-        _batches: &[Vec<UdfValue>],
-    ) -> UdfResult<Vec<UdfValue>> {
+    fn invoke_batch(&self, _handle: &HostFunctionHandle, _batches: &[Vec<UdfValue>]) -> UdfResult<Vec<UdfValue>> {
         Err(UdfError::UnsupportedType)
     }
 }
@@ -76,9 +60,7 @@ pub fn install_js_host_adapter(conn: &yydb::Connection, invoker: Function) {
 }
 
 fn map_reflect_error(error: JsValue) -> UdfError {
-    UdfError::ExecutionFailed {
-        message: format!("wasm micro host payload build failed: {:?}", error),
-    }
+    UdfError::ExecutionFailed { message: format!("wasm micro host payload build failed: {:?}", error) }
 }
 
 fn udf_value_to_js(value: &UdfValue) -> UdfResult<JsValue> {

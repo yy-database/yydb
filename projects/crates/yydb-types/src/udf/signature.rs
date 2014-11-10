@@ -1,8 +1,10 @@
 //! UDF definition contracts shared by catalog, session, and host registries.
 
-use super::identity::UdfIdentity;
-use super::policy::{Determinism, Effect, Placement, UdfPolicy};
-use super::{Result, UdfError};
+use super::{
+    Result, UdfError,
+    identity::UdfIdentity,
+    policy::{Determinism, Effect, Placement, UdfPolicy},
+};
 
 /// Phase-1 scalar types supported by the UDF boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -33,38 +35,22 @@ pub struct Signature {
 impl Signature {
     /// Creates a fully typed signature.
     pub fn new(args: Vec<UdfType>, returns: UdfType) -> Self {
-        Self {
-            args,
-            returns,
-            variadic: false,
-        }
+        Self { args, returns, variadic: false }
     }
 
     /// Creates a fixed-arity closure contract that accepts any Phase-1 argument types.
     pub fn untyped_fixed(arity: usize) -> Self {
-        Self {
-            args: vec![UdfType::Any; arity],
-            returns: UdfType::Any,
-            variadic: false,
-        }
+        Self { args: vec![UdfType::Any; arity], returns: UdfType::Any, variadic: false }
     }
 
     /// Creates a variadic closure contract that accepts any Phase-1 argument count and types.
     pub fn untyped_variadic() -> Self {
-        Self {
-            args: vec![],
-            returns: UdfType::Any,
-            variadic: true,
-        }
+        Self { args: vec![], returns: UdfType::Any, variadic: true }
     }
 
     /// Returns the fixed argument count, if any.
     pub fn expected_arity(&self) -> Option<usize> {
-        if self.variadic {
-            None
-        } else {
-            Some(self.args.len())
-        }
+        if self.variadic { None } else { Some(self.args.len()) }
     }
 
     /// Returns the expected argument count for typed signatures.
@@ -120,16 +106,11 @@ pub struct UdfDefinition {
 impl UdfDefinition {
     /// Validates a catalog definition.
     pub fn validate(&self) -> Result<()> {
-        if self.policy.effect == Effect::Pure
-            && self.policy.determinism != Determinism::Deterministic
-        {
+        if self.policy.effect == Effect::Pure && self.policy.determinism != Determinism::Deterministic {
             return Err(UdfError::UnsupportedEffect);
         }
         if self.placement == Placement::Embedded
-            && matches!(
-                self.policy.effect,
-                Effect::Network | Effect::WriteLocal | Effect::ExternalSideEffect
-            )
+            && matches!(self.policy.effect, Effect::Network | Effect::WriteLocal | Effect::ExternalSideEffect)
         {
             return Err(UdfError::UnsupportedEffect);
         }

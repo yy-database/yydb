@@ -1,12 +1,11 @@
-use yydb::server::{dispatch, is_loopback_host};
 use yydb::{
-    protocol::{
-        decode_error, decode_kv_get_ok, decode_micro_host_invoke, decode_micro_host_invoke_ok,
-        decode_scalar_call_ok, encode_kv_get, encode_micro_host_invoke,
-        encode_micro_host_invoke_ok, encode_micro_register, encode_scalar_call,
-        encode_schema_ensure, Frame, MessageType, MAGIC_YYDB, MAGIC_YYDS, WIRE_VERSION,
-    },
     Connection, HostFunctionHandle, UdfValue, Value,
+    protocol::{
+        Frame, MAGIC_YYDB, MAGIC_YYDS, MessageType, WIRE_VERSION, decode_error, decode_kv_get_ok, decode_micro_host_invoke,
+        decode_micro_host_invoke_ok, decode_scalar_call_ok, encode_kv_get, encode_micro_host_invoke,
+        encode_micro_host_invoke_ok, encode_micro_register, encode_scalar_call, encode_schema_ensure,
+    },
+    server::{dispatch, is_loopback_host},
 };
 
 #[test]
@@ -33,10 +32,7 @@ fn dispatch_hello_info_kv() {
     assert_eq!(hello.msg_type, MessageType::HelloOk);
     let body = std::str::from_utf8(&hello.body).expect("hello body utf8");
     assert!(
-        !body.is_empty()
-            && body
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || byte == b'.'),
+        !body.is_empty() && body.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.'),
         "hello ok body should be a semver string, got {body:?}"
     );
 
@@ -45,15 +41,9 @@ fn dispatch_hello_info_kv() {
     let text = String::from_utf8(info.body).unwrap();
     assert!(text.contains("records=1"));
 
-    let get = dispatch(
-        &conn,
-        &Frame::new(MessageType::KvGet, 3, encode_kv_get("a")),
-    );
+    let get = dispatch(&conn, &Frame::new(MessageType::KvGet, 3, encode_kv_get("a")));
     assert_eq!(get.msg_type, MessageType::KvGetOk);
-    assert_eq!(
-        decode_kv_get_ok(&get.body).unwrap().as_deref(),
-        Some(b"b".as_slice())
-    );
+    assert_eq!(decode_kv_get_ok(&get.body).unwrap().as_deref(), Some(b"b".as_slice()));
 }
 
 #[test]
@@ -72,35 +62,21 @@ fn dispatch_micro_register_records_session_metadata() {
         [2u8; 32],
     )
     .unwrap();
-    let response = dispatch(
-        &conn,
-        &Frame::new(
-            MessageType::MicroRegister,
-            4,
-            encode_micro_register(&definition),
-        ),
-    );
+    let response = dispatch(&conn, &Frame::new(MessageType::MicroRegister, 4, encode_micro_register(&definition)));
     assert_eq!(response.msg_type, MessageType::MicroRegisterOk);
     assert!(conn.list_scalars().contains(&"text.normalize".to_owned()));
 }
 
 #[test]
 fn micro_host_invoke_roundtrip_codec() {
-    let handle = HostFunctionHandle {
-        host_id: 9,
-        function_id: "normalize".into(),
-        version: 1,
-    };
+    let handle = HostFunctionHandle { host_id: 9, function_id: "normalize".into(), version: 1 };
     let args = vec![UdfValue::Text("  Hi  ".into())];
     let body = encode_micro_host_invoke(&handle, &args);
     let (decoded_handle, decoded_args) = decode_micro_host_invoke(&body).unwrap();
     assert_eq!(decoded_handle, handle);
     assert_eq!(decoded_args, args);
     let ok = encode_micro_host_invoke_ok(UdfValue::Text("hi".into()));
-    assert_eq!(
-        decode_micro_host_invoke_ok(&ok).unwrap(),
-        UdfValue::Text("hi".into())
-    );
+    assert_eq!(decode_micro_host_invoke_ok(&ok).unwrap(), UdfValue::Text("hi".into()));
 }
 
 #[test]
@@ -108,19 +84,13 @@ fn dispatch_scalar_call_routes_through_registry() {
     let conn = Connection::open_in_memory().unwrap();
     conn.create_scalar("double", 1, |args| match args {
         [Value::I64(n)] => Ok(Value::I64(n * 2)),
-        _ => Err(yydb::Error::Udf {
-            name: "double".into(),
-            message: "expected i64".into(),
-        }),
+        _ => Err(yydb::Error::Udf { name: "double".into(), message: "expected i64".into() }),
     })
     .unwrap();
     let body = encode_scalar_call("double", 1, &[Value::I64(21)]).unwrap();
     let response = dispatch(&conn, &Frame::new(MessageType::ScalarCall, 5, body));
     assert_eq!(response.msg_type, MessageType::ScalarCallOk);
-    assert_eq!(
-        decode_scalar_call_ok(&response.body).unwrap(),
-        Value::I64(42)
-    );
+    assert_eq!(decode_scalar_call_ok(&response.body).unwrap(), Value::I64(42));
 }
 
 #[test]
@@ -135,14 +105,7 @@ fn loopback_host_detection() {
 #[test]
 fn error_frame_carries_structured_code_and_message() {
     let conn = Connection::open_in_memory().unwrap();
-    let response = dispatch(
-        &conn,
-        &Frame::new(
-            MessageType::SchemaEnsure,
-            6,
-            encode_schema_ensure(1, "table {"),
-        ),
-    );
+    let response = dispatch(&conn, &Frame::new(MessageType::SchemaEnsure, 6, encode_schema_ensure(1, "table {")));
     assert_eq!(response.msg_type, MessageType::Error);
     let error = decode_error(&response.body).expect("structured error body");
     assert_eq!(error.code, "yydb.schema.invalid");
@@ -153,10 +116,7 @@ fn error_frame_carries_structured_code_and_message() {
 fn error_frame_codes_cover_protocol_and_corrupt_paths() {
     let conn = Connection::open_in_memory().unwrap();
 
-    let unknown = dispatch(
-        &conn,
-        &Frame::new(MessageType::Unknown(9999), 7, Vec::new()),
-    );
+    let unknown = dispatch(&conn, &Frame::new(MessageType::Unknown(9999), 7, Vec::new()));
     assert_eq!(unknown.msg_type, MessageType::Error);
     assert_eq!(decode_error(&unknown.body).unwrap().code, "yydb.protocol");
 
@@ -168,19 +128,6 @@ fn error_frame_codes_cover_protocol_and_corrupt_paths() {
 #[test]
 fn error_code_taxonomy_is_stable() {
     assert_eq!(yydb::Error::SessionClosed.code(), "yydb.session.closed");
-    assert_eq!(
-        yydb::Error::Schema {
-            message: "bad".into()
-        }
-        .code(),
-        "yydb.schema.invalid"
-    );
-    assert_eq!(
-        yydb::Error::Remote {
-            code: "yydb.remote.probe".into(),
-            message: "peer".into(),
-        }
-        .code(),
-        "yydb.remote.probe"
-    );
+    assert_eq!(yydb::Error::Schema { message: "bad".into() }.code(), "yydb.schema.invalid");
+    assert_eq!(yydb::Error::Remote { code: "yydb.remote.probe".into(), message: "peer".into() }.code(), "yydb.remote.probe");
 }

@@ -3,8 +3,7 @@ use yydb::Connection;
 #[test]
 fn main_snapshot_roundtrip_preserves_kv_and_schema() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema("table Setting { @@id: uuid, key: utf8, value: utf8 }")
-        .expect("schema");
+    conn.ensure_schema("table Setting { @@id: uuid, key: utf8, value: utf8 }").expect("schema");
     conn.put("theme", b"dark").expect("put");
 
     let bytes = conn.main_snapshot().expect("snapshot");

@@ -6,9 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use yydb_formats::{
-    blob_chunk_hash, encode_blob_chunk, parse_blob_header, read_blob_payload, BlobChunkRef,
-};
+use yydb_formats::{BlobChunkRef, blob_chunk_hash, encode_blob_chunk, parse_blob_header, read_blob_payload};
 use yydb_types::{Error, Result};
 
 /// On-disk content-addressed blob root.
@@ -43,9 +41,7 @@ impl BlobStore {
         if path.exists() {
             let existing = fs::read(&path)?;
             if existing != encoded {
-                return Err(object_corrupt(format!(
-                    "blob chunk hash collision at {hash_hex}"
-                )));
+                return Err(object_corrupt(format!("blob chunk hash collision at {hash_hex}")));
             }
             return Ok(());
         }
@@ -62,9 +58,7 @@ impl BlobStore {
     pub fn read(&self, hash_hex: &str, expected_size: u64) -> Result<Vec<u8>> {
         let path = self.path_for_hash(hash_hex);
         if !path.exists() {
-            return Err(Error::ObjectNotFound {
-                hash_hex: hash_hex.to_owned(),
-            });
+            return Err(Error::ObjectNotFound { hash_hex: hash_hex.to_owned() });
         }
         let payload = decode_payload(&fs::read(&path)?)?;
         if payload.len() as u64 != expected_size {
@@ -80,19 +74,13 @@ impl BlobStore {
     pub fn chunk_ref(&self, hash_hex: &str) -> Result<BlobChunkRef> {
         let path = self.path_for_hash(hash_hex);
         if !path.exists() {
-            return Err(Error::ObjectNotFound {
-                hash_hex: hash_hex.to_owned(),
-            });
+            return Err(Error::ObjectNotFound { hash_hex: hash_hex.to_owned() });
         }
         let header = parse_blob_header(&fs::read(&path)?).map_err(|error| match error {
             Error::Corrupt(message) => object_corrupt(message),
             other => other,
         })?;
-        Ok(BlobChunkRef {
-            chunk_hash: header.chunk_hash,
-            chunk_len: header.chunk_len,
-            logical_offset: header.logical_offset,
-        })
+        Ok(BlobChunkRef { chunk_hash: header.chunk_hash, chunk_len: header.chunk_len, logical_offset: header.logical_offset })
     }
 
     /// Enumerate every `.blob` segment as `(hash_hex, payload size)`.
@@ -120,9 +108,7 @@ impl BlobStore {
                 }
                 let payload = decode_payload(&fs::read(&path)?)?;
                 if hash_hex != hex_of(&blob_chunk_hash(&payload)) {
-                    return Err(object_corrupt(format!(
-                        "blob file name does not match chunk_hash {hash_hex}"
-                    )));
+                    return Err(object_corrupt(format!("blob file name does not match chunk_hash {hash_hex}")));
                 }
                 objects.push((hash_hex.to_owned(), payload.len() as u64));
             }
@@ -141,9 +127,7 @@ impl BlobStore {
 }
 
 fn object_corrupt(message: impl Into<String>) -> Error {
-    Error::ObjectCorrupt {
-        message: message.into(),
-    }
+    Error::ObjectCorrupt { message: message.into() }
 }
 
 fn decode_payload(file_bytes: &[u8]) -> Result<Vec<u8>> {

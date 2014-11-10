@@ -1,6 +1,4 @@
-use crate::connection::Connection;
-use crate::objects::references as refs;
-use crate::{ObjectRef, Result};
+use crate::{ObjectRef, Result, connection::Connection, objects::references as refs};
 
 /// Pending record mutations applied atomically by [`Batch::commit`].
 #[derive(Debug, Default)]
@@ -16,8 +14,7 @@ impl Batch {
 
     /// Queue an upsert for commit.
     pub fn put(&mut self, key: impl Into<String>, value: impl AsRef<[u8]>) {
-        self.changes
-            .push((key.into(), Some(value.as_ref().to_vec())));
+        self.changes.push((key.into(), Some(value.as_ref().to_vec())));
     }
 
     /// Queue a delete for commit.

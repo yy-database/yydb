@@ -32,12 +32,7 @@ pub fn load_table(records: &BTreeMap<String, Vec<u8>>, table: &str) -> Result<Ve
 }
 
 /// Upsert one logical row keyed by `pk`.
-pub fn upsert_row(
-    records: &mut BTreeMap<String, Vec<u8>>,
-    table: &str,
-    pk: &str,
-    row: &QueryRow,
-) -> Result<()> {
+pub fn upsert_row(records: &mut BTreeMap<String, Vec<u8>>, table: &str, pk: &str, row: &QueryRow) -> Result<()> {
     records.insert(row_key(table, pk), encode_row(row)?);
     Ok(())
 }
@@ -47,25 +42,19 @@ fn encode_row(row: &QueryRow) -> Result<Vec<u8>> {
     for (key, value) in row {
         map.insert(key.clone(), encode_value(value)?);
     }
-    serde_json::to_vec(&JsonValue::Object(map))
-        .map_err(|_| Error::Corrupt("row json encode failed"))
+    serde_json::to_vec(&JsonValue::Object(map)).map_err(|_| Error::Corrupt("row json encode failed"))
 }
 
 /// Load one row by primary key.
 pub fn load_row(records: &BTreeMap<String, Vec<u8>>, table: &str, pk: &str) -> Result<QueryRow> {
     let key = row_key(table, pk);
-    let bytes = records.get(&key).ok_or_else(|| Error::Schema {
-        message: format!("missing row `{table}` pk `{pk}`"),
-    })?;
+    let bytes = records.get(&key).ok_or_else(|| Error::Schema { message: format!("missing row `{table}` pk `{pk}`") })?;
     decode_row(bytes)
 }
 
 fn decode_row(bytes: &[u8]) -> Result<QueryRow> {
-    let json: JsonValue =
-        serde_json::from_slice(bytes).map_err(|_| Error::Corrupt("row json decode failed"))?;
-    let object = json
-        .as_object()
-        .ok_or(Error::Corrupt("row json must be an object"))?;
+    let json: JsonValue = serde_json::from_slice(bytes).map_err(|_| Error::Corrupt("row json decode failed"))?;
+    let object = json.as_object().ok_or(Error::Corrupt("row json must be an object"))?;
     let mut row = QueryRow::new();
     for (key, value) in object {
         row.insert(key.clone(), decode_value(value)?);
@@ -81,9 +70,7 @@ fn encode_value(value: &Value) -> Result<JsonValue> {
         Value::Text(s) => JsonValue::String(s.clone()),
         Value::Uuid(id) => JsonValue::String(id.to_string()),
         _ => {
-            return Err(Error::Unsupported(
-                "query row encoding supports null, bool, i64, text, and uuid only",
-            ));
+            return Err(Error::Unsupported("query row encoding supports null, bool, i64, text, and uuid only"));
         }
     })
 }
@@ -95,9 +82,7 @@ fn decode_value(value: &JsonValue) -> Result<Value> {
         JsonValue::Number(n) => Value::I64(n.as_i64().unwrap_or(0)),
         JsonValue::String(s) => Value::Text(s.clone()),
         _ => {
-            return Err(Error::Unsupported(
-                "query row decoding supports null, bool, number, and string only",
-            ));
+            return Err(Error::Unsupported("query row decoding supports null, bool, number, and string only"));
         }
     })
 }

@@ -1,7 +1,7 @@
 // fixture: yydb.wal.reopen_doctor
 
 use crate::fixtures::yydb::{cleanup, reopen, temp_db_path};
-use yydb::{journal::wal_path, DoctorSeverity, OpenFlags};
+use yydb::{DoctorSeverity, OpenFlags, journal::wal_path};
 
 #[test]
 fn yydb_wal_reopen_doctor() {
@@ -18,10 +18,7 @@ fn yydb_wal_reopen_doctor() {
     assert_eq!(reopened.get("wal/b").unwrap(), Some(b"2".to_vec()));
     let report = reopened.doctor().unwrap();
     assert!(
-        !report
-            .issues
-            .iter()
-            .any(|issue| issue.severity == DoctorSeverity::Error),
+        !report.issues.iter().any(|issue| issue.severity == DoctorSeverity::Error),
         "fixture yydb.wal.reopen_doctor doctor reported errors: {:?}",
         report.issues
     );

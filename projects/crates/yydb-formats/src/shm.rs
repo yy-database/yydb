@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 
 use yydb_types::{Error, Result};
 
-use crate::crc32c::crc32c;
-use crate::wal::{committed_tail_lsn, parse_wal_recover};
+use crate::{
+    crc32c::crc32c,
+    wal::{committed_tail_lsn, parse_wal_recover},
+};
 
 /// Five-byte magic prefix for SHM sidecar files.
 pub const SHM_MAGIC: &[u8; 5] = b"YYSH\x00";
@@ -64,13 +66,7 @@ pub fn encode_shm(block: &ShmBlock) -> Vec<u8> {
 
 /// Encode an empty, checksum-valid SHM block for golden fixtures.
 pub fn encode_empty_shm() -> Vec<u8> {
-    encode_shm(&ShmBlock {
-        format_version: 0,
-        writer_epoch: 0,
-        active_readers: 0,
-        wal_tail_lsn: 0,
-        wal_file_bytes: 0,
-    })
+    encode_shm(&ShmBlock { format_version: 0, writer_epoch: 0, active_readers: 0, wal_tail_lsn: 0, wal_file_bytes: 0 })
 }
 
 /// Resolve `<main>-shm` for a database main file path.

@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use yydb_formats::{FilePager, MemoryPager, KEY_KIND_USER, TREE_RECORD};
+use yydb_formats::{FilePager, KEY_KIND_USER, MemoryPager, TREE_RECORD};
 use yydb_types::{Error, Result};
 
 const META_PREFIX: &[u8] = b"__yydb/meta/";
@@ -79,8 +79,7 @@ pub fn read_snapshot<P: PagerKv>(pager: &mut P) -> Result<Snapshot> {
             snapshot.metadata.insert(key.encoded, value);
             continue;
         }
-        let name = String::from_utf8(key.encoded)
-            .map_err(|_| Error::Corrupt("record key is not UTF-8"))?;
+        let name = String::from_utf8(key.encoded).map_err(|_| Error::Corrupt("record key is not UTF-8"))?;
         snapshot.records.insert(name, value);
     }
     Ok(snapshot)
@@ -117,8 +116,7 @@ fn read_rows(pager: &mut impl PagerKv) -> Result<BTreeMap<String, Vec<u8>>> {
         if key.encoded.starts_with(META_PREFIX) {
             continue;
         }
-        let name = String::from_utf8(key.encoded)
-            .map_err(|_| Error::Corrupt("record key is not UTF-8"))?;
+        let name = String::from_utf8(key.encoded).map_err(|_| Error::Corrupt("record key is not UTF-8"))?;
         rows.insert(name, value);
     }
     Ok(rows)

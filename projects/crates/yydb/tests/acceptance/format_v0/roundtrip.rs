@@ -5,11 +5,7 @@ use std::fs;
 use yydb::{Connection, DoctorSeverity, OpenFlags};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "yydb-formats-v0-roundtrip-{}-{}.yydb",
-        std::process::id(),
-        label
-    ))
+    std::env::temp_dir().join(format!("yydb-formats-v0-roundtrip-{}-{}.yydb", std::process::id(), label))
 }
 
 #[test]
@@ -23,16 +19,10 @@ fn yydb_formats_v0_roundtrip() {
     drop(conn);
 
     let reopened = Connection::open(&path).unwrap();
-    assert_eq!(
-        reopened.get("fixture/one").unwrap(),
-        Some(b"value".to_vec())
-    );
+    assert_eq!(reopened.get("fixture/one").unwrap(), Some(b"value".to_vec()));
     let report = reopened.doctor().unwrap();
     assert!(
-        report
-            .issues
-            .iter()
-            .all(|issue| issue.severity != DoctorSeverity::Error),
+        report.issues.iter().all(|issue| issue.severity != DoctorSeverity::Error),
         "doctor reported errors: {:?}",
         report.issues
     );

@@ -11,10 +11,7 @@ fn yydb_opfs_crash_after_blob_publish() {
 
     assert_eq!(volume.visible_references(), vec!["blob-live".to_string()]);
     assert_eq!(volume.orphan_blobs(), vec!["blob-orphan".to_string()]);
-    assert!(
-        volume.dangling_references().is_empty(),
-        "committed catalog must not reference unpublished blobs"
-    );
+    assert!(volume.dangling_references().is_empty(), "committed catalog must not reference unpublished blobs");
 }
 
 #[test]

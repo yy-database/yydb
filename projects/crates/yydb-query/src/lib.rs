@@ -20,9 +20,7 @@ use vos::types::ResolvedContract;
 
 pub use catalog::resolved_contract_from_document;
 pub use ops::QueryRow;
-pub use params::{
-    bind_named, execute_prepared, prepare, BoundStatement, ParameterDescriptor, PreparedStatement,
-};
+pub use params::{BoundStatement, ParameterDescriptor, PreparedStatement, bind_named, execute_prepared, prepare};
 pub use store::upsert_row;
 
 /// Execute a VOS read pipeline against stored table rows.

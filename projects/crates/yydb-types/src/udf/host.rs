@@ -1,9 +1,11 @@
 //! Transportable host micro metadata shared by protocol and runtime.
 
-use super::identity::UdfIdentity;
-use super::policy::{Placement, UdfPolicy};
-use super::signature::{ImplementationKind, Signature, UdfDefinition, UdfType};
-use super::{Result, UdfError};
+use super::{
+    Result, UdfError,
+    identity::UdfIdentity,
+    policy::{Placement, UdfPolicy},
+    signature::{ImplementationKind, Signature, UdfDefinition, UdfType},
+};
 
 /// Opaque handle to a function registered in an external host runtime.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -51,11 +53,7 @@ impl HostMicroDefinition {
             identity,
             signature,
             policy: UdfPolicy::pure_host(),
-            handle: HostFunctionHandle {
-                host_id,
-                function_id,
-                version: handle_version,
-            },
+            handle: HostFunctionHandle { host_id, function_id, version: handle_version },
             fingerprint,
         })
     }

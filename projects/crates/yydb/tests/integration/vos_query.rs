@@ -50,8 +50,6 @@ fn execute_vos_write_participates_in_transactions() {
 #[test]
 fn query_vos_requires_schema() {
     let conn = Connection::open_in_memory().expect("open");
-    let err = conn
-        .query_vos("User.all().collect()")
-        .expect_err("no schema");
+    let err = conn.query_vos("User.all().collect()").expect_err("no schema");
     assert!(err.to_string().contains("ensure_schema"));
 }

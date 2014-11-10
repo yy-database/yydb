@@ -1,5 +1,5 @@
 use yydb_execution::Value;
-use yydb_udf::{from_execution, into_execution, type_from_execution, UdfError, UdfValue};
+use yydb_udf::{UdfError, UdfValue, from_execution, into_execution, type_from_execution};
 
 #[test]
 fn udf_value_round_trips_phase1_execution_types() {
@@ -16,12 +16,6 @@ fn udf_value_round_trips_phase1_execution_types() {
 
 #[test]
 fn unsupported_execution_types_are_rejected_at_boundary() {
-    assert!(matches!(
-        from_execution(&Value::Bytes(vec![1, 2, 3])),
-        Err(UdfError::UnsupportedType)
-    ));
-    assert!(matches!(
-        type_from_execution(yydb_execution::Type::Bytes),
-        Err(UdfError::UnsupportedType)
-    ));
+    assert!(matches!(from_execution(&Value::Bytes(vec![1, 2, 3])), Err(UdfError::UnsupportedType)));
+    assert!(matches!(type_from_execution(yydb_execution::Type::Bytes), Err(UdfError::UnsupportedType)));
 }

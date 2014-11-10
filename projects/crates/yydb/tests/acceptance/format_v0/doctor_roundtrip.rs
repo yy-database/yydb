@@ -6,17 +6,11 @@ use yydb::{Connection, DoctorSeverity, OpenFlags};
 use yydb_formats::diagnose_file;
 
 fn temp_path(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "yydb-formats-v0-doctor-{}-{}.yydb",
-        std::process::id(),
-        label
-    ))
+    std::env::temp_dir().join(format!("yydb-formats-v0-doctor-{}-{}.yydb", std::process::id(), label))
 }
 
 fn fixture(name: &str) -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../yydb-formats/tests/fixtures/format-v0")
-        .join(name)
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../yydb-formats/tests/fixtures/format-v0").join(name)
 }
 
 #[test]
@@ -32,10 +26,7 @@ fn yydb_formats_v0_doctor_roundtrip_clean() {
     let reopened = Connection::open(&path).unwrap();
     let report = reopened.doctor().unwrap();
     assert!(
-        report
-            .issues
-            .iter()
-            .all(|issue| issue.severity != DoctorSeverity::Error),
+        report.issues.iter().all(|issue| issue.severity != DoctorSeverity::Error),
         "doctor reported errors: {:?}",
         report.issues
     );
@@ -49,13 +40,8 @@ fn yydb_formats_v0_doctor_corrupt_header_fixture() {
     fs::copy(fixture("page0_bad_checksum.bin"), &path).unwrap();
 
     let issues = diagnose_file(&path).unwrap();
-    let slot_a = issues.iter().find(|issue| {
-        issue.code == "yydb.doctor.corrupt_header" && issue.key_hint.as_deref() == Some("slot_a")
-    });
-    assert!(
-        slot_a.is_some(),
-        "expected slot_a corrupt_header issue, got {:?}",
-        issues
-    );
+    let slot_a =
+        issues.iter().find(|issue| issue.code == "yydb.doctor.corrupt_header" && issue.key_hint.as_deref() == Some("slot_a"));
+    assert!(slot_a.is_some(), "expected slot_a corrupt_header issue, got {:?}", issues);
     let _ = fs::remove_file(&path);
 }

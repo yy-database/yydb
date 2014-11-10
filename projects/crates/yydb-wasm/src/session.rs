@@ -2,14 +2,16 @@
 
 use js_sys::Function;
 use wasm_bindgen::prelude::*;
-use yydb::{protocol as wire, Connection, Error};
+use yydb::{Connection, Error, protocol as wire};
 
-use crate::core::{
-    compare_exchange_json, connection_info, kv_get_json, query_rows_json, scan_prefix_json,
-    scalar_call_json, schema_get_json, unit_result_json,
+use crate::{
+    core::{
+        compare_exchange_json, connection_info, kv_get_json, query_rows_json, scalar_call_json, scan_prefix_json,
+        schema_get_json, unit_result_json,
+    },
+    host_js::JsHostAdapter,
+    opfs::{OpfsCapabilities, OpfsPersistentVolume, open_persistent},
 };
-use crate::host_js::JsHostAdapter;
-use crate::opfs::{open_persistent, OpfsCapabilities, OpfsPersistentVolume};
 
 fn closed_session_error() -> Error {
     Error::SessionClosed
@@ -18,34 +20,25 @@ fn closed_session_error() -> Error {
 /// Parse a write-batch JSON body: `[{ "key": "...", "value": bytes | null }, ...]`.
 fn parse_write_batch(body: &[u8]) -> yydb::Result<Vec<(String, Option<Vec<u8>>)>> {
     let array: serde_json::Value = serde_json::from_slice(body)
-        .map_err(|_| Error::Protocol {
-            message: "writeBatch body must be a JSON array".to_string(),
-        })?;
-    let arr = array.as_array().ok_or_else(|| Error::Protocol {
-        message: "writeBatch body must be a JSON array".to_string(),
-    })?;
+        .map_err(|_| Error::Protocol { message: "writeBatch body must be a JSON array".to_string() })?;
+    let arr =
+        array.as_array().ok_or_else(|| Error::Protocol { message: "writeBatch body must be a JSON array".to_string() })?;
     arr.iter()
         .map(|entry| {
-            let obj = entry.as_object().ok_or_else(|| Error::Protocol {
-                message: "writeBatch entry must be an object".to_string(),
-            })?;
+            let obj = entry
+                .as_object()
+                .ok_or_else(|| Error::Protocol { message: "writeBatch entry must be an object".to_string() })?;
             let key = obj
                 .get("key")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| Error::Protocol {
-                    message: "writeBatch entry missing string `key`".to_string(),
-                })?
+                .ok_or_else(|| Error::Protocol { message: "writeBatch entry missing string `key`".to_string() })?
                 .to_owned();
             let value = match obj.get("value") {
                 Some(serde_json::Value::Null) | None => None,
                 Some(v) => {
                     let bytes: Vec<u8> = v
                         .as_array()
-                        .and_then(|arr| {
-                            arr.iter()
-                                .map(|x| x.as_i64().and_then(|n| u8::try_from(n).ok()))
-                                .collect()
-                        })
+                        .and_then(|arr| arr.iter().map(|x| x.as_i64().and_then(|n| u8::try_from(n).ok())).collect())
                         .ok_or_else(|| Error::Protocol {
                             message: "writeBatch `value` must be null or a byte array".to_string(),
                         })?;
@@ -60,41 +53,38 @@ fn parse_write_batch(body: &[u8]) -> yydb::Result<Vec<(String, Option<Vec<u8>>)>
 /// Parse a rename-map JSON body (same shape as the N-API layer accepts).
 /// Returns `Ok` with an empty RenameMap when `json` is `None`, empty, or `"null"`.
 fn parse_rename_map(json: Option<&str>) -> yydb::Result<yydb::catalog::RenameMap> {
-    let Some(json) = json else {
+    let Some(json) = json
+    else {
         return Ok(yydb::catalog::RenameMap::default());
     };
     if json.is_empty() || json == "null" {
         return Ok(yydb::catalog::RenameMap::default());
     }
-    let arr: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|_| Error::Protocol {
-        message: "migrateSchema renames must be a JSON array".to_string(),
-    })?;
+    let arr: Vec<serde_json::Value> = serde_json::from_str(json)
+        .map_err(|_| Error::Protocol { message: "migrateSchema renames must be a JSON array".to_string() })?;
     let mut renames = yydb::catalog::RenameMap::default();
     for entry in arr {
-        let obj = entry.as_object().ok_or_else(|| Error::Protocol {
-            message: "migrateSchema rename entry must be an object".to_string(),
-        })?;
-        if let (Some(from), Some(to)) = (
-            obj.get("fromType").and_then(|v| v.as_str()),
-            obj.get("toType").and_then(|v| v.as_str()),
-        ) {
+        let obj = entry
+            .as_object()
+            .ok_or_else(|| Error::Protocol { message: "migrateSchema rename entry must be an object".to_string() })?;
+        if let (Some(from), Some(to)) =
+            (obj.get("fromType").and_then(|v| v.as_str()), obj.get("toType").and_then(|v| v.as_str()))
+        {
             renames.types.insert(from.to_owned(), to.to_owned());
-        } else if let (Some(type_name), Some(from_field), Some(to_field)) = (
+        }
+        else if let (Some(type_name), Some(from_field), Some(to_field)) = (
             obj.get("type").and_then(|v| v.as_str()),
             obj.get("fromField").and_then(|v| v.as_str()),
             obj.get("toField").and_then(|v| v.as_str()),
         ) {
             renames.fields.insert(
-                yydb::catalog::FieldPath {
-                    type_name: type_name.to_owned(),
-                    field_name: from_field.to_owned(),
-                },
+                yydb::catalog::FieldPath { type_name: type_name.to_owned(), field_name: from_field.to_owned() },
                 to_field.to_owned(),
             );
-        } else {
+        }
+        else {
             return Err(Error::Protocol {
-                message: "migrateSchema entry needs {fromType,toType} or {type,fromField,toField}"
-                    .to_string(),
+                message: "migrateSchema entry needs {fromType,toType} or {type,fromField,toField}".to_string(),
             });
         }
     }
@@ -123,9 +113,7 @@ fn run_call_scalar(conn: &Connection, closed: bool, body: &[u8]) -> String {
         return scalar_call_json(Err(closed_session_error()));
     }
     match wire::decode_scalar_call(body) {
-        Ok((name, version, args)) => {
-            scalar_call_json(conn.call_scalar_version(&name, version, &args))
-        }
+        Ok((name, version, args)) => scalar_call_json(conn.call_scalar_version(&name, version, &args)),
         Err(error) => scalar_call_json(Err(error)),
     }
 }
@@ -138,21 +126,13 @@ fn open_persistent_connection(volume: &OpfsPersistentVolume) -> yydb::Result<Con
     Ok(conn)
 }
 
-fn persist_persistent_connection(
-    conn: &Connection,
-    volume: &OpfsPersistentVolume,
-) -> yydb::Result<()> {
+fn persist_persistent_connection(conn: &Connection, volume: &OpfsPersistentVolume) -> yydb::Result<()> {
     let bytes = conn.main_snapshot()?;
     volume.publish_main(&bytes)?;
     Ok(())
 }
 
-fn run_ensure_schema_persistent(
-    conn: &Connection,
-    volume: &OpfsPersistentVolume,
-    closed: bool,
-    document: &str,
-) -> String {
+fn run_ensure_schema_persistent(conn: &Connection, volume: &OpfsPersistentVolume, closed: bool, document: &str) -> String {
     if closed {
         return unit_result_json(Err(closed_session_error()));
     }
@@ -162,13 +142,7 @@ fn run_ensure_schema_persistent(
     }
 }
 
-fn run_put_persistent(
-    conn: &Connection,
-    volume: &OpfsPersistentVolume,
-    closed: bool,
-    key: &str,
-    value: &[u8],
-) -> String {
+fn run_put_persistent(conn: &Connection, volume: &OpfsPersistentVolume, closed: bool, key: &str, value: &[u8]) -> String {
     if closed {
         return unit_result_json(Err(closed_session_error()));
     }
@@ -190,12 +164,7 @@ impl MemorySession {
     /// Open a fresh in-memory database session.
     #[wasm_bindgen(constructor)]
     pub fn new() -> std::result::Result<MemorySession, JsValue> {
-        Connection::open_in_memory()
-            .map(|conn| Self {
-                conn,
-                closed: false,
-            })
-            .map_err(|err| JsValue::from_str(&err.to_string()))
+        Connection::open_in_memory().map(|conn| Self { conn, closed: false }).map_err(|err| JsValue::from_str(&err.to_string()))
     }
 
     /// Persist the database-truth VOS schema document.
@@ -259,19 +228,11 @@ impl MemorySession {
     /// Both `expected` and `replacement` are either bytes or null (null means absent / delete).
     /// Returns JSON `{ ok, success, error }` where `success=false` means CAS lost the race.
     #[wasm_bindgen(js_name = compareExchange)]
-    pub fn compare_exchange(
-        &self,
-        key: &str,
-        expected: Option<Vec<u8>>,
-        replacement: Option<Vec<u8>>,
-    ) -> String {
+    pub fn compare_exchange(&self, key: &str, expected: Option<Vec<u8>>, replacement: Option<Vec<u8>>) -> String {
         if self.closed {
             return compare_exchange_json(Err(closed_session_error()));
         }
-        compare_exchange_json(
-            self.conn
-                .compare_exchange(key, expected.as_deref(), replacement.as_deref()),
-        )
+        compare_exchange_json(self.conn.compare_exchange(key, expected.as_deref(), replacement.as_deref()))
     }
 
     /// Execute a VOS read pipeline and return the resulting rows.
@@ -391,18 +352,10 @@ impl MemorySession {
 }
 
 /// Open a persistent OPFS-backed session with the supplied capability profile.
-pub fn open_persistent_session(
-    path: &str,
-    caps: &OpfsCapabilities,
-) -> yydb::Result<PersistentSession> {
+pub fn open_persistent_session(path: &str, caps: &OpfsCapabilities) -> yydb::Result<PersistentSession> {
     let volume = open_persistent(path, caps)?;
     let conn = open_persistent_connection(&volume)?;
-    Ok(PersistentSession {
-        path: path.to_string(),
-        conn,
-        volume: Some(volume),
-        closed: false,
-    })
+    Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false })
 }
 
 /// Stateful OPFS-backed database session with `YDPG` main-file hydration and publish.
@@ -419,11 +372,8 @@ impl PersistentSession {
     /// Open `path` using the full capability profile inferred from its suffix.
     #[wasm_bindgen(constructor)]
     pub fn new(path: &str) -> std::result::Result<PersistentSession, JsValue> {
-        let caps = if path.ends_with(".yydx") {
-            OpfsCapabilities::full_yydx_profile()
-        } else {
-            OpfsCapabilities::full_yydb_profile()
-        };
+        let caps =
+            if path.ends_with(".yydx") { OpfsCapabilities::full_yydx_profile() } else { OpfsCapabilities::full_yydb_profile() };
         open_persistent_session(path, &caps).map_err(|err| JsValue::from_str(&err.to_string()))
     }
 
@@ -505,12 +455,7 @@ impl PersistentSession {
 
     /// Compare-and-swap, then persist the snapshot when the CAS succeeds.
     #[wasm_bindgen(js_name = compareExchange)]
-    pub fn compare_exchange(
-        &self,
-        key: &str,
-        expected: Option<Vec<u8>>,
-        replacement: Option<Vec<u8>>,
-    ) -> String {
+    pub fn compare_exchange(&self, key: &str, expected: Option<Vec<u8>>, replacement: Option<Vec<u8>>) -> String {
         if self.closed {
             return compare_exchange_json(Err(closed_session_error()));
         }
@@ -554,10 +499,9 @@ impl PersistentSession {
         if self.closed {
             return unit_result_json(Err(closed_session_error()));
         }
-        let Ok(renames) = parse_rename_map(renames_json.as_deref()) else {
-            return unit_result_json(Err(Error::Protocol {
-                message: "invalid renames JSON".to_string(),
-            }));
+        let Ok(renames) = parse_rename_map(renames_json.as_deref())
+        else {
+            return unit_result_json(Err(Error::Protocol { message: "invalid renames JSON".to_string() }));
         };
         match self.volume.as_ref() {
             Some(volume) => match self.conn.migrate_schema(document, &renames) {

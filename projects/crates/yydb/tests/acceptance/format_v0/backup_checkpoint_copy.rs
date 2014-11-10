@@ -1,7 +1,7 @@
 // fixture: format_v0.backup_checkpoint_copy
 
 use crate::fixtures::yydb::{cleanup, temp_db};
-use yydb::{journal::wal_path, Connection, OpenFlags};
+use yydb::{Connection, OpenFlags, journal::wal_path};
 
 #[test]
 fn yydb_formats_v0_backup_checkpoint_copy() {
@@ -9,19 +9,12 @@ fn yydb_formats_v0_backup_checkpoint_copy() {
     let backup = temp_db("backup-checkpoint-copy");
 
     let conn = Connection::open_with_flags(&path, OpenFlags::wal()).expect("open");
-    conn.ensure_schema("table Setting { @@id: uuid, key: utf8, value: utf8 }")
-        .expect("schema");
+    conn.ensure_schema("table Setting { @@id: uuid, key: utf8, value: utf8 }").expect("schema");
     conn.put("theme", b"dark").expect("put");
-    assert!(
-        wal_path(&path).exists(),
-        "wal sidecar should exist before backup"
-    );
+    assert!(wal_path(&path).exists(), "wal sidecar should exist before backup");
 
     conn.backup_to(&backup).expect("backup");
-    assert!(
-        !wal_path(&backup).exists(),
-        "checkpoint backup must not copy wal sidecar"
-    );
+    assert!(!wal_path(&backup).exists(), "checkpoint backup must not copy wal sidecar");
     drop(conn);
 
     let restored = Connection::open(&backup).expect("open backup");
@@ -43,10 +36,7 @@ fn yydb_formats_v0_backup_with_wal_copy() {
     assert!(wal_path(&path).exists());
 
     conn.backup_with_wal_to(&backup).expect("backup with wal");
-    assert!(
-        wal_path(&backup).exists(),
-        "wal-inclusive backup must copy sidecar"
-    );
+    assert!(wal_path(&backup).exists(), "wal-inclusive backup must copy sidecar");
     drop(conn);
 
     let restored = Connection::open(&backup).expect("open backup");

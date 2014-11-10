@@ -2,15 +2,11 @@
 
 use std::fs;
 
-use yydb::{journal::shm_path, Connection, OpenFlags};
+use yydb::{Connection, OpenFlags, journal::shm_path};
 use yydb_formats::{committed_tail_lsn, parse_shm, parse_wal};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "yydb-formats-v0-shm-sidecar-{}-{}.yydb",
-        std::process::id(),
-        label
-    ))
+    std::env::temp_dir().join(format!("yydb-formats-v0-shm-sidecar-{}-{}.yydb", std::process::id(), label))
 }
 
 #[test]

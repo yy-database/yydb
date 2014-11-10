@@ -10,22 +10,13 @@ fn yydb_scenario_vos_transaction_backup() {
 
     conn.put("user/ada", b"ada").expect("put");
 
-    assert_eq!(
-        conn.get("user/ada").expect("get").as_deref(),
-        Some(b"ada".as_slice())
-    );
+    assert_eq!(conn.get("user/ada").expect("get").as_deref(), Some(b"ada".as_slice()));
 
     conn.backup_yydx_to(&backup).expect("backup");
     drop(conn);
 
     let restored = Connection::open_yydx(&backup).expect("open backup");
-    assert_eq!(
-        restored
-            .get("user/ada")
-            .expect("get after restore")
-            .as_deref(),
-        Some(b"ada".as_slice())
-    );
+    assert_eq!(restored.get("user/ada").expect("get after restore").as_deref(), Some(b"ada".as_slice()));
 
     cleanup(&path);
     cleanup(&backup);

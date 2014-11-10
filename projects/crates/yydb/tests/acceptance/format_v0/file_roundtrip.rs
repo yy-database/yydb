@@ -6,11 +6,7 @@ use yydb_formats::{FilePager, PAGE_MAGIC};
 
 #[test]
 fn yydb_formats_v0_file_roundtrip() {
-    let path = std::env::temp_dir().join(format!(
-        "yydb-formats-v0-file-{}-{}.yydb",
-        std::process::id(),
-        "roundtrip"
-    ));
+    let path = std::env::temp_dir().join(format!("yydb-formats-v0-file-{}-{}.yydb", std::process::id(), "roundtrip"));
     let _ = std::fs::remove_file(&path);
     {
         let mut pager = FilePager::open(&path, true).unwrap();

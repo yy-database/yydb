@@ -6,11 +6,7 @@ use yydb::{Connection, OpenFlags};
 use yydb_formats::PAGE_MAGIC;
 
 fn temp_path(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "yydb-formats-v0-connection-{}-{}.yydb",
-        std::process::id(),
-        label
-    ))
+    std::env::temp_dir().join(format!("yydb-formats-v0-connection-{}-{}.yydb", std::process::id(), label))
 }
 
 #[test]

@@ -1,17 +1,18 @@
 //! Shared helpers for acceptance fixture harness (`open_temp_db`, temp paths, cleanup).
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use yydb::journal::{shm_path, wal_path};
-use yydb::{Connection, ObjectStore};
+use yydb::{
+    Connection, ObjectStore,
+    journal::{shm_path, wal_path},
+};
 
 pub fn temp_db_with_ext(label: &str, ext: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
     std::env::temp_dir().join(format!("yydb-{label}-{nonce}.{ext}"))
 }
 

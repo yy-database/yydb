@@ -9,18 +9,20 @@ use std::{
 
 use yydb_types::{Error, Result};
 
-use crate::blob_refs::BlobManifestDelta;
-use crate::btree::RecordTree;
-use crate::header::{
-    corrupt_header_slot_checksum, inactive_slot_offset, parse_page0, slot_offset_for_kind,
-    DatabaseHeader, PAGE_MAGIC, PAGE_SIZE,
+use crate::{
+    blob_refs::BlobManifestDelta,
+    btree::RecordTree,
+    header::{
+        DatabaseHeader, PAGE_MAGIC, PAGE_SIZE, corrupt_header_slot_checksum, inactive_slot_offset, parse_page0,
+        slot_offset_for_kind,
+    },
+    key::TreeKey,
+    memory::MemoryPager,
+    pager::PageStore,
+    shm::{shm_sidecar_path, sync_shm_from_wal},
+    wal::committed_tail_lsn,
+    wal_append::{WalWriter, read_wal_file, replay_wal_pages, wal_sidecar_path},
 };
-use crate::key::TreeKey;
-use crate::memory::MemoryPager;
-use crate::pager::PageStore;
-use crate::shm::{shm_sidecar_path, sync_shm_from_wal};
-use crate::wal::committed_tail_lsn;
-use crate::wal_append::{read_wal_file, replay_wal_pages, wal_sidecar_path, WalWriter};
 
 /// Persistent page store backed by a single `YDPG` main file.
 pub struct FilePager {
@@ -38,17 +40,8 @@ impl FilePager {
             std::fs::create_dir_all(parent)?;
         }
         let existed = path.exists();
-        let inner = if existed {
-            load_main_file(&path)?
-        } else {
-            MemoryPager::new_empty(fresh_database_id(), 0x01)
-        };
-        let mut file_pager = Self {
-            path: path.clone(),
-            inner,
-            wal_enabled: enable_wal,
-            wal: None,
-        };
+        let inner = if existed { load_main_file(&path)? } else { MemoryPager::new_empty(fresh_database_id(), 0x01) };
+        let mut file_pager = Self { path: path.clone(), inner, wal_enabled: enable_wal, wal: None };
         if !existed {
             file_pager.persist_all()?;
         }
@@ -78,11 +71,7 @@ impl FilePager {
     }
 
     /// Like [`mutate_with_publish`] but also records `.yydx` blob manifest deltas in WAL.
-    pub fn mutate_with_publish_blob_refs<F>(
-        &mut self,
-        mutate: F,
-        blob_refs: &[BlobManifestDelta],
-    ) -> Result<()>
+    pub fn mutate_with_publish_blob_refs<F>(&mut self, mutate: F, blob_refs: &[BlobManifestDelta]) -> Result<()>
     where
         F: FnOnce(&mut MemoryPager) -> Result<()>,
     {
@@ -93,9 +82,7 @@ impl FilePager {
 
     /// User KV put with durability.
     pub fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()> {
-        self.mutate_with_publish(|inner| {
-            RecordTree::open(inner).put(TreeKey::user_record(key), value.to_vec())
-        })
+        self.mutate_with_publish(|inner| RecordTree::open(inner).put(TreeKey::user_record(key), value.to_vec()))
     }
 
     /// User KV get.
@@ -174,11 +161,7 @@ impl FilePager {
         Ok(())
     }
 
-    fn publish_delta(
-        &mut self,
-        before: &BTreeMap<u32, Vec<u8>>,
-        blob_refs: &[BlobManifestDelta],
-    ) -> Result<()> {
+    fn publish_delta(&mut self, before: &BTreeMap<u32, Vec<u8>>, blob_refs: &[BlobManifestDelta]) -> Result<()> {
         let after = self.inner.pages_snapshot();
         let mut changed = Vec::new();
         for (page_id, image) in &after {
@@ -195,7 +178,8 @@ impl FilePager {
                 wal.append_commit(&changed, blob_refs)?;
                 sync_shm_from_wal(&self.path, wal.path())?;
             }
-        } else {
+        }
+        else {
             for (page_id, image) in &changed {
                 self.write_page_to_file(*page_id, image)?;
             }
@@ -204,7 +188,8 @@ impl FilePager {
     }
 
     fn committed_wal_tail_lsn(&self) -> Result<u64> {
-        let Some(wal_path) = self.wal_path() else {
+        let Some(wal_path) = self.wal_path()
+        else {
             return Ok(0);
         };
         if !wal_path.exists() {
@@ -214,7 +199,8 @@ impl FilePager {
     }
 
     fn replay_wal_if_present(&mut self) -> Result<()> {
-        let Some(wal_path) = self.wal_path() else {
+        let Some(wal_path) = self.wal_path()
+        else {
             return Ok(());
         };
         if !wal_path.exists() {
@@ -247,10 +233,7 @@ impl FilePager {
     }
 
     fn persist_page0(&self) -> Result<()> {
-        let page0 = self
-            .inner
-            .get_page(0)?
-            .ok_or(Error::Corrupt("missing page0"))?;
+        let page0 = self.inner.get_page(0)?.ok_or(Error::Corrupt("missing page0"))?;
         self.write_page_to_file(0, &page0)?;
         Ok(())
     }
@@ -269,15 +252,10 @@ impl FilePager {
     pub fn simulate_checkpoint_crash_corrupt_inactive_header(&mut self) -> Result<()> {
         let checkpoint_lsn = self.committed_wal_tail_lsn()?;
         let header_before = self.inner.header()?;
-        let inactive_offset =
-            inactive_slot_offset(slot_offset_for_kind(header_before.slot.slot_kind));
+        let inactive_offset = inactive_slot_offset(slot_offset_for_kind(header_before.slot.slot_kind));
         self.persist_data_pages()?;
         self.inner.bump_checkpoint_slot(checkpoint_lsn)?;
-        let page0 = self
-            .inner
-            .get_page(0)?
-            .ok_or(Error::Corrupt("missing page0"))?
-            .clone();
+        let page0 = self.inner.get_page(0)?.ok_or(Error::Corrupt("missing page0"))?.clone();
         let mut image = page0;
         corrupt_header_slot_checksum(&mut image, inactive_offset)?;
         self.write_page_to_file(0, &image)?;
@@ -289,12 +267,7 @@ impl FilePager {
             return Err(Error::Corrupt("page image wrong size"));
         }
         let offset = u64::from(page_id) * u64::try_from(PAGE_SIZE).unwrap_or(u64::MAX);
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&self.path)?;
+        let mut file = OpenOptions::new().create(true).read(true).write(true).truncate(false).open(&self.path)?;
         let needed = offset + PAGE_SIZE as u64;
         if file.metadata()?.len() < needed {
             file.set_len(needed)?;
@@ -343,9 +316,7 @@ pub fn main_bytes_from_memory_pager(pager: &MemoryPager) -> Result<Vec<u8>> {
     let page_count = max_id as usize + 1;
     let mut out = vec![0_u8; page_count * PAGE_SIZE];
     for page_id in 0..=max_id {
-        let image = snapshot
-            .get(&page_id)
-            .ok_or(Error::Corrupt("memory pager page gap"))?;
+        let image = snapshot.get(&page_id).ok_or(Error::Corrupt("memory pager page gap"))?;
         let start = page_id as usize * PAGE_SIZE;
         out[start..start + PAGE_SIZE].copy_from_slice(image);
     }
@@ -374,7 +345,5 @@ fn load_main_bytes(bytes: &[u8]) -> Result<MemoryPager> {
 }
 
 fn fresh_database_id() -> [u8; 16] {
-    [
-        0xAA, 0xBB, 0xCC, 0xDD, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1,
-    ]
+    [0xAA, 0xBB, 0xCC, 0xDD, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1]
 }

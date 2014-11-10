@@ -12,10 +12,7 @@ fn yydb_orphan_reclaim_idempotent() {
     assert_eq!(first.reclaimed_objects, 1);
 
     let second = conn.reclaim_orphans(std::slice::from_ref(&orphan)).unwrap();
-    assert_eq!(
-        second.reclaimed_objects, 0,
-        "reclaim must be idempotent when the chunk is already gone"
-    );
+    assert_eq!(second.reclaimed_objects, 0, "reclaim must be idempotent when the chunk is already gone");
 
     cleanup(&path);
 }

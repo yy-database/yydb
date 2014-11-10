@@ -1,4 +1,4 @@
-use yydb_formats::{encode_empty_page0, MemoryPager, PAGE_SIZE};
+use yydb_formats::{MemoryPager, PAGE_SIZE, encode_empty_page0};
 
 #[test]
 fn memory_pager_bootstrap_page0() {

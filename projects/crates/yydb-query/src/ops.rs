@@ -71,15 +71,8 @@ impl SlotTy {
 pub enum Pred {
     True,
     False,
-    FieldBool {
-        path: Vec<String>,
-        value: BoundValue,
-    },
-    FieldCmp {
-        path: Vec<String>,
-        op: CmpOp,
-        value: BoundValue,
-    },
+    FieldBool { path: Vec<String>, value: BoundValue },
+    FieldCmp { path: Vec<String>, op: CmpOp, value: BoundValue },
     And(Box<Pred>, Box<Pred>),
     Or(Box<Pred>, Box<Pred>),
 }
@@ -90,10 +83,7 @@ pub enum ProjectExpr {
     /// Read a scalar field path from the current row context.
     Scalar { path: Vec<String> },
     /// Project nested fields from a referenced row at `path`.
-    Nested {
-        path: Vec<String>,
-        fields: Vec<ProjectField>,
-    },
+    Nested { path: Vec<String>, fields: Vec<ProjectField> },
 }
 
 /// One projected output field.

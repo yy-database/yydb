@@ -16,8 +16,7 @@ use napi::bindgen_prelude::{Buffer, Result};
 use napi_derive::napi;
 
 fn reason(error: yydb::Error) -> napi::Error {
-    let json = serde_json::to_string(&error.to_json())
-        .unwrap_or_else(|_| error.to_string());
+    let json = serde_json::to_string(&error.to_json()).unwrap_or_else(|_| error.to_string());
     napi::Error::from_reason(json)
 }
 
@@ -33,12 +32,8 @@ pub fn version() -> String {
 /// the `yydb serve` CLI should invoke it.
 #[napi]
 pub fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> Result<()> {
-    yydb::server::run_serve(
-        std::path::Path::new(&db_path),
-        &bind,
-        insecure_bind.unwrap_or(false),
-    )
-    .map_err(|error| napi::Error::from_reason(error.to_string()))
+    yydb::server::run_serve(std::path::Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
+        .map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
 /// Handle to one open `.yydb` file.
@@ -52,53 +47,37 @@ impl Database {
     /// Open (create when missing) the database at `db_path`.
     #[napi(factory)]
     pub fn open(db_path: String) -> Result<Self> {
-        Ok(Self {
-            connection: yydb::Connection::open(&db_path).map_err(reason)?,
-        })
+        Ok(Self { connection: yydb::Connection::open(&db_path).map_err(reason)? })
     }
 
     /// Absolute path of the database file.
     #[napi]
     pub fn path(&self) -> Option<String> {
-        self.connection
-            .path()
-            .map(|path| path.display().to_string())
+        self.connection.path().map(|path| path.display().to_string())
     }
 
     /// Path of the `-wal` sidecar for file-backed databases.
     #[napi]
     pub fn wal_path(&self) -> Option<String> {
-        self.connection
-            .wal_path()
-            .map(|path| path.display().to_string())
+        self.connection.wal_path().map(|path| path.display().to_string())
     }
 
     /// Path of the `-shm` sidecar for file-backed databases.
     #[napi]
     pub fn shm_path(&self) -> Option<String> {
-        self.connection
-            .shm_path()
-            .map(|path| path.display().to_string())
+        self.connection.shm_path().map(|path| path.display().to_string())
     }
 
     /// Published schema version, or `null` before the first schema.
     #[napi]
     pub fn schema_version(&self) -> Result<Option<u32>> {
-        Ok(self
-            .connection
-            .schema()
-            .map_err(reason)?
-            .map(|schema| schema.version))
+        Ok(self.connection.schema().map_err(reason)?.map(|schema| schema.version))
     }
 
     /// Published VOS schema document, or `null` before the first schema.
     #[napi]
     pub fn schema_document(&self) -> Result<Option<String>> {
-        Ok(self
-            .connection
-            .schema()
-            .map_err(reason)?
-            .map(|schema| schema.document))
+        Ok(self.connection.schema().map_err(reason)?.map(|schema| schema.document))
     }
 
     /// Validate and publish a VOS schema document.
@@ -154,25 +133,15 @@ impl Database {
     /// Delete one record. Idempotent — absent keys silently succeed.
     #[napi]
     pub fn delete(&self, key: String) -> Result<()> {
-        self.connection
-            .write_batch(&[(key, None)])
-            .map_err(reason)
+        self.connection.write_batch(&[(key, None)]).map_err(reason)
     }
 
     /// Scan keys in lexical order with `prefix` (use `""` for all keys).
     /// `after` is an exclusive continuation cursor (pass `null` for the first page).
     /// Returns a JSON array string: `[{ "key": "...", "value": [...] }, ...]`.
     #[napi]
-    pub fn scan_prefix(
-        &self,
-        prefix: String,
-        after: Option<String>,
-        limit: u32,
-    ) -> Result<String> {
-        let rows = self
-            .connection
-            .scan_prefix(&prefix, after.as_deref(), limit as usize)
-            .map_err(reason)?;
+    pub fn scan_prefix(&self, prefix: String, after: Option<String>, limit: u32) -> Result<String> {
+        let rows = self.connection.scan_prefix(&prefix, after.as_deref(), limit as usize).map_err(reason)?;
         let json_rows: Vec<serde_json::Value> = rows
             .into_iter()
             .map(|(k, v)| {
@@ -182,21 +151,18 @@ impl Database {
                 })
             })
             .collect();
-        serde_json::to_string(&json_rows)
-            .map_err(|e| napi::Error::from_reason(format!("encode scan rows: {e}")))
+        serde_json::to_string(&json_rows).map_err(|e| napi::Error::from_reason(format!("encode scan rows: {e}")))
     }
 
     /// Atomically write or delete many keys.
     /// `changes_json` is `[{ "key": "...", "value": bytes | null }, ...]`.
     #[napi]
     pub fn write_batch(&self, changes_json: String) -> Result<()> {
-        let changes: Vec<serde_json::Value> = serde_json::from_str(&changes_json)
-            .map_err(|e| napi::Error::from_reason(format!("invalid batch JSON: {e}")))?;
+        let changes: Vec<serde_json::Value> =
+            serde_json::from_str(&changes_json).map_err(|e| napi::Error::from_reason(format!("invalid batch JSON: {e}")))?;
         let mut parsed: Vec<(String, Option<Vec<u8>>)> = Vec::with_capacity(changes.len());
         for entry in changes {
-            let obj = entry
-                .as_object()
-                .ok_or_else(|| napi::Error::from_reason("batch entry must be an object"))?;
+            let obj = entry.as_object().ok_or_else(|| napi::Error::from_reason("batch entry must be an object"))?;
             let key = obj
                 .get("key")
                 .and_then(|v| v.as_str())
@@ -207,16 +173,8 @@ impl Database {
                 Some(v) => {
                     let bytes: Vec<u8> = v
                         .as_array()
-                        .and_then(|arr| {
-                            arr.iter()
-                                .map(|x| x.as_i64().and_then(|n| u8::try_from(n).ok()))
-                                .collect()
-                        })
-                        .ok_or_else(|| {
-                            napi::Error::from_reason(
-                                "batch `value` must be null or a byte array",
-                            )
-                        })?;
+                        .and_then(|arr| arr.iter().map(|x| x.as_i64().and_then(|n| u8::try_from(n).ok())).collect())
+                        .ok_or_else(|| napi::Error::from_reason("batch `value` must be null or a byte array"))?;
                     Some(bytes)
                 }
             };
@@ -229,15 +187,8 @@ impl Database {
     /// Both are JSON arrays of bytes (from `Buffer`) or `null`.
     /// Returns `true` on success, `false` if the current value did not match.
     #[napi]
-    pub fn compare_exchange(
-        &self,
-        key: String,
-        expected: Option<Buffer>,
-        replacement: Option<Buffer>,
-    ) -> Result<bool> {
-        self.connection
-            .compare_exchange(&key, expected.as_deref(), replacement.as_deref())
-            .map_err(reason)
+    pub fn compare_exchange(&self, key: String, expected: Option<Buffer>, replacement: Option<Buffer>) -> Result<bool> {
+        self.connection.compare_exchange(&key, expected.as_deref(), replacement.as_deref()).map_err(reason)
     }
 
     /// Begin an explicit transaction. Must be balanced with `commit` or `rollback`.
@@ -273,8 +224,7 @@ impl Database {
                 serde_json::Value::Object(map)
             })
             .collect();
-        serde_json::to_string(&mapped)
-            .map_err(|e| napi::Error::from_reason(format!("encode rows: {e}")))
+        serde_json::to_string(&mapped).map_err(|e| napi::Error::from_reason(format!("encode rows: {e}")))
     }
 
     /// Execute a VOS write program (INSERT / schema macros).
@@ -290,46 +240,36 @@ impl Database {
     /// no fields. Entries with `fromType`/`toType` update the type name; entries
     /// with `type`/`fromField`/`toField` update a specific field.
     #[napi]
-    pub fn migrate_schema(
-        &self,
-        document: String,
-        renames_json: Option<String>,
-    ) -> Result<()> {
+    pub fn migrate_schema(&self, document: String, renames_json: Option<String>) -> Result<()> {
         let mut renames = yydb::catalog::RenameMap::default();
         if let Some(json) = renames_json {
-            let arr: Vec<serde_json::Value> = serde_json::from_str(&json)
-                .map_err(|e| napi::Error::from_reason(format!("invalid renames JSON: {e}")))?;
+            let arr: Vec<serde_json::Value> =
+                serde_json::from_str(&json).map_err(|e| napi::Error::from_reason(format!("invalid renames JSON: {e}")))?;
             for entry in arr {
-                let obj = entry.as_object().ok_or_else(|| {
-                    napi::Error::from_reason("rename entry must be an object")
-                })?;
-                if let (Some(from), Some(to)) = (
-                    obj.get("fromType").and_then(|v| v.as_str()),
-                    obj.get("toType").and_then(|v| v.as_str()),
-                ) {
+                let obj = entry.as_object().ok_or_else(|| napi::Error::from_reason("rename entry must be an object"))?;
+                if let (Some(from), Some(to)) =
+                    (obj.get("fromType").and_then(|v| v.as_str()), obj.get("toType").and_then(|v| v.as_str()))
+                {
                     renames.types.insert(from.to_owned(), to.to_owned());
-                } else if let (Some(type_name), Some(from_field), Some(to_field)) = (
+                }
+                else if let (Some(type_name), Some(from_field), Some(to_field)) = (
                     obj.get("type").and_then(|v| v.as_str()),
                     obj.get("fromField").and_then(|v| v.as_str()),
                     obj.get("toField").and_then(|v| v.as_str()),
                 ) {
                     renames.fields.insert(
-                        yydb::catalog::FieldPath {
-                            type_name: type_name.to_owned(),
-                            field_name: from_field.to_owned(),
-                        },
+                        yydb::catalog::FieldPath { type_name: type_name.to_owned(), field_name: from_field.to_owned() },
                         to_field.to_owned(),
                     );
-                } else {
+                }
+                else {
                     return Err(napi::Error::from_reason(
                         "rename entry must have {fromType,toType} or {type,fromField,toField}",
                     ));
                 }
             }
         }
-        self.connection
-            .migrate_schema(&document, &renames)
-            .map_err(reason)
+        self.connection.migrate_schema(&document, &renames).map_err(reason)
     }
 
     /// Checkpoint then copy a self-contained `.yydb` main file to `dest`.
@@ -354,8 +294,7 @@ impl Database {
     #[napi]
     pub fn doctor(&self) -> Result<String> {
         let report = self.connection.doctor().map_err(reason)?;
-        serde_json::to_string(&report)
-            .map_err(|e| napi::Error::from_reason(format!("serialize doctor report: {e}")))
+        serde_json::to_string(&report).map_err(|e| napi::Error::from_reason(format!("serialize doctor report: {e}")))
     }
 
     /// Fold WAL into the main file and reclaim safe orphan blobs (`.yydx` layouts only).
@@ -363,8 +302,7 @@ impl Database {
     #[napi]
     pub fn compact_yydx(&self) -> Result<String> {
         let report = self.connection.compact_yydx().map_err(reason)?;
-        serde_json::to_string(&report)
-            .map_err(|e| napi::Error::from_reason(format!("serialize compact report: {e}")))
+        serde_json::to_string(&report).map_err(|e| napi::Error::from_reason(format!("serialize compact report: {e}")))
     }
 
     /// Install a session-local host micro definition.
@@ -382,14 +320,10 @@ impl Database {
         handle_version: u32,
         fingerprint: Buffer,
     ) -> Result<()> {
-        let arg_types = args
-            .iter()
-            .map(|t| parse_udf_type(t))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let arg_types = args.iter().map(|t| parse_udf_type(t)).collect::<std::result::Result<Vec<_>, _>>()?;
         let returns_type = parse_udf_type(&returns)?;
-        let fp_bytes: [u8; 32] = fingerprint.as_ref().try_into().map_err(|_| {
-            napi::Error::from_reason("fingerprint must be exactly 32 bytes")
-        })?;
+        let fp_bytes: [u8; 32] =
+            fingerprint.as_ref().try_into().map_err(|_| napi::Error::from_reason("fingerprint must be exactly 32 bytes"))?;
         let definition = yydb::HostMicroDefinition::from_scalar(
             &name,
             version,
@@ -408,24 +342,12 @@ impl Database {
     ///
     /// `args_json` is a JSON array of scalar values. Returns result as JSON.
     #[napi]
-    pub fn call_scalar(
-        &self,
-        name: String,
-        version: u32,
-        args_json: String,
-    ) -> Result<String> {
-        let args: Vec<serde_json::Value> = serde_json::from_str(&args_json)
-            .map_err(|e| napi::Error::from_reason(format!("invalid args JSON: {e}")))?;
-        let values: Vec<yydb::Value> = args
-            .into_iter()
-            .map(json_to_value)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let result = self
-            .connection
-            .call_scalar_version(&name, version, &values)
-            .map_err(reason)?;
-        serde_json::to_string(&value_to_json(result))
-            .map_err(|e| napi::Error::from_reason(format!("encode result: {e}")))
+    pub fn call_scalar(&self, name: String, version: u32, args_json: String) -> Result<String> {
+        let args: Vec<serde_json::Value> =
+            serde_json::from_str(&args_json).map_err(|e| napi::Error::from_reason(format!("invalid args JSON: {e}")))?;
+        let values: Vec<yydb::Value> = args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
+        let result = self.connection.call_scalar_version(&name, version, &values).map_err(reason)?;
+        serde_json::to_string(&value_to_json(result)).map_err(|e| napi::Error::from_reason(format!("encode result: {e}")))
     }
 }
 
@@ -448,10 +370,7 @@ impl Client {
     /// wire Hello handshake before returning.
     #[napi(factory)]
     pub fn connect(endpoint: String) -> Result<Self> {
-        Ok(Self {
-            client: yydb::client::Client::connect(endpoint).map_err(reason)?,
-            closed: false,
-        })
+        Ok(Self { client: yydb::client::Client::connect(endpoint).map_err(reason)?, closed: false })
     }
 
     /// Configured endpoint string (`host:port`).
@@ -475,21 +394,13 @@ impl Client {
     /// Published schema version, or `null` before the first schema.
     #[napi]
     pub fn schema_version(&self) -> Result<Option<u32>> {
-        Ok(self
-            .client
-            .schema()
-            .map_err(reason)?
-            .map(|schema| schema.version))
+        Ok(self.client.schema().map_err(reason)?.map(|schema| schema.version))
     }
 
     /// Published VOS schema document, or `null` before the first schema.
     #[napi]
     pub fn schema_document(&self) -> Result<Option<String>> {
-        Ok(self
-            .client
-            .schema()
-            .map_err(reason)?
-            .map(|schema| schema.document))
+        Ok(self.client.schema().map_err(reason)?.map(|schema| schema.document))
     }
 
     /// Validate and publish a VOS schema document on the remote engine.
@@ -513,9 +424,7 @@ impl Client {
     /// Remote client does not expose record count; use info() for diagnostics.
     #[napi]
     pub fn record_count(&self) -> Result<u32> {
-        Err(napi::Error::from_reason(
-            "record_count is not available on the remote client; use info() for diagnostics",
-        ))
+        Err(napi::Error::from_reason("record_count is not available on the remote client; use info() for diagnostics"))
     }
 
     /// Install a session-local host micro definition on the remote engine.
@@ -536,14 +445,10 @@ impl Client {
         if self.closed {
             return Err(napi::Error::from_reason("client is closed"));
         }
-        let arg_types = args
-            .iter()
-            .map(|t| parse_udf_type(t))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let arg_types = args.iter().map(|t| parse_udf_type(t)).collect::<std::result::Result<Vec<_>, _>>()?;
         let returns_type = parse_udf_type(&returns)?;
-        let fp_bytes: [u8; 32] = fingerprint.as_ref().try_into().map_err(|_| {
-            napi::Error::from_reason("fingerprint must be exactly 32 bytes")
-        })?;
+        let fp_bytes: [u8; 32] =
+            fingerprint.as_ref().try_into().map_err(|_| napi::Error::from_reason("fingerprint must be exactly 32 bytes"))?;
         let definition = yydb::HostMicroDefinition::from_scalar(
             &name,
             version,
@@ -563,27 +468,15 @@ impl Client {
     /// `args_json` is a JSON array of scalar values (`null`, `bool`, `number`,
     /// `string`). Returns the scalar result as a JSON string.
     #[napi]
-    pub fn call_scalar(
-        &self,
-        name: String,
-        version: u32,
-        args_json: String,
-    ) -> Result<String> {
+    pub fn call_scalar(&self, name: String, version: u32, args_json: String) -> Result<String> {
         if self.closed {
             return Err(napi::Error::from_reason("client is closed"));
         }
-        let args: Vec<serde_json::Value> = serde_json::from_str(&args_json)
-            .map_err(|e| napi::Error::from_reason(format!("invalid args JSON: {e}")))?;
-        let values: Vec<yydb::Value> = args
-            .into_iter()
-            .map(json_to_value)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let result = self
-            .client
-            .call_scalar_version(&name, version, &values)
-            .map_err(reason)?;
-        serde_json::to_string(&value_to_json(result))
-            .map_err(|e| napi::Error::from_reason(format!("encode result: {e}")))
+        let args: Vec<serde_json::Value> =
+            serde_json::from_str(&args_json).map_err(|e| napi::Error::from_reason(format!("invalid args JSON: {e}")))?;
+        let values: Vec<yydb::Value> = args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
+        let result = self.client.call_scalar_version(&name, version, &values).map_err(reason)?;
+        serde_json::to_string(&value_to_json(result)).map_err(|e| napi::Error::from_reason(format!("encode result: {e}")))
     }
 
     /// Close the remote client. Idempotent — further calls fail.
@@ -611,16 +504,16 @@ fn json_to_value(json: serde_json::Value) -> Result<yydb::Value> {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Ok(yydb::Value::I64(i))
-            } else if let Some(f) = n.as_f64() {
+            }
+            else if let Some(f) = n.as_f64() {
                 Ok(yydb::Value::F64(f))
-            } else {
+            }
+            else {
                 Err(napi::Error::from_reason("number out of range for i64/f64"))
             }
         }
         serde_json::Value::String(s) => Ok(yydb::Value::Text(s)),
-        other => Err(napi::Error::from_reason(format!(
-            "unsupported scalar value: {other:?}"
-        ))),
+        other => Err(napi::Error::from_reason(format!("unsupported scalar value: {other:?}"))),
     }
 }
 
@@ -630,9 +523,9 @@ fn value_to_json(value: yydb::Value) -> serde_json::Value {
         yydb::Value::Bool(b) => serde_json::Value::Bool(b),
         yydb::Value::I64(i) => serde_json::Value::Number(i.into()),
         yydb::Value::U64(u) => serde_json::Value::Number(u.into()),
-        yydb::Value::F64(f) => serde_json::Number::from_f64(f)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
+        yydb::Value::F64(f) => {
+            serde_json::Number::from_f64(f).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null)
+        }
         yydb::Value::Text(s) => serde_json::Value::String(s),
         other => serde_json::Value::String(format!("{other:?}")),
     }

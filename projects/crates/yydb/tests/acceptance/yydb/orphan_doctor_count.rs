@@ -24,10 +24,7 @@ fn yydb_orphan_doctor_count() {
     assert_eq!(report.reclaimed_objects, 2);
 
     let after = conn.doctor().unwrap().orphan_object_count;
-    assert_eq!(
-        after, 0,
-        "doctor orphan count must drop to zero after reclaim"
-    );
+    assert_eq!(after, 0, "doctor orphan count must drop to zero after reclaim");
     assert!(conn.get_object(&live).is_ok());
 
     cleanup(&path);
