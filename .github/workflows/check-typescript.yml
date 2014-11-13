@@ -27,9 +27,9 @@ jobs:
         run: cargo install wasm-pack --locked
       - run: pnpm run build:wasm
       - run: pnpm exec nifty format --check
+      - run: pnpm --filter @yydb/yydb build
       - run: pnpm --filter @yydb/yydb-client build
       - run: pnpm --filter @yydb/yydb-client test
-      - run: pnpm --filter @yydb/yydb build
       - run: pnpm --filter @yydb/yydb test
       - run: pnpm --filter @yydb/light-db build
       - run: pnpm --filter @yydb/light-db test
