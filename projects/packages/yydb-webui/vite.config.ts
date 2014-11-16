@@ -7,6 +7,7 @@ export default defineConfig({
     resolve: {
         alias: {
             '@yydb/yydb-client': fileURLToPath(new URL('../yydb-client/src/index.ts', import.meta.url)),
+            '@yydb/yydb': fileURLToPath(new URL('../yydb/src/shared/errors.ts', import.meta.url)),
         },
     },
     server: {
