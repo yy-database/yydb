@@ -6,7 +6,7 @@
  */
 
 import {
-    Database,
+    BrowserDatabase,
     isOpfsAvailable,
     LightDbError,
     LightDbErrorCodes,
@@ -227,8 +227,8 @@ export async function runBrowserSuite(): Promise<BrowserCaseResult[]> {
  * 打开数据库，默认使用 OPFS
  * @param name 数据库名
  */
-async function open(name: string): Promise<Database> {
-    return Database.open(name, { storage: new OpfsStorageAdapterFactory() });
+async function open(name: string): Promise<BrowserDatabase> {
+    return BrowserDatabase.open(name, { storage: new OpfsStorageAdapterFactory() });
 }
 
 /**

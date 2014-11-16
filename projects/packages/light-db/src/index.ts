@@ -65,6 +65,7 @@ export type {
 // 作者面
 export {
     Database,
+    BrowserDatabase,
     openLightDatabase,
     Transaction,
     SCHEMA_KEY,

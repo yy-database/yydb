@@ -2,7 +2,7 @@
  * api 层导出
  */
 
-export { Database, openLightDatabase } from './database';
+export { Database, BrowserDatabase, openLightDatabase } from './database';
 export type { OpenOptions, ScanRow, ScanOptions, BatchChange, MigrateOptions } from './database';
 export { Transaction } from './transaction';
 export type { TransactionState } from './transaction';
