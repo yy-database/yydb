@@ -5,14 +5,11 @@
  * 这里的代码只依赖 Web 平台，不引入任何 Node 内置模块。
  */
 
-import {
-    BrowserDatabase,
-    isOpfsAvailable,
-    LightDbError,
-    LightDbErrorCodes,
-    listenDatabaseEvents,
-    OpfsStorageAdapterFactory,
-} from '../../src/index';
+import { BrowserDatabase } from '../../src/api/database';
+import { OpfsStorageAdapterFactory } from '../../src/storage/opfs/OpfsStorageAdapter';
+import { isOpfsAvailable } from '../../src/storage/index';
+import { LightDbError, LightDbErrorCodes } from '../../src/errors/index';
+import { listenDatabaseEvents } from '../../src/core/index';
 
 /** 单个用例结果 */
 export interface BrowserCaseResult {
