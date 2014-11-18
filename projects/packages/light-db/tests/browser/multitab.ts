@@ -5,7 +5,10 @@
  * 验证写租约互斥、关闭通知与重开后的一致性。
  */
 
-import { Database, LightDbError, listenDatabaseEvents, OpfsStorageAdapterFactory } from '../../src/index';
+import { BrowserDatabase as Database } from '../../src/api/database';
+import { OpfsStorageAdapterFactory } from '../../src/storage/opfs/OpfsStorageAdapter';
+import { LightDbError } from '../../src/errors/index';
+import { listenDatabaseEvents } from '../../src/core/index';
 
 /** 页面内保留的数据库与监听器 */
 interface MultitabScope {
