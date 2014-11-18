@@ -276,12 +276,18 @@ async function corruptSnapshot(name: string): Promise<void> {
  * 执行并捕获结构化失败
  * @param action 待执行动作
  */
+function isLightDbError(value: unknown): value is LightDbError {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as Record<string, unknown>;
+    return typeof obj['code'] === 'string' && typeof obj['message'] === 'string';
+}
+
 async function expectFailure(action: () => Promise<unknown>): Promise<LightDbError> {
     try {
         await action();
     } catch (error) {
-        if (error instanceof LightDbError) {
-            return error;
+        if (isLightDbError(error)) {
+            return error as LightDbError;
         }
         throw new Error(`期望 LightDbError，实际为 ${String(error)}`);
     }
