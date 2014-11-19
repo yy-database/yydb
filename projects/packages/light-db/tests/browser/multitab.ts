@@ -132,11 +132,20 @@ export async function openWriteClose(name: string, key: string, value: string): 
 
 /**
  * 转换为结构化失败
- * @param error 错误
+ *
+ * browser 环境下 `instanceof LightDbError` 可能因模块加载路径不同而不成立，
+ * 这里用 duck-typing 检查 `code` 属性是否存在且为字符串。
  */
 function failure(error: unknown): OpenAttempt {
-    if (error instanceof LightDbError) {
-        return { ok: false, code: error.code, retryable: error.retryable };
+    if (error && typeof error === 'object') {
+        const obj = error as Record<string, unknown>;
+        if (typeof obj['code'] === 'string') {
+            return {
+                ok: false,
+                code: obj['code'] as string,
+                retryable: typeof obj['retryable'] === 'boolean' ? (obj['retryable'] as boolean) : undefined,
+            };
+        }
     }
     return { ok: false, code: `unexpected: ${String(error)}` };
 }
