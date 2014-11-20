@@ -5,7 +5,7 @@
  * 验证写租约互斥、关闭通知与重开后的一致性。
  */
 
-import { BrowserDatabase as Database } from '../../src/api/database';
+import { Database } from '../../src/api/database';
 import { OpfsStorageAdapterFactory } from '../../src/storage/opfs/OpfsStorageAdapter';
 import { LightDbError } from '../../src/errors/index';
 import { listenDatabaseEvents } from '../../src/core/index';

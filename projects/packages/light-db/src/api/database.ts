@@ -1,7 +1,7 @@
 /**
  * Schema 版本与文档。
  *
- * 共享类型：WASM {@link Database} 与纯 TS {@link BrowserDatabase} 都使用同一版本模型。
+ * 共享类型：纯 TS {@link Database} 与 WASM {@link WasmDatabase} 都使用同一版本模型。
  */
 export interface SchemaVersion {
     version: number;
@@ -42,7 +42,7 @@ export interface OpenOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Pure-TS BrowserDatabase (StorageEngine wrapper — browser-friendly, no WASM)
+// Pure-TS Database (StorageEngine wrapper — browser-friendly, no WASM)
 // ---------------------------------------------------------------------------
 
 import { StorageEngine } from '../core/engine.js';
@@ -60,12 +60,18 @@ const MAX_DATABASE_NAME_LENGTH = 128;
 /**
  * 浏览器可用的纯 TS 数据库实现。
  *
- * 与 WASM {@link Database}（`api/wasm-database.ts`）同属 `@yydb/light-db` 作者面，
- * 但完全不依赖 WASM。浏览器测试、OPFS 一致性验证、以及不想引入 WASM 捆绑的场景应使用此实现。
+ * 与 Node 侧 `@yydb/yydb` 的 {@link Database} 同构：宿主靠 import 来源区分：
+ *
+ * ```ts
+ * import { Database } from '@yydb/yydb';       // Node 原生
+ * import { Database } from '@yydb/light-db';   // 浏览器纯 TS（本文件）
+ * ```
+ *
+ * 完全不依赖 WASM；OPFS 持久化、WAL 恢复、检查点、事务都在 TypeScript 内完成。
  *
  * 默认后端是 `OpfsStorageAdapterFactory`；通过 `options.storage` 可以显式指定。
  */
-export class BrowserDatabase implements LightDatabase {
+export class Database implements LightDatabase {
     /** 数据库名 */
     public readonly name: string;
 
@@ -83,7 +89,7 @@ export class BrowserDatabase implements LightDatabase {
      * @param name 数据库名
      * @param options 打开选项
      */
-    public static async open(name: string, options: LightDatabaseOptions = {}): Promise<BrowserDatabase> {
+    public static async open(name: string, options: LightDatabaseOptions = {}): Promise<Database> {
         if (name.trim().length === 0 || name.length > MAX_DATABASE_NAME_LENGTH) {
             throw new LightDbError(LightDbErrorCodes.unsupported, `database name must be 1-${MAX_DATABASE_NAME_LENGTH} characters`, {
                 operation: 'open',
@@ -99,7 +105,7 @@ export class BrowserDatabase implements LightDatabase {
 
         const engine = await StorageEngine.open(name, storage, engineOptions);
 
-        return new BrowserDatabase(name, engine);
+        return new Database(name, engine);
     }
 
     /** 读取已持久化的 schema */

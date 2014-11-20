@@ -88,16 +88,12 @@ export class TransactionHandle {
 }
 
 /**
- * Browser/WASM 侧 YYDB 数据库句柄。
+ * Browser/WASM 侧 YYDB 数据库句柄（可选后端）。
  *
- * 与 `@yydb/yydb` 的 {@link Database} 同名——宿主靠 import 来源区分：
- *
- * ```ts
- * import { Database } from '@yydb/yydb';       // Node 原生
- * import { Database } from '@yydb/light-db';   // 浏览器 WASM
- * ```
+ * 这是 `@yydb/light-db` 的 WASM 路径。默认可选——包主线是 {@link Database}
+ * （`api/database.ts`，纯 TS，无 WASM 依赖），宿主按需显式 import 本文件以引入 WASM。
  */
-export class Database {
+export class WasmDatabase {
     /** 数据库名（OPFS 路径）。 */
     public readonly name: string;
 
@@ -109,7 +105,7 @@ export class Database {
     }
 
     /** 初始化 WASM 并打开一个 session（memory 或 OPFS persistent）。 */
-    public static async open(name: string, options: OpenOptions = {}): Promise<Database> {
+    public static async open(name: string, options: OpenOptions = {}): Promise<WasmDatabase> {
         if (!name || name.length === 0) {
             throw new Error('database name must not be empty');
         }
@@ -120,7 +116,7 @@ export class Database {
             ? createMemorySession()
             : openPersistentSession(name);
 
-        return new Database(name, session);
+        return new WasmDatabase(name, session);
     }
 
     /** 解析 WASM JSON 结果，失败时转 LightDbError。 */
@@ -267,10 +263,10 @@ export class Database {
     }
 }
 
-/** 打开浏览器 WASM 数据库的便捷函数（等价于 {@link Database.open}）。 */
+/** 打开浏览器 WASM 数据库的便捷函数（等价于 {@link WasmDatabase.open}）。 */
 export async function openLightDatabase(
     name: string,
     options: OpenOptions = {},
-): Promise<Database> {
-    return Database.open(name, options);
+): Promise<WasmDatabase> {
+    return WasmDatabase.open(name, options);
 }

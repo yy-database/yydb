@@ -5,7 +5,7 @@
  * 这里的代码只依赖 Web 平台，不引入任何 Node 内置模块。
  */
 
-import { BrowserDatabase } from '../../src/api/database';
+import { Database } from '../../src/api/database';
 import { OpfsStorageAdapterFactory } from '../../src/storage/opfs/OpfsStorageAdapter';
 import { isOpfsAvailable } from '../../src/storage/index';
 import { LightDbError, LightDbErrorCodes } from '../../src/errors/index';
@@ -224,8 +224,8 @@ export async function runBrowserSuite(): Promise<BrowserCaseResult[]> {
  * 打开数据库，默认使用 OPFS
  * @param name 数据库名
  */
-async function open(name: string): Promise<BrowserDatabase> {
-    return BrowserDatabase.open(name, { storage: new OpfsStorageAdapterFactory() });
+async function open(name: string): Promise<Database> {
+    return Database.open(name, { storage: new OpfsStorageAdapterFactory() });
 }
 
 /**
