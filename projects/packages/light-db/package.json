@@ -1,6 +1,6 @@
 {
     "name": "@yydb/light-db",
-    "version": "0.0.15",
+    "version": "0.0.16",
     "description": "Light DB — browser-native YYDB database written in pure TypeScript",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",

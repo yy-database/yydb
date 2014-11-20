@@ -3,7 +3,7 @@ resolver = "2"
 members = ["projects/crates/*"]
 
 [workspace.package]
-version = "0.0.15"
+version = "0.0.16"
 edition = "2024"
 authors = ["Yggdrasill Team <192607617@qq.com>"]
 license = "MPL-2.0"
@@ -12,16 +12,16 @@ repository = "https://github.com/yy-database/yydb.rs"
 [workspace.dependencies]
 vos = { git = "https://github.com/voml/vos-language.git", rev = "74e257ec7e0ffdaf6d2d8ac5be38f4e88e5debd4" }
 # Engine (bottom → mid; depend on yydb facade in apps)
-yydb-types = { version = "0.0.15", path = "projects/crates/yydb-types" }
-yydb-formats = { version = "0.0.15", path = "projects/crates/yydb-formats" }
-yydb-execution = { version = "0.0.15", path = "projects/crates/yydb-execution" }
-yydb-udf = { version = "0.0.15", path = "projects/crates/yydb-udf" }
-yydb-query = { version = "0.0.15", path = "projects/crates/yydb-query" }
-yydb-storage = { version = "0.0.15", path = "projects/crates/yydb-storage" }
-yydb-engine = { version = "0.0.15", path = "projects/crates/yydb-engine" }
-yydb-protocol = { version = "0.0.15", path = "projects/crates/yydb-protocol" }
+yydb-types = { version = "0.0.16", path = "projects/crates/yydb-types" }
+yydb-formats = { version = "0.0.16", path = "projects/crates/yydb-formats" }
+yydb-execution = { version = "0.0.16", path = "projects/crates/yydb-execution" }
+yydb-udf = { version = "0.0.16", path = "projects/crates/yydb-udf" }
+yydb-query = { version = "0.0.16", path = "projects/crates/yydb-query" }
+yydb-storage = { version = "0.0.16", path = "projects/crates/yydb-storage" }
+yydb-engine = { version = "0.0.16", path = "projects/crates/yydb-engine" }
+yydb-protocol = { version = "0.0.16", path = "projects/crates/yydb-protocol" }
 # Facade
-yydb = { version = "0.0.15", path = "projects/crates/yydb" }
+yydb = { version = "0.0.16", path = "projects/crates/yydb" }
 # Transport (aggregated by the facade; never depend back on `yydb`)
 yydb-client = { path = "projects/crates/yydb-client" }
 yydb-server = { path = "projects/crates/yydb-server" }
