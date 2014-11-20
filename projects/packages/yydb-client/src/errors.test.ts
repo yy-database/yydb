@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { YydbError, YydbErrorCodes, isYydbError } from './errors.ts';
+import { YydbError, YydbClientErrorCodes, isYydbError } from './errors.ts';
 
 test('YydbError carries code, operation and retryable flag', () => {
-    const error = new YydbError(YydbErrorCodes.schemaInvalid, 'VOS schema: boom', {
+    const error = new YydbError('yydb.schema.invalid', 'VOS schema: boom', {
         operation: 'schemaEnsure',
     });
     assert.equal(error.name, 'YydbError');
@@ -15,7 +15,7 @@ test('YydbError carries code, operation and retryable flag', () => {
 
 test('YydbError respects explicit retryable option and keeps wrapped cause', () => {
     const cause = new Error('socket');
-    const error = new YydbError(YydbErrorCodes.clientTransportFailure, 'connect: transport failed', {
+    const error = new YydbError(YydbClientErrorCodes.clientTransportFailure, 'connect: transport failed', {
         operation: 'connect',
         retryable: true,
         cause,
