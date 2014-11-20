@@ -41,22 +41,24 @@ function writeJson(filePath, data) {
     fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
-function preparePackageJson(pkgDir, { workspaceClientToVersion = false } = {}) {
+/** Replace every `workspace:*` entry in a deps map with the publish version. */
+function rewriteWorkspaceDeps(deps) {
+    if (!deps) return;
+    for (const key of Object.keys(deps)) {
+        if (deps[key] === 'workspace:*') {
+            deps[key] = version;
+        }
+    }
+}
+
+function preparePackageJson(pkgDir) {
     const pkgPath = path.join(pkgDir, 'package.json');
     const j = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
     if (version) {
         j.version = version;
-        if (j.optionalDependencies) {
-            for (const key of Object.keys(j.optionalDependencies)) {
-                j.optionalDependencies[key] = version;
-            }
-        }
-    }
-    if (workspaceClientToVersion && j.dependencies?.['@yydb/yydb-client'] === 'workspace:*') {
-        j.dependencies['@yydb/yydb-client'] = version || j.version;
-    }
-    if (workspaceClientToVersion && j.dependencies?.['@yydb/yydb-unknown-wasm32'] === 'workspace:*') {
-        j.dependencies['@yydb/yydb-unknown-wasm32'] = version || j.version;
+        rewriteWorkspaceDeps(j.dependencies);
+        rewriteWorkspaceDeps(j.devDependencies);
+        rewriteWorkspaceDeps(j.optionalDependencies);
     }
     // Provenance: repository.url must match the publishing GitHub repo.
     // Keep monorepo `directory` so npm links to projects/packages/<pkg>.
@@ -93,8 +95,6 @@ for (const { pkg, fileName } of NATIVE_ARTIFACTS) {
 preparePackageJson(path.join(root, 'projects', 'packages', 'light-db'));
 preparePackageJson(path.join(root, 'projects', 'packages', 'yydb-client'));
 preparePackageJson(path.join(root, 'projects', 'packages', 'yydb-unknown-wasm32'));
-preparePackageJson(path.join(root, 'projects', 'packages', 'yydb'), {
-    workspaceClientToVersion: true,
-});
+preparePackageJson(path.join(root, 'projects', 'packages', 'yydb'));
 
 console.log('npm packages prepared', version || '(package.json versions)');
