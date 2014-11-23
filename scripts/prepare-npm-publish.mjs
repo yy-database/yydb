@@ -31,10 +31,7 @@ function walkFiles(dir, acc = []) {
 function findNativeBinding(fileName) {
     const files = walkFiles(path.join(root, '_engines'));
     const hit = files.find((f) => path.basename(f) === fileName);
-    if (!hit) {
-        throw new Error(`missing native binding ${fileName} under _engines/`);
-    }
-    return hit;
+    return hit || null;
 }
 
 function writeJson(filePath, data) {
@@ -82,8 +79,13 @@ for (const { pkg, fileName } of NATIVE_ARTIFACTS) {
     const destDir = path.join(root, 'projects', 'packages', pkg);
     const libDir = path.join(destDir, 'lib');
     const dest = path.join(libDir, fileName);
+    const src = findNativeBinding(fileName);
+    if (!src) {
+        console.log(`skip ${pkg}: no native binding ${fileName} under _engines/`);
+        continue;
+    }
     fs.mkdirSync(libDir, { recursive: true });
-    fs.copyFileSync(findNativeBinding(fileName), dest);
+    fs.copyFileSync(src, dest);
     try {
         fs.chmodSync(dest, 0o755);
     } catch {

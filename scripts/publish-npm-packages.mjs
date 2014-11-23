@@ -8,8 +8,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { NATIVE_ARTIFACTS } from './native-artifacts.mjs';
 
 const root = process.cwd();
+const NATIVE_PKG_NAMES = new Set(NATIVE_ARTIFACTS.map((a) => a.pkg));
 const dirs = (
     process.env.PUBLISH_PACKAGES || 'yydb-win32-x64 yydb-linux-x64 yydb-darwin-x64 yydb-darwin-arm64 light-db yydb-client yydb-unknown-wasm32 yydb'
 )
@@ -39,6 +41,16 @@ function publishDir(dirName) {
     if (existing === version) {
         console.log(`skip ${name}@${version} (already published)`);
         return 'skipped';
+    }
+
+    // Native platform packages need their .node binary; skip silently if missing.
+    if (NATIVE_PKG_NAMES.has(dirName)) {
+        const nativeInfo = NATIVE_ARTIFACTS.find((a) => a.pkg === dirName);
+        const nodeFile = nativeInfo && path.join(dir, 'lib', nativeInfo.fileName);
+        if (!nodeFile || !fs.existsSync(nodeFile)) {
+            console.log(`skip ${name}@${version} (native binary missing — builder likely timed out)`);
+            return 'skipped';
+        }
     }
 
     console.log(`publish ${name}@${version}`);
