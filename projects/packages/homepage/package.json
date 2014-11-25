@@ -1,6 +1,6 @@
 {
     "name": "@yydb/yydb-homepage",
-    "version": "0.0.16",
+    "version": "0.0.17",
     "description": "YYDB product homepage and Chinese user documentation",
     "license": "MPL-2.0",
     "private": true,
