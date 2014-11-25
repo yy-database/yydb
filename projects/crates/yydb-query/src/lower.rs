@@ -4,32 +4,43 @@ use vos::syntax::{VosBinaryOp, VosExpr, VosFieldInit, VosLiteral, VosProgram, Vo
 
 use yydb_types::{Error, Result};
 
-use super::ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, SortKey};
+use super::{
+    ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, SortKey},
+    params::ParameterDescriptor,
+};
 
 fn query_error(message: impl Into<String>) -> Error {
     Error::Schema { message: message.into() }
 }
 
 /// Lower a VOS program into an ordered physical op list.
-pub fn lower_program(program: &VosProgram) -> Result<Vec<QueryOp>> {
+///
+/// `parameters` is the ordered descriptor list produced by
+/// [`super::params::prepare`]; lowering converts `Name("__yydb_param_<idx>")`
+/// Identifier nodes directly into `BoundValue::Slot` references.
+pub fn lower_program(program: &VosProgram, parameters: &[ParameterDescriptor]) -> Result<Vec<QueryOp>> {
     let mut bindings: Vec<(String, VosExpr)> = Vec::new();
     for stmt in &program.statements {
         match stmt {
             VosStmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
-            VosStmt::Expr(expr) => return lower_exec_expr(expr, &bindings),
+            VosStmt::Expr(expr) => return lower_exec_expr(expr, &bindings, parameters),
         }
     }
     let Some(result) = &program.result
     else {
         return Err(query_error("query program has no result expression"));
     };
-    lower_exec_expr(result, &bindings)
+    lower_exec_expr(result, &bindings, parameters)
 }
 
-fn lower_exec_expr(expr: &VosExpr, bindings: &[(String, VosExpr)]) -> Result<Vec<QueryOp>> {
+fn lower_exec_expr(
+    expr: &VosExpr,
+    bindings: &[(String, VosExpr)],
+    parameters: &[ParameterDescriptor],
+) -> Result<Vec<QueryOp>> {
     let expr = expand_bindings(expr, bindings)?;
     let pipeline = split_collect(&expr)?;
-    let mut ops = lower_pipeline(&pipeline)?;
+    let mut ops = lower_pipeline(&pipeline, parameters)?;
     ops.push(QueryOp::Collect);
     Ok(ops)
 }
@@ -75,7 +86,7 @@ fn split_collect(expr: &VosExpr) -> Result<VosExpr> {
     }
 }
 
-fn lower_pipeline(expr: &VosExpr) -> Result<Vec<QueryOp>> {
+fn lower_pipeline(expr: &VosExpr, parameters: &[ParameterDescriptor]) -> Result<Vec<QueryOp>> {
     let mut methods: Vec<(&str, &[VosExpr])> = Vec::new();
     let mut cur = expr;
     loop {
@@ -94,7 +105,7 @@ fn lower_pipeline(expr: &VosExpr) -> Result<Vec<QueryOp>> {
             VosExpr::Name { name, .. } => {
                 let mut ops = vec![QueryOp::Scan { table: name.clone() }];
                 for (method, args) in methods.into_iter().rev() {
-                    push_method(&mut ops, method, args)?;
+                    push_method(&mut ops, method, args, parameters)?;
                 }
                 return Ok(ops);
             }
@@ -103,12 +114,17 @@ fn lower_pipeline(expr: &VosExpr) -> Result<Vec<QueryOp>> {
     }
 }
 
-fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[VosExpr]) -> Result<()> {
+fn push_method(
+    ops: &mut Vec<QueryOp>,
+    method: &str,
+    args: &[VosExpr],
+    parameters: &[ParameterDescriptor],
+) -> Result<()> {
     match method {
         "all" => Ok(()),
         "filter" | "where" => {
             let pred_expr = args.first().ok_or_else(|| query_error(format!("`.{method}` requires a predicate")))?;
-            ops.push(QueryOp::Filter { predicate: lower_predicate(pred_expr)? });
+            ops.push(QueryOp::Filter { predicate: lower_predicate(pred_expr, parameters)? });
             Ok(())
         }
         "map" => {
@@ -127,12 +143,12 @@ fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[VosExpr]) -> Result
             Ok(())
         }
         "skip" => {
-            let count = literal_count(args.first(), method)?;
+            let count = bound_count(args.first(), method, parameters)?;
             ops.push(QueryOp::Skip { count });
             Ok(())
         }
         "take" => {
-            let count = literal_count(args.first(), method)?;
+            let count = bound_count(args.first(), method, parameters)?;
             ops.push(QueryOp::Take { count });
             Ok(())
         }
@@ -143,26 +159,30 @@ fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[VosExpr]) -> Result
     }
 }
 
-fn lower_predicate(expr: &VosExpr) -> Result<Pred> {
+fn lower_predicate(expr: &VosExpr, parameters: &[ParameterDescriptor]) -> Result<Pred> {
     match expr {
         VosExpr::Lambda(lambda) => {
             let param = lambda.params.first().map(String::as_str);
-            lower_pred_body(lambda.body.as_ref(), param)
+            lower_pred_body(lambda.body.as_ref(), param, parameters)
         }
-        other => lower_pred_body(other, None),
+        other => lower_pred_body(other, None, parameters),
     }
 }
 
-fn lower_pred_body(expr: &VosExpr, param: Option<&str>) -> Result<Pred> {
+fn lower_pred_body(
+    expr: &VosExpr,
+    param: Option<&str>,
+    parameters: &[ParameterDescriptor],
+) -> Result<Pred> {
     use yydb_types::Value;
     match expr {
         VosExpr::Literal(VosLiteral::Bool(true)) => Ok(Pred::True),
         VosExpr::Literal(VosLiteral::Bool(false)) => Ok(Pred::False),
         VosExpr::Binary { op: VosBinaryOp::And, left, right, .. } => {
-            Ok(Pred::And(Box::new(lower_pred_body(left, param)?), Box::new(lower_pred_body(right, param)?)))
+            Ok(Pred::And(Box::new(lower_pred_body(left, param, parameters)?), Box::new(lower_pred_body(right, param, parameters)?)))
         }
         VosExpr::Binary { op: VosBinaryOp::Or, left, right, .. } => {
-            Ok(Pred::Or(Box::new(lower_pred_body(left, param)?), Box::new(lower_pred_body(right, param)?)))
+            Ok(Pred::Or(Box::new(lower_pred_body(left, param, parameters)?), Box::new(lower_pred_body(right, param, parameters)?)))
         }
         VosExpr::Binary { op, left, right, .. } => {
             let path = lower_field_path(left.as_ref(), param)?;
@@ -180,9 +200,10 @@ fn lower_pred_body(expr: &VosExpr, param: Option<&str>) -> Result<Pred> {
                 VosExpr::Literal(VosLiteral::Float(_)) => {
                     return Err(query_error("Phase 1 does not support float literals in filters"));
                 }
+                VosExpr::Name { name, .. } => name_to_slot(name, parameters)?,
                 _ => {
                     return Err(query_error(
-                        "Phase 1 filters require a literal right-hand side (parameters become supported after PreparedStatement lands)",
+                        "Phase 1 filters require a literal or parameter right-hand side",
                     ));
                 }
             };
@@ -210,6 +231,21 @@ fn lower_pred_body(expr: &VosExpr, param: Option<&str>) -> Result<Pred> {
             }
             Ok(Pred::FieldBool { path, value: BoundValue::Literal(Value::Bool(true)) })
         }
+    }
+}
+
+/// Convert a `Name("__yydb_param_<name>")` Identifier (emitted by our
+/// scan_and_rewrite preprocessor) into a proper `BoundValue::Slot`.
+fn name_to_slot(name: &str, parameters: &[ParameterDescriptor]) -> Result<BoundValue> {
+    const PREFIX: &str = "__yydb_param_";
+    if let Some(param_name) = name.strip_prefix(PREFIX) {
+        let param = parameters
+            .iter()
+            .find(|p| p.name == param_name)
+            .ok_or_else(|| query_error(format!("undeclared parameter `{param_name}` in lowered source")))?;
+        Ok(BoundValue::Slot { index: param.index, expected_ty: param.slot_ty })
+    } else {
+        Err(query_error(format!("expected rewritten parameter Name, got `{name}`")))
     }
 }
 
@@ -293,7 +329,11 @@ fn lower_project_expr(expr: &VosExpr, param: Option<&str>) -> Result<ProjectExpr
     }
 }
 
-fn literal_count(expr: Option<&VosExpr>, method: &str) -> Result<BoundValue> {
+fn bound_count(
+    expr: Option<&VosExpr>,
+    method: &str,
+    parameters: &[ParameterDescriptor],
+) -> Result<BoundValue> {
     use yydb_types::Value;
     let Some(expr) = expr
     else {
@@ -304,9 +344,9 @@ fn literal_count(expr: Option<&VosExpr>, method: &str) -> Result<BoundValue> {
             let n: i64 = t.parse().map_err(|_| query_error(format!("invalid `{method}` count")))?;
             Ok(BoundValue::Literal(Value::I64(n)))
         }
-        // String literal is allowed as a placeholder slot — rewrite_placeholders_in_ops
-        // in prepare() converts these to BoundValue::Slot.
-        VosExpr::Literal(VosLiteral::String(s)) => Ok(BoundValue::Literal(Value::Text(s.clone()))),
-        _ => Err(query_error(format!("`.{method}` count must be an integer literal"))),
+        // A rewritten parameter Identifier `__yydb_param_N`.
+        VosExpr::Name { name, .. } => name_to_slot(name, parameters),
+        _ => Err(query_error(format!("`.{method}` count must be an integer literal or parameter"))),
     }
 }
+

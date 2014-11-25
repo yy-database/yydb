@@ -19,7 +19,7 @@ pub fn execute(
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Vec<QueryRow>> {
     let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
-    let ops = lower::lower_program(&program)?;
+    let ops = lower::lower_program(&program, &[])?;
     execute_ops(&ops, contract, records, &[])
 }
 
