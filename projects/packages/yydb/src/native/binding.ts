@@ -46,6 +46,10 @@ export interface NativeDatabase {
     queryVos(source: string): string;
     /** Execute a VOS write program. */
     executeVosWrite(source: string): void;
+    /** Prepare a VOS read pipeline into a reusable plan; returns a native Statement handle. */
+    prepare(source: string): NativeStatement;
+    /** Execute a previously prepared statement with optional JSON parameters. */
+    queryPrepared(statement: NativeStatement, paramsJson?: string | null): string;
     /** Publish a new schema version, optionally with rename map. */
     migrateSchema(document: string, renamesJson?: string | null): void;
     /** Checkpoint + copy self-contained `.yydb` main file (no WAL sidecars). */
@@ -67,6 +71,18 @@ export interface NativeDatabase {
         fingerprint: Uint8Array,
     ): void;
     callScalar(name: string, version: number, argsJson: string): string;
+}
+
+/** A prepared VOS query plan handle exposed by the native binding. */
+export interface NativeStatement {
+    /** Fingerprint-prefixed unique id for this prepared statement. */
+    statementId(): string;
+    /** Parameter descriptors JSON — the `parameters` field from a `PreparedStatement`. */
+    parametersJson(): string;
+    /** Full statement metadata as JSON (statementId, queryKind, parameters, readSet, writeSet, sourceFingerprint, source). */
+    info(): string;
+    /** Release this statement's plan from the registry; returns true when actually removed. */
+    close(): boolean;
 }
 
 /** One remote `yydb serve` handle exposed by the native binding. */

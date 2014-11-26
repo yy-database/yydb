@@ -12,7 +12,7 @@ import {
     type MicroHandle,
     MicroSessionRegistry,
 } from '../shared/micro.js';
-import { loadNative } from '../native/binding.js';
+import { loadNative, type NativeStatement as NativeStatementHandle } from '../native/binding.js';
 import type { UdfScalarDescriptor } from '../shared/udf-types.js';
 import { YydbError } from '../shared/errors.js';
 
@@ -93,6 +93,104 @@ export interface DoctorReport {
 export interface CompactReport {
     checkpointed: boolean;
     orphans_reclaimed: number;
+}
+
+/** Declared type for a prepared statement parameter slot. */
+export type SlotType = 'any' | 'bool' | 'i64' | 'text' | 'null';
+
+/** One named parameter descriptor on a {@link Statement}. */
+export interface ParameterDescriptor {
+    /** Canonical parameter name (no leading `$`). */
+    name: string;
+    /** Positional slot index within the bound-value slice (0-based). */
+    index: number;
+    /** Declared slot type; narrowed from surrounding context when possible. */
+    slotTy: SlotType;
+    /** Number of times this parameter appears in the source. */
+    usageCount: number;
+}
+
+/** Whether a prepared statement is a read pipeline or a write program. */
+export type QueryKind = 'Read' | 'Write';
+
+/** Metadata about a prepared statement — useful for logging and cache keys. */
+export interface StatementInfo {
+    statementId: string;
+    queryKind: QueryKind;
+    parameters: ParameterDescriptor[];
+    readSet: string[];
+    writeSet: string[];
+    sourceFingerprint: string;
+    source: string;
+}
+
+/**
+ * A pre-parsed, pre-lowered VOS query plan.
+ *
+ * Created by {@link Database.prepare}. The actual lowered op tree lives on
+ * the native side in a thread-local registry keyed by `statementId`; this
+ * class is a thin JS handle. Bind parameters and re-execute via
+ * {@link Statement.execute} without re-parsing or re-lowering the source.
+ *
+ * ```ts
+ * const stmt = await db.prepare('User.all().take($limit).collect()');
+ * const rows = await stmt.execute({ limit: 100 });
+ * // re-execute with different bind
+ * const rows2 = await stmt.execute({ limit: 50 });
+ * // release when done
+ * stmt.close();
+ * ```
+ */
+export class Statement {
+    private closed = false;
+
+    constructor(
+        private readonly native: NativeStatementHandle,
+        private readonly db: unknown,
+    ) {}
+
+    /** The fingerprint-prefixed unique id for this statement. */
+    get statementId(): string { return this.native.statementId(); }
+
+    /** Parameter descriptors — empty array when the statement takes no parameters. */
+    get parameters(): ParameterDescriptor[] {
+        return JSON.parse(this.native.parametersJson()) as ParameterDescriptor[];
+    }
+
+    /** Full statement metadata. */
+    get info(): StatementInfo {
+        return JSON.parse(this.native.info()) as StatementInfo;
+    }
+
+    /** Whether this statement has been closed and can no longer execute. */
+    get isClosed(): boolean { return this.closed; }
+
+    /**
+     * Execute this prepared statement with optional named parameter bindings.
+     *
+     * Missing parameters, extraneous parameters or mistyped parameters raise
+     * `YydbError` with code `yydb.query.bind`.
+     *
+     * @param params Named parameter values — keys match the parameter names
+     * in the VOS source (`$name` → `{ name: value }`). Omit when the statement
+     * takes no parameters.
+     */
+    async execute<T = Record<string, unknown>>(params?: Record<string, unknown>): Promise<T[]> {
+        if (this.closed) {
+            throw new YydbError('yydb.statement.closed', 'statement has been closed');
+        }
+        const paramsJson = params !== undefined && params !== null ? JSON.stringify(params) : null;
+        const rowsJson = (this.db as any).queryPrepared(this.native, paramsJson);
+        return JSON.parse(rowsJson) as T[];
+    }
+
+    /** Release this statement's plan from the native registry. */
+    close(): void {
+        if (!this.closed) {
+            this.native.close();
+            this.closed = true;
+        }
+    }
 }
 
 /**
@@ -316,6 +414,29 @@ export class Database {
             }
             throw YydbError.fromDiagnosticJson(err instanceof Error ? err.message : String(err)) ?? err;
         }
+    }
+
+    /**
+     * Prepare a VOS read pipeline into a reusable query plan.
+     *
+     * Returns a {@link Statement} handle. The actual lowered op tree lives
+     * on the native side in a thread-local registry — you can call
+     * `statement.execute({ paramName: value })` cheaply multiple times
+     * without re-parsing or re-lowering the source.
+     *
+     * Prepare requires no schema binding; plan building is a pure parse +
+     * lower pass. Execute still needs `ensureSchema` first.
+     *
+     * ```ts
+     * const stmt = await db.prepare('User.all().take($limit).collect()');
+     * const rows = await stmt.execute({ limit: 100 });
+     * const rows2 = await stmt.execute({ limit: 50 });
+     * stmt.close();
+     * ```
+     */
+    async prepare(source: string): Promise<Statement> {
+        const nativeStmt = this.native.prepare(source);
+        return new Statement(nativeStmt, this.native);
     }
 
     /** Execute a VOS read pipeline and return typed rows. */
