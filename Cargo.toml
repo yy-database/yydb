@@ -33,6 +33,7 @@ blake3 = "1"
 sha1 = "0.11.0"
 base64 = "0.23.1"
 uuid = { version = "1", features = ["serde", "v4"] }
+serde = "1"
 serde_json = "1"
 windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Storage_FileSystem", "Win32_System_IO"] }
 napi = { version = "3.14.2", default-features = false, features = ["napi4"] }

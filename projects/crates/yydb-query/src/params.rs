@@ -23,7 +23,7 @@ use super::{
 };
 
 /// One named parameter extracted during prepare.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParameterDescriptor {
     /// Canonical parameter name (no leading `$`).
     pub name: String,
@@ -37,7 +37,7 @@ pub struct ParameterDescriptor {
 }
 
 /// Read / write query kind — populated after lowering when ops are inspected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum QueryKind {
     /// Read pipeline ending in `.collect()`.
     Read,
@@ -46,12 +46,17 @@ pub enum QueryKind {
 }
 
 /// A pre-parsed, pre-lowered query plan with known parameter slots.
-#[derive(Debug, Clone)]
+///
+/// `ops` carries the engine-internal lowered plan (not serialized across
+/// boundaries); the public surface exposes only parameter descriptors,
+/// fingerprints and kind for introspection and wire transmission.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PreparedStatement {
     /// Unique synthetic ID for this prepared statement (monotonic within a
     /// connection, stable fingerprint otherwise).
     pub statement_id: String,
     /// Lowered ops where every parameter occurrence is a `BoundValue::Slot`.
+    #[serde(skip)]
     pub ops: Vec<QueryOp>,
     /// Whether this statement is a read pipeline or a write program.
     pub query_kind: QueryKind,

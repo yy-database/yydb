@@ -12,12 +12,82 @@
 
 #![deny(missing_docs)]
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use napi::bindgen_prelude::{Buffer, Result};
 use napi_derive::napi;
 
 fn reason(error: yydb::Error) -> napi::Error {
     let json = serde_json::to_string(&error.to_json()).unwrap_or_else(|_| error.to_string());
     napi::Error::from_reason(json)
+}
+
+// ─── Prepared statement registry ──────────────────────────────────────────
+
+thread_local! {
+    /// Statement registry — one entry per `Database.prepare()` call in this
+    /// thread. Keyed by `statement_id` (FNV-1a fingerprint prefix); holding
+    /// the full `PreparedStatement` with lowered op tree for execution.
+    static STMT_REG: std::cell::RefCell<BTreeMap<String, yydb::query::PreparedStatement>> =
+        const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+fn register_stmt(stmt: yydb::query::PreparedStatement) -> String {
+    let id = stmt.statement_id.clone();
+    STMT_REG.with(|r| { r.borrow_mut().insert(id.clone(), stmt); });
+    id
+}
+
+fn take_stmt(id: &str) -> Option<yydb::query::PreparedStatement> {
+    STMT_REG.with(|r| r.borrow_mut().remove(id))
+}
+
+fn with_stmt<F, R>(id: &str, f: F) -> Result<R>
+where
+    F: FnOnce(&yydb::query::PreparedStatement) -> Result<R>,
+{
+    STMT_REG.with(|r| {
+        let borrow = r.borrow();
+        let stmt = borrow
+            .get(id)
+            .ok_or_else(|| napi::Error::from_reason(format!("statement `{id}` has been closed or never prepared")))?;
+        f(stmt)
+    })
+}
+
+fn parse_params_json(json: &str) -> Result<BTreeMap<String, yydb::Value>> {
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| napi::Error::from_reason(format!("invalid parameters JSON: {e}")))?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| napi::Error::from_reason("parameters must be a JSON object {name: value, ...}"))?;
+    let mut map = BTreeMap::new();
+    for (key, val) in obj {
+        let yydb_val = json_to_value_ref(val)?;
+        map.insert(key.clone(), yydb_val);
+    }
+    Ok(map)
+}
+
+fn json_to_value_ref(v: &serde_json::Value) -> Result<yydb::Value> {
+    use yydb::Value;
+    Ok(match v {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::I64(i)
+            }
+            else if let Some(f) = n.as_f64() {
+                Value::F64(f)
+            }
+            else {
+                return Err(napi::Error::from_reason(format!("unsupported JSON number: {n}")));
+            }
+        }
+        serde_json::Value::String(s) => Value::Text(s.clone()),
+        _ => return Err(napi::Error::from_reason(format!("unsupported JSON value type: {v:?}"))),
+    })
 }
 
 /// Embedded `yydb` engine version string.
@@ -231,6 +301,50 @@ impl Database {
     #[napi]
     pub fn execute_vos_write(&self, source: String) -> Result<()> {
         self.connection.execute_vos_write(&source).map_err(reason)
+    }
+
+    /// Prepare a VOS read pipeline into a reusable query plan.
+    ///
+    /// The returned [`Statement`] holds the `statement_id`; the lowered op
+    /// tree, parameter descriptors and source fingerprint stay in a
+    /// thread-local registry keyed by that id. Callers re-use the plan via
+    /// [`Self::query_prepared`] or drop it explicitly with
+    /// [`Statement::close`].
+    ///
+    /// Requires no schema binding — plan building is a pure parse + lower pass.
+    #[napi]
+    pub fn prepare(&self, source: String) -> Result<Statement> {
+        let stmt = self.connection.prepare_vos(&source).map_err(reason)?;
+        let id = register_stmt(stmt);
+        Ok(Statement { statement_id: id })
+    }
+
+    /// Execute a previously prepared statement with optional named parameter
+    /// bindings.
+    ///
+    /// `params_json` is `{ "paramName": <value>, ... }` or `null` when the
+    /// statement takes no parameters. Missing / extraneous / mistyped
+    /// parameters surface as `yydb.query.bind`.
+    #[napi]
+    pub fn query_prepared(&self, statement: &Statement, params_json: Option<String>) -> Result<String> {
+        let named = match params_json {
+            Some(json) if !json.trim().is_empty() && json.trim() != "null" => parse_params_json(&json)?,
+            _ => BTreeMap::new(),
+        };
+        let rows = with_stmt(&statement.statement_id, |stmt| {
+            self.connection.query_prepared(stmt, &named).map_err(reason)
+        })?;
+        let mapped: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|row| {
+                let mut map = serde_json::Map::new();
+                for (k, v) in row {
+                    map.insert(k, value_to_json(v));
+                }
+                serde_json::Value::Object(map)
+            })
+            .collect();
+        serde_json::to_string(&mapped).map_err(|e| napi::Error::from_reason(format!("encode rows: {e}")))
     }
 
     /// Publish a new schema version with an optional rename map.
@@ -483,6 +597,59 @@ impl Client {
     #[napi]
     pub fn close(&mut self) {
         self.closed = true;
+    }
+}
+
+/// Handle to a prepared VOS query plan.
+///
+/// Created by [`Database::prepare`]. The actual lowered op tree lives in a
+/// thread-local registry keyed by [`Self::statement_id`]; this struct is a
+/// lightweight id handle for the JS side. Call [`Self::close`] (or rely on
+/// GC-collection after the JS side drops the handle) to release the plan.
+#[napi]
+pub struct Statement {
+    statement_id: String,
+}
+
+#[napi]
+impl Statement {
+    /// The fingerprint-prefixed unique id for this statement.
+    #[napi]
+    pub fn statement_id(&self) -> String {
+        self.statement_id.clone()
+    }
+
+    /// Parameter descriptors as JSON — the same schema as the
+    /// `parameters` field on a `PreparedStatement`. Empty array when the
+    /// statement takes no parameters.
+    #[napi]
+    pub fn parameters_json(&self) -> Result<String> {
+        with_stmt(&self.statement_id, |stmt| {
+            serde_json::to_string(&stmt.parameters)
+                .map_err(|e| napi::Error::from_reason(format!("encode parameters: {e}")))
+        })
+    }
+
+    /// Full statement metadata as JSON — `statement_id`, `query_kind`,
+    /// `parameters`, `read_set`, `write_set`, `source_fingerprint` and
+    /// `source`. Useful for debug logging and cache-key construction.
+    #[napi]
+    pub fn info(&self) -> Result<String> {
+        with_stmt(&self.statement_id, |stmt| {
+            serde_json::to_value(stmt)
+                .map_err(|e| napi::Error::from_reason(format!("encode statement info: {e}")))
+                .and_then(|val| {
+                    serde_json::to_string(&val)
+                        .map_err(|e| napi::Error::from_reason(format!("encode statement info string: {e}")))
+                })
+        })
+    }
+
+    /// Release this statement's plan from the thread-local registry.
+    /// Subsequent calls through the handle will fail. Idempotent.
+    #[napi]
+    pub fn close(&self) -> bool {
+        take_stmt(&self.statement_id).is_some()
     }
 }
 

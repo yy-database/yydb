@@ -34,7 +34,7 @@ pub enum BoundValue {
 
 /// Declared type for a parameter slot. `Any` means the caller-supplied value
 /// is accepted as-is at bind time with no compile-time type constraint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SlotTy {
     Any,
     Bool,
