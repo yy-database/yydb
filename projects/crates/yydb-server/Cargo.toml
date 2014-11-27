@@ -18,7 +18,9 @@ path = "src/lib.rs"
 [dependencies]
 base64 = { workspace = true }
 sha1 = { workspace = true }
+serde_json = { workspace = true }
 yydb-engine = { workspace = true }
 yydb-protocol = { workspace = true }
+yydb-query = { workspace = true }
 yydb-types = { workspace = true }
 yydb-udf = { workspace = true }

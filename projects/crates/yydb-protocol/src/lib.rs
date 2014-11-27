@@ -69,6 +69,18 @@ pub enum MessageType {
     ScalarCall,
     /// Scalar UDF result (S→C).
     ScalarCallOk,
+    /// Client authenticates after Hello (token or challenge-response).
+    Authenticate,
+    /// Server authenticate reply (body contains opaque session token for reconnection).
+    AuthenticateOk,
+    /// Client prepares a VOS query source into a reusable plan.
+    Prepare,
+    /// Prepare reply (body: statement_id string).
+    PrepareOk,
+    /// Execute a previously prepared statement with optional bound parameters.
+    ExecutePrepared,
+    /// ExecutePrepared reply (body: JSON rows, same shape as KvGetOk value).
+    ExecutePreparedOk,
     /// Error reply.
     Error,
     /// Unrecognized type (still framed so the peer can answer with Error).
@@ -97,6 +109,12 @@ impl MessageType {
             16 => Self::MicroHostInvokeOk,
             17 => Self::ScalarCall,
             18 => Self::ScalarCallOk,
+            19 => Self::Authenticate,
+            20 => Self::AuthenticateOk,
+            21 => Self::Prepare,
+            22 => Self::PrepareOk,
+            23 => Self::ExecutePrepared,
+            24 => Self::ExecutePreparedOk,
             255 => Self::Error,
             other => Self::Unknown(other),
         }
@@ -123,6 +141,12 @@ impl MessageType {
             Self::MicroHostInvokeOk => 16,
             Self::ScalarCall => 17,
             Self::ScalarCallOk => 18,
+            Self::Authenticate => 19,
+            Self::AuthenticateOk => 20,
+            Self::Prepare => 21,
+            Self::PrepareOk => 22,
+            Self::ExecutePrepared => 23,
+            Self::ExecutePreparedOk => 24,
             Self::Error => 255,
             Self::Unknown(code) => code,
         }
@@ -662,6 +686,110 @@ pub fn decode_kv_get_ok(body: &[u8]) -> Result<Option<Vec<u8>>> {
     let mut offset = 1;
     let val_len = read_u32(body, &mut offset)?;
     Ok(Some(read_bytes(body, &mut offset, val_len)?.to_vec()))
+}
+
+// ─── Authenticate ─────────────────────────────────────────────────────────
+
+/// Encode an `Authenticate` request body: raw bearer token (opaque).
+pub fn encode_authenticate(token: &str) -> Vec<u8> {
+    let mut body = Vec::new();
+    push_bytes(&mut body, token.as_bytes());
+    body
+}
+
+/// Decode an `Authenticate` request body.
+pub fn decode_authenticate(body: &[u8]) -> Result<String> {
+    let mut offset = 0;
+    let len = read_u32(body, &mut offset)?;
+    let bytes = read_bytes(body, &mut offset, len)?;
+    std::str::from_utf8(bytes).map_err(|_| Error::Corrupt("authenticate token is not utf-8")).map(|s| s.to_owned())
+}
+
+/// Encode an `AuthenticateOk` reply body: session token for future connections.
+pub fn encode_authenticate_ok(session_token: &str) -> Vec<u8> {
+    let mut body = Vec::new();
+    push_bytes(&mut body, session_token.as_bytes());
+    body
+}
+
+// ─── Prepare / ExecutePrepared ────────────────────────────────────────────
+
+/// Encode a `Prepare` request body: raw VOS source.
+pub fn encode_prepare(source: &str) -> Vec<u8> {
+    let mut body = Vec::new();
+    push_bytes(&mut body, source.as_bytes());
+    body
+}
+
+/// Decode a `Prepare` request body.
+pub fn decode_prepare(body: &[u8]) -> Result<String> {
+    let mut offset = 0;
+    let len = read_u32(body, &mut offset)?;
+    let bytes = read_bytes(body, &mut offset, len)?;
+    std::str::from_utf8(bytes).map_err(|_| Error::Corrupt("prepare source is not utf-8")).map(|s| s.to_owned())
+}
+
+/// Encode a `PrepareOk` reply body: statement_id string.
+pub fn encode_prepare_ok(statement_id: &str) -> Vec<u8> {
+    let mut body = Vec::new();
+    push_bytes(&mut body, statement_id.as_bytes());
+    body
+}
+
+/// Decode a `PrepareOk` reply body.
+pub fn decode_prepare_ok(body: &[u8]) -> Result<String> {
+    let mut offset = 0;
+    let len = read_u32(body, &mut offset)?;
+    let bytes = read_bytes(body, &mut offset, len)?;
+    std::str::from_utf8(bytes).map_err(|_| Error::Corrupt("prepare ok statement_id is not utf-8")).map(|s| s.to_owned())
+}
+
+/// Encode an `ExecutePrepared` request body: statement_id + optional JSON parameters.
+///
+/// `params_json` may be `None` or empty string when the statement takes no parameters.
+pub fn encode_execute_prepared(statement_id: &str, params_json: Option<&str>) -> Vec<u8> {
+    let mut body = Vec::new();
+    push_bytes(&mut body, statement_id.as_bytes());
+    match params_json {
+        Some(p) if !p.is_empty() => push_bytes(&mut body, p.as_bytes()),
+        _ => push_u32(&mut body, 0),
+    }
+    body
+}
+
+/// Decode an `ExecutePrepared` request body → (statement_id, optional JSON params).
+pub fn decode_execute_prepared(body: &[u8]) -> Result<(String, Option<String>)> {
+    let mut offset = 0;
+    let id_len = read_u32(body, &mut offset)?;
+    let id_bytes = read_bytes(body, &mut offset, id_len)?;
+    let statement_id =
+        std::str::from_utf8(id_bytes).map_err(|_| Error::Corrupt("execute prepared statement_id is not utf-8"))?.to_owned();
+    let params_len = read_u32(body, &mut offset)?;
+    let params = if params_len > 0 {
+        let bytes = read_bytes(body, &mut offset, params_len)?;
+        let text = std::str::from_utf8(bytes)
+            .map_err(|_| Error::Corrupt("execute prepared params is not utf-8"))?
+            .to_owned();
+        Some(text)
+    } else {
+        None
+    };
+    Ok((statement_id, params))
+}
+
+/// Encode an `ExecutePreparedOk` reply body — raw JSON rows.
+pub fn encode_execute_prepared_ok(rows_json: &str) -> Vec<u8> {
+    let mut body = Vec::new();
+    push_bytes(&mut body, rows_json.as_bytes());
+    body
+}
+
+/// Decode an `ExecutePreparedOk` reply body.
+pub fn decode_execute_prepared_ok(body: &[u8]) -> Result<String> {
+    let mut offset = 0;
+    let len = read_u32(body, &mut offset)?;
+    let bytes = read_bytes(body, &mut offset, len)?;
+    std::str::from_utf8(bytes).map_err(|_| Error::Corrupt("execute prepared ok rows is not utf-8")).map(|s| s.to_owned())
 }
 
 /// One structured `Error` frame body: code plus human-readable message.

@@ -13,5 +13,5 @@ pub mod host_wire;
 
 mod serve;
 
-pub use dispatch::{dispatch, is_loopback_host};
+pub use dispatch::{PreparedPlan, SessionState, dispatch, is_loopback_host};
 pub use serve::{assert_bind_allowed, run_serve};

@@ -163,6 +163,12 @@ pub enum Error {
     },
     /// Session handle is closed and can no longer serve operations.
     SessionClosed,
+    /// Wire authentication failed — invalid token, token missing, or an
+    /// unauthenticated connection attempting a non-handshake frame.
+    Auth {
+        /// Human-readable detail (token mismatch, handshake required, …).
+        message: String,
+    },
     /// Failure reported by a remote YY wire peer (code plus peer message).
     Remote {
         /// Stable code the peer reported (for example `yydb.schema.invalid`).
@@ -208,6 +214,7 @@ impl fmt::Display for Error {
                 write!(f, "quota exceeded for namespace {namespace}")
             }
             Self::SessionClosed => write!(f, "session closed"),
+            Self::Auth { message } => write!(f, "auth: {message}"),
             Self::Remote { code, message } => write!(f, "{code}: {message}"),
         }
     }
@@ -241,6 +248,7 @@ impl Error {
             Self::UdfVersionMismatch { .. } => "yydb.udf.version_mismatch",
             Self::QuotaExceeded { .. } => "yydb.quota.exceeded",
             Self::SessionClosed => "yydb.session.closed",
+            Self::Auth { .. } => "yydb.auth",
             Self::Remote { code, .. } => code,
         }
     }
@@ -248,8 +256,8 @@ impl Error {
     /// High-level operation category for diagnostic catalog routing.
     ///
     /// One of: `"io"` / `"schema"` / `"udf"` / `"object"` / `"cas"` /
-    /// `"lease"` / `"fencing"` / `"protocol"` / `"session"` / `"quota"` /
-    /// `"unsupported"` / `"remote"`. Hosts use this to pick the right section
+    /// `"lease"` / `"fencing"` / `"protocol"` / `"session"` / `"auth"` /
+    /// `"quota"` / `"unsupported"` / `"remote"`. Hosts use this to pick the right section
     /// of a locale catalog.
     pub fn operation(&self) -> &'static str {
         match self {
@@ -267,6 +275,7 @@ impl Error {
             Self::LeaseExpired { .. } => "lease",
             Self::QuotaExceeded { .. } => "quota",
             Self::SessionClosed => "session",
+            Self::Auth { .. } => "auth",
             Self::Remote { .. } => "remote",
         }
     }
@@ -281,6 +290,7 @@ impl Error {
             Self::Io(_) | Self::Corrupt(_) | Self::Unsupported(_) | Self::SessionClosed => {
                 return None;
             }
+            Self::Auth { message } => vec![("detail", message.clone())],
             Self::SchemaConflict { expected, found } => vec![("expected", expected.to_string()), ("found", found.to_string())],
             Self::UdfNotFound { name } | Self::Udf { name, .. } => {
                 vec![("name", name.clone())]

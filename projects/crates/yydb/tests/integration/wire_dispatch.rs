@@ -5,8 +5,31 @@ use yydb::{
         decode_micro_host_invoke_ok, decode_scalar_call_ok, encode_kv_get, encode_micro_host_invoke,
         encode_micro_host_invoke_ok, encode_micro_register, encode_scalar_call, encode_schema_ensure,
     },
-    server::{dispatch, is_loopback_host},
+    server::{SessionState, dispatch, is_loopback_host},
 };
+
+/// Helper: create a fresh session state and pre-authenticate it so the test
+/// can exercise any dispatch path beyond Hello/Authenticate.
+fn authed_state() -> SessionState {
+    let state = SessionState::new(1);
+    *state.authenticated.lock().unwrap() = true;
+    state
+}
+
+/// Helper: run Hello → Authenticate → one frame, return the last response.
+fn dispatch_with_handshake(conn: &Connection, request: &Frame) -> Frame {
+    let state = SessionState::new(1);
+    // dispatch Hello first
+    let _hello_ok = dispatch(conn, &state, &Frame::new(MessageType::Hello, 1, Vec::new()));
+    // dispatch Authenticate
+    let _auth_ok = dispatch(conn, &state, &Frame::new(
+        MessageType::Authenticate,
+        2,
+        yydb_protocol::encode_authenticate("yydb-phase0-default-token"),
+    ));
+    // now dispatch the real request
+    dispatch(conn, &state, request)
+}
 
 #[test]
 fn roundtrip_frame() {
@@ -28,7 +51,10 @@ fn dispatch_hello_info_kv() {
     conn.ensure_schema("table T { @@id: uuid }").unwrap();
     conn.put("a", b"b").unwrap();
 
-    let hello = dispatch(&conn, &Frame::new(MessageType::Hello, 1, Vec::new()));
+    let state = SessionState::new(1);
+
+    // Hello is allowed pre-auth
+    let hello = dispatch(&conn, &state, &Frame::new(MessageType::Hello, 1, Vec::new()));
     assert_eq!(hello.msg_type, MessageType::HelloOk);
     let body = std::str::from_utf8(&hello.body).expect("hello body utf8");
     assert!(
@@ -36,12 +62,15 @@ fn dispatch_hello_info_kv() {
         "hello ok body should be a semver string, got {body:?}"
     );
 
-    let info = dispatch(&conn, &Frame::new(MessageType::Info, 2, Vec::new()));
+    // After auth, Info and KvGet work
+    *state.authenticated.lock().unwrap() = true;
+
+    let info = dispatch(&conn, &state, &Frame::new(MessageType::Info, 2, Vec::new()));
     assert_eq!(info.msg_type, MessageType::InfoOk);
     let text = String::from_utf8(info.body).unwrap();
     assert!(text.contains("records=1"));
 
-    let get = dispatch(&conn, &Frame::new(MessageType::KvGet, 3, encode_kv_get("a")));
+    let get = dispatch(&conn, &state, &Frame::new(MessageType::KvGet, 3, encode_kv_get("a")));
     assert_eq!(get.msg_type, MessageType::KvGetOk);
     assert_eq!(decode_kv_get_ok(&get.body).unwrap().as_deref(), Some(b"b".as_slice()));
 }
@@ -62,7 +91,7 @@ fn dispatch_micro_register_records_session_metadata() {
         [2u8; 32],
     )
     .unwrap();
-    let response = dispatch(&conn, &Frame::new(MessageType::MicroRegister, 4, encode_micro_register(&definition)));
+    let response = dispatch(&conn, &authed_state(), &Frame::new(MessageType::MicroRegister, 4, encode_micro_register(&definition)));
     assert_eq!(response.msg_type, MessageType::MicroRegisterOk);
     assert!(conn.list_scalars().contains(&"text.normalize".to_owned()));
 }
@@ -88,7 +117,7 @@ fn dispatch_scalar_call_routes_through_registry() {
     })
     .unwrap();
     let body = encode_scalar_call("double", 1, &[Value::I64(21)]).unwrap();
-    let response = dispatch(&conn, &Frame::new(MessageType::ScalarCall, 5, body));
+    let response = dispatch(&conn, &authed_state(), &Frame::new(MessageType::ScalarCall, 5, body));
     assert_eq!(response.msg_type, MessageType::ScalarCallOk);
     assert_eq!(decode_scalar_call_ok(&response.body).unwrap(), Value::I64(42));
 }
@@ -105,7 +134,7 @@ fn loopback_host_detection() {
 #[test]
 fn error_frame_carries_structured_code_and_message() {
     let conn = Connection::open_in_memory().unwrap();
-    let response = dispatch(&conn, &Frame::new(MessageType::SchemaEnsure, 6, encode_schema_ensure(1, "table {")));
+    let response = dispatch(&conn, &authed_state(), &Frame::new(MessageType::SchemaEnsure, 6, encode_schema_ensure(1, "table {")));
     assert_eq!(response.msg_type, MessageType::Error);
     let error = decode_error(&response.body).expect("structured error body");
     assert_eq!(error.code, "yydb.schema.invalid");
@@ -116,11 +145,11 @@ fn error_frame_carries_structured_code_and_message() {
 fn error_frame_codes_cover_protocol_and_corrupt_paths() {
     let conn = Connection::open_in_memory().unwrap();
 
-    let unknown = dispatch(&conn, &Frame::new(MessageType::Unknown(9999), 7, Vec::new()));
+    let unknown = dispatch(&conn, &authed_state(), &Frame::new(MessageType::Unknown(9999), 7, Vec::new()));
     assert_eq!(unknown.msg_type, MessageType::Error);
     assert_eq!(decode_error(&unknown.body).unwrap().code, "yydb.protocol");
 
-    let truncated = dispatch(&conn, &Frame::new(MessageType::KvGet, 8, vec![1, 0]));
+    let truncated = dispatch(&conn, &authed_state(), &Frame::new(MessageType::KvGet, 8, vec![1, 0]));
     assert_eq!(truncated.msg_type, MessageType::Error);
     assert_eq!(decode_error(&truncated.body).unwrap().code, "yydb.corrupt");
 }
