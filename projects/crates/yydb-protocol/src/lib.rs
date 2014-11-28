@@ -767,11 +767,10 @@ pub fn decode_execute_prepared(body: &[u8]) -> Result<(String, Option<String>)> 
     let params_len = read_u32(body, &mut offset)?;
     let params = if params_len > 0 {
         let bytes = read_bytes(body, &mut offset, params_len)?;
-        let text = std::str::from_utf8(bytes)
-            .map_err(|_| Error::Corrupt("execute prepared params is not utf-8"))?
-            .to_owned();
+        let text = std::str::from_utf8(bytes).map_err(|_| Error::Corrupt("execute prepared params is not utf-8"))?.to_owned();
         Some(text)
-    } else {
+    }
+    else {
         None
     };
     Ok((statement_id, params))

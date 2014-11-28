@@ -22,11 +22,11 @@ fn dispatch_with_handshake(conn: &Connection, request: &Frame) -> Frame {
     // dispatch Hello first
     let _hello_ok = dispatch(conn, &state, &Frame::new(MessageType::Hello, 1, Vec::new()));
     // dispatch Authenticate
-    let _auth_ok = dispatch(conn, &state, &Frame::new(
-        MessageType::Authenticate,
-        2,
-        yydb_protocol::encode_authenticate("yydb-phase0-default-token"),
-    ));
+    let _auth_ok = dispatch(
+        conn,
+        &state,
+        &Frame::new(MessageType::Authenticate, 2, yydb_protocol::encode_authenticate("yydb-phase0-default-token")),
+    );
     // now dispatch the real request
     dispatch(conn, &state, request)
 }
@@ -91,7 +91,8 @@ fn dispatch_micro_register_records_session_metadata() {
         [2u8; 32],
     )
     .unwrap();
-    let response = dispatch(&conn, &authed_state(), &Frame::new(MessageType::MicroRegister, 4, encode_micro_register(&definition)));
+    let response =
+        dispatch(&conn, &authed_state(), &Frame::new(MessageType::MicroRegister, 4, encode_micro_register(&definition)));
     assert_eq!(response.msg_type, MessageType::MicroRegisterOk);
     assert!(conn.list_scalars().contains(&"text.normalize".to_owned()));
 }
@@ -134,7 +135,8 @@ fn loopback_host_detection() {
 #[test]
 fn error_frame_carries_structured_code_and_message() {
     let conn = Connection::open_in_memory().unwrap();
-    let response = dispatch(&conn, &authed_state(), &Frame::new(MessageType::SchemaEnsure, 6, encode_schema_ensure(1, "table {")));
+    let response =
+        dispatch(&conn, &authed_state(), &Frame::new(MessageType::SchemaEnsure, 6, encode_schema_ensure(1, "table {")));
     assert_eq!(response.msg_type, MessageType::Error);
     let error = decode_error(&response.body).expect("structured error body");
     assert_eq!(error.code, "yydb.schema.invalid");

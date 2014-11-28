@@ -33,11 +33,7 @@ pub fn lower_program(program: &VosProgram, parameters: &[ParameterDescriptor]) -
     lower_exec_expr(result, &bindings, parameters)
 }
 
-fn lower_exec_expr(
-    expr: &VosExpr,
-    bindings: &[(String, VosExpr)],
-    parameters: &[ParameterDescriptor],
-) -> Result<Vec<QueryOp>> {
+fn lower_exec_expr(expr: &VosExpr, bindings: &[(String, VosExpr)], parameters: &[ParameterDescriptor]) -> Result<Vec<QueryOp>> {
     let expr = expand_bindings(expr, bindings)?;
     let pipeline = split_collect(&expr)?;
     let mut ops = lower_pipeline(&pipeline, parameters)?;
@@ -114,12 +110,7 @@ fn lower_pipeline(expr: &VosExpr, parameters: &[ParameterDescriptor]) -> Result<
     }
 }
 
-fn push_method(
-    ops: &mut Vec<QueryOp>,
-    method: &str,
-    args: &[VosExpr],
-    parameters: &[ParameterDescriptor],
-) -> Result<()> {
+fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[VosExpr], parameters: &[ParameterDescriptor]) -> Result<()> {
     match method {
         "all" => Ok(()),
         "filter" | "where" => {
@@ -169,21 +160,19 @@ fn lower_predicate(expr: &VosExpr, parameters: &[ParameterDescriptor]) -> Result
     }
 }
 
-fn lower_pred_body(
-    expr: &VosExpr,
-    param: Option<&str>,
-    parameters: &[ParameterDescriptor],
-) -> Result<Pred> {
+fn lower_pred_body(expr: &VosExpr, param: Option<&str>, parameters: &[ParameterDescriptor]) -> Result<Pred> {
     use yydb_types::Value;
     match expr {
         VosExpr::Literal(VosLiteral::Bool(true)) => Ok(Pred::True),
         VosExpr::Literal(VosLiteral::Bool(false)) => Ok(Pred::False),
-        VosExpr::Binary { op: VosBinaryOp::And, left, right, .. } => {
-            Ok(Pred::And(Box::new(lower_pred_body(left, param, parameters)?), Box::new(lower_pred_body(right, param, parameters)?)))
-        }
-        VosExpr::Binary { op: VosBinaryOp::Or, left, right, .. } => {
-            Ok(Pred::Or(Box::new(lower_pred_body(left, param, parameters)?), Box::new(lower_pred_body(right, param, parameters)?)))
-        }
+        VosExpr::Binary { op: VosBinaryOp::And, left, right, .. } => Ok(Pred::And(
+            Box::new(lower_pred_body(left, param, parameters)?),
+            Box::new(lower_pred_body(right, param, parameters)?),
+        )),
+        VosExpr::Binary { op: VosBinaryOp::Or, left, right, .. } => Ok(Pred::Or(
+            Box::new(lower_pred_body(left, param, parameters)?),
+            Box::new(lower_pred_body(right, param, parameters)?),
+        )),
         VosExpr::Binary { op, left, right, .. } => {
             let path = lower_field_path(left.as_ref(), param)?;
             if path.is_empty() {
@@ -202,9 +191,7 @@ fn lower_pred_body(
                 }
                 VosExpr::Name { name, .. } => name_to_slot(name, parameters)?,
                 _ => {
-                    return Err(query_error(
-                        "Phase 1 filters require a literal or parameter right-hand side",
-                    ));
+                    return Err(query_error("Phase 1 filters require a literal or parameter right-hand side"));
                 }
             };
             if matches!(op, VosBinaryOp::Eq) {
@@ -244,7 +231,8 @@ fn name_to_slot(name: &str, parameters: &[ParameterDescriptor]) -> Result<BoundV
             .find(|p| p.name == param_name)
             .ok_or_else(|| query_error(format!("undeclared parameter `{param_name}` in lowered source")))?;
         Ok(BoundValue::Slot { index: param.index, expected_ty: param.slot_ty })
-    } else {
+    }
+    else {
         Err(query_error(format!("expected rewritten parameter Name, got `{name}`")))
     }
 }
@@ -329,11 +317,7 @@ fn lower_project_expr(expr: &VosExpr, param: Option<&str>) -> Result<ProjectExpr
     }
 }
 
-fn bound_count(
-    expr: Option<&VosExpr>,
-    method: &str,
-    parameters: &[ParameterDescriptor],
-) -> Result<BoundValue> {
+fn bound_count(expr: Option<&VosExpr>, method: &str, parameters: &[ParameterDescriptor]) -> Result<BoundValue> {
     use yydb_types::Value;
     let Some(expr) = expr
     else {
@@ -349,4 +333,3 @@ fn bound_count(
         _ => Err(query_error(format!("`.{method}` count must be an integer literal or parameter"))),
     }
 }
-

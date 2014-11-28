@@ -22,8 +22,8 @@ use std::{
     net::{TcpListener, TcpStream},
     path::Path,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, Condvar, Mutex, MutexGuard, OnceLock,
+        atomic::{AtomicU64, Ordering},
     },
     thread,
     time::Duration,
@@ -87,16 +87,12 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn auth_token() -> &'static str {
     static TOKEN: OnceLock<String> = OnceLock::new();
-    TOKEN.get_or_init(|| {
-        std::env::var("YYDB_AUTH_TOKEN").unwrap_or_else(|_| "yydb-phase0-default-token".to_owned())
-    })
+    TOKEN.get_or_init(|| std::env::var("YYDB_AUTH_TOKEN").unwrap_or_else(|_| "yydb-phase0-default-token".to_owned()))
 }
 
 fn session_token() -> &'static str {
     static TOKEN: OnceLock<String> = OnceLock::new();
-    TOKEN.get_or_init(|| {
-        std::env::var("YYDB_SESSION_TOKEN").unwrap_or_else(|_| "yydb-phase0-session-token".to_owned())
-    })
+    TOKEN.get_or_init(|| std::env::var("YYDB_SESSION_TOKEN").unwrap_or_else(|_| "yydb-phase0-session-token".to_owned()))
 }
 
 /// Resolve the effective insecure-bind flag from CLI and env var.
@@ -105,9 +101,7 @@ fn insecure_bind_opted_in(explicit: bool) -> bool {
     if explicit {
         return true;
     }
-    std::env::var("YYDB_ALLOW_INSECURE_BIND")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+    std::env::var("YYDB_ALLOW_INSECURE_BIND").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false)
 }
 
 /// Validate bind policy before listening.
@@ -121,9 +115,7 @@ pub fn assert_bind_allowed(bind: &str, insecure_bind: bool) -> Result<(), String
         return Ok(());
     }
     if insecure_bind {
-        eprintln!(
-            "⚠  yy-db listening on non-loopback bind `{bind}` — NO authentication, NO encryption"
-        );
+        eprintln!("⚠  yy-db listening on non-loopback bind `{bind}` — NO authentication, NO encryption");
         eprintln!("⚠  This is ONLY safe on a trusted network or behind a TLS-terminating proxy");
         return Ok(());
     }

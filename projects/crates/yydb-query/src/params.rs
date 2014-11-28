@@ -108,8 +108,7 @@ pub fn prepare(source: &str) -> Result<PreparedStatement> {
     let (parameters, rewritten) = scan_and_rewrite(source)?;
     let source_fingerprint = fingerprint(source);
 
-    let program = vos::parse_program(&rewritten)
-        .map_err(|diagnostics| Error::Schema { message: diagnostics })?;
+    let program = vos::parse_program(&rewritten).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
     let ops = super::lower::lower_program(&program, &parameters)?;
 
     let (query_kind, read_set, write_set) = classify_ops(&ops);
@@ -234,7 +233,7 @@ fn scan_and_rewrite(source: &str) -> Result<(Vec<ParameterDescriptor>, String)> 
                             _ => out.push(ch),
                         }
                     }
-                        '$' => {
+                    '$' => {
                         // Try to read an identifier immediately after `$`.
                         // `chars` has just yielded `$`, so the next item is the
                         // first char of the identifier body (or whatever follows).
@@ -247,7 +246,7 @@ fn scan_and_rewrite(source: &str) -> Result<(Vec<ParameterDescriptor>, String)> 
                                     ident_chars.push(c);
                                     chars = peek; // now consume that char
                                 }
-                                _ => break,    // non-identifier char stays in chars
+                                _ => break, // non-identifier char stays in chars
                             }
                         }
                         if !ident_chars.is_empty() {
@@ -275,7 +274,8 @@ fn scan_and_rewrite(source: &str) -> Result<(Vec<ParameterDescriptor>, String)> 
                             // dedup is by name so same name → same identifier.
                             out.push_str(PARAM_PREFIX);
                             out.push_str(&name_for_rewrite);
-                        } else {
+                        }
+                        else {
                             // Lone `$` — keep as-is; VOS parser will reject but that's
                             // a source error, not a parameter.
                             out.push('$');
@@ -360,11 +360,7 @@ mod tests {
     fn prepare_extracts_dollar_named_parameters_in_order() {
         let source = r#"User.all().take($limit).collect()"#;
         let (parameters, rewritten) = scan_and_rewrite(source).expect("scan");
-        assert!(
-            vos::parse_program(&rewritten).is_ok(),
-            "rewritten must parse: {}",
-            rewritten
-        );
+        assert!(vos::parse_program(&rewritten).is_ok(), "rewritten must parse: {}", rewritten);
         let stmt = prepare(source).expect("prepare");
         assert_eq!(stmt.parameters.len(), 1);
         assert_eq!(stmt.parameters[0].name, "limit");
@@ -406,11 +402,7 @@ mod tests {
         assert_eq!(err.code(), "yydb.query.bind");
         assert_eq!(err.operation(), "query");
         let params = err.params().expect("QueryBind has params");
-        let param_value = params
-            .iter()
-            .find(|(k, _)| *k == "parameter")
-            .map(|(_, v)| v.as_str())
-            .expect("parameter exists");
+        let param_value = params.iter().find(|(k, _)| *k == "parameter").map(|(_, v)| v.as_str()).expect("parameter exists");
         assert_eq!(param_value, "limit");
     }
 
@@ -450,16 +442,14 @@ mod tests {
 
     #[test]
     fn param_inside_line_comment_is_not_extracted() {
-        let (params, _) =
-            scan_and_rewrite("User.all().take($x).collect() // $y should not count").unwrap();
+        let (params, _) = scan_and_rewrite("User.all().take($x).collect() // $y should not count").unwrap();
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "x");
     }
 
     #[test]
     fn param_inside_block_comment_is_not_extracted() {
-        let (params, _) =
-            scan_and_rewrite("User.all().take($x) /* $y is inside */ .collect()").unwrap();
+        let (params, _) = scan_and_rewrite("User.all().take($x) /* $y is inside */ .collect()").unwrap();
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "x");
     }
@@ -478,11 +468,8 @@ mod tests {
         assert_eq!(stmt.parameters[0].name, "offset");
         assert_eq!(stmt.parameters[1].name, "limit");
 
-        let bound = bind_named(
-            &stmt,
-            &BTreeMap::from([("offset".into(), Value::I64(50)), ("limit".into(), Value::I64(10))]),
-        )
-        .unwrap();
+        let bound =
+            bind_named(&stmt, &BTreeMap::from([("offset".into(), Value::I64(50)), ("limit".into(), Value::I64(10))])).unwrap();
         assert_eq!(bound, vec![Value::I64(50), Value::I64(10)]);
     }
 

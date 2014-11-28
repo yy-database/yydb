@@ -2,16 +2,16 @@
 //!
 //! Kept out of `yydb-protocol` because it executes database operations.
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use std::{
+    collections::BTreeMap,
+    sync::{Mutex, OnceLock},
+};
 
 use yydb_engine::Connection;
 use yydb_protocol::{
-    Frame, MessageType,
-    decode_authenticate, decode_execute_prepared, decode_kv_get, decode_kv_put, decode_micro_register,
-    decode_prepare, decode_scalar_call, decode_schema_ensure,
-    encode_authenticate_ok, encode_execute_prepared_ok, encode_kv_get_ok, encode_prepare_ok,
-    encode_scalar_call_ok, encode_schema_ok, error_frame,
+    Frame, MessageType, decode_authenticate, decode_execute_prepared, decode_kv_get, decode_kv_put, decode_micro_register,
+    decode_prepare, decode_scalar_call, decode_schema_ensure, encode_authenticate_ok, encode_execute_prepared_ok,
+    encode_kv_get_ok, encode_prepare_ok, encode_scalar_call_ok, encode_schema_ok, error_frame,
 };
 use yydb_query::PreparedStatement;
 use yydb_types::{Error, Result};
@@ -30,16 +30,12 @@ use yydb_types::{Error, Result};
 ///   env vars `YYDB_AUTH_TOKEN` / `YYDB_SESSION_TOKEN`)
 fn expected_auth_token() -> &'static str {
     static TOKEN: OnceLock<String> = OnceLock::new();
-    TOKEN.get_or_init(|| {
-        std::env::var("YYDB_AUTH_TOKEN").unwrap_or_else(|_| "yydb-phase0-default-token".to_owned())
-    })
+    TOKEN.get_or_init(|| std::env::var("YYDB_AUTH_TOKEN").unwrap_or_else(|_| "yydb-phase0-default-token".to_owned()))
 }
 
 fn session_token() -> &'static str {
     static TOKEN: OnceLock<String> = OnceLock::new();
-    TOKEN.get_or_init(|| {
-        std::env::var("YYDB_SESSION_TOKEN").unwrap_or_else(|_| "yydb-phase0-session-token".to_owned())
-    })
+    TOKEN.get_or_init(|| std::env::var("YYDB_SESSION_TOKEN").unwrap_or_else(|_| "yydb-phase0-session-token".to_owned()))
 }
 
 // ─── Per-connection session state ─────────────────────────────────────────
@@ -78,9 +74,11 @@ pub fn is_authenticated(state: &SessionState) -> bool {
 /// Parse ExecutePrepared params JSON into a named-param map.
 /// Returns Err(Error) for malformed JSON / wrong types.
 fn parse_params_json(json: &str) -> Result<BTreeMap<String, yydb_types::Value>> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(json).map_err(|e| Error::QueryBind { parameter: String::new(), message: format!("invalid params JSON: {e}") })?;
-    let obj = parsed.as_object().ok_or_else(|| Error::QueryBind { parameter: String::new(), message: "params must be a JSON object".to_owned() })?;
+    let parsed: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| Error::QueryBind { parameter: String::new(), message: format!("invalid params JSON: {e}") })?;
+    let obj = parsed
+        .as_object()
+        .ok_or_else(|| Error::QueryBind { parameter: String::new(), message: "params must be a JSON object".to_owned() })?;
     let mut m = BTreeMap::new();
     for (k, v) in obj {
         m.insert(k.clone(), json_to_value(v)?);
@@ -128,9 +126,7 @@ pub fn dispatch(conn: &Connection, state: &SessionState, request: &Frame) -> Fra
                 Err(error) => return error_frame(id, &error),
             };
             if token != expected_auth_token() {
-                return error_frame(id, &Error::Auth {
-                    message: "authentication failed: invalid token".to_owned(),
-                });
+                return error_frame(id, &Error::Auth { message: "authentication failed: invalid token".to_owned() });
             }
             *state.authenticated.lock().unwrap() = true;
             Frame::new(MessageType::AuthenticateOk, id, encode_authenticate_ok(session_token()))
@@ -138,9 +134,15 @@ pub fn dispatch(conn: &Connection, state: &SessionState, request: &Frame) -> Fra
         // ── authenticated required ──────────────────────────────────────
         _ => {
             if !is_authenticated(state) {
-                return error_frame(id, &Error::Auth {
-                    message: format!("connection not authenticated — send Hello + Authenticate first (got {})", request.msg_type.as_u16()),
-                });
+                return error_frame(
+                    id,
+                    &Error::Auth {
+                        message: format!(
+                            "connection not authenticated — send Hello + Authenticate first (got {})",
+                            request.msg_type.as_u16()
+                        ),
+                    },
+                );
             }
             dispatch_authed(conn, state, request)
         }
@@ -204,10 +206,11 @@ fn dispatch_authed(conn: &Connection, state: &SessionState, request: &Frame) -> 
                 Err(error) => return error_frame(id, &error),
             };
             let sid = stmt.statement_id.clone();
-            state.prepared.lock().unwrap().insert(sid.clone(), PreparedPlan {
-                statement: stmt,
-                connection_id: state.connection_id,
-            });
+            state
+                .prepared
+                .lock()
+                .unwrap()
+                .insert(sid.clone(), PreparedPlan { statement: stmt, connection_id: state.connection_id });
             Frame::new(MessageType::PrepareOk, id, encode_prepare_ok(&sid))
         }
         MessageType::ExecutePrepared => {
@@ -217,10 +220,15 @@ fn dispatch_authed(conn: &Connection, state: &SessionState, request: &Frame) -> 
             };
             let plan = match state.prepared.lock().unwrap().get(&sid).cloned() {
                 Some(p) => p,
-                None => return error_frame(id, &Error::QueryBind {
-                    parameter: String::new(),
-                    message: format!("unknown prepared statement `{sid}` — must Prepare first on this connection"),
-                }),
+                None => {
+                    return error_frame(
+                        id,
+                        &Error::QueryBind {
+                            parameter: String::new(),
+                            message: format!("unknown prepared statement `{sid}` — must Prepare first on this connection"),
+                        },
+                    );
+                }
             };
             let named_params = match params_json {
                 Some(json) => match parse_params_json(&json) {
@@ -253,9 +261,9 @@ fn dispatch_authed(conn: &Connection, state: &SessionState, request: &Frame) -> 
         | MessageType::Error => error_frame(id, &Error::Protocol { message: "unexpected client message type".to_owned() }),
         // Hello / Authenticate are handled by dispatch() before auth check — reaching here means
         // they somehow slipped through; reject defensively.
-        MessageType::Hello | MessageType::Authenticate => error_frame(id, &Error::Protocol {
-            message: "handshake frame received after auth — protocol violation".to_owned(),
-        }),
+        MessageType::Hello | MessageType::Authenticate => {
+            error_frame(id, &Error::Protocol { message: "handshake frame received after auth — protocol violation".to_owned() })
+        }
         MessageType::Unknown(code) => error_frame(id, &Error::Protocol { message: format!("unknown msg_type {code}") }),
     }
 }
@@ -274,12 +282,15 @@ fn json_to_value(v: &serde_json::Value) -> Result<yydb_types::Value> {
         serde_json::Value::Null => Ok(Value::Null),
         serde_json::Value::Bool(b) => Ok(Value::Bool(*b)),
         serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() { Ok(Value::I64(i)) }
-            else if let Some(f) = n.as_f64() { Ok(Value::F64(f)) }
-            else { Err(Error::QueryBind {
-                parameter: String::new(),
-                message: format!("unsupported JSON number: {n}"),
-            })}
+            if let Some(i) = n.as_i64() {
+                Ok(Value::I64(i))
+            }
+            else if let Some(f) = n.as_f64() {
+                Ok(Value::F64(f))
+            }
+            else {
+                Err(Error::QueryBind { parameter: String::new(), message: format!("unsupported JSON number: {n}") })
+            }
         }
         serde_json::Value::String(s) => Ok(Value::Text(s.clone())),
         _ => Err(Error::QueryBind {
@@ -294,10 +305,14 @@ fn rows_to_json(rows: &[std::collections::BTreeMap<String, yydb_types::Value>]) 
     use yydb_types::Value;
     let mut out = String::from("[");
     for (i, row) in rows.iter().enumerate() {
-        if i > 0 { out.push(','); }
+        if i > 0 {
+            out.push(',');
+        }
         out.push('{');
         for (j, (k, v)) in row.iter().enumerate() {
-            if j > 0 { out.push(','); }
+            if j > 0 {
+                out.push(',');
+            }
             out.push_str(&format!("\"{}\":", escape_json(k)));
             match v {
                 Value::Null => out.push_str("null"),

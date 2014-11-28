@@ -34,7 +34,9 @@ thread_local! {
 
 fn register_stmt(stmt: yydb::query::PreparedStatement) -> String {
     let id = stmt.statement_id.clone();
-    STMT_REG.with(|r| { r.borrow_mut().insert(id.clone(), stmt); });
+    STMT_REG.with(|r| {
+        r.borrow_mut().insert(id.clone(), stmt);
+    });
     id
 }
 
@@ -56,11 +58,10 @@ where
 }
 
 fn parse_params_json(json: &str) -> Result<BTreeMap<String, yydb::Value>> {
-    let value: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| napi::Error::from_reason(format!("invalid parameters JSON: {e}")))?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| napi::Error::from_reason("parameters must be a JSON object {name: value, ...}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| napi::Error::from_reason(format!("invalid parameters JSON: {e}")))?;
+    let obj =
+        value.as_object().ok_or_else(|| napi::Error::from_reason("parameters must be a JSON object {name: value, ...}"))?;
     let mut map = BTreeMap::new();
     for (key, val) in obj {
         let yydb_val = json_to_value_ref(val)?;
@@ -331,9 +332,7 @@ impl Database {
             Some(json) if !json.trim().is_empty() && json.trim() != "null" => parse_params_json(&json)?,
             _ => BTreeMap::new(),
         };
-        let rows = with_stmt(&statement.statement_id, |stmt| {
-            self.connection.query_prepared(stmt, &named).map_err(reason)
-        })?;
+        let rows = with_stmt(&statement.statement_id, |stmt| self.connection.query_prepared(stmt, &named).map_err(reason))?;
         let mapped: Vec<serde_json::Value> = rows
             .into_iter()
             .map(|row| {
@@ -625,8 +624,7 @@ impl Statement {
     #[napi]
     pub fn parameters_json(&self) -> Result<String> {
         with_stmt(&self.statement_id, |stmt| {
-            serde_json::to_string(&stmt.parameters)
-                .map_err(|e| napi::Error::from_reason(format!("encode parameters: {e}")))
+            serde_json::to_string(&stmt.parameters).map_err(|e| napi::Error::from_reason(format!("encode parameters: {e}")))
         })
     }
 
@@ -636,12 +634,12 @@ impl Statement {
     #[napi]
     pub fn info(&self) -> Result<String> {
         with_stmt(&self.statement_id, |stmt| {
-            serde_json::to_value(stmt)
-                .map_err(|e| napi::Error::from_reason(format!("encode statement info: {e}")))
-                .and_then(|val| {
+            serde_json::to_value(stmt).map_err(|e| napi::Error::from_reason(format!("encode statement info: {e}"))).and_then(
+                |val| {
                     serde_json::to_string(&val)
                         .map_err(|e| napi::Error::from_reason(format!("encode statement info string: {e}")))
-                })
+                },
+            )
         })
     }
 
