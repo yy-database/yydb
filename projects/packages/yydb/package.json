@@ -1,6 +1,6 @@
 {
     "name": "@yydb/yydb",
-    "version": "0.0.17",
+    "version": "0.0.18",
     "description": "YYDB Node embedded engine and CLI",
     "license": "MPL-2.0",
     "type": "module",
