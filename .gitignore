@@ -50,3 +50,6 @@ pnpm-lock.yaml
 # Light DB test artifacts
 projects/packages/light-db/temp/
 
+# Nifty change-logs draft index (local only — regenerate with `nifty change-logs --version X.Y.Z --write`)
+documentation/maintenance/releases/*.reference.md
+
