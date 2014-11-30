@@ -7,7 +7,7 @@ version = "0.0.18"
 edition = "2024"
 authors = ["Yggdrasill Team <192607617@qq.com>"]
 license = "MPL-2.0"
-repository = "https://github.com/yy-database/yydb.rs"
+repository = "https://github.com/yy-database/yydb"
 
 [workspace.dependencies]
 vos = { git = "https://github.com/voml/vos-language.git", rev = "74e257ec7e0ffdaf6d2d8ac5be38f4e88e5debd4" }

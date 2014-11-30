@@ -1,27 +1,24 @@
 # `@yydb/yydb-unknown-wasm32`
 
-Low-level wasm-pack artifacts for the YYDB browser core. **App authors should use
-[`@yydb/yydb/wasm`](https://www.npmjs.com/package/@yydb/yydb)** instead of this package.
+Low-level wasm-pack artifacts for the YYDB browser core: init glue, schema checks, and memory / persistent sessions.
 
-Import here only when you need the raw glue or bundled `.wasm` path. For durable reads and writes in production, prefer
-[`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client) against `yydb serve` until wasm persistence
-lands.
+Application authors should use [`@yydb/light-db`](https://www.npmjs.com/package/@yydb/light-db), which wraps these
+artifacts as `WasmDatabase` and `openLightDatabase`. Import this package directly only when you need the raw glue or
+the bundled `.wasm` asset path.
 
 ## Example
 
 ```ts
-import {initWasm, checkSchema, yydbVersion} from "@yydb/yydb/wasm";
+import { checkSchema, initWasm, yydbVersion } from '@yydb/yydb-unknown-wasm32';
 
 await initWasm();
 
 console.log(yydbVersion());
-console.log(
-    checkSchema("table Setting { @@id: uuid, key: utf8 }"),
-);
+console.log(checkSchema('table Setting { @@id: uuid, key: utf8 }'));
 ```
 
 Call `initWasm()` once before semantic methods. Omit `options.module` to load the bundled `lib/yydb_wasm_bg.wasm` asset.
 
-Low-level glue: `@yydb/yydb-unknown-wasm32/wasm` (raw `.wasm` path).
+Raw asset path: `@yydb/yydb-unknown-wasm32/wasm`.
 
-[YYDB overview](https://github.com/yy-database/yydb.rs)
+[YYDB overview](https://github.com/yy-database/yydb) · [Browser product](https://www.npmjs.com/package/@yydb/light-db)

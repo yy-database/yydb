@@ -20,10 +20,10 @@ Requires Node.js 18+. Skills do not ship `@yydb/yydb` or `@yydb/yydb-client`.
 
 | Skill | Load when |
 |-------|-----------|
-| [`yydb-serve-protocol`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md) | Wire frames, TCP/WebSocket, `yydb serve`, `@yydb/yydb-client` codec |
-| [`yydb-bytes-storage`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-skills/skills/yydb-bytes-storage/SKILL.md) | Legacy per-object CAS layout only — **not** current `.yydb` |
+| [`yydb-serve-protocol`](https://github.com/yy-database/yydb/tree/dev/projects/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md) | Wire frames, TCP/WebSocket, `yydb serve`, `@yydb/yydb-client` codec |
+| [`yydb-bytes-storage`](https://github.com/yy-database/yydb/tree/dev/projects/packages/yydb-skills/skills/yydb-bytes-storage/SKILL.md) | Legacy per-object CAS layout only — **not** current `.yydb` |
 
-Human guides: [YYDB user documentation](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans).
+Human guides: [YYDB user documentation](https://github.com/yy-database/yydb/tree/dev/projects/packages/homepage/documentation/zh-hans).
 
 ## Example prompts
 

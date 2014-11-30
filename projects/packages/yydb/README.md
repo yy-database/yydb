@@ -17,9 +17,14 @@ For a wire client only (renderer or an app that already runs `yydb serve`), use
 | Import | Runtime | Role |
 |--------|---------|------|
 | `@yydb/yydb` | Node | `Database.open`, micro helpers, VOS re-exports |
-| `@yydb/yydb/cli` | Node | CLI (`version`, `init`, `info`, `serve`) |
+| `@yydb/yydb/cli` | Node | CLI (`version`, `init`, `info`, `verify`, `serve`) |
 
 Node.js 18+.
+
+```bash
+npm install @yydb/yydb
+npx yydb version
+```
 
 Schema truth lives in the `.yydb` file via `ensureSchema` and VOS documents.
 
@@ -65,6 +70,21 @@ await db.close();
 `OpenOptions`: `cli` (explicit CLI script path), `port` (preferred loopback port), `serveArgs` (extra `yydb serve`
 arguments). `binary` is a deprecated alias for `cli`.
 
+### Prepared statements
+
+`db.prepare` parses and lowers a VOS query once; the plan stays in a native thread-local registry and re-executes
+with different bindings.
+
+```ts
+const stmt = await db.prepare('User.all().take($limit).collect()');
+const rows = await stmt.execute({ limit: 100 });
+const more = await stmt.execute({ limit: 50 });
+stmt.close();
+```
+
+`stmt.parameters` lists the expected bindings, and `stmt.info` exposes the read/write sets and source fingerprint.
+Missing, extra, or mistyped parameters raise `YydbError` with code `yydb.query.bind`.
+
 The native binding exposes additive operations (`schemaVersion`, `schemaDocument`, `recordCount`, `journalMode`,
 `checkpoint`, `walFrameCount`, `get`, `put`); the CLI composes commands from them.
 
@@ -73,7 +93,7 @@ The native binding exposes additive operations (`schemaVersion`, `schemaDocument
 | Need | Package |
 |------|---------|
 | Node embedded engine and CLI (this package) | **`@yydb/yydb`** |
-| Browser, pure TypeScript | **`@yydb/light-db`** |
+| Browser engine (pure TS and WASM sessions) | **`@yydb/light-db`** |
 | Wire client only | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client) |
 | In-process Rust embed | [`yydb`](https://crates.io/crates/yydb) |
 | Agent skills (wire protocol) | [`@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills) |
@@ -83,4 +103,4 @@ endpoint.
 
 The managed engine listens on `127.0.0.1` with no authentication — keep the endpoint private.
 
-[YYDB overview](https://github.com/yy-database/yydb.rs) · [User guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
+[YYDB overview](https://github.com/yy-database/yydb) · [User guides](https://github.com/yy-database/yydb/tree/dev/projects/packages/homepage/documentation/zh-hans)

@@ -1,7 +1,7 @@
 # `@yydb/yydb-client`
 
-TypeScript client for the YY wire protocol over WebSocket or TCP. Use when `yydb serve` already runs (from [
-`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) CLI or another host) and you only need the client surface —
+TypeScript client for the YY wire protocol over WebSocket or TCP. Use it when `yydb serve` already runs (from
+[`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) CLI or another host) and you only need the client surface —
 browser, WebUI, Electron renderer, or a thin Node process.
 
 [![npm](https://img.shields.io/npm/v/@yydb/yydb-client)](https://www.npmjs.com/package/@yydb/yydb-client)
@@ -52,8 +52,7 @@ instead.
 The client accepts hosts that announce `YYDB` or `YYDS` on the shared wire. Connect only to hosts you control — normally
 `127.0.0.1` or `localhost`.
 
-Protocol details: [
-`yydb-serve-protocol`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md)
+Protocol details: [`yydb-serve-protocol`](https://github.com/yy-database/yydb/tree/dev/projects/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md)
 in [`@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills).
 
-[YYDB overview](https://github.com/yy-database/yydb.rs) · [User guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
+[YYDB overview](https://github.com/yy-database/yydb) · [User guides](https://github.com/yy-database/yydb/tree/dev/projects/packages/homepage/documentation/zh-hans)

@@ -26,12 +26,12 @@
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/yy-database/yydb.rs.git",
+        "url": "git+https://github.com/yy-database/yydb.git",
         "directory": "projects/packages/yydb-client"
     },
-    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-client#readme",
+    "homepage": "https://github.com/yy-database/yydb/tree/dev/projects/packages/yydb-client#readme",
     "bugs": {
-        "url": "https://github.com/yy-database/yydb.rs/issues"
+        "url": "https://github.com/yy-database/yydb/issues"
     },
     "keywords": [
         "yydb",

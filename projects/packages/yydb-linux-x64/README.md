@@ -22,4 +22,4 @@ The CLI also ships from `@yydb/yydb`:
 npx yydb serve app.yydb --bind 127.0.0.1:7700
 ```
 
-[YYDB overview](https://github.com/yy-database/yydb.rs)
+[YYDB overview](https://github.com/yy-database/yydb)

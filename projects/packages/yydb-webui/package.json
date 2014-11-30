@@ -12,12 +12,12 @@
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/yy-database/yydb.rs.git",
+        "url": "git+https://github.com/yy-database/yydb.git",
         "directory": "projects/packages/yydb-webui"
     },
-    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-webui#readme",
+    "homepage": "https://github.com/yy-database/yydb/tree/dev/projects/packages/yydb-webui#readme",
     "bugs": {
-        "url": "https://github.com/yy-database/yydb.rs/issues"
+        "url": "https://github.com/yy-database/yydb/issues"
     },
     "dependencies": {
         "@yydb/yydb-client": "workspace:*",

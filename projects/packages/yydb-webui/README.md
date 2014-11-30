@@ -28,4 +28,4 @@ The UI uses [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-clien
 
 The reference server has no authentication. Keep the UI and endpoint on your machine or a trusted private network.
 
-[Node file API](https://www.npmjs.com/package/@yydb/yydb) · [YYDB overview](https://github.com/yy-database/yydb.rs) · [User guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
+[Node file API](https://www.npmjs.com/package/@yydb/yydb) · [YYDB overview](https://github.com/yy-database/yydb) · [User guides](https://github.com/yy-database/yydb/tree/dev/projects/packages/homepage/documentation/zh-hans)

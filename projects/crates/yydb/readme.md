@@ -26,7 +26,7 @@ fn main() -> Result<()> {
 ```
 
 `Connection::open` creates the file when needed. `Connection::open_in_memory()` keeps object CAS in-process without
-filesystem sidecars — useful for tests.
+filesystem sidecars — useful for tests. `prepare_vos` and `query_prepared` reuse named statements across calls.
 
 ## API surface
 
@@ -60,4 +60,4 @@ use yydb::prelude::*;
 | Node all-in-one    | `@yydb/yydb`          |
 | TS wire client     | `@yydb/yydb-client`   |
 
-[API reference](https://docs.rs/yydb) · [YYDB overview](https://github.com/yy-database/yydb.rs) · [User guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
+[API reference](https://docs.rs/yydb) · [YYDB overview](https://github.com/yy-database/yydb) · [User guides](https://github.com/yy-database/yydb/tree/dev/projects/packages/homepage/documentation/zh-hans)

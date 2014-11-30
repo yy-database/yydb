@@ -1,6 +1,6 @@
 {
     "bugs": {
-        "url": "https://github.com/yy-database/yydb.rs/issues"
+        "url": "https://github.com/yy-database/yydb/issues"
     },
     "description": "Browser WebAssembly binary for `@yydb/yydb`",
     "devDependencies": {
@@ -20,7 +20,7 @@
         "lib",
         "README.md"
     ],
-    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-unknown-wasm32#readme",
+    "homepage": "https://github.com/yy-database/yydb/tree/dev/projects/packages/yydb-unknown-wasm32#readme",
     "license": "MPL-2.0",
     "name": "@yydb/yydb-unknown-wasm32",
     "publishConfig": {
@@ -29,7 +29,7 @@
     "repository": {
         "directory": "projects/packages/yydb-unknown-wasm32",
         "type": "git",
-        "url": "git+https://github.com/yy-database/yydb.rs.git"
+        "url": "git+https://github.com/yy-database/yydb.git"
     },
     "scripts": {
         "test": "pnpm run typecheck",
