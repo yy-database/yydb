@@ -5,8 +5,7 @@
 
 ## 1. 错误模型
 
-1. 错误必须可分支：稳定标识是 `yydb::Error::code()` 返回的字符串，完整清单见 [
-   `03-encoding-and-compatibility.md`](./03-encoding-and-compatibility.md) §2。客户端只能对 `code` 分支。
+1. 错误必须可分支：稳定标识是 `yydb::Error::code()` 返回的字符串，完整清单见 [`03-encoding-and-compatibility.md`](./03-encoding-and-compatibility.md) §2。客户端只能对 `code` 分支。
 2. `message` 是显示文本，可读、可翻译、可随版本变化。任何代码不得解析 `message` 做判断。
 3. 新增失败路径必须落到已有 `code` 或新增 `code`。用 `yydb.io` / `yydb.unsupported` 兜底而不加语义，视为错误分类缺失。
 4. 错误必须携带上下文：至少能说明失败的操作（读、写、schema、UDF、协议、lease）与对象。上下文放结构化字段，不靠拼字符串。
@@ -30,8 +29,7 @@
 4. 默认路径必须安全且够用：`Connection::open` 直接可用，危险能力（非 loopback 绑定、覆盖写、强制回收）需要显式选择。
 5. 命名表达产品语义，不表达内部结构。不出现以 crate 名、缓冲区名、页名命名的方法。
 6. 不为“以后可能需要”预留参数、泛型或 trait。新增扩展点必须有当前调用方。
-7. 破坏性变更直接改签名并同步所有调用方，不留 deprecated 兼容壳（见 [
-   `04-engineering-standards.md`](./04-engineering-standards.md) §6）。
+7. 破坏性变更直接改签名并同步所有调用方，不留 deprecated 兼容壳（见 [`04-engineering-standards.md`](./04-engineering-standards.md) §6）。
 
 ## 4. 绑定层（N-API / PyO3 / wasm）
 

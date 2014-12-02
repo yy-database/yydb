@@ -13,8 +13,6 @@ Rust：
 - [`yydb`](https://crates.io/crates/yydb)：YYDB 嵌入式门面
 - [`yydb-client`](https://crates.io/crates/yydb-client)：YYDB 远程 TCP 客户端
 
-完整说明（Agent skill）：[
-`yydb-serve-protocol`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md)（[
-`@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills)）。
+完整说明（Agent skill）：[`yydb-serve-protocol`](https://github.com/yy-database/yydb/tree/dev/projects/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md)（[`@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills)）。
 
 当前帧类型：Hello、Info、SchemaGet / SchemaEnsure、KvGet / KvPut（见 skill 中的 `msg_type` 表）。

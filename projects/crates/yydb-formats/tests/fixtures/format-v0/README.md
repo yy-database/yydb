@@ -1,8 +1,8 @@
 # v0 golden bytes
 
-设计合同：[`../09-v0页与WAL字节合同.md`](../09-v0页与WAL字节合同.md) · 架构：[`../07-存储模式与统一存储合同.md`](../07-存储模式与统一存储合同.md)
+格式与兼容合同：[`03-encoding-and-compatibility.md`](../../../../../../documentation/03-encoding-and-compatibility.md) · 存储架构：[`02-architecture.md`](../../../../../../documentation/02-architecture.md)
 
-本目录冻结 v0 page file、WAL、SHM、blob 的独立 golden 与损坏样例。实现仓 `yydb.rs` 须逐文件断言这些样例。
+本目录冻结 v0 page file、WAL、SHM、blob 的独立 golden 与损坏样例。实现仓 `yydb` 须逐文件断言这些样例。
 
 ```text
 manifest.toml              case 列表与期望 doctor 结果
