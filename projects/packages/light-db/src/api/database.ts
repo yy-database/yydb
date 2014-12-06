@@ -1,8 +1,10 @@
 /**
- * Schema 版本与文档。
+ * Shared schema and open types.
  *
- * 共享类型：纯 TS {@link Database} 与 WASM {@link WasmDatabase} 都使用同一版本模型。
+ * These types are the stable contract used by both the WASM-backed
+ * {@link Database} (主线) and the pure-TS {@link PureTsDatabase} (参考实现).
  */
+
 export interface SchemaVersion {
     version: number;
     document: string;
@@ -35,14 +37,14 @@ export interface MigrateOptions {
     >;
 }
 
-/** 打开浏览器 WASM 数据库的选项。 */
+/** Options for opening any light-db backend. */
 export interface OpenOptions {
-    /** 使用内存 session（测试专用；默认使用 OPFS 持久 session）。 */
+    /** Use an in-memory session (test only; default is OPFS persistent). */
     memory?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Pure-TS Database (StorageEngine wrapper — browser-friendly, no WASM)
+// Pure-TS Database (reference / test-only — NOT production path)
 // ---------------------------------------------------------------------------
 
 import { StorageEngine } from '../core/engine.js';
@@ -54,25 +56,20 @@ import { decodeSchema, encodeSchema, parseSchemaDocument, RESERVED_KEY_PREFIX, S
 import { Transaction } from './transaction.js';
 import type { LightDatabase, LightDatabaseOptions } from './types.js';
 
-/** 数据库名最大长度 */
+/** Max database name length. */
 const MAX_DATABASE_NAME_LENGTH = 128;
 
 /**
- * 浏览器可用的纯 TS 数据库实现。
+ * Pure-TypeScript database — reference / test backend only.
  *
- * 与 Node 侧 `@yydb/yydb` 的 {@link Database} 同构：宿主靠 import 来源区分：
- *
- * ```ts
- * import { Database } from '@yydb/yydb';       // Node 原生
- * import { Database } from '@yydb/light-db';   // 浏览器纯 TS（本文件）
- * ```
- *
- * 完全不依赖 WASM；OPFS 持久化、WAL 恢复、检查点、事务都在 TypeScript 内完成。
- *
- * 默认后端是 `OpfsStorageAdapterFactory`；通过 `options.storage` 可以显式指定。
+ * ⚠️ This is NOT the production path. The main {@link Database} uses
+ * `@yydb/yydb-unknown-wasm32` for Rust-level semantics, schema validation,
+ * VOS execution and OPFS persistence. This class re-implements only a
+ * minimal KV schema-store over StorageEngine and is kept for unit tests
+ * and as a fallback when WASM initialization is intentionally skipped.
  */
-export class Database implements LightDatabase {
-    /** 数据库名 */
+export class PureTsDatabase implements LightDatabase {
+    /** Database name. */
     public readonly name: string;
 
     private readonly engine: StorageEngine;
@@ -84,12 +81,8 @@ export class Database implements LightDatabase {
         this.transaction = new Transaction(engine);
     }
 
-    /**
-     * 打开数据库
-     * @param name 数据库名
-     * @param options 打开选项
-     */
-    public static async open(name: string, options: LightDatabaseOptions = {}): Promise<Database> {
+    /** Open a database with the pure-TS StorageEngine backend. */
+    public static async open(name: string, options: LightDatabaseOptions = {}): Promise<PureTsDatabase> {
         if (name.trim().length === 0 || name.length > MAX_DATABASE_NAME_LENGTH) {
             throw new LightDbError(LightDbErrorCodes.unsupported, `database name must be 1-${MAX_DATABASE_NAME_LENGTH} characters`, {
                 operation: 'open',
@@ -104,20 +97,22 @@ export class Database implements LightDatabase {
         if (options.lease !== undefined) engineOptions.lease = options.lease;
 
         const engine = await StorageEngine.open(name, storage, engineOptions);
-
-        return new Database(name, engine);
+        return new PureTsDatabase(name, engine);
     }
 
-    /** 读取已持久化的 schema */
+    /** Read the persisted schema, or `null`. */
     public async schema(): Promise<SchemaVersion | null> {
         const value = await this.engine.get(SCHEMA_KEY);
         return value ? decodeSchema(value) : null;
     }
 
     /**
-     * 声明 schema 文档
+     * Declare the schema document.
      *
-     * 文档是唯一真相：首次写入后，重复调用必须传入完全相同的文档。
+     * The document is the single source of truth: subsequent calls must
+     * pass the exact same document. This pure-TS implementation does NOT
+     * perform full VOS validation — it only checks that the document is
+     * parseable and stores it as KV.
      */
     public async ensureSchema(document: string): Promise<void> {
         const version = parseSchemaDocument(document);
@@ -138,47 +133,47 @@ export class Database implements LightDatabase {
         this.engine.notifySchemaChange();
     }
 
-    /** 读取键 */
+    /** Read one record, or `null`. */
     public async get(key: string): Promise<Uint8Array | null> {
         return this.engine.get(this.assertUserKey(key, 'kvGet'));
     }
 
-    /** 写入键 */
+    /** Insert or replace one record. */
     public async put(key: string, value: Uint8Array): Promise<void> {
         await this.engine.put(this.assertUserKey(key, 'kvPut'), value);
     }
 
-    /** 删除键 */
+    /** Delete one record. Returns whether the key was present. */
     public async delete(key: string): Promise<boolean> {
         return this.engine.delete(this.assertUserKey(key, 'kvDelete'));
     }
 
-    /** 开始事务 */
+    /** Begin an explicit transaction. */
     public async begin(): Promise<void> {
         await this.transaction.begin();
     }
 
-    /** 提交事务 */
+    /** Commit the current transaction. */
     public async commit(): Promise<void> {
         await this.transaction.commit();
     }
 
-    /** 回滚事务 */
+    /** Roll back the current transaction. */
     public async rollback(): Promise<void> {
         await this.transaction.rollback();
     }
 
-    /** 执行检查点 */
+    /** Fold the WAL into the main storage file. */
     public async checkpoint(): Promise<CheckpointResult> {
         return this.engine.checkpoint();
     }
 
-    /** 统计信息 */
+    /** Engine statistics snapshot. */
     public stats(): StorageEngineStats {
         return this.engine.getStats();
     }
 
-    /** 关闭数据库 */
+    /** Close the database and release the StorageEngine. */
     public async close(): Promise<void> {
         if (this.transaction.isActive) {
             await this.transaction.rollback();
@@ -186,9 +181,7 @@ export class Database implements LightDatabase {
         await this.engine.close();
     }
 
-    /**
-     * 校验用户键
-     */
+    /** Validate user-supplied keys. */
     private assertUserKey(key: string, operation: string): string {
         if (key.length === 0) {
             throw new LightDbError(LightDbErrorCodes.unsupported, 'key must not be empty', { operation });
@@ -202,19 +195,15 @@ export class Database implements LightDatabase {
     }
 }
 
-/**
- * 解析存储后端
- */
+/** Resolve the storage backend factory. */
 function resolveStorageFactory(options: LightDatabaseOptions): StorageAdapterFactory {
     if (options.storage) {
         return options.storage;
     }
-
     if (!isOpfsAvailable()) {
         throw new LightDbError(LightDbErrorCodes.unsupported, 'OPFS is unavailable, pass an explicit storage adapter', {
             operation: 'open',
         });
     }
-
     return new OpfsStorageAdapterFactory();
 }
