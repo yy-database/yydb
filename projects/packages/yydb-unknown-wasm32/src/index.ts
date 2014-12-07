@@ -62,19 +62,13 @@ function assertReady(): void {
     }
 }
 
-async function resolveDefaultWasmBytes(): Promise<ArrayBuffer | Uint8Array | URL> {
-    const wasmUrl = new URL('../lib/yydb_wasm_bg.wasm', import.meta.url);
-    if (typeof process !== 'undefined' && process.versions?.node) {
-        const { readFileSync } = await import('node:fs');
-        const { fileURLToPath } = await import('node:url');
-        return readFileSync(fileURLToPath(wasmUrl));
-    }
-    return wasmUrl;
+function resolveDefaultWasmUrl(): URL {
+    return new URL('../lib/yydb_wasm_bg.wasm', import.meta.url);
 }
 
-async function normalizeInitInput(input: WasmInitInput | undefined): Promise<WasmInitInput | ArrayBuffer | Uint8Array> {
+function normalizeInitInput(input: WasmInitInput | undefined): WasmInitInput | ArrayBuffer | Uint8Array {
     if (input === undefined) {
-        return resolveDefaultWasmBytes();
+        return resolveDefaultWasmUrl();
     }
     if (
         input instanceof URL ||
@@ -94,7 +88,7 @@ export async function initWasm(options: InitWasmOptions = {}): Promise<void> {
     if (ready) {
         return;
     }
-    const moduleOrPath = await normalizeInitInput(options.module);
+    const moduleOrPath = normalizeInitInput(options.module);
     await initGlue({ module_or_path: moduleOrPath });
     ready = true;
 }
