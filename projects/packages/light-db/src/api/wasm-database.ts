@@ -361,6 +361,35 @@ export class Database {
     }
 
     /**
+     * Register a session-local host micro UDF definition.
+     *
+     * Accepts the wire-format `MicroRegister` body (same bytes produced by
+     * the Rust-side `yydb-protocol::encode_micro_register`). The JS-side
+     * implementation is wired via {@link setMicroHostInvoker}.
+     *
+     * @param body Encoded `MicroRegister` bytes.
+     */
+    public registerMicro(body: Uint8Array): Promise<void> {
+        return this.parseResult(this.session.registerMicro(body));
+    }
+
+    /**
+     * Invoke a registered scalar UDF.
+     *
+     * Accepts the wire-format `ScalarCall` body (same bytes produced by
+     * `yydb-protocol::encode_scalar_call`). Returns the scalar result.
+     *
+     * @param body Encoded `ScalarCall` bytes.
+     */
+    public async callScalar(body: Uint8Array): Promise<string | number | boolean | null> {
+        const raw = JSON.parse(this.session.callScalar(body)) as WasmResult;
+        if (!raw.ok) throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
+        const value = raw.value;
+        if (value === null || value === undefined) return null;
+        return value as string | number | boolean;
+    }
+
+    /**
      * Close the session. Idempotent — further calls fail.
      *
      * On persistent (OPFS) sessions this triggers a final snapshot publish.
