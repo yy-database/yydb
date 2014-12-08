@@ -1,75 +1,93 @@
 /**
- * 浏览器数据库作者面类型
+ * Browser database authoring-surface types.
  *
- * 这些类型是 `@yydb/light-db` 的稳定合同：二进制一律 `Uint8Array`，
- * 不出现本地路径、文件句柄或 Node 专属类型。
+ * These are the stable contract for `@yydb/light-db`: binary values
+ * are always `Uint8Array`, no local file paths, file handles, or
+ * Node-exclusive types leak through.
  */
 
-import type { LeaseMode } from '../core/lease';
-import type { CheckpointResult, StorageEngineStats } from '../core/engine';
-import type { StorageAdapterFactory } from '../storage/StorageAdapter';
-
-/** Schema 版本与文档，与 `@yydb/yydb` 同构 */
+/** Schema version and document (aligned with `@yydb/yydb`). */
 export interface SchemaVersion {
-    /** Schema 版本 */
     version: number;
-    /** Schema 文档全文 */
     document: string;
 }
 
-/** 打开数据库的选项 */
-export interface LightDatabaseOptions {
-    /** 页大小，默认 4KB */
-    pageSize?: number;
-    /** WAL 字节阈值，超过后自动检查点，默认 16MB */
-    walThreshold?: number;
-    /** 是否自动检查点，默认 true */
-    autoCheckpoint?: boolean;
-    /** 写租约模式，默认 `web-locks` */
-    lease?: LeaseMode;
-    /** 存储后端，默认 OPFS */
-    storage?: StorageAdapterFactory;
-}
-
 /**
- * 浏览器数据库
- *
- * 与 `@yydb/yydb` 的 TypeScript 作者面保持同一调用形态与返回语义。
+ * Shared browser-database contract — both the WASM-backed main
+ * {@link Database} and the pure-TS {@link PureTsDatabase} implement
+ * (or are compatible with) this shape. Node-side parity is maintained
+ * via identical method names and return semantics.
  */
 export interface LightDatabase {
-    /** 数据库名 */
+    /** Database name (OPFS path / namespace). */
     readonly name: string;
 
-    /** 读取已持久化的 schema */
-    schema(): Promise<SchemaVersion | null>;
+    /** Engine version string. */
+    serverVersion(): string;
 
-    /** 声明 schema 文档，文档是唯一真相 */
-    ensureSchema(document: string): Promise<void>;
+    /** Basic diagnostics — session info from the engine. */
+    info(): string;
 
-    /** 读取键 */
+    /** Published schema metadata, or `null` before the first schema. */
+    getSchema(): Promise<SchemaVersion | null>;
+
+    /**
+     * Validate and publish a VOS schema document. Accepts raw `.vos`
+     * source or `@voml/vos` descriptors.
+     */
+    ensureSchema(...input: [string] | string[]): Promise<void>;
+
+    /** Read one record, or `null`. */
     get(key: string): Promise<Uint8Array | null>;
 
-    /** 写入键 */
-    put(key: string, value: Uint8Array): Promise<void>;
+    /** Insert or replace one record. */
+    put(key: string, value: Uint8Array | string): Promise<void>;
 
-    /** 删除键，键存在时返回 true */
-    delete(key: string): Promise<boolean>;
+    /** Delete one record. Silently succeeds when absent. */
+    delete(key: string): Promise<void>;
 
-    /** 开启事务 */
+    /** Fold the WAL into the main storage. */
+    checkpoint(): Promise<void>;
+
+    /** Begin an explicit transaction. */
     begin(): Promise<void>;
 
-    /** 提交事务 */
+    /** Commit the current transaction. */
     commit(): Promise<void>;
 
-    /** 回滚事务 */
+    /** Roll back the current transaction. */
     rollback(): Promise<void>;
 
-    /** 执行检查点 */
-    checkpoint(): Promise<CheckpointResult>;
+    /** Execute a VOS read pipeline. */
+    query<T = Record<string, unknown>>(source: string): Promise<T[]>;
 
-    /** 数据库统计 */
-    stats(): StorageEngineStats;
+    /** Execute a VOS write program. */
+    execute(source: string): Promise<void>;
 
-    /** 关闭数据库 */
+    /** Close the session. Idempotent. */
     close(): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Pure-TS backend option types (kept for reference/test use only)
+// ---------------------------------------------------------------------------
+
+import type { LeaseMode } from '../core/lease';
+import type { StorageAdapterFactory } from '../storage/StorageAdapter';
+
+/**
+ * Options for opening the pure-TS {@link PureTsDatabase} backend.
+ * Not used by the WASM mainline {@link Database}.
+ */
+export interface LightDatabaseOptions {
+    /** Page size, default 4 KiB. */
+    pageSize?: number;
+    /** WAL byte threshold after which an auto-checkpoint runs; default 16 MiB. */
+    walThreshold?: number;
+    /** Whether auto-checkpoint runs; default `true`. */
+    autoCheckpoint?: boolean;
+    /** Write-lease mode; default `web-locks`. */
+    lease?: LeaseMode;
+    /** Storage backend; default OPFS. */
+    storage?: StorageAdapterFactory;
 }

@@ -48,7 +48,7 @@ export interface OpenOptions {
 // ---------------------------------------------------------------------------
 
 import { StorageEngine } from '../core/engine.js';
-import type { CheckpointResult, StorageEngineOptions, StorageEngineStats } from '../core/engine.js';
+import type { StorageEngineOptions } from '../core/engine.js';
 import { LightDbError, LightDbErrorCodes } from '../errors/index.js';
 import { isOpfsAvailable, OpfsStorageAdapterFactory } from '../storage/opfs/OpfsStorageAdapter.js';
 import type { StorageAdapterFactory } from '../storage/StorageAdapter.js';
@@ -101,7 +101,7 @@ export class PureTsDatabase implements LightDatabase {
     }
 
     /** Read the persisted schema, or `null`. */
-    public async schema(): Promise<SchemaVersion | null> {
+    public async getSchema(): Promise<SchemaVersion | null> {
         const value = await this.engine.get(SCHEMA_KEY);
         return value ? decodeSchema(value) : null;
     }
@@ -114,9 +114,15 @@ export class PureTsDatabase implements LightDatabase {
      * perform full VOS validation — it only checks that the document is
      * parseable and stores it as KV.
      */
-    public async ensureSchema(document: string): Promise<void> {
+    public async ensureSchema(...input: [string] | string[]): Promise<void> {
+        const document = input[0];
+        if (typeof document !== 'string') {
+            throw new LightDbError(LightDbErrorCodes.schemaInvalid, 'pure-TS backend only accepts raw schema strings', {
+                operation: 'ensureSchema',
+            });
+        }
         const version = parseSchemaDocument(document);
-        const existing = await this.schema();
+        const existing = await this.getSchema();
 
         if (existing) {
             if (existing.document !== document) {
@@ -139,13 +145,14 @@ export class PureTsDatabase implements LightDatabase {
     }
 
     /** Insert or replace one record. */
-    public async put(key: string, value: Uint8Array): Promise<void> {
-        await this.engine.put(this.assertUserKey(key, 'kvPut'), value);
+    public async put(key: string, value: Uint8Array | string): Promise<void> {
+        const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+        await this.engine.put(this.assertUserKey(key, 'kvPut'), bytes);
     }
 
-    /** Delete one record. Returns whether the key was present. */
-    public async delete(key: string): Promise<boolean> {
-        return this.engine.delete(this.assertUserKey(key, 'kvDelete'));
+    /** Delete one record. Silently succeeds when absent. */
+    public async delete(key: string): Promise<void> {
+        await this.engine.delete(this.assertUserKey(key, 'kvDelete'));
     }
 
     /** Begin an explicit transaction. */
@@ -164,13 +171,32 @@ export class PureTsDatabase implements LightDatabase {
     }
 
     /** Fold the WAL into the main storage file. */
-    public async checkpoint(): Promise<CheckpointResult> {
-        return this.engine.checkpoint();
+    public async checkpoint(): Promise<void> {
+        await this.engine.checkpoint();
     }
 
-    /** Engine statistics snapshot. */
-    public stats(): StorageEngineStats {
-        return this.engine.getStats();
+    /** Engine version — pure-TS backend reports no specific engine. */
+    public serverVersion(): string {
+        return 'light-db-pure-ts';
+    }
+
+    /** Basic diagnostics — pure-TS backend only reports the database name. */
+    public info(): string {
+        return `name=${this.name}\nbackend=pure-ts\n`;
+    }
+
+    /** VOS query not available on pure-TS backend. */
+    public async query<T = Record<string, unknown>>(_source: string): Promise<T[]> {
+        throw new LightDbError(LightDbErrorCodes.unsupported, 'VOS query is not available on the pure-TS backend', {
+            operation: 'query',
+        });
+    }
+
+    /** VOS write programs not available on pure-TS backend. */
+    public async execute(_source: string): Promise<void> {
+        throw new LightDbError(LightDbErrorCodes.unsupported, 'VOS execute is not available on the pure-TS backend', {
+            operation: 'execute',
+        });
     }
 
     /** Close the database and release the StorageEngine. */
