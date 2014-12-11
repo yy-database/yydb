@@ -33,7 +33,7 @@ import type {
     ScanOptions,
     ScanRow,
     SchemaVersion,
-} from './database.js';
+} from './types.js';
 
 /** WASM session JSON envelope shape (`{ ok, ..., error }`). */
 interface WasmResult {
@@ -400,19 +400,10 @@ export class Database {
 }
 
 // ---------------------------------------------------------------------------
-// Legacy aliases
+// Convenience entry
 // ---------------------------------------------------------------------------
 
-/**
- * @deprecated Use {@link Database} instead. Kept as a compat alias for code
- * that explicitly imported `WasmDatabase`.
- */
-export const WasmDatabase = Database;
-
-/** @deprecated Use {@link PureTsDatabase} from `./database` instead. */
-export type { PureTsDatabase } from './database';
-
-/** Open a browser WASM database — convenience alias for {@link Database.open}. */
+/** Open a browser database — convenience alias for {@link Database.open}. */
 export async function openLightDatabase(name: string, options: OpenOptions = {}): Promise<Database> {
     return Database.open(name, options);
 }

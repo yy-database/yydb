@@ -1,9 +1,10 @@
 /**
  * Browser database authoring-surface types.
  *
- * These are the stable contract for `@yydb/light-db`: binary values
- * are always `Uint8Array`, no local file paths, file handles, or
- * Node-exclusive types leak through.
+ * These are the stable contract for `@yydb/light-db`:
+ * - Binary values are always `Uint8Array` — never `Buffer`.
+ * - No local file paths, file handles, or Node-exclusive types leak through.
+ * - Aligned with the Node-side `@yydb/yydb` method names and return semantics.
  */
 
 /** Schema version and document (aligned with `@yydb/yydb`). */
@@ -12,11 +13,47 @@ export interface SchemaVersion {
     document: string;
 }
 
+/** One row from {@link Database.scan}. */
+export interface ScanRow {
+    key: string;
+    value: Uint8Array;
+}
+
+/** Options for {@link Database.scan}. */
+export interface ScanOptions {
+    /** Include this prefix in every returned key; default `""` returns everything. */
+    prefix?: string;
+    /** Exclusive continuation cursor from a previous scan's last row; default `null` starts fresh. */
+    after?: string | null;
+    /** Max rows returned per call; default `1000`. */
+    limit?: number;
+}
+
+/** One change in {@link Database.batch}. Use `null` to delete. */
+export interface BatchChange {
+    key: string;
+    value: Uint8Array | string | null;
+}
+
+/** Options for {@link Database.migrateSchema}. */
+export interface MigrateOptions {
+    /** Rename entries — `fromType`/`toType` updates a type name; `type`/`fromField`/`toField` updates one field. */
+    renames?: ReadonlyArray<
+        | { fromType: string; toType: string }
+        | { type: string; fromField: string; toField: string }
+    >;
+}
+
+/** Options for opening the WASM-backed {@link Database}. */
+export interface OpenOptions {
+    /** Use an in-memory session (test only; default is OPFS persistent). */
+    memory?: boolean;
+}
+
 /**
- * Shared browser-database contract — both the WASM-backed main
- * {@link Database} and the pure-TS {@link PureTsDatabase} implement
- * (or are compatible with) this shape. Node-side parity is maintained
- * via identical method names and return semantics.
+ * Light database contract — aligned with the Node-side `@yydb/yydb`.
+ * Only the WASM-backed {@link Database} implements this in production;
+ * the formerly pure-TS backend has been removed.
  */
 export interface LightDatabase {
     /** Database name (OPFS path / namespace). */
@@ -66,28 +103,4 @@ export interface LightDatabase {
 
     /** Close the session. Idempotent. */
     close(): Promise<void>;
-}
-
-// ---------------------------------------------------------------------------
-// Pure-TS backend option types (kept for reference/test use only)
-// ---------------------------------------------------------------------------
-
-import type { LeaseMode } from '../core/lease';
-import type { StorageAdapterFactory } from '../storage/StorageAdapter';
-
-/**
- * Options for opening the pure-TS {@link PureTsDatabase} backend.
- * Not used by the WASM mainline {@link Database}.
- */
-export interface LightDatabaseOptions {
-    /** Page size, default 4 KiB. */
-    pageSize?: number;
-    /** WAL byte threshold after which an auto-checkpoint runs; default 16 MiB. */
-    walThreshold?: number;
-    /** Whether auto-checkpoint runs; default `true`. */
-    autoCheckpoint?: boolean;
-    /** Write-lease mode; default `web-locks`. */
-    lease?: LeaseMode;
-    /** Storage backend; default OPFS. */
-    storage?: StorageAdapterFactory;
 }
