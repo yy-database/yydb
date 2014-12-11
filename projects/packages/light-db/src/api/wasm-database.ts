@@ -28,6 +28,7 @@ import { emitSource, type EmittableItem } from '@voml/vos';
 import { LightDbError } from '../errors/index.js';
 import type {
     BatchChange,
+    LightDatabase,
     MigrateOptions,
     OpenOptions,
     ScanOptions,
@@ -134,7 +135,7 @@ export class TransactionHandle {
  * Rust-backed WASM session (memory or OPFS) and exposes the same user API
  * as the Node-side `@yydb/yydb`.
  */
-export class Database {
+export class Database implements LightDatabase {
     /** Database name (OPFS path). */
     public readonly name: string;
 

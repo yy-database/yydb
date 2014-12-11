@@ -31,13 +31,3 @@ export type {
     ScanRow,
     SchemaVersion,
 } from './api';
-
-// Schema 编解码工具（Database 实现使用）
-export {
-    SCHEMA_KEY,
-    RESERVED_KEY_PREFIX,
-    documentVersion,
-    parseSchemaDocument,
-    encodeSchema,
-    decodeSchema,
-} from './api/schema';

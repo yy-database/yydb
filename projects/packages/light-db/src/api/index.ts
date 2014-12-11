@@ -7,15 +7,6 @@
 
 export { Database, TransactionHandle, openLightDatabase } from './wasm-database';
 
-export {
-    SCHEMA_KEY,
-    RESERVED_KEY_PREFIX,
-    documentVersion,
-    parseSchemaDocument,
-    encodeSchema,
-    decodeSchema,
-} from './schema';
-
 export type {
     BatchChange,
     LightDatabase,

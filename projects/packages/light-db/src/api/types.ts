@@ -70,9 +70,9 @@ export interface LightDatabase {
 
     /**
      * Validate and publish a VOS schema document. Accepts raw `.vos`
-     * source or `@voml/vos` descriptors.
+     * source or `@voml/vos` descriptors (e.g. `v.table()`, `v.class()`).
      */
-    ensureSchema(...input: [string] | string[]): Promise<void>;
+    ensureSchema(...input: [string] | object[]): Promise<void>;
 
     /** Read one record, or `null`. */
     get(key: string): Promise<Uint8Array | null>;
