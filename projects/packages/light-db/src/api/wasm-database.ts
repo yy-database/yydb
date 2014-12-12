@@ -26,6 +26,14 @@ import {
 } from '@yydb/yydb-unknown-wasm32';
 import { emitSource, type EmittableItem } from '@voml/vos';
 import { LightDbError } from '../errors/index.js';
+import {
+    MicroSessionRegistry,
+    defineMicro as buildMicro,
+    microFingerprint,
+    udfWireKind,
+    type DefinedMicro,
+    type MicroHandle,
+} from '../shared/micro.js';
 import type {
     BatchChange,
     LightDatabase,
@@ -35,6 +43,11 @@ import type {
     ScanRow,
     SchemaVersion,
 } from './types.js';
+import type {
+    InferUdfArgs,
+    InferUdfReturn,
+    UdfScalarDescriptor,
+} from '../shared/udf-types.js';
 
 /** WASM session JSON envelope shape (`{ ok, ..., error }`). */
 interface WasmResult {
@@ -141,9 +154,14 @@ export class Database implements LightDatabase {
 
     private readonly session: WasmSession;
 
+    private readonly registry: MicroSessionRegistry;
+
     private constructor(name: string, session: WasmSession) {
         this.name = name;
         this.session = session;
+        this.registry = new MicroSessionRegistry();
+        // Route WASM host-micro callbacks into our per-session registry.
+        session.setMicroHostInvoker((payload) => this.registry.invokeFromWire(payload));
     }
 
     /**
@@ -346,44 +364,69 @@ export class Database implements LightDatabase {
     }
 
     /**
-     * Install a session-local host micro UDF.
+     * Build a typed session-local micro definition without registering it.
      *
-     * The WASM core exposes `setMicroHostInvoker` to call back into JS for
-     * host-provided scalar UDFs. `registerMicro` registers the definition on
-     * the Rust side; the invoker function handles the actual JS-side call.
-     *
-     * @param invoker A JS function that receives `{ hostId, handleVersion, functionId, args }`
-     * and returns the scalar result.
+     * Same signature as the Node-side `@yydb/yydb`; this is a thin alias
+     * over the shared `defineMicro` helper so author code stays portable.
      */
-    public setMicroHostInvoker(
-        invoker: (payload: { hostId: number; handleVersion: number; functionId: string; args: readonly unknown[] }) => unknown,
-    ): void {
-        this.session.setMicroHostInvoker(invoker as unknown as (...args: unknown[]) => unknown);
+    public defineMicro<
+        TArgs extends readonly UdfScalarDescriptor[],
+        TReturn extends UdfScalarDescriptor,
+    >(input: {
+        readonly name: string;
+        readonly version: number;
+        readonly args: TArgs;
+        readonly returns: TReturn;
+        readonly effect: 'pure';
+        readonly deterministic: boolean;
+        readonly mode?: 'scalar';
+        readonly fn: (...args: InferUdfArgs<TArgs>) => InferUdfReturn<TReturn>;
+    }): DefinedMicro<TArgs, TReturn> {
+        return buildMicro(input);
     }
 
     /**
-     * Register a session-local host micro UDF definition.
+     * Install a session-local host micro into both the JS registry and the
+     * WASM core. Host micros never persist across sessions.
      *
-     * Accepts the wire-format `MicroRegister` body (same bytes produced by
-     * the Rust-side `yydb-protocol::encode_micro_register`). The JS-side
-     * implementation is wired via {@link setMicroHostInvoker}.
-     *
-     * @param body Encoded `MicroRegister` bytes.
+     * Uses the high-level JSON bridge (`registerMicroJson`) so we never
+     * encode wire bodies in TS; Rust owns the protocol.
      */
-    public registerMicro(body: Uint8Array): Promise<void> {
-        return this.parseResult(this.session.registerMicro(body));
+    public async registerMicro<
+        TArgs extends readonly UdfScalarDescriptor[],
+        TReturn extends UdfScalarDescriptor,
+    >(definition: DefinedMicro<TArgs, TReturn>): Promise<MicroHandle> {
+        const handle = this.registry.register(definition);
+        const argTypes = definition.args.map((d) => udfWireKind(d));
+        const returnType = udfWireKind(definition.returns);
+        const fingerprint = Array.from(microFingerprint(definition.name, definition.version));
+        const json = JSON.stringify({
+            name: definition.name,
+            version: definition.version,
+            argTypes,
+            returnType,
+            hostId: handle.hostId,
+            functionId: handle.functionId,
+            handleVersion: handle.implementationVersion,
+            fingerprint,
+        });
+        this.parseResult(this.session.registerMicroJson(json));
+        return handle;
     }
 
     /**
-     * Invoke a registered scalar UDF.
+     * Invoke a registered scalar UDF via the WASM core.
      *
-     * Accepts the wire-format `ScalarCall` body (same bytes produced by
-     * `yydb-protocol::encode_scalar_call`). Returns the scalar result.
-     *
-     * @param body Encoded `ScalarCall` bytes.
+     * Uses the high-level JSON bridge (`callScalarJson`) — args are encoded
+     * as plain JSON scalars (`number`, `string`, `boolean`, `null`).
      */
-    public async callScalar(body: Uint8Array): Promise<string | number | boolean | null> {
-        const raw = JSON.parse(this.session.callScalar(body)) as WasmResult;
+    public async callScalar(
+        name: string,
+        version: number,
+        args: readonly (string | number | boolean | null)[],
+    ): Promise<string | number | boolean | null> {
+        const json = JSON.stringify({ name, version, args });
+        const raw = JSON.parse(this.session.callScalarJson(json)) as WasmResult;
         if (!raw.ok) throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
         const value = raw.value;
         if (value === null || value === undefined) return null;
