@@ -42,6 +42,10 @@ export type WasmSession = {
     setMicroHostInvoker(invoker: (payload: MicroHostInvokePayload) => unknown): void;
     registerMicro(body: Uint8Array): string;
     callScalar(body: Uint8Array): string;
+    /** High-level JSON descriptor for host micro registration. */
+    registerMicroJson(json: string): string;
+    /** High-level JSON args for scalar UDF invocation. */
+    callScalarJson(json: string): string;
     close(): void;
     readonly path?: string;
 };
