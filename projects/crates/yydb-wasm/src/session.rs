@@ -98,6 +98,144 @@ fn run_ensure_schema(conn: &Connection, closed: bool, document: &str) -> String 
     unit_result_json(conn.ensure_schema(document))
 }
 
+/// Parse a JSON MicroRegister request:
+/// `{ name, version, argTypes: ["i64"|"bool"|"text"|"null"], returnType, hostId, functionId, handleVersion, fingerprint: [32 u8s] }`.
+fn parse_micro_register_json(json: &str) -> yydb::Result<yydb::types::udf::HostMicroDefinition> {
+    let obj: serde_json::Value = serde_json::from_str(json)
+        .map_err(|_| Error::Protocol { message: "registerMicroJson must be a JSON object".to_string() })?;
+    let name = obj
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::Protocol { message: "registerMicroJson missing string `name`".to_string() })?
+        .to_owned();
+    let version = obj
+        .get("version")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| Error::Protocol { message: "registerMicroJson missing u32 `version`".to_string() })?;
+    let arg_types_arr = obj
+        .get("argTypes")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| Error::Protocol { message: "registerMicroJson missing array `argTypes`".to_string() })?;
+    let arg_types: Vec<yydb::types::udf::UdfType> = arg_types_arr
+        .iter()
+        .map(|v| {
+            let s = v.as_str().ok_or_else(|| Error::Protocol {
+                message: "registerMicroJson `argTypes` must be string tags".to_string(),
+            })?;
+            parse_udf_type_tag(s)
+        })
+        .collect::<Result<_, _>>()?;
+    let return_type = obj
+        .get("returnType")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::Protocol { message: "registerMicroJson missing string `returnType`".to_string() })?;
+    let return_type = parse_udf_type_tag(return_type)?;
+    let host_id = obj
+        .get("hostId")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| Error::Protocol { message: "registerMicroJson missing u64 `hostId`".to_string() })?;
+    let function_id = obj
+        .get("functionId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::Protocol { message: "registerMicroJson missing string `functionId`".to_string() })?
+        .to_owned();
+    let handle_version = obj
+        .get("handleVersion")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| Error::Protocol { message: "registerMicroJson missing u32 `handleVersion`".to_string() })?;
+    let fingerprint_arr = obj
+        .get("fingerprint")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| Error::Protocol { message: "registerMicroJson missing array `fingerprint`".to_string() })?;
+    let mut fingerprint = [0u8; 32];
+    if fingerprint_arr.len() != 32 {
+        return Err(Error::Protocol {
+            message: format!("registerMicroJson `fingerprint` must be 32 bytes, got {}", fingerprint_arr.len()),
+        });
+    }
+    for (i, v) in fingerprint_arr.iter().enumerate() {
+        let byte = v
+            .as_u64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| Error::Protocol { message: "registerMicroJson `fingerprint` values must be u8".to_string() })?;
+        fingerprint[i] = byte;
+    }
+    yydb::types::udf::HostMicroDefinition::from_scalar(
+        &name,
+        version,
+        arg_types,
+        return_type,
+        host_id,
+        function_id,
+        handle_version,
+        fingerprint,
+    )
+    .map_err(|_| Error::Protocol { message: "registerMicroJson failed validation".to_string() })
+}
+
+/// Parse a JSON ScalarCall request:
+/// `{ name, version, args: [42, "text", true, null] }`.
+fn parse_scalar_call_json(json: &str) -> yydb::Result<(String, u32, Vec<yydb::types::Value>)> {
+    let obj: serde_json::Value = serde_json::from_str(json)
+        .map_err(|_| Error::Protocol { message: "callScalarJson must be a JSON object".to_string() })?;
+    let name = obj
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::Protocol { message: "callScalarJson missing string `name`".to_string() })?
+        .to_owned();
+    let version = obj
+        .get("version")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| Error::Protocol { message: "callScalarJson missing u32 `version`".to_string() })?;
+    let args_arr = obj
+        .get("args")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| Error::Protocol { message: "callScalarJson missing array `args`".to_string() })?;
+    let mut args = Vec::with_capacity(args_arr.len());
+    for v in args_arr {
+        args.push(json_value_to_runtime(v)?);
+    }
+    Ok((name, version, args))
+}
+
+/// Map a JSON scalar to the YY runtime `Value` subset (used by callScalar args).
+fn json_value_to_runtime(v: &serde_json::Value) -> yydb::Result<yydb::types::Value> {
+    match v {
+        serde_json::Value::Null => Ok(yydb::types::Value::Null),
+        serde_json::Value::Bool(b) => Ok(yydb::types::Value::Bool(*b)),
+        serde_json::Value::Number(n) => {
+            // Prefer i64 when it fits exactly; fall back to Float for fractional.
+            if let Some(i) = n.as_i64() {
+                Ok(yydb::types::Value::I64(i))
+            }
+            else if let Some(f) = n.as_f64() {
+                Ok(yydb::types::Value::F64(f))
+            }
+            else {
+                Err(Error::Protocol { message: "callScalarJson number out of range".to_string() })
+            }
+        }
+        serde_json::Value::String(s) => Ok(yydb::types::Value::Text(s.clone())),
+        _ => Err(Error::Protocol { message: "callScalarJson args must be scalar values".to_string() }),
+    }
+}
+
+/// Map a wire `UdfType` tag string back to the enum variant.
+fn parse_udf_type_tag(s: &str) -> yydb::Result<yydb::types::udf::UdfType> {
+    match s {
+        "i64" => Ok(yydb::types::udf::UdfType::I64),
+        "bool" => Ok(yydb::types::udf::UdfType::Bool),
+        "text" => Ok(yydb::types::udf::UdfType::Text),
+        "null" => Ok(yydb::types::udf::UdfType::Null),
+        _ => Err(Error::Protocol {
+            message: format!("unknown UDF type tag: {s}"),
+        }),
+    }
+}
+
 fn run_register_micro(conn: &Connection, closed: bool, body: &[u8]) -> String {
     if closed {
         return unit_result_json(Err(closed_session_error()));
@@ -108,11 +246,31 @@ fn run_register_micro(conn: &Connection, closed: bool, body: &[u8]) -> String {
     }
 }
 
+fn run_register_micro_json(conn: &Connection, closed: bool, json: &str) -> String {
+    if closed {
+        return unit_result_json(Err(closed_session_error()));
+    }
+    match parse_micro_register_json(json) {
+        Ok(definition) => unit_result_json(conn.register_host_micro(definition)),
+        Err(error) => unit_result_json(Err(error)),
+    }
+}
+
 fn run_call_scalar(conn: &Connection, closed: bool, body: &[u8]) -> String {
     if closed {
         return scalar_call_json(Err(closed_session_error()));
     }
     match wire::decode_scalar_call(body) {
+        Ok((name, version, args)) => scalar_call_json(conn.call_scalar_version(&name, version, &args)),
+        Err(error) => scalar_call_json(Err(error)),
+    }
+}
+
+fn run_call_scalar_json(conn: &Connection, closed: bool, json: &str) -> String {
+    if closed {
+        return scalar_call_json(Err(closed_session_error()));
+    }
+    match parse_scalar_call_json(json) {
         Ok((name, version, args)) => scalar_call_json(conn.call_scalar_version(&name, version, &args)),
         Err(error) => scalar_call_json(Err(error)),
     }
@@ -342,6 +500,25 @@ impl MemorySession {
     #[wasm_bindgen(js_name = callScalar)]
     pub fn call_scalar(&self, body: &[u8]) -> String {
         run_call_scalar(&self.conn, self.closed, body)
+    }
+
+    /// Register a session-local host micro from a JSON descriptor.
+    ///
+    /// Accepts the same shape as the TS `defineMicro` + encoded handle:
+    /// `{ name, version, argTypes, returnType, hostId, functionId, handleVersion, fingerprint }`.
+    /// Returns JSON `{ ok, error }`.
+    #[wasm_bindgen(js_name = registerMicroJson)]
+    pub fn register_micro_json(&self, json: &str) -> String {
+        run_register_micro_json(&self.conn, self.closed, json)
+    }
+
+    /// Invoke a scalar UDF from JSON args.
+    ///
+    /// Accepts `{ name, version, args: [scalars] }` — avoids the binary
+    /// `ScalarCall` body when the caller is JS. Returns JSON `{ ok, value, error }`.
+    #[wasm_bindgen(js_name = callScalarJson)]
+    pub fn call_scalar_json(&self, json: &str) -> String {
+        run_call_scalar_json(&self.conn, self.closed, json)
     }
 
     /// Mark the session closed; further calls return closed-session errors.
@@ -615,6 +792,30 @@ impl PersistentSession {
     #[wasm_bindgen(js_name = callScalar)]
     pub fn call_scalar(&self, body: &[u8]) -> String {
         run_call_scalar(&self.conn, self.closed, body)
+    }
+
+    /// Register a session-local host micro from a JSON descriptor (Persistent session variant).
+    #[wasm_bindgen(js_name = registerMicroJson)]
+    pub fn register_micro_json(&self, json: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.volume.as_ref() {
+            Some(volume) => match parse_micro_register_json(json) {
+                Ok(definition) => match self.conn.register_host_micro(definition) {
+                    Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                    Err(error) => unit_result_json(Err(error)),
+                },
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Invoke a scalar UDF from JSON args (Persistent session variant).
+    #[wasm_bindgen(js_name = callScalarJson)]
+    pub fn call_scalar_json(&self, json: &str) -> String {
+        run_call_scalar_json(&self.conn, self.closed, json)
     }
 
     /// Flush pending durable state, then mark the session closed.
