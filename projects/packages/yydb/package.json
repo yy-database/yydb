@@ -1,6 +1,6 @@
 {
     "name": "@yydb/yydb",
-    "version": "0.0.18",
+    "version": "0.1.0",
     "description": "YYDB Node embedded engine and CLI",
     "license": "MPL-2.0",
     "type": "module",
@@ -49,7 +49,7 @@
     "dependencies": {
         "@vmz/commander": "^0.3.5",
         "@vmz/diagnostic": "^0.3.5",
-        "@voml/vos": "^0.0.1"
+        "@voml/vos": "^0.0.5"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",

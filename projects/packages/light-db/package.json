@@ -1,6 +1,6 @@
 {
     "name": "@yydb/light-db",
-    "version": "0.0.18",
+    "version": "0.1.0",
     "description": "Light DB — browser-native YYDB database backed by Rust WASM (yydb-unknown-wasm32)",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -41,7 +41,7 @@
         "typescript": "^5.3.0"
     },
     "dependencies": {
-        "@voml/vos": "^0.0.1",
+        "@voml/vos": "^0.0.5",
         "@yydb/yydb-unknown-wasm32": "workspace:*"
     }
 }
