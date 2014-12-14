@@ -829,3 +829,146 @@ impl PersistentSession {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests for JSON bridge parsers
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use yydb::types::Value;
+
+    fn ok_register_json() -> String {
+        let fingerprint = [0u8; 32];
+        let fp_arr: Vec<u8> = fingerprint.to_vec();
+        serde_json::json!({
+            "name": "double",
+            "version": 1,
+            "argTypes": ["i64"],
+            "returnType": "i64",
+            "hostId": 7,
+            "functionId": "1",
+            "handleVersion": 1,
+            "fingerprint": fp_arr,
+        })
+        .to_string()
+    }
+
+    fn ok_call_json() -> String {
+        serde_json::json!({
+            "name": "double",
+            "version": 1,
+            "args": [21],
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn parses_micro_register_json_successfully() {
+        let definition = parse_micro_register_json(&ok_register_json()).expect("valid register json");
+        assert_eq!(definition.identity.name(), "double");
+        assert_eq!(definition.identity.version, 1);
+        assert_eq!(definition.signature.args, vec![yydb::types::udf::UdfType::I64]);
+        assert_eq!(definition.signature.returns, yydb::types::udf::UdfType::I64);
+        assert_eq!(definition.handle.host_id, 7);
+        assert_eq!(definition.handle.function_id, "1");
+        assert_eq!(definition.handle.version, 1);
+        assert_eq!(definition.fingerprint, [0u8; 32]);
+    }
+
+    #[test]
+    fn rejects_micro_register_missing_field() {
+        let mut obj = serde_json::json!({
+            "name": "double",
+            "version": 1,
+            "argTypes": ["i64"],
+            "returnType": "i64",
+            "hostId": 7,
+            "functionId": "1",
+            "handleVersion": 1,
+            "fingerprint": vec![0u8; 32],
+        });
+        let map = obj.as_object_mut().unwrap();
+        map.remove("name");
+        let err = parse_micro_register_json(&obj.to_string()).expect_err("should fail");
+        assert!(format!("{err:?}").contains("registerMicroJson"));
+    }
+
+    #[test]
+    fn rejects_micro_register_invalid_type_tag() {
+        let json = serde_json::json!({
+            "name": "fancy",
+            "version": 1,
+            "argTypes": ["i128"],
+            "returnType": "i64",
+            "hostId": 1,
+            "functionId": "1",
+            "handleVersion": 1,
+            "fingerprint": vec![0u8; 32],
+        })
+        .to_string();
+        let err = parse_micro_register_json(&json).expect_err("should fail");
+        assert!(format!("{err:?}").contains("unknown UDF type tag"));
+    }
+
+    #[test]
+    fn rejects_micro_register_wrong_fingerprint_length() {
+        let json = serde_json::json!({
+            "name": "short",
+            "version": 1,
+            "argTypes": [],
+            "returnType": "bool",
+            "hostId": 1,
+            "functionId": "1",
+            "handleVersion": 1,
+            "fingerprint": vec![0u8; 16],
+        })
+        .to_string();
+        let err = parse_micro_register_json(&json).expect_err("should fail");
+        assert!(format!("{err:?}").contains("32 bytes"));
+    }
+
+    #[test]
+    fn parses_scalar_call_json_with_number_to_i64() {
+        let (name, version, args) = parse_scalar_call_json(&ok_call_json()).expect("valid call json");
+        assert_eq!(name, "double");
+        assert_eq!(version, 1);
+        assert_eq!(args, vec![Value::I64(21)]);
+    }
+
+    #[test]
+    fn parses_scalar_call_json_with_various_scalars() {
+        let json = serde_json::json!({
+            "name": "mixed",
+            "version": 1,
+            "args": [42, "hello", true, null, 3.14],
+        })
+        .to_string();
+        let (_, _, args) = parse_scalar_call_json(&json).expect("ok");
+        assert_eq!(args[0], Value::I64(42));
+        assert_eq!(args[1], Value::Text("hello".to_owned()));
+        assert_eq!(args[2], Value::Bool(true));
+        assert_eq!(args[3], Value::Null);
+        assert!(matches!(args[4], Value::F64(_)));
+    }
+
+    #[test]
+    fn rejects_scalar_call_missing_field() {
+        let json = r#"{"name":"only"}"#;
+        let err = parse_scalar_call_json(json).expect_err("should fail");
+        assert!(format!("{err:?}").contains("callScalarJson"));
+    }
+
+    #[test]
+    fn rejects_scalar_call_non_scalar_arg() {
+        let json = serde_json::json!({
+            "name": "bad",
+            "version": 1,
+            "args": [{"nested": true}],
+        })
+        .to_string();
+        let err = parse_scalar_call_json(&json).expect_err("should fail");
+        assert!(format!("{err:?}").contains("scalar"));
+    }
+}

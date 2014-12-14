@@ -364,6 +364,25 @@ export class Database implements LightDatabase {
     }
 
     /**
+     * Override the host micro invoker.
+     *
+     * The constructor wires this to the per-session {@link MicroSessionRegistry}
+     * so that high-level {@link registerMicro} + {@link callScalar} works out of
+     * the box. Call this only if you need to replace the default resolution
+     * logic (e.g. to inject a mock invoker in tests).
+     */
+    public overrideMicroHostInvoker(
+        invoker: (payload: {
+            hostId: number;
+            handleVersion: number;
+            functionId: string;
+            args: readonly unknown[];
+        }) => unknown,
+    ): void {
+        this.session.setMicroHostInvoker(invoker as unknown as (...args: unknown[]) => unknown);
+    }
+
+    /**
      * Build a typed session-local micro definition without registering it.
      *
      * Same signature as the Node-side `@yydb/yydb`; this is a thin alias
