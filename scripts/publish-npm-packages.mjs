@@ -54,7 +54,7 @@ function publishDir(dirName) {
     }
 
     console.log(`publish ${name}@${version}`);
-    const r = spawnSync('npm', ['publish', '--access', 'public', '--tag', 'legacy'], {
+    const r = spawnSync('npm', ['publish', '--access', 'public'], {
         cwd: dir,
         stdio: 'inherit',
         shell: true,
