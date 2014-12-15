@@ -1,6 +1,6 @@
 {
     "name": "@yydb/yydb-webui",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Local browser UI for inspecting a running YYDB server",
     "license": "MPL-2.0",
     "private": true,
