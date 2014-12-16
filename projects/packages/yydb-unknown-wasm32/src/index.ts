@@ -46,6 +46,14 @@ export type WasmSession = {
     registerMicroJson(json: string): string;
     /** High-level JSON args for scalar UDF invocation. */
     callScalarJson(json: string): string;
+    /** Read-only consistency probes. Returns JSON `{ ok, report?, error? }`. */
+    doctorJson(): string;
+    /** Prepare a VOS query plan. Returns JSON `{ ok, statement_id?, ..., error? }`. */
+    prepareJson(source: string): string;
+    /** Execute a previously prepared statement. Returns JSON `{ ok, rows?, error? }`. */
+    queryPreparedJson(json: string): string;
+    /** Release a prepared statement's plan. Returns true if present. */
+    closeStatement(statementId: string): boolean;
     close(): void;
     readonly path?: string;
 };

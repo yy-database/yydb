@@ -36,12 +36,15 @@ import {
 } from '../shared/micro.js';
 import type {
     BatchChange,
+    DoctorReport,
     LightDatabase,
     MigrateOptions,
     OpenOptions,
+    ParameterDescriptor,
     ScanOptions,
     ScanRow,
     SchemaVersion,
+    StatementInfo,
 } from './types.js';
 import type {
     InferUdfArgs,
@@ -56,6 +59,7 @@ interface WasmResult {
     value?: unknown;
     schema?: { version: number; document: string } | null;
     success?: boolean;
+    report?: unknown;
     error?: unknown;
     code?: unknown;
 }
@@ -459,6 +463,129 @@ export class Database implements LightDatabase {
      */
     public async close(): Promise<void> {
         this.session.close();
+    }
+
+    // -------------------------------------------------------------------
+    // Doctor + Prepared statements
+    // -------------------------------------------------------------------
+
+    /**
+     * Read-only consistency probe.
+     *
+     * Returns a report with checkpoint lag, orphan blob counts, per-namespace
+     * stats and any named diagnostic issues — same shape as the Node-side
+     * `@yydb/yydb` doctor.
+     */
+    public async doctor(): Promise<DoctorReport> {
+        const raw = JSON.parse(this.session.doctorJson()) as WasmResult;
+        if (!raw.ok) throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
+        return raw.report as DoctorReport;
+    }
+
+    /**
+     * Prepare a VOS query plan — parses and lowers once, re-executes many times.
+     *
+     * ```ts
+     * const stmt = await db.prepare('User.all().filter(u => u.age > $min).take($limit)');
+     * const rows = await stmt.execute({ min: 18, limit: 50 });
+     * stmt.close();
+     * ```
+     */
+    public async prepare(source: string): Promise<Statement> {
+        const raw = JSON.parse(this.session.prepareJson(source)) as WasmResult & Partial<StatementInfo>;
+        if (!raw.ok) throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
+        const info: StatementInfo = {
+            statement_id: raw.statement_id!,
+            query_kind: raw.query_kind!,
+            parameters: raw.parameters!,
+            read_set: raw.read_set!,
+            write_set: raw.write_set!,
+            source_fingerprint: raw.source_fingerprint!,
+            source: raw.source!,
+        };
+        return new Statement(this.session, info);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Statement — WASM-backed prepared query plan
+// ---------------------------------------------------------------------------
+
+/**
+ * A pre-parsed, pre-lowered VOS query plan (WASM variant).
+ *
+ * The lowered op tree lives in the session's internal registry keyed by
+ * `statement_id`; this class is a thin JS handle. Bind parameters and
+ * re-execute via {@link Statement.execute} without re-parsing or re-lowering.
+ *
+ * ```ts
+ * const stmt = await db.prepare('User.all().take($limit).collect()');
+ * const rows = await stmt.execute({ limit: 100 });
+ * // re-execute with different bind
+ * const rows2 = await stmt.execute({ limit: 50 });
+ * // release when done
+ * stmt.close();
+ * ```
+ */
+export class Statement {
+    private closed = false;
+
+    constructor(
+        private readonly session: WasmSession,
+        private readonly infoObj: StatementInfo,
+    ) {}
+
+    /** The unique id for this prepared statement (WASM-assigned). */
+    get statementId(): string {
+        return this.infoObj.statement_id;
+    }
+
+    /** Parameter descriptors — empty array when the statement takes no parameters. */
+    get parameters(): ParameterDescriptor[] {
+        return this.infoObj.parameters;
+    }
+
+    /** Full statement metadata — query kind, read/write sets, fingerprint and source. */
+    get info(): StatementInfo {
+        return this.infoObj;
+    }
+
+    /** Whether this statement has been closed and can no longer execute. */
+    get isClosed(): boolean {
+        return this.closed;
+    }
+
+    /**
+     * Execute this prepared statement with optional named parameter bindings.
+     *
+     * Missing parameters, extraneous parameters or mistyped parameters raise
+     * an error with `yydb.query.bind` code.
+     *
+     * @param params Named parameter values — keys match the parameter names
+     * in the VOS source (`$name` → `{ name: value }`). Omit when the statement
+     * takes no parameters.
+     */
+    async execute<T = Record<string, unknown>>(params?: Record<string, unknown> | null): Promise<T[]> {
+        if (this.closed) {
+            throw new Error('yydb.statement.closed: statement has been closed');
+        }
+        const json = JSON.stringify({
+            statementId: this.infoObj.statement_id,
+            params: params ?? null,
+        });
+        const raw = JSON.parse(this.session.queryPreparedJson(json)) as WasmResult;
+        if (!raw.ok) {
+            throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
+        }
+        return (raw.rows ?? []) as T[];
+    }
+
+    /** Release this statement's plan from the WASM session registry. Idempotent. */
+    close(): void {
+        if (!this.closed) {
+            this.session.closeStatement(this.infoObj.statement_id);
+            this.closed = true;
+        }
     }
 }
 

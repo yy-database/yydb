@@ -5,14 +5,19 @@
  * `@yydb/yydb-unknown-wasm32` 的 Rust 语义核心）。
  */
 
-export { Database, TransactionHandle, openLightDatabase } from './wasm-database';
+export { Database, Statement, TransactionHandle, openLightDatabase } from './wasm-database';
 
 export type {
     BatchChange,
+    DoctorReport,
     LightDatabase,
     MigrateOptions,
     OpenOptions,
+    ParameterDescriptor,
+    QueryKind,
     ScanOptions,
     ScanRow,
     SchemaVersion,
+    SlotType,
+    StatementInfo,
 } from './types';
