@@ -1,8 +1,11 @@
 //! Stateful YYDB sessions for browser WASM hosts.
 
+use std::collections::{BTreeMap, HashMap};
+
 use js_sys::Function;
 use wasm_bindgen::prelude::*;
 use yydb::{Connection, Error, protocol as wire};
+use yydb_query::PreparedStatement;
 
 use crate::{
     core::{
@@ -315,6 +318,7 @@ fn run_put_persistent(conn: &Connection, volume: &OpfsPersistentVolume, closed: 
 pub struct MemorySession {
     conn: Connection,
     closed: bool,
+    stmts: HashMap<String, PreparedStatement>,
 }
 
 #[wasm_bindgen]
@@ -322,7 +326,9 @@ impl MemorySession {
     /// Open a fresh in-memory database session.
     #[wasm_bindgen(constructor)]
     pub fn new() -> std::result::Result<MemorySession, JsValue> {
-        Connection::open_in_memory().map(|conn| Self { conn, closed: false }).map_err(|err| JsValue::from_str(&err.to_string()))
+        Connection::open_in_memory()
+            .map(|conn| Self { conn, closed: false, stmts: HashMap::new() })
+            .map_err(|err| JsValue::from_str(&err.to_string()))
     }
 
     /// Persist the database-truth VOS schema document.
@@ -521,10 +527,134 @@ impl MemorySession {
         run_call_scalar_json(&self.conn, self.closed, json)
     }
 
+    /// Read-only consistency probes against the database.
+    ///
+    /// Returns JSON `{ ok, report, error }` where `report` matches the
+    /// Node-side `DoctorReport` shape (namespace stats, checkpoint lag,
+    /// orphan blobs, named issues).
+    #[wasm_bindgen(js_name = doctorJson)]
+    pub fn doctor_json(&self) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.conn.doctor() {
+            Ok(report) => serde_json::json!({ "ok": true, "report": report }).to_string(),
+            Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+        }
+    }
+
+    /// Prepare a VOS read pipeline into a reusable query plan.
+    ///
+    /// Registers the plan in this session's internal registry and returns
+    /// JSON `{ ok, statement_id, parameters, query_kind, source_fingerprint,
+    /// read_set, write_set, source, error }`. No schema binding required —
+    /// plan building is pure parse + lower.
+    #[wasm_bindgen(js_name = prepareJson)]
+    pub fn prepare_json(&mut self, source: &str) -> String {
+        if self.closed {
+            return serde_json::json!({ "ok": false, "error": closed_session_error().to_string() }).to_string();
+        }
+        match self.conn.prepare_vos(source) {
+            Ok(stmt) => {
+                let id = format!("stmt-{}", self.stmts.len() + 1);
+                self.stmts.insert(id.clone(), stmt.clone());
+                match serde_json::to_value(&stmt) {
+                    Ok(mut val) => {
+                        val["ok"] = serde_json::Value::Bool(true);
+                        val["statement_id"] = serde_json::Value::String(id);
+                        val.to_string()
+                    }
+                    Err(error) => serde_json::json!({ "ok": false, "error": format!("encode statement: {error}") }).to_string(),
+                }
+            }
+            Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+        }
+    }
+
+    /// Execute a previously prepared statement with optional named parameter bindings.
+    ///
+    /// Accepts `{ statementId: "...", params: { "name": value, ... } | null }`.
+    /// Returns JSON `{ ok, rows, error }` where `rows` matches a regular
+    /// `queryVos` result.
+    #[wasm_bindgen(js_name = queryPreparedJson)]
+    pub fn query_prepared_json(&self, json: &str) -> String {
+        if self.closed {
+            return serde_json::json!({ "ok": false, "error": closed_session_error().to_string() }).to_string();
+        }
+        let obj: serde_json::Value = match serde_json::from_str(json) {
+            Ok(v) => v,
+            Err(error) => return serde_json::json!({ "ok": false, "error": format!("invalid queryPrepared body: {error}") }).to_string(),
+        };
+        let id = match obj.get("statementId").and_then(|v| v.as_str()) {
+            Some(s) => s.to_owned(),
+            None => return serde_json::json!({ "ok": false, "error": "queryPrepared: missing string `statementId`" }).to_string(),
+        };
+        let stmt = match self.stmts.get(&id) {
+            Some(s) => s,
+            None => return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string(),
+        };
+        let named: BTreeMap<String, yydb::types::Value> = match obj.get("params") {
+            None | Some(serde_json::Value::Null) => BTreeMap::new(),
+            Some(val) => {
+                let obj = match val.as_object() {
+                    Some(o) => o,
+                    None => return serde_json::json!({ "ok": false, "error": "queryPrepared: params must be an object or null" }).to_string(),
+                };
+                let mut out = BTreeMap::new();
+                for (k, v) in obj {
+                    out.insert(k.clone(), match json_value_to_runtime(v) {
+                        Ok(val) => val,
+                        Err(error) => return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+                    });
+                }
+                out
+            }
+        };
+        match self.conn.query_prepared(stmt, &named) {
+            Ok(rows) => {
+                let mapped: Vec<serde_json::Map<String, serde_json::Value>> = rows
+                    .into_iter()
+                    .map(|row| {
+                        let mut map = serde_json::Map::new();
+                        for (k, v) in row {
+                            map.insert(k, value_to_json(v));
+                        }
+                        map
+                    })
+                    .collect();
+                serde_json::json!({ "ok": true, "rows": mapped }).to_string()
+            }
+            Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+        }
+    }
+
+    /// Release a prepared statement's plan from the session registry. Idempotent.
+    #[wasm_bindgen(js_name = closeStatement)]
+    pub fn close_statement(&mut self, statement_id: &str) -> bool {
+        self.stmts.remove(statement_id).is_some()
+    }
+
     /// Mark the session closed; further calls return closed-session errors.
     #[wasm_bindgen]
     pub fn close(&mut self) {
         self.closed = true;
+        self.stmts.clear();
+    }
+}
+
+/// Serialize a VOS runtime Value to JSON.
+fn value_to_json(v: yydb::types::Value) -> serde_json::Value {
+    use yydb::types::Value;
+    match v {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(b) => serde_json::Value::Bool(b),
+        Value::Text(s) => serde_json::Value::String(s),
+        Value::I64(i) => serde_json::Value::Number(serde_json::Number::from(i)),
+        Value::U64(u) => serde_json::Value::Number(serde_json::Number::from(u)),
+        Value::F64(f) => serde_json::Number::from_f64(f).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+        Value::Bytes(b) => serde_json::Value::Array(b.into_iter().map(|x| serde_json::Value::Number(serde_json::Number::from(x as u8))).collect()),
+        Value::Uuid(u) => serde_json::Value::String(u.to_string()),
+        _ => serde_json::Value::Null, // Vector, Object, File, Row — WASM JSON bridge skips for now
     }
 }
 
@@ -532,7 +662,7 @@ impl MemorySession {
 pub fn open_persistent_session(path: &str, caps: &OpfsCapabilities) -> yydb::Result<PersistentSession> {
     let volume = open_persistent(path, caps)?;
     let conn = open_persistent_connection(&volume)?;
-    Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false })
+    Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
 }
 
 /// Stateful OPFS-backed database session with `YDPG` main-file hydration and publish.
@@ -542,6 +672,7 @@ pub struct PersistentSession {
     conn: Connection,
     volume: Option<OpfsPersistentVolume>,
     closed: bool,
+    stmts: HashMap<String, PreparedStatement>,
 }
 
 #[wasm_bindgen]
@@ -818,6 +949,102 @@ impl PersistentSession {
         run_call_scalar_json(&self.conn, self.closed, json)
     }
 
+    /// Read-only consistency probes against the persistent database.
+    ///
+    /// Returns JSON `{ ok, report, error }` matching Node-side DoctorReport shape.
+    #[wasm_bindgen(js_name = doctorJson)]
+    pub fn doctor_json(&self) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.conn.doctor() {
+            Ok(report) => serde_json::json!({ "ok": true, "report": report }).to_string(),
+            Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+        }
+    }
+
+    /// Prepare a VOS read pipeline into a reusable query plan (Persistent session variant).
+    #[wasm_bindgen(js_name = prepareJson)]
+    pub fn prepare_json(&mut self, source: &str) -> String {
+        if self.closed {
+            return serde_json::json!({ "ok": false, "error": closed_session_error().to_string() }).to_string();
+        }
+        match self.conn.prepare_vos(source) {
+            Ok(stmt) => {
+                let id = format!("stmt-{}", self.stmts.len() + 1);
+                self.stmts.insert(id.clone(), stmt.clone());
+                match serde_json::to_value(&stmt) {
+                    Ok(mut val) => {
+                        val["ok"] = serde_json::Value::Bool(true);
+                        val["statement_id"] = serde_json::Value::String(id);
+                        val.to_string()
+                    }
+                    Err(error) => serde_json::json!({ "ok": false, "error": format!("encode statement: {error}") }).to_string(),
+                }
+            }
+            Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+        }
+    }
+
+    /// Execute a previously prepared statement (Persistent session variant).
+    #[wasm_bindgen(js_name = queryPreparedJson)]
+    pub fn query_prepared_json(&self, json: &str) -> String {
+        if self.closed {
+            return serde_json::json!({ "ok": false, "error": closed_session_error().to_string() }).to_string();
+        }
+        let obj: serde_json::Value = match serde_json::from_str(json) {
+            Ok(v) => v,
+            Err(error) => return serde_json::json!({ "ok": false, "error": format!("invalid queryPrepared body: {error}") }).to_string(),
+        };
+        let id = match obj.get("statementId").and_then(|v| v.as_str()) {
+            Some(s) => s.to_owned(),
+            None => return serde_json::json!({ "ok": false, "error": "queryPrepared: missing string `statementId`" }).to_string(),
+        };
+        let stmt = match self.stmts.get(&id) {
+            Some(s) => s,
+            None => return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string(),
+        };
+        let named: BTreeMap<String, yydb::types::Value> = match obj.get("params") {
+            None | Some(serde_json::Value::Null) => BTreeMap::new(),
+            Some(val) => {
+                let obj = match val.as_object() {
+                    Some(o) => o,
+                    None => return serde_json::json!({ "ok": false, "error": "queryPrepared: params must be an object or null" }).to_string(),
+                };
+                let mut out = BTreeMap::new();
+                for (k, v) in obj {
+                    out.insert(k.clone(), match json_value_to_runtime(v) {
+                        Ok(val) => val,
+                        Err(error) => return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+                    });
+                }
+                out
+            }
+        };
+        match self.conn.query_prepared(stmt, &named) {
+            Ok(rows) => {
+                let mapped: Vec<serde_json::Map<String, serde_json::Value>> = rows
+                    .into_iter()
+                    .map(|row| {
+                        let mut map = serde_json::Map::new();
+                        for (k, v) in row {
+                            map.insert(k, value_to_json(v));
+                        }
+                        map
+                    })
+                    .collect();
+                serde_json::json!({ "ok": true, "rows": mapped }).to_string()
+            }
+            Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+        }
+    }
+
+    /// Release a prepared statement's plan from this persistent session's registry. Idempotent.
+    #[wasm_bindgen(js_name = closeStatement)]
+    pub fn close_statement(&mut self, statement_id: &str) -> bool {
+        self.stmts.remove(statement_id).is_some()
+    }
+
     /// Flush pending durable state, then mark the session closed.
     #[wasm_bindgen]
     pub fn close(&mut self) {
@@ -825,6 +1052,7 @@ impl PersistentSession {
             if let Some(volume) = self.volume.take() {
                 let _ = persist_persistent_connection(&self.conn, &volume);
             }
+            self.stmts.clear();
             self.closed = true;
         }
     }
