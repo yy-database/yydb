@@ -1,6 +1,10 @@
 //! Lease records and fencing tokens stored in reserved record keys.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 use yydb_types::{Error, LeaseExpectation, LeaseToken, ReleaseOutcome, Result};
 
@@ -16,8 +20,21 @@ pub(crate) enum LeaseRecord {
     Failed { reason: String },
 }
 
+/// Wall-clock milliseconds since UNIX epoch.
+///
+/// Native: `SystemTime::now().duration_since(UNIX_EPOCH).as_millis()`.
+/// WASM (browser): `js_sys::Date::now()` — `SystemTime::now` panics in
+/// browser WASM targets because `wasm-pack --target web` disables std time.
 pub(crate) fn now_millis() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // js_sys::Date::now() returns f64 ms since epoch
+        js_sys::Date::now() as u64
+    }
 }
 
 pub(crate) fn lease_record_key(key: &str) -> String {

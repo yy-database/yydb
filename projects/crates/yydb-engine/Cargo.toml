@@ -19,3 +19,8 @@ yydb-execution = { workspace = true }
 yydb-udf = { workspace = true }
 yydb-query = { workspace = true }
 serde_json = { workspace = true }
+# wasm-bindgen + js-sys: only needed at wasm32 target (SystemTime::now panics on
+# browser WASM targets). Kept as optional so native builds stay lean.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
