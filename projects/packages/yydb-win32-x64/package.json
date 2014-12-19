@@ -1,6 +1,6 @@
 {
     "name": "@yydb/yydb-win32-x64",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "YYDB native binding for Windows x64; installed automatically by @yydb/yydb",
     "license": "MPL-2.0",
     "type": "module",
