@@ -163,11 +163,49 @@ pub enum Error {
     },
     /// Session handle is closed and can no longer serve operations.
     SessionClosed,
-    /// Wire authentication failed — invalid token, token missing, or an
-    /// unauthenticated connection attempting a non-handshake frame.
-    Auth {
-        /// Human-readable detail (token mismatch, handshake required, …).
+    /// Client supplied a bearer token that does not match any bootstrap
+    /// principal or active session (wrong-length, wrong-value, or token
+    /// format that the server cannot map to a principal).
+    AuthTokenInvalid {
+        /// Human-readable detail (for example "token not in bootstrap registry").
         message: String,
+    },
+    /// Client presented a session token that the server knows but whose
+    /// `expiration` timestamp has passed.
+    AuthSessionExpired {
+        /// Human-readable detail (for example "session expired at …").
+        message: String,
+    },
+    /// Bootstrap principal or named identity referenced by the connection
+    /// (for example via an auth-config file) does not exist on this server.
+    AuthPrincipalNotFound {
+        /// Human-readable detail (for example "principal `svc-worker-07` not configured").
+        message: String,
+    },
+    /// Connection originated from a non-loopback address and is attempting
+    /// to authenticate as an anonymous principal — server refuses to open
+    /// any work for an anonymous remote peer.
+    AuthAnonymousRemoteDenied {
+        /// Human-readable detail.
+        message: String,
+    },
+    /// Server started with a non-loopback bind address but no bootstrap
+    /// principals were configured (neither env vars nor an auth-config
+    /// file). Startup must refuse to expose the process anonymously.
+    AuthConfigMissing {
+        /// Human-readable detail (for example expected env var names or
+        /// auth-config file path hints).
+        message: String,
+    },
+    /// Prepared statement bound to a schema that has since been migrated or
+    /// invalidated. Re-prepare with the current schema.
+    SchemaInvalidated {
+        /// FNV-1a fingerprint of the schema document captured at prepare time.
+        expected_fingerprint: String,
+        /// FNV-1a fingerprint of the schema document currently active.
+        current_fingerprint: String,
+        /// Schema revision at prepare time (IdentityHistory.revision).
+        schema_revision: u64,
     },
     /// Failure reported by a remote YY wire peer (code plus peer message).
     Remote {
@@ -214,7 +252,19 @@ impl fmt::Display for Error {
                 write!(f, "quota exceeded for namespace {namespace}")
             }
             Self::SessionClosed => write!(f, "session closed"),
-            Self::Auth { message } => write!(f, "auth: {message}"),
+            Self::AuthTokenInvalid { message } => write!(f, "auth: invalid token — {message}"),
+            Self::AuthSessionExpired { message } => write!(f, "auth: session expired — {message}"),
+            Self::AuthPrincipalNotFound { message } => write!(f, "auth: principal not found — {message}"),
+            Self::AuthAnonymousRemoteDenied { message } => {
+                write!(f, "auth: anonymous remote denied — {message}")
+            }
+            Self::AuthConfigMissing { message } => write!(f, "auth: config missing — {message}"),
+            Self::SchemaInvalidated { expected_fingerprint, current_fingerprint, schema_revision } => {
+                write!(
+                    f,
+                    "schema invalidated at revision {schema_revision}: expected fingerprint `{expected_fingerprint}`, current `{current_fingerprint}`"
+                )
+            }
             Self::Remote { code, message } => write!(f, "{code}: {message}"),
         }
     }
@@ -248,7 +298,12 @@ impl Error {
             Self::UdfVersionMismatch { .. } => "yydb.udf.version_mismatch",
             Self::QuotaExceeded { .. } => "yydb.quota.exceeded",
             Self::SessionClosed => "yydb.session.closed",
-            Self::Auth { .. } => "yydb.auth",
+            Self::AuthTokenInvalid { .. } => "yydb.auth.token_invalid",
+            Self::AuthSessionExpired { .. } => "yydb.auth.session_expired",
+            Self::AuthPrincipalNotFound { .. } => "yydb.auth.principal_not_found",
+            Self::AuthAnonymousRemoteDenied { .. } => "yydb.auth.anonymous_remote_denied",
+            Self::AuthConfigMissing { .. } => "yydb.auth.config_missing",
+            Self::SchemaInvalidated { .. } => "yydb.schema.invalidated",
             Self::Remote { code, .. } => code,
         }
     }
@@ -275,7 +330,12 @@ impl Error {
             Self::LeaseExpired { .. } => "lease",
             Self::QuotaExceeded { .. } => "quota",
             Self::SessionClosed => "session",
-            Self::Auth { .. } => "auth",
+            Self::AuthTokenInvalid { .. }
+            | Self::AuthSessionExpired { .. }
+            | Self::AuthPrincipalNotFound { .. }
+            | Self::AuthAnonymousRemoteDenied { .. }
+            | Self::AuthConfigMissing { .. } => "auth",
+            Self::SchemaInvalidated { .. } => "query",
             Self::Remote { .. } => "remote",
         }
     }
@@ -290,7 +350,11 @@ impl Error {
             Self::Io(_) | Self::Corrupt(_) | Self::Unsupported(_) | Self::SessionClosed => {
                 return None;
             }
-            Self::Auth { message } => vec![("detail", message.clone())],
+            Self::AuthTokenInvalid { message }
+            | Self::AuthSessionExpired { message }
+            | Self::AuthPrincipalNotFound { message }
+            | Self::AuthAnonymousRemoteDenied { message }
+            | Self::AuthConfigMissing { message } => vec![("detail", message.clone())],
             Self::SchemaConflict { expected, found } => vec![("expected", expected.to_string()), ("found", found.to_string())],
             Self::UdfNotFound { name } | Self::Udf { name, .. } => {
                 vec![("name", name.clone())]
@@ -312,6 +376,11 @@ impl Error {
                 vec![("name", name.clone()), ("expected", expected.to_string()), ("got", got.to_string())]
             }
             Self::QuotaExceeded { namespace } => vec![("namespace", namespace.clone())],
+            Self::SchemaInvalidated { expected_fingerprint, current_fingerprint, schema_revision } => vec![
+                ("expected_fingerprint", expected_fingerprint.clone()),
+                ("current_fingerprint", current_fingerprint.clone()),
+                ("schema_revision", schema_revision.to_string()),
+            ],
             Self::Remote { code, message } => {
                 vec![("code", code.clone()), ("message", message.clone())]
             }
