@@ -1,28 +1,32 @@
 //! Loopback-first binary serve (TCP + WebSocket `/wire`).
 //!
-//! Security gates (Step 6 — enforced at startup):
+//! Security gates (Phase 1 — enforced at startup and per-connection):
 //!
 //! 1. Default bind MUST be loopback. Non-loopback bind is rejected *unless*
-//!    `--insecure-bind` AND `YYDB_ALLOW_INSECURE_BIND=1`. Flag alone is never
-//!    sufficient — env var is required for intentional opt-in.
+//!    an explicit auth bootstrap is configured (`YYDB_AUTH_TOKENS` with
+//!    at least one named principal). `--insecure-bind` alone is never
+//!    sufficient — the flag now accepts that explicit auth config is
+//!    *not* being used, but the flag cannot bypass it on non-loopback.
 //! 2. Max concurrent connections capped at `MAX_CONNECTIONS` (256).
 //! 3. Handshake timeout `HANDSHAKE_TIMEOUT` (5s) — connections that don't
 //!    complete Hello + Authenticate drop before accepting any other frame.
 //!
-//! Auth model (Step 7 — per-connection):
+//! Auth model (session registry):
 //!
 //! Every connection is unauthenticated until it sends a valid Authenticate
-//! frame. Hello is the *only* frame accepted before auth; all others get
-//! `Error { code: "yydb.auth.required" }`. Prepared statements are tracked
-//! per-connection in `SessionState.prepared` and are dropped when the
-//! connection closes.
+//! frame. The server looks up the bearer token in a shared bootstrap
+//! registry (seeded from env), refuses anonymous principals from remote
+//! peers, and creates an in-memory [`Session`] bound to the token with a
+//! 1-hour TTL. Hello is the *only* frame accepted before auth; all
+//! others get a structured auth error. Prepared statements are tracked
+//! per-connection and drop when the connection closes.
 
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::Path,
     sync::{
-        Arc, Condvar, Mutex, MutexGuard, OnceLock,
+        Arc, Condvar, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     thread,
@@ -34,8 +38,8 @@ use yydb_engine::Connection;
 use yydb_protocol::{Frame, HEADER_LEN, MAX_BODY_LEN, read_frame, split_bind, write_frame};
 use yydb_types::Error;
 
+use crate::auth::{AuthBootstrap, SessionRegistry};
 use crate::dispatch::{SessionState, dispatch, is_authenticated, is_loopback_host};
-
 use crate::host_wire::TcpWireHostAdapter;
 
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -85,16 +89,6 @@ pub const MAX_CONNECTIONS: usize = 256;
 /// any further frame is accepted. Connections that miss this window drop.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
-fn auth_token() -> &'static str {
-    static TOKEN: OnceLock<String> = OnceLock::new();
-    TOKEN.get_or_init(|| std::env::var("YYDB_AUTH_TOKEN").unwrap_or_else(|_| "yydb-phase0-default-token".to_owned()))
-}
-
-fn session_token() -> &'static str {
-    static TOKEN: OnceLock<String> = OnceLock::new();
-    TOKEN.get_or_init(|| std::env::var("YYDB_SESSION_TOKEN").unwrap_or_else(|_| "yydb-phase0-session-token".to_owned()))
-}
-
 /// Resolve the effective insecure-bind flag from CLI and env var.
 /// Either source independently opts in. Internal helper for `run_serve`.
 fn insecure_bind_opted_in(explicit: bool) -> bool {
@@ -104,31 +98,64 @@ fn insecure_bind_opted_in(explicit: bool) -> bool {
     std::env::var("YYDB_ALLOW_INSECURE_BIND").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false)
 }
 
-/// Validate bind policy before listening.
+/// Whether this peer address is loopback (used to reject anonymous
+/// principals from remote binds at lookup time).
+fn peer_is_loopback(stream: &TcpStream) -> bool {
+    match stream.peer_addr() {
+        Ok(addr) => is_loopback_host(addr.ip().to_string().as_str()),
+        Err(_) => false, // peer_addr shouldn't fail on an accepted stream; default to safe side
+    }
+}
+
+/// Validate bind policy and bootstrap auth config before listening.
 ///
-/// Loopback is always accepted. Non-loopback requires `insecure_bind=true`
-/// (or the `YYDB_ALLOW_INSECURE_BIND=1` env var, which `run_serve` folds in
-/// before calling us). We refuse to silently expose on LAN/WAN without opt-in.
-pub fn assert_bind_allowed(bind: &str, insecure_bind: bool) -> Result<(), String> {
+/// Loopback bind is always accepted (with a dev-warning if auth uses the
+/// anonymous loopback default). Non-loopback bind requires at least one
+/// *named* principal in the bootstrap registry — anonymous loopback-only
+/// principals are rejected. Passing `insecure_bind=true` suppresses the
+/// warning on loopback but does not bypass the non-loopback named-principal
+/// check.
+pub fn assert_bind_allowed(bind: &str, insecure_bind: bool, bootstrap: &AuthBootstrap) -> Result<(), String> {
     let (host, _port) = split_bind(bind).map_err(|e| e.to_string())?;
-    if is_loopback_host(&host) {
-        return Ok(());
-    }
-    if insecure_bind {
-        eprintln!("⚠  yy-db listening on non-loopback bind `{bind}` — NO authentication, NO encryption");
+    let bind_is_loopback = is_loopback_host(&host);
+    if !bind_is_loopback {
+        if bootstrap.named_count() == 0 {
+            return Err(Error::AuthConfigMissing {
+                message: format!(
+                    "refusing to bind to non-loopback address `{bind}` without explicit named auth — \
+                     set YYDB_AUTH_TOKENS to configure at least one named principal before starting serve"
+                ),
+            }
+            .to_string());
+        }
+        eprintln!(
+            "⚠  yy-db listening on non-loopback bind `{bind}` with {} named principal(s) configured — \
+             TLS is still NOT enforced at the wire layer",
+            bootstrap.named_count()
+        );
         eprintln!("⚠  This is ONLY safe on a trusted network or behind a TLS-terminating proxy");
+        if insecure_bind {
+            eprintln!("⚠  --insecure-bind passed — treated as explicit consent for non-TLS transport");
+        }
         return Ok(());
     }
-    Err(format!(
-        "refusing to bind to non-loopback address `{bind}` — pass `--insecure-bind` or set \
-         YYDB_ALLOW_INSECURE_BIND=1 to opt in (unsafe)"
-    ))
+    // loopback bind: fine either way
+    if insecure_bind {
+        eprintln!("⚠  --insecure-bind passed on loopback bind — anonymous dev access allowed locally");
+    }
+    Ok(())
 }
 
 /// Open the database and serve binary protocol v1 until the process exits.
 pub fn run_serve(path: &Path, bind: &str, insecure_bind: bool) -> Result<(), Box<dyn std::error::Error>> {
     let insecure_bind = insecure_bind_opted_in(insecure_bind);
-    assert_bind_allowed(bind, insecure_bind)?;
+    let (host, _port) = split_bind(bind)?;
+    let bind_is_loopback = is_loopback_host(&host);
+
+    let bootstrap = AuthBootstrap::from_env(bind_is_loopback)?;
+    assert_bind_allowed(bind, insecure_bind, &bootstrap)?;
+
+    let registry = Arc::new(SessionRegistry::new(&bootstrap));
 
     let conn = Connection::open(path)?;
     let listener = TcpListener::bind(bind)?;
@@ -141,28 +168,29 @@ pub fn run_serve(path: &Path, bind: &str, insecure_bind: bool) -> Result<(), Box
         path.display(),
         HANDSHAKE_TIMEOUT.as_secs()
     );
-    println!("Auth: Hello → Authenticate (token from YYDB_AUTH_TOKEN) → queries");
-    if insecure_bind {
-        println!("⚠  --insecure-bind passed (loopback only unless YYDB_ALLOW_INSECURE_BIND=1)");
+    println!(
+        "Auth: Hello → Authenticate ({} principal(s); tokens from YYDB_AUTH_TOKENS) → queries",
+        bootstrap.tokens.len()
+    );
+    if bind_is_loopback && bootstrap.named_count() == 0 {
+        println!("⚠  Loopback-only anonymous bootstrap — dev mode. Set YYDB_AUTH_TOKENS for explicit principals.");
     }
 
-    for stream in listener.incoming() {
+    for stream_res in listener.incoming() {
         let permit = limit.acquire();
         let connection_id = next_id.fetch_add(1, Ordering::Relaxed);
-        let session_state = Arc::new(Mutex::new(SessionState::new(connection_id)));
+        let stream = stream_res?;
+        let remote = !peer_is_loopback(&stream);
+        let registry_ref = registry.clone();
+        let session_state = Arc::new(Mutex::new(SessionState::new(connection_id, registry_ref, remote)));
         let conn_ref = conn.session();
-        let auth = auth_token().to_owned();
-        let session_tok = session_token().to_owned();
 
-        let stream = stream?;
         thread::spawn(move || {
             let _permit = permit; // RAII — drops when thread exits
             let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
             if let Err(error) = handle_client(stream, &conn_ref, session_state) {
                 eprintln!("client error: {error}");
             }
-            let _ = auth;
-            let _ = session_tok;
         });
     }
     Ok(())

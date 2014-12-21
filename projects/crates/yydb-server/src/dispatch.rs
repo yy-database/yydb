@@ -4,39 +4,20 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
 };
 
 use yydb_engine::Connection;
 use yydb_protocol::{
-    Frame, MessageType, decode_authenticate, decode_execute_prepared, decode_kv_get, decode_kv_put, decode_micro_register,
-    decode_prepare, decode_scalar_call, decode_schema_ensure, encode_authenticate_ok, encode_execute_prepared_ok,
-    encode_kv_get_ok, encode_prepare_ok, encode_scalar_call_ok, encode_schema_ok, error_frame,
+    Frame, MessageType, decode_authenticate, decode_execute_prepared, decode_kv_get, decode_kv_put,
+    decode_micro_register, decode_prepare, decode_scalar_call, decode_schema_ensure, encode_authenticate_ok,
+    encode_execute_prepared_ok, encode_kv_get_ok, encode_prepare_ok, encode_scalar_call_ok, encode_schema_ok,
+    error_frame,
 };
 use yydb_query::PreparedStatement;
 use yydb_types::{Error, Result};
 
-// ─── Auth token ──────────────────────────────────────────────────────────
-
-/// Hard-coded bearer token for the in-tree reference server.
-///
-/// **This is Phase-0 placeholder security.** Before any deployment, replace
-/// this with a proper challenge-response handshake (e.g. shared-secret HMAC)
-/// or mTLS. The contract is:
-///
-/// * token is verified on every `Authenticate` frame
-/// * session tokens are opaque strings returned by the server
-/// * both token values should be rotated per deployment (configurable via
-///   env vars `YYDB_AUTH_TOKEN` / `YYDB_SESSION_TOKEN`)
-fn expected_auth_token() -> &'static str {
-    static TOKEN: OnceLock<String> = OnceLock::new();
-    TOKEN.get_or_init(|| std::env::var("YYDB_AUTH_TOKEN").unwrap_or_else(|_| "yydb-phase0-default-token".to_owned()))
-}
-
-fn session_token() -> &'static str {
-    static TOKEN: OnceLock<String> = OnceLock::new();
-    TOKEN.get_or_init(|| std::env::var("YYDB_SESSION_TOKEN").unwrap_or_else(|_| "yydb-phase0-session-token".to_owned()))
-}
+use crate::auth::{Session, SessionRegistry};
 
 // ─── Per-connection session state ─────────────────────────────────────────
 
@@ -49,26 +30,40 @@ pub struct PreparedPlan {
     pub connection_id: u64,
 }
 
-/// Per-connection state — tracks prepared statements and auth status.
+/// Per-connection state — tracks prepared statements, attached [`Session`],
+/// and a handle to the bootstrap registry shared with all peers.
 pub struct SessionState {
     /// Monotonic id for this connection.
     pub connection_id: u64,
-    /// Whether the connection has completed the Authenticate handshake.
-    pub authenticated: Mutex<bool>,
+    /// Shared bootstrap registry — every connection Authenticates against it.
+    pub registry: std::sync::Arc<SessionRegistry>,
+    /// Whether this peer connected from a non-loopback address. Remote
+    /// peers may not authenticate as [`PrincipalKind::Anonymous`].
+    pub remote: bool,
+    /// Attached session after a successful Authenticate handshake.
+    pub session: Mutex<Option<Session>>,
     /// Plans prepared on this connection, keyed by `statement_id`.
     pub prepared: Mutex<BTreeMap<String, PreparedPlan>>,
 }
 
 impl SessionState {
-    /// Fresh per-connection state; auth and plan registry start empty.
-    pub fn new(connection_id: u64) -> Self {
-        Self { connection_id, authenticated: Mutex::new(false), prepared: Mutex::new(BTreeMap::new()) }
+    /// Fresh per-connection state — no session, empty plan registry, but
+    /// already wired to the server's shared [`SessionRegistry`].
+    pub fn new(connection_id: u64, registry: std::sync::Arc<SessionRegistry>, remote: bool) -> Self {
+        Self {
+            connection_id,
+            registry,
+            remote,
+            session: Mutex::new(None),
+            prepared: Mutex::new(BTreeMap::new()),
+        }
     }
 }
 
-/// Read auth status for a connection (serve.rs needs this).
+/// Read auth status for a connection (serve.rs needs this to drop the
+/// handshake timeout once the client has a real session attached).
 pub fn is_authenticated(state: &SessionState) -> bool {
-    *state.authenticated.lock().expect("session auth poisoned")
+    state.session.lock().expect("session auth poisoned").is_some()
 }
 
 /// Parse ExecutePrepared params JSON into a named-param map.
@@ -105,13 +100,14 @@ fn info_body(conn: &Connection) -> Result<Vec<u8>> {
 // ─── Dispatch ────────────────────────────────────────────────────────────
 
 /// Dispatch one client request frame against an open [`Connection`], with
-/// per-connection auth enforcement.
+/// per-connection session enforcement via the shared [`SessionRegistry`].
 ///
 /// Connection lifecycle:
 /// 1. `Hello` — always accepted (no auth required)
-/// 2. `Authenticate` — verify token, mark `state.authenticated = true`
-/// 3. Every other request — rejected with `Error { code: "yydb.auth.required" }`
-///    until `authenticated == true`
+/// 2. `Authenticate` — verify token against bootstrap registry + bind-policy
+///    rules, attach a [`Session`] on success
+/// 3. Every other request — rejected with structured auth error until a
+///    session is attached
 ///
 /// Once authenticated, Prepare / ExecutePrepared hit the per-connection
 /// plan registry; all other frames dispatch directly to the connection.
@@ -125,18 +121,20 @@ pub fn dispatch(conn: &Connection, state: &SessionState, request: &Frame) -> Fra
                 Ok(t) => t,
                 Err(error) => return error_frame(id, &error),
             };
-            if token != expected_auth_token() {
-                return error_frame(id, &Error::Auth { message: "authentication failed: invalid token".to_owned() });
+            match state.registry.lookup_session(&token, state.remote) {
+                Ok(session) => {
+                    *state.session.lock().unwrap() = Some(session.clone());
+                    Frame::new(MessageType::AuthenticateOk, id, encode_authenticate_ok(&session.token))
+                }
+                Err(error) => error_frame(id, &error),
             }
-            *state.authenticated.lock().unwrap() = true;
-            Frame::new(MessageType::AuthenticateOk, id, encode_authenticate_ok(session_token()))
         }
         // ── authenticated required ──────────────────────────────────────
         _ => {
             if !is_authenticated(state) {
                 return error_frame(
                     id,
-                    &Error::Auth {
+                    &Error::AuthTokenInvalid {
                         message: format!(
                             "connection not authenticated — send Hello + Authenticate first (got {})",
                             request.msg_type.as_u16()

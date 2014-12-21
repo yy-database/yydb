@@ -8,10 +8,12 @@
 
 #![deny(missing_docs)]
 
+pub mod auth;
 pub mod dispatch;
 pub mod host_wire;
 
 mod serve;
 
+pub use auth::{AuthBootstrap, Principal, PrincipalKind, Role, Permission, Session, SessionRegistry};
 pub use dispatch::{PreparedPlan, SessionState, dispatch, is_loopback_host};
 pub use serve::{assert_bind_allowed, run_serve};
