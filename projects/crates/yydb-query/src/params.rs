@@ -50,6 +50,12 @@ pub enum QueryKind {
 /// `ops` carries the engine-internal lowered plan (not serialized across
 /// boundaries); the public surface exposes only parameter descriptors,
 /// fingerprints and kind for introspection and wire transmission.
+///
+/// When prepared through a live [`yydb_engine::Connection`] the statement
+/// additionally records the active schema's FNV-1a fingerprint and revision
+/// so later executions can detect schema migration without re-parsing.
+/// Pure [`prepare`] calls (for tests or offline use) leave these fields at
+/// their empty / zero values; the engine path always fills them.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PreparedStatement {
     /// Unique synthetic ID for this prepared statement (monotonic within a
@@ -71,6 +77,15 @@ pub struct PreparedStatement {
     pub source_fingerprint: String,
     /// The raw VOS source text (for diagnostics / cache keys).
     pub source: String,
+    /// FNV-1a fingerprint of the schema document captured at prepare time.
+    /// Empty string when this statement was prepared without a live schema
+    /// context (unit tests or offline [`prepare`] calls).
+    #[serde(default)]
+    pub schema_fingerprint: String,
+    /// Schema revision captured at prepare time. Zero when prepared without
+    /// a live schema context.
+    #[serde(default)]
+    pub schema_revision: u64,
 }
 
 /// A parameterized statement bound to one concrete parameter value set.
@@ -104,6 +119,9 @@ pub(crate) const PARAM_PREFIX: &str = "__yydb_param_";
 ///      directly to `BoundValue::Slot { index, expected_ty }`.
 ///   5. Build the full PreparedStatement envelope (read_set / write_set /
 ///      query_kind), ready to pass to [`execute_prepared`].
+///
+/// This pure variant does not know the live schema so `schema_fingerprint`
+/// and `schema_revision` remain empty / zero. The engine path fills them.
 pub fn prepare(source: &str) -> Result<PreparedStatement> {
     let (parameters, rewritten) = scan_and_rewrite(source)?;
     let source_fingerprint = fingerprint(source);
@@ -123,6 +141,8 @@ pub fn prepare(source: &str) -> Result<PreparedStatement> {
         write_set,
         source_fingerprint,
         source: source.to_owned(),
+        schema_fingerprint: String::new(),
+        schema_revision: 0,
     })
 }
 
@@ -339,7 +359,7 @@ fn classify_ops(ops: &[QueryOp]) -> (QueryKind, Vec<String>, Vec<String>) {
 
 /// FNV-1a 64-bit — stable, collision-safe for query-source keys within a
 /// single database workspace (not a cryptographic hash).
-fn fingerprint(source: &str) -> String {
+pub fn fingerprint(source: &str) -> String {
     let mut h: u64 = 0xcbf29ce484222325;
     for &b in source.as_bytes() {
         h ^= b as u64;

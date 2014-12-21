@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::{Error, Result};
-use yydb_query::{PreparedStatement, QueryRow, prepare as prepare_source};
+use yydb_query::{PreparedStatement, QueryRow, fingerprint as fp, prepare as prepare_source};
 use yydb_types::Value;
 
 use super::Connection;
@@ -12,15 +12,19 @@ impl Connection {
     /// Prepare a VOS read pipeline into a reusable query plan.
     ///
     /// The returned [`PreparedStatement`] carries the lowered op tree, named
-    /// parameter descriptors and source fingerprint. It is independent of any
-    /// connection state or transaction snapshot — you can hold onto it across
-    /// multiple queries and re-bind parameters cheaply via
-    /// [`Self::query_prepared`].
-    ///
-    /// Requires no schema binding; plan building is a pure parse + lower pass.
+    /// parameter descriptors, source fingerprint and — when a schema is
+    /// already bound on this connection — the current schema's fingerprint
+    /// and revision. Executions later use those two fields to detect schema
+    /// migration without re-parsing.
     pub fn prepare_vos(&self, source: &str) -> Result<PreparedStatement> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        prepare_source(source)
+        let mut stmt = prepare_source(source)?;
+        let state = self.active_state_unlocked()?;
+        if let Some(schema) = &state.schema {
+            stmt.schema_fingerprint = fp(&schema.document);
+            stmt.schema_revision = state.identity_history.as_ref().map(|h| h.revision).unwrap_or(0);
+        }
+        Ok(stmt)
     }
 
     /// Execute a previously prepared statement with named parameter bindings.
@@ -30,10 +34,33 @@ impl Connection {
     /// parameters, contains extraneous ones, or provides values that do not
     /// match the declared slot types.
     ///
-    /// Requires [`Self::ensure_schema`] first.
+    /// Returns [`Error::SchemaInvalidated`] when the active schema document
+    /// has drifted from the fingerprint captured at prepare time. Re-prepare
+    /// after schema migration.
     pub fn query_prepared(&self, stmt: &PreparedStatement, named: &BTreeMap<String, Value>) -> Result<Vec<QueryRow>> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let state = self.active_state_unlocked()?;
+
+        // Schema-fingerprint gate: only when the statement was prepared with
+        // a live schema context (non-empty fingerprint).
+        if !stmt.schema_fingerprint.is_empty() {
+            let Some(schema) = &state.schema else {
+                return Err(Error::SchemaInvalidated {
+                    expected_fingerprint: stmt.schema_fingerprint.clone(),
+                    current_fingerprint: String::new(),
+                    schema_revision: stmt.schema_revision,
+                });
+            };
+            let current_fp = fp(&schema.document);
+            if current_fp != stmt.schema_fingerprint {
+                return Err(Error::SchemaInvalidated {
+                    expected_fingerprint: stmt.schema_fingerprint.clone(),
+                    current_fingerprint: current_fp,
+                    schema_revision: stmt.schema_revision,
+                });
+            }
+        }
+
         let contract = resolved_contract(&state)?;
         let values = yydb_query::bind_named(stmt, named)?;
         yydb_query::execute_prepared(stmt, &values, Some(&contract), &state.records)
