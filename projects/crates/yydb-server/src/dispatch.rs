@@ -17,7 +17,7 @@ use yydb_protocol::{
 use yydb_query::PreparedStatement;
 use yydb_types::{Error, Result};
 
-use crate::auth::{Session, SessionRegistry};
+use crate::auth::{AuthBootstrap, Principal, PrincipalKind, Session, SessionRegistry};
 
 // ─── Per-connection session state ─────────────────────────────────────────
 
@@ -55,6 +55,43 @@ impl SessionState {
             registry,
             remote,
             session: Mutex::new(None),
+            prepared: Mutex::new(BTreeMap::new()),
+        }
+    }
+
+    /// Convenience constructor for unit tests — loopback-only anonymous
+    /// bootstrap pre-configured with the former default token, and the
+    /// session field already populated so `dispatch_authed` paths run
+    /// without an on-wire Authenticate frame. This is the 1-argument
+    /// replacement for the prior `SessionState::new(id)` used across
+    /// in-tree tests.
+    pub fn for_test(connection_id: u64) -> Self {
+        Self::build_for_test(connection_id, true)
+    }
+
+    /// Same bootstrap as [`Self::for_test`] but leaves the session field
+    /// `None` so callers can run a real `Authenticate` frame through
+    /// `dispatch` and observe the handshake path.
+    pub fn for_test_unauthed(connection_id: u64) -> Self {
+        Self::build_for_test(connection_id, false)
+    }
+
+    fn build_for_test(connection_id: u64, pre_auth: bool) -> Self {
+        let token = std::env::var("YYDB_AUTH_TOKEN").unwrap_or_else(|_| "yydb-phase0-default-token".to_owned());
+        let principal = Principal::anonymous_loopback();
+        let bootstrap = AuthBootstrap { tokens: vec![(token.clone(), principal.clone())] };
+        let registry = std::sync::Arc::new(SessionRegistry::new(&bootstrap));
+        let session = if pre_auth {
+            let now = std::time::SystemTime::now();
+            Some(Session { principal, token, created_at: now, expires_at: now + Session::TTL })
+        } else {
+            None
+        };
+        Self {
+            connection_id,
+            registry,
+            remote: false,
+            session: Mutex::new(session),
             prepared: Mutex::new(BTreeMap::new()),
         }
     }

@@ -24,9 +24,8 @@ fn remote_error_keeps_stable_code() {
     let server_conn = Arc::clone(&conn);
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        let state = SessionState::new(1);
-        // Mock server — skip the on-wire Authenticate handshake for this unit test
-        *state.authenticated.lock().unwrap() = true;
+        let state = SessionState::for_test(1);
+        // Mock server — pre-authenticated via SessionState::for_test
         while let Ok(request) = read_frame(&mut stream) {
             let response = dispatch(&server_conn, &state, &request);
             write_frame(&mut stream, &response).unwrap();
@@ -63,9 +62,8 @@ fn tcp_roundtrip_against_local_dispatch_server() {
     let server_conn = Arc::clone(&conn);
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        let state = SessionState::new(2);
-        // Mock server — skip the on-wire Authenticate handshake for this unit test
-        *state.authenticated.lock().unwrap() = true;
+        let state = SessionState::for_test(2);
+        // Mock server — pre-authenticated via SessionState::for_test
         while let Ok(request) = read_frame(&mut stream) {
             let response = dispatch(&server_conn, &state, &request);
             write_frame(&mut stream, &response).unwrap();

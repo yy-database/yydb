@@ -11,14 +11,12 @@ use yydb::{
 /// Helper: create a fresh session state and pre-authenticate it so the test
 /// can exercise any dispatch path beyond Hello/Authenticate.
 fn authed_state() -> SessionState {
-    let state = SessionState::new(1);
-    *state.authenticated.lock().unwrap() = true;
-    state
+    SessionState::for_test(1)
 }
 
 /// Helper: run Hello → Authenticate → one frame, return the last response.
 fn dispatch_with_handshake(conn: &Connection, request: &Frame) -> Frame {
-    let state = SessionState::new(1);
+    let state = SessionState::for_test_unauthed(1);
     // dispatch Hello first
     let _hello_ok = dispatch(conn, &state, &Frame::new(MessageType::Hello, 1, Vec::new()));
     // dispatch Authenticate
@@ -51,9 +49,9 @@ fn dispatch_hello_info_kv() {
     conn.ensure_schema("table T { @@id: uuid }").unwrap();
     conn.put("a", b"b").unwrap();
 
-    let state = SessionState::new(1);
+    let state = SessionState::for_test(1);
 
-    // Hello is allowed pre-auth
+    // Hello is allowed pre-auth (first frame even though state is pre-authed)
     let hello = dispatch(&conn, &state, &Frame::new(MessageType::Hello, 1, Vec::new()));
     assert_eq!(hello.msg_type, MessageType::HelloOk);
     let body = std::str::from_utf8(&hello.body).expect("hello body utf8");
@@ -63,8 +61,6 @@ fn dispatch_hello_info_kv() {
     );
 
     // After auth, Info and KvGet work
-    *state.authenticated.lock().unwrap() = true;
-
     let info = dispatch(&conn, &state, &Frame::new(MessageType::Info, 2, Vec::new()));
     assert_eq!(info.msg_type, MessageType::InfoOk);
     let text = String::from_utf8(info.body).unwrap();
