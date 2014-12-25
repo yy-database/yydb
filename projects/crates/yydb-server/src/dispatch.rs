@@ -2,17 +2,13 @@
 //!
 //! Kept out of `yydb-protocol` because it executes database operations.
 
-use std::{
-    collections::BTreeMap,
-    sync::Mutex,
-};
+use std::{collections::BTreeMap, sync::Mutex};
 
 use yydb_engine::Connection;
 use yydb_protocol::{
-    Frame, MessageType, decode_authenticate, decode_execute_prepared, decode_kv_get, decode_kv_put,
-    decode_micro_register, decode_prepare, decode_scalar_call, decode_schema_ensure, encode_authenticate_ok,
-    encode_execute_prepared_ok, encode_kv_get_ok, encode_prepare_ok, encode_scalar_call_ok, encode_schema_ok,
-    error_frame,
+    Frame, MessageType, decode_authenticate, decode_execute_prepared, decode_kv_get, decode_kv_put, decode_micro_register,
+    decode_prepare, decode_scalar_call, decode_schema_ensure, encode_authenticate_ok, encode_execute_prepared_ok,
+    encode_kv_get_ok, encode_prepare_ok, encode_scalar_call_ok, encode_schema_ok, error_frame,
 };
 use yydb_query::PreparedStatement;
 use yydb_types::{Error, Result};
@@ -50,13 +46,7 @@ impl SessionState {
     /// Fresh per-connection state — no session, empty plan registry, but
     /// already wired to the server's shared [`SessionRegistry`].
     pub fn new(connection_id: u64, registry: std::sync::Arc<SessionRegistry>, remote: bool) -> Self {
-        Self {
-            connection_id,
-            registry,
-            remote,
-            session: Mutex::new(None),
-            prepared: Mutex::new(BTreeMap::new()),
-        }
+        Self { connection_id, registry, remote, session: Mutex::new(None), prepared: Mutex::new(BTreeMap::new()) }
     }
 
     /// Convenience constructor for unit tests — loopback-only anonymous
@@ -84,16 +74,11 @@ impl SessionState {
         let session = if pre_auth {
             let now = std::time::SystemTime::now();
             Some(Session { principal, token, created_at: now, expires_at: now + Session::TTL })
-        } else {
+        }
+        else {
             None
         };
-        Self {
-            connection_id,
-            registry,
-            remote: false,
-            session: Mutex::new(session),
-            prepared: Mutex::new(BTreeMap::new()),
-        }
+        Self { connection_id, registry, remote: false, session: Mutex::new(session), prepared: Mutex::new(BTreeMap::new()) }
     }
 }
 

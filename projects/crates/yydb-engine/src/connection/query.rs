@@ -44,7 +44,8 @@ impl Connection {
         // Schema-fingerprint gate: only when the statement was prepared with
         // a live schema context (non-empty fingerprint).
         if !stmt.schema_fingerprint.is_empty() {
-            let Some(schema) = &state.schema else {
+            let Some(schema) = &state.schema
+            else {
                 return Err(Error::SchemaInvalidated {
                     expected_fingerprint: stmt.schema_fingerprint.clone(),
                     current_fingerprint: String::new(),

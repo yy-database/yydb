@@ -38,9 +38,11 @@ use yydb_engine::Connection;
 use yydb_protocol::{Frame, HEADER_LEN, MAX_BODY_LEN, read_frame, split_bind, write_frame};
 use yydb_types::Error;
 
-use crate::auth::{AuthBootstrap, SessionRegistry};
-use crate::dispatch::{SessionState, dispatch, is_authenticated, is_loopback_host};
-use crate::host_wire::TcpWireHostAdapter;
+use crate::{
+    auth::{AuthBootstrap, SessionRegistry},
+    dispatch::{SessionState, dispatch, is_authenticated, is_loopback_host},
+    host_wire::TcpWireHostAdapter,
+};
 
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -168,10 +170,7 @@ pub fn run_serve(path: &Path, bind: &str, insecure_bind: bool) -> Result<(), Box
         path.display(),
         HANDSHAKE_TIMEOUT.as_secs()
     );
-    println!(
-        "Auth: Hello → Authenticate ({} principal(s); tokens from YYDB_AUTH_TOKENS) → queries",
-        bootstrap.tokens.len()
-    );
+    println!("Auth: Hello → Authenticate ({} principal(s); tokens from YYDB_AUTH_TOKENS) → queries", bootstrap.tokens.len());
     if bind_is_loopback && bootstrap.named_count() == 0 {
         println!("⚠  Loopback-only anonymous bootstrap — dev mode. Set YYDB_AUTH_TOKENS for explicit principals.");
     }

@@ -180,14 +180,14 @@ impl AuthBootstrap {
         }
         // No explicit auth config: only allowed on loopback.
         if bind_is_loopback {
-            let default_token =
-                env::var("YYDB_AUTH_TOKEN").unwrap_or_else(|_| "yydb-phase0-default-token".to_owned());
+            let default_token = env::var("YYDB_AUTH_TOKEN").unwrap_or_else(|_| "yydb-phase0-default-token".to_owned());
             let anon = Principal::anonymous_loopback();
             return Ok(Self { tokens: vec![(default_token, anon)] });
         }
         Err(Error::AuthConfigMissing {
             message: "non-loopback bind requires explicit auth — set YYDB_AUTH_TOKENS \
-                      (format: `token=name:Role1,Role2;…`) before starting serve".to_owned(),
+                      (format: `token=name:Role1,Role2;…`) before starting serve"
+                .to_owned(),
         })
     }
 
@@ -247,11 +247,7 @@ fn parse_roles(raw: &str) -> Result<Vec<Role>, Error> {
             "writer" => Role::Writer,
             "schemaadmin" | "schema_admin" | "schema" => Role::SchemaAdmin,
             "loopbackonly" | "loopback_only" => Role::LoopbackOnly,
-            other => {
-                return Err(Error::AuthConfigMissing {
-                    message: format!("unknown role `{other}` in auth config"),
-                })
-            }
+            other => return Err(Error::AuthConfigMissing { message: format!("unknown role `{other}` in auth config") }),
         };
         out.push(role);
     }
@@ -293,7 +289,11 @@ impl SessionRegistry {
             if let Some(session) = sessions.get(token) {
                 if session.is_expired() {
                     return Err(Error::AuthSessionExpired {
-                        message: format!("session for principal `{}` expired at {:?}", session.principal.label(), session.expires_at),
+                        message: format!(
+                            "session for principal `{}` expired at {:?}",
+                            session.principal.label(),
+                            session.expires_at
+                        ),
                     });
                 }
                 if remote && !session.principal.allows_remote() {
@@ -306,11 +306,8 @@ impl SessionRegistry {
         }
 
         // Slow path: create a fresh session from bootstrap principal.
-        let principal = self
-            .bootstrap
-            .get(token)
-            .cloned()
-            .ok_or_else(|| Error::AuthTokenInvalid {
+        let principal =
+            self.bootstrap.get(token).cloned().ok_or_else(|| Error::AuthTokenInvalid {
                 message: "token does not match any configured principal".to_owned(),
             })?;
 
@@ -321,12 +318,8 @@ impl SessionRegistry {
         }
 
         let now = SystemTime::now();
-        let session = Session {
-            principal: principal.clone(),
-            token: token.to_owned(),
-            created_at: now,
-            expires_at: now + Session::TTL,
-        };
+        let session =
+            Session { principal: principal.clone(), token: token.to_owned(), created_at: now, expires_at: now + Session::TTL };
         let mut sessions = self.sessions.lock().expect("session registry poisoned");
         sessions.insert(token.to_owned(), session.clone());
         Ok(session)
@@ -346,9 +339,7 @@ mod tests {
 
     #[test]
     fn anon_forbidden_on_remote_lookup() {
-        let bootstrap = AuthBootstrap {
-            tokens: vec![("t-anon".to_owned(), Principal::anonymous_loopback())],
-        };
+        let bootstrap = AuthBootstrap { tokens: vec![("t-anon".to_owned(), Principal::anonymous_loopback())] };
         let reg = SessionRegistry::new(&bootstrap);
         let err = reg.lookup_session("t-anon", true).unwrap_err();
         assert!(matches!(err, Error::AuthAnonymousRemoteDenied { .. }));
@@ -356,9 +347,7 @@ mod tests {
 
     #[test]
     fn anon_ok_on_loopback_lookup() {
-        let bootstrap = AuthBootstrap {
-            tokens: vec![("t-anon".to_owned(), Principal::anonymous_loopback())],
-        };
+        let bootstrap = AuthBootstrap { tokens: vec![("t-anon".to_owned(), Principal::anonymous_loopback())] };
         let reg = SessionRegistry::new(&bootstrap);
         let session = reg.lookup_session("t-anon", false).unwrap();
         assert_eq!(session.principal.kind, PrincipalKind::Anonymous);

@@ -6,11 +6,14 @@ fn anon_bootstrap() -> AuthBootstrap {
 
 fn named_bootstrap() -> AuthBootstrap {
     AuthBootstrap {
-        tokens: vec![("t-svc".to_owned(), Principal {
-            name: "svc-worker-07".to_owned(),
-            kind: PrincipalKind::Service,
-            roles: vec![yydb_server::Role::Writer],
-        })],
+        tokens: vec![(
+            "t-svc".to_owned(),
+            Principal {
+                name: "svc-worker-07".to_owned(),
+                kind: PrincipalKind::Service,
+                roles: vec![yydb_server::Role::Writer],
+            },
+        )],
     }
 }
 

@@ -123,9 +123,9 @@ fn parse_micro_register_json(json: &str) -> yydb::Result<yydb::types::udf::HostM
     let arg_types: Vec<yydb::types::udf::UdfType> = arg_types_arr
         .iter()
         .map(|v| {
-            let s = v.as_str().ok_or_else(|| Error::Protocol {
-                message: "registerMicroJson `argTypes` must be string tags".to_string(),
-            })?;
+            let s = v
+                .as_str()
+                .ok_or_else(|| Error::Protocol { message: "registerMicroJson `argTypes` must be string tags".to_string() })?;
             parse_udf_type_tag(s)
         })
         .collect::<Result<_, _>>()?;
@@ -233,9 +233,7 @@ fn parse_udf_type_tag(s: &str) -> yydb::Result<yydb::types::udf::UdfType> {
         "bool" => Ok(yydb::types::udf::UdfType::Bool),
         "text" => Ok(yydb::types::udf::UdfType::Text),
         "null" => Ok(yydb::types::udf::UdfType::Null),
-        _ => Err(Error::Protocol {
-            message: format!("unknown UDF type tag: {s}"),
-        }),
+        _ => Err(Error::Protocol { message: format!("unknown UDF type tag: {s}") }),
     }
 }
 
@@ -583,29 +581,41 @@ impl MemorySession {
         }
         let obj: serde_json::Value = match serde_json::from_str(json) {
             Ok(v) => v,
-            Err(error) => return serde_json::json!({ "ok": false, "error": format!("invalid queryPrepared body: {error}") }).to_string(),
+            Err(error) => {
+                return serde_json::json!({ "ok": false, "error": format!("invalid queryPrepared body: {error}") }).to_string();
+            }
         };
         let id = match obj.get("statementId").and_then(|v| v.as_str()) {
             Some(s) => s.to_owned(),
-            None => return serde_json::json!({ "ok": false, "error": "queryPrepared: missing string `statementId`" }).to_string(),
+            None => {
+                return serde_json::json!({ "ok": false, "error": "queryPrepared: missing string `statementId`" }).to_string();
+            }
         };
         let stmt = match self.stmts.get(&id) {
             Some(s) => s,
-            None => return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string(),
+            None => {
+                return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string();
+            }
         };
         let named: BTreeMap<String, yydb::types::Value> = match obj.get("params") {
             None | Some(serde_json::Value::Null) => BTreeMap::new(),
             Some(val) => {
                 let obj = match val.as_object() {
                     Some(o) => o,
-                    None => return serde_json::json!({ "ok": false, "error": "queryPrepared: params must be an object or null" }).to_string(),
+                    None => {
+                        return serde_json::json!({ "ok": false, "error": "queryPrepared: params must be an object or null" })
+                            .to_string();
+                    }
                 };
                 let mut out = BTreeMap::new();
                 for (k, v) in obj {
-                    out.insert(k.clone(), match json_value_to_runtime(v) {
-                        Ok(val) => val,
-                        Err(error) => return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
-                    });
+                    out.insert(
+                        k.clone(),
+                        match json_value_to_runtime(v) {
+                            Ok(val) => val,
+                            Err(error) => return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+                        },
+                    );
                 }
                 out
             }
@@ -652,7 +662,9 @@ fn value_to_json(v: yydb::types::Value) -> serde_json::Value {
         Value::I64(i) => serde_json::Value::Number(serde_json::Number::from(i)),
         Value::U64(u) => serde_json::Value::Number(serde_json::Number::from(u)),
         Value::F64(f) => serde_json::Number::from_f64(f).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
-        Value::Bytes(b) => serde_json::Value::Array(b.into_iter().map(|x| serde_json::Value::Number(serde_json::Number::from(x as u8))).collect()),
+        Value::Bytes(b) => serde_json::Value::Array(
+            b.into_iter().map(|x| serde_json::Value::Number(serde_json::Number::from(x as u8))).collect(),
+        ),
         Value::Uuid(u) => serde_json::Value::String(u.to_string()),
         _ => serde_json::Value::Null, // Vector, Object, File, Row — WASM JSON bridge skips for now
     }
@@ -994,29 +1006,41 @@ impl PersistentSession {
         }
         let obj: serde_json::Value = match serde_json::from_str(json) {
             Ok(v) => v,
-            Err(error) => return serde_json::json!({ "ok": false, "error": format!("invalid queryPrepared body: {error}") }).to_string(),
+            Err(error) => {
+                return serde_json::json!({ "ok": false, "error": format!("invalid queryPrepared body: {error}") }).to_string();
+            }
         };
         let id = match obj.get("statementId").and_then(|v| v.as_str()) {
             Some(s) => s.to_owned(),
-            None => return serde_json::json!({ "ok": false, "error": "queryPrepared: missing string `statementId`" }).to_string(),
+            None => {
+                return serde_json::json!({ "ok": false, "error": "queryPrepared: missing string `statementId`" }).to_string();
+            }
         };
         let stmt = match self.stmts.get(&id) {
             Some(s) => s,
-            None => return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string(),
+            None => {
+                return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string();
+            }
         };
         let named: BTreeMap<String, yydb::types::Value> = match obj.get("params") {
             None | Some(serde_json::Value::Null) => BTreeMap::new(),
             Some(val) => {
                 let obj = match val.as_object() {
                     Some(o) => o,
-                    None => return serde_json::json!({ "ok": false, "error": "queryPrepared: params must be an object or null" }).to_string(),
+                    None => {
+                        return serde_json::json!({ "ok": false, "error": "queryPrepared: params must be an object or null" })
+                            .to_string();
+                    }
                 };
                 let mut out = BTreeMap::new();
                 for (k, v) in obj {
-                    out.insert(k.clone(), match json_value_to_runtime(v) {
-                        Ok(val) => val,
-                        Err(error) => return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
-                    });
+                    out.insert(
+                        k.clone(),
+                        match json_value_to_runtime(v) {
+                            Ok(val) => val,
+                            Err(error) => return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+                        },
+                    );
                 }
                 out
             }
