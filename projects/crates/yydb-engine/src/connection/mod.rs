@@ -3,7 +3,10 @@
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use crate::{
@@ -61,6 +64,7 @@ pub struct Connection {
     pub(crate) txn: Mutex<Option<State>>,
     pub(crate) udfs: Mutex<UdfSubsystem>,
     pub(crate) objects: std::sync::Arc<ObjectStore>,
+    pub(crate) closed: std::sync::Arc<AtomicBool>,
 }
 
 impl Connection {
@@ -96,6 +100,7 @@ impl Connection {
             else {
                 ObjectStore::open_ephemeral()
             }),
+            closed: std::sync::Arc::new(AtomicBool::new(false)),
         };
         // Force recovery path once so a leftover WAL is applied.
         let _ = connection.read_state()?;
@@ -111,6 +116,7 @@ impl Connection {
             backend: std::sync::Arc::new(Backend::Memory { state: Mutex::new(State::default()) }),
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: std::sync::Arc::new(ObjectStore::open_ephemeral()),
+            closed: std::sync::Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -127,6 +133,7 @@ impl Connection {
             txn: Mutex::new(None),
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: std::sync::Arc::clone(&self.objects),
+            closed: std::sync::Arc::clone(&self.closed),
         }
     }
 
@@ -190,5 +197,28 @@ impl Connection {
             ));
         }
         Ok(())
+    }
+
+    /// Mark this connection and all derived sessions as closed.
+    ///
+    /// Subsequent `prepare_vos`, `query_prepared` and other surface methods
+    /// return [`Error::SessionClosed`]. The underlying storage backend stays
+    /// alive for any `Arc` clones still held.
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether this connection (or a parent it was derived from via
+    /// [`Self::session`]) has been closed.
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    /// Internal pre-flight gate: returns `Err(SessionClosed)` when the
+    /// connection is closed. Used by every surface method that touches
+    /// prepared statements so a stale handle fails fast instead of
+    /// silently operating on a half-closed store.
+    pub(crate) fn guard_session_alive(&self) -> Result<()> {
+        if self.is_closed() { Err(Error::SessionClosed) } else { Ok(()) }
     }
 }

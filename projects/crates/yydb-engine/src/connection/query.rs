@@ -17,6 +17,7 @@ impl Connection {
     /// and revision. Executions later use those two fields to detect schema
     /// migration without re-parsing.
     pub fn prepare_vos(&self, source: &str) -> Result<PreparedStatement> {
+        self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut stmt = prepare_source(source)?;
         let state = self.active_state_unlocked()?;
@@ -38,6 +39,7 @@ impl Connection {
     /// has drifted from the fingerprint captured at prepare time. Re-prepare
     /// after schema migration.
     pub fn query_prepared(&self, stmt: &PreparedStatement, named: &BTreeMap<String, Value>) -> Result<Vec<QueryRow>> {
+        self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let state = self.active_state_unlocked()?;
 
@@ -94,6 +96,7 @@ impl Connection {
     /// Mutates the active connection state. When a transaction is open, changes
     /// stay in the snapshot until [`Self::commit`] or [`Self::rollback`].
     pub fn execute_vos_write(&self, source: &str) -> Result<()> {
+        self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         self.mutate_active_state_unlocked(|state| {
             let contract = resolved_contract(state)?;
