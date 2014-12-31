@@ -197,6 +197,17 @@ pub enum Error {
         /// auth-config file path hints).
         message: String,
     },
+    /// Principal authenticated successfully but does not hold the permission
+    /// required for the requested frame. Emitted by dispatch gates before
+    /// any connection-side write / schema op runs.
+    AuthInsufficientPermission {
+        /// Stable label of the permission the frame required (`read`,
+        /// `write`, `schema`).
+        required: String,
+        /// Short human-readable description of the frame that was denied
+        /// (`KvPut`, `SchemaEnsure`, …).
+        frame: String,
+    },
     /// Prepared statement bound to a schema that has since been migrated or
     /// invalidated. Re-prepare with the current schema.
     SchemaInvalidated {
@@ -259,6 +270,9 @@ impl fmt::Display for Error {
                 write!(f, "auth: anonymous remote denied — {message}")
             }
             Self::AuthConfigMissing { message } => write!(f, "auth: config missing — {message}"),
+            Self::AuthInsufficientPermission { required, frame } => {
+                write!(f, "auth: insufficient permission — frame `{frame}` requires `{required}`")
+            }
             Self::SchemaInvalidated { expected_fingerprint, current_fingerprint, schema_revision } => {
                 write!(
                     f,
@@ -303,6 +317,7 @@ impl Error {
             Self::AuthPrincipalNotFound { .. } => "yydb.auth.principal_not_found",
             Self::AuthAnonymousRemoteDenied { .. } => "yydb.auth.anonymous_remote_denied",
             Self::AuthConfigMissing { .. } => "yydb.auth.config_missing",
+            Self::AuthInsufficientPermission { .. } => "yydb.auth.insufficient_permission",
             Self::SchemaInvalidated { .. } => "yydb.schema.invalidated",
             Self::Remote { code, .. } => code,
         }
@@ -334,7 +349,8 @@ impl Error {
             | Self::AuthSessionExpired { .. }
             | Self::AuthPrincipalNotFound { .. }
             | Self::AuthAnonymousRemoteDenied { .. }
-            | Self::AuthConfigMissing { .. } => "auth",
+            | Self::AuthConfigMissing { .. }
+            | Self::AuthInsufficientPermission { .. } => "auth",
             Self::SchemaInvalidated { .. } => "query",
             Self::Remote { .. } => "remote",
         }
@@ -355,6 +371,9 @@ impl Error {
             | Self::AuthPrincipalNotFound { message }
             | Self::AuthAnonymousRemoteDenied { message }
             | Self::AuthConfigMissing { message } => vec![("detail", message.clone())],
+            Self::AuthInsufficientPermission { required, frame } => {
+                vec![("required", required.clone()), ("frame", frame.clone())]
+            }
             Self::SchemaConflict { expected, found } => vec![("expected", expected.to_string()), ("found", found.to_string())],
             Self::UdfNotFound { name } | Self::Udf { name, .. } => {
                 vec![("name", name.clone())]

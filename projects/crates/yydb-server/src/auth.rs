@@ -74,6 +74,11 @@ impl Principal {
             kind => format!("{}:{}", kind.as_str(), self.name),
         }
     }
+
+    /// True when any of this principal's roles grants the requested permission.
+    pub fn has_permission(&self, perm: Permission) -> bool {
+        self.roles.iter().any(|r| r.permissions().contains(&perm))
+    }
 }
 
 // ─── Role / Permission (minimal, for follow-up authz) ──────────────────
@@ -100,6 +105,17 @@ pub enum Permission {
     Write,
     /// Change schema via `SchemaEnsure`.
     Schema,
+}
+
+impl Permission {
+    /// Stable label for diagnostic error params (`read`, `write`, `schema`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Schema => "schema",
+        }
+    }
 }
 
 impl Role {
