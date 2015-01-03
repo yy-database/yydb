@@ -13,7 +13,7 @@ use yydb_protocol::{
 use yydb_query::PreparedStatement;
 use yydb_types::{Error, Result};
 
-use crate::auth::{AuthBootstrap, Principal, PrincipalKind, Session, SessionRegistry};
+use crate::auth::{AuthBootstrap, Permission, Principal, Session, SessionRegistry};
 
 // ─── Per-connection session state ─────────────────────────────────────────
 
@@ -171,6 +171,23 @@ pub fn dispatch(conn: &Connection, state: &SessionState, request: &Frame) -> Fra
 
 fn dispatch_authed(conn: &Connection, state: &SessionState, request: &Frame) -> Frame {
     let id = request.request_id;
+
+    // ── Permission gate ──────────────────────────────────────────────
+    {
+        let session_guard = state.session.lock().expect("session auth poisoned");
+        let session = session_guard.as_ref().expect("auth check above guarantees session present");
+        let required = required_permission(request.msg_type);
+        if !session.principal.has_permission(required) {
+            return error_frame(
+                id,
+                &Error::AuthInsufficientPermission {
+                    required: required.as_str().to_owned(),
+                    frame: format!("{:?}", request.msg_type),
+                },
+            );
+        }
+    }
+
     match request.msg_type {
         MessageType::Info => match info_body(conn) {
             Ok(body) => Frame::new(MessageType::InfoOk, id, body),
@@ -285,6 +302,19 @@ fn dispatch_authed(conn: &Connection, state: &SessionState, request: &Frame) -> 
             error_frame(id, &Error::Protocol { message: "handshake frame received after auth — protocol violation".to_owned() })
         }
         MessageType::Unknown(code) => error_frame(id, &Error::Protocol { message: format!("unknown msg_type {code}") }),
+    }
+}
+
+/// Which [`Permission`] an incoming frame requires before dispatch.
+///
+/// * `KvPut` → [`Permission::Write`]
+/// * `SchemaEnsure` → [`Permission::Schema`]
+/// * Everything else (reads, prepared statements, UDF calls) → [`Permission::Read`]
+fn required_permission(msg: MessageType) -> Permission {
+    match msg {
+        MessageType::KvPut => Permission::Write,
+        MessageType::SchemaEnsure => Permission::Schema,
+        _ => Permission::Read,
     }
 }
 
