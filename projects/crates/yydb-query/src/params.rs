@@ -342,7 +342,7 @@ fn scan_and_rewrite(source: &str) -> Result<(Vec<ParameterDescriptor>, String)> 
 /// Walk lowered ops to classify read/write + extract simple read_set.
 fn classify_ops(ops: &[QueryOp]) -> (QueryKind, Vec<String>, Vec<String>) {
     let mut tables: Vec<String> = Vec::new();
-    let mut kind = QueryKind::Read;
+    let kind = QueryKind::Read;
     for op in ops {
         match op {
             QueryOp::Scan { table } => {

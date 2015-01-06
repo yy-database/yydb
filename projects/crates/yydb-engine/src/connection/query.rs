@@ -19,6 +19,8 @@ impl Connection {
     pub fn prepare_vos(&self, source: &str) -> Result<PreparedStatement> {
         self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        // `prepare_source` already classifies ops and fills `query_kind` —
+        // the engine path only adds schema fingerprint / revision on top.
         let mut stmt = prepare_source(source)?;
         let state = self.active_state_unlocked()?;
         if let Some(schema) = &state.schema {
