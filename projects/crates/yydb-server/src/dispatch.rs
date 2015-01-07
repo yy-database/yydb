@@ -10,7 +10,7 @@ use yydb_protocol::{
     decode_prepare, decode_scalar_call, decode_schema_ensure, encode_authenticate_ok, encode_execute_prepared_ok,
     encode_kv_get_ok, encode_prepare_ok, encode_scalar_call_ok, encode_schema_ok, error_frame,
 };
-use yydb_query::PreparedStatement;
+use yydb_query::{PreparedStatement, QueryKind};
 use yydb_types::{Error, Result};
 
 use crate::auth::{AuthBootstrap, Permission, Principal, Session, SessionRegistry};
@@ -267,6 +267,28 @@ fn dispatch_authed(conn: &Connection, state: &SessionState, request: &Frame) -> 
                     );
                 }
             };
+
+            // ── Dynamic gate by statement effect kind ──────────────────
+            // Read-plan → already covered by the upfront `Permission::Read`
+            // gate above; write-plan → must also hold `Permission::Write`.
+            let required = match plan.statement.query_kind {
+                QueryKind::Read => Permission::Read,
+                QueryKind::Write => Permission::Write,
+            };
+            {
+                let session_guard = state.session.lock().expect("session auth poisoned");
+                let session = session_guard.as_ref().expect("auth check above guarantees session present");
+                if !session.principal.has_permission(required) {
+                    return error_frame(
+                        id,
+                        &Error::AuthInsufficientPermission {
+                            required: required.as_str().to_owned(),
+                            frame: format!("ExecutePrepared({})", sid),
+                        },
+                    );
+                }
+            }
+
             let named_params = match params_json {
                 Some(json) => match parse_params_json(&json) {
                     Ok(m) => m,
