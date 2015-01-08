@@ -19,6 +19,25 @@ fn dml_error(message: impl Into<String>) -> Error {
     Error::Schema { message: message.into() }
 }
 
+/// Quick AST-level check: does this VOS program look like a write /
+/// mutation (insert, macro call)? Used by [`crate::params::prepare`] to
+/// short-circuit DML programs past the read-pipeline lowerer.
+pub(crate) fn is_write_program(program: &VosProgram) -> bool {
+    for stmt in &program.statements {
+        if let VosStmt::Expr(expr) = stmt {
+            if is_macro_call(expr) || is_typed_object_insert(expr) {
+                return true;
+            }
+        }
+    }
+    if let Some(result) = &program.result {
+        if is_macro_call(result) || is_typed_object_insert(result) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Execute unit-valued VOS write programs against stored table rows.
 pub fn execute(
     source: &str,

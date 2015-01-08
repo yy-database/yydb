@@ -21,6 +21,7 @@ use super::{
     exec,
     ops::{QueryOp, QueryRow, SlotTy},
 };
+use vos::syntax::{VosExpr, VosProgram, VosStmt};
 
 /// One named parameter extracted during prepare.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -127,9 +128,22 @@ pub fn prepare(source: &str) -> Result<PreparedStatement> {
     let source_fingerprint = fingerprint(source);
 
     let program = vos::parse_program(&rewritten).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
-    let ops = super::lower::lower_program(&program, &parameters)?;
 
-    let (query_kind, read_set, write_set) = classify_ops(&ops);
+    // ── Write-program short-circuit ────────────────────────────────────
+    // DML programs (`Type::insert(...)`, `TypedObject.insert()`) do not
+    // lower to QueryOp pipelines — execute_prepared must route them through
+    // the dml executor instead. We detect them here so `query_kind` is
+    // populated correctly before engine / dispatch code sees the stmt.
+    let is_write_program = super::dml::is_write_program(&program);
+    let (ops, query_kind, read_set, write_set) = if is_write_program {
+        (Vec::new(), QueryKind::Write, Vec::new(), extract_write_set(&program))
+    }
+    else {
+        let ops = super::lower::lower_program(&program, &parameters)?;
+        let (kind, reads, writes) = classify_ops(&ops);
+        (ops, kind, reads, writes)
+    };
+
     let statement_id = format!("stmt-{source_fingerprint}");
 
     Ok(PreparedStatement {
@@ -355,6 +369,54 @@ fn classify_ops(ops: &[QueryOp]) -> (QueryKind, Vec<String>, Vec<String>) {
         }
     }
     (kind, tables, Vec::new())
+}
+
+/// Extract table names referenced by insert-style expressions in a write
+/// program AST. Handles both `Type::insert({ … })` and
+/// `TypedObject { … }.insert()` shapes.
+fn extract_write_set(program: &VosProgram) -> Vec<String> {
+    let mut tables = Vec::new();
+    let mut visit_expr = |expr: &VosExpr| {
+        if let Some(name) = type_name_from_insert_expr(expr) {
+            if !tables.contains(&name) {
+                tables.push(name);
+            }
+        }
+    };
+    for stmt in &program.statements {
+        if let VosStmt::Expr(expr) = stmt {
+            visit_expr(expr);
+        }
+    }
+    if let Some(result) = &program.result {
+        visit_expr(result);
+    }
+    tables
+}
+
+fn type_name_from_insert_expr(expr: &VosExpr) -> Option<String> {
+    let VosExpr::Call { callee, .. } = expr
+    else {
+        return None;
+    };
+    // `Type::insert({ … })` — callee is a Name("Type") called as a constructor-style call
+    // `TypedObject { … }.insert()` — callee is Member(object="TypedObject", name="insert")
+    match callee.as_ref() {
+        VosExpr::Member { object, name, .. } if name == "insert" => {
+            // `Something.insert()` — extract from the object
+            type_name_from_expr(object)
+        }
+        _ => None,
+    }
+}
+
+fn type_name_from_expr(expr: &VosExpr) -> Option<String> {
+    match expr {
+        VosExpr::Name { name, .. } => Some(name.clone()),
+        VosExpr::TypedObject { ty, .. } => Some(ty.clone()),
+        VosExpr::Member { object, .. } => type_name_from_expr(object),
+        _ => None,
+    }
 }
 
 /// FNV-1a 64-bit — stable, collision-safe for query-source keys within a

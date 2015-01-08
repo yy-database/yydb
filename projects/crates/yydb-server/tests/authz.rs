@@ -2,7 +2,9 @@
 //! Role → Permission mappings for wire frames.
 
 use yydb_engine::Connection;
-use yydb_protocol::{Frame, MessageType, encode_kv_get, encode_kv_put, encode_schema_ensure};
+use yydb_protocol::{
+    Frame, MessageType, encode_execute_prepared, encode_kv_get, encode_kv_put, encode_prepare, encode_schema_ensure,
+};
 use yydb_server::{Principal, PrincipalKind, Role, Session, SessionState, dispatch};
 
 /// A VOS schema document that yy-db accepts.
@@ -191,4 +193,64 @@ fn principal_has_permission_respects_roles() {
     assert!(admin.has_permission(Permission::Read));
     assert!(admin.has_permission(Permission::Write));
     assert!(admin.has_permission(Permission::Schema));
+}
+
+// ─── Prepared statement dynamic gating ──────────────────────────────────
+
+/// Extract the statement_id from a PrepareOk frame body.
+fn sid_from_prepare_ok(frame: &Frame) -> String {
+    // body is: u32 len + utf8 bytes
+    let len = u32::from_le_bytes([frame.body[0], frame.body[1], frame.body[2], frame.body[3]]) as usize;
+    std::str::from_utf8(&frame.body[4..4 + len]).expect("valid utf8").to_owned()
+}
+
+#[test]
+fn reader_execute_prepared_read_is_allowed() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.ensure_schema(VALID_SCHEMA).unwrap();
+    let state = state_with_principal(20, named_principal("reader", vec![Role::Reader]));
+
+    let prepare = Frame::new(MessageType::Prepare, 1, encode_prepare("User.all().collect()"));
+    let sid_frame = dispatch(&conn, &state, &prepare);
+    assert_eq!(sid_frame.msg_type, MessageType::PrepareOk, "prepare must succeed");
+    let sid = sid_from_prepare_ok(&sid_frame);
+
+    let exec = Frame::new(MessageType::ExecutePrepared, 2, encode_execute_prepared(&sid, None));
+    let resp = dispatch(&conn, &state, &exec);
+    assert!(is_ok(&resp), "Reader ExecutePrepared(read) must be allowed, got {:?}", resp.msg_type);
+}
+
+#[test]
+fn reader_execute_prepared_write_is_denied() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.ensure_schema(VALID_SCHEMA).unwrap();
+    let state = state_with_principal(21, named_principal("reader", vec![Role::Reader]));
+
+    let prepare = Frame::new(MessageType::Prepare, 1, encode_prepare("User { name: \"x\" }.insert()"));
+    let sid_frame = dispatch(&conn, &state, &prepare);
+    assert_eq!(sid_frame.msg_type, MessageType::PrepareOk, "prepare write VOS must succeed");
+    let sid = sid_from_prepare_ok(&sid_frame);
+
+    let exec = Frame::new(MessageType::ExecutePrepared, 2, encode_execute_prepared(&sid, None));
+    let resp = dispatch(&conn, &state, &exec);
+    assert!(is_permission_error(&resp), "Reader ExecutePrepared(write) must be denied, got {:?}", resp.msg_type);
+}
+
+#[test]
+fn writer_execute_prepared_write_is_allowed() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.ensure_schema(VALID_SCHEMA).unwrap();
+    let state = state_with_principal(22, named_principal("writer", vec![Role::Writer]));
+
+    let prepare = Frame::new(MessageType::Prepare, 1, encode_prepare("User { name: \"x\" }.insert()"));
+    let sid_frame = dispatch(&conn, &state, &prepare);
+    assert_eq!(sid_frame.msg_type, MessageType::PrepareOk, "prepare write VOS must succeed");
+    let sid = sid_from_prepare_ok(&sid_frame);
+
+    let exec = Frame::new(MessageType::ExecutePrepared, 2, encode_execute_prepared(&sid, None));
+    let resp = dispatch(&conn, &state, &exec);
+    // Even though the Write stmt's ops are short-circuited to empty (prepare
+    // doesn't lower DML), the dispatch dynamic gate should still let it
+    // through because Writer has Permission::Write.
+    assert!(!is_permission_error(&resp), "Writer ExecutePrepared(write) must be allowed");
 }
