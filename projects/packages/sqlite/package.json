@@ -1,0 +1,60 @@
+{
+    "name": "@yydb/sqlite",
+    "version": "0.1.0",
+    "description": "Bounded read-only SQLite format-3 snapshot reader for YYDB — schema inspection, typed record decoding, and blank database creation.",
+    "license": "MPL-2.0",
+    "type": "module",
+    "sideEffects": false,
+    "exports": {
+        ".": {
+            "types": "./src/index.ts",
+            "import": "./src/index.ts",
+            "default": "./src/index.ts"
+        },
+        "./node": {
+            "types": "./src/node.ts",
+            "import": "./src/node.ts",
+            "default": "./src/node.ts"
+        }
+    },
+    "bin": {
+        "sqlite": "bin/sqlite3.mjs"
+    },
+    "files": [
+        "bin",
+        "src",
+        "readme.md"
+    ],
+    "scripts": {
+        "typecheck": "tsc --noEmit -p tsconfig.json",
+        "test": "node --experimental-strip-types --test \"./tests/**/*.test.ts\""
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/yy-database/yydb.git",
+        "directory": "projects/packages/sqlite"
+    },
+    "homepage": "https://github.com/yy-database/yydb/tree/dev/projects/packages/sqlite#readme",
+    "bugs": {
+        "url": "https://github.com/yy-database/yydb/issues"
+    },
+    "keywords": [
+        "yydb",
+        "sqlite",
+        "format-3",
+        "binary-compatible"
+    ],
+    "publishConfig": {
+        "access": "public"
+    },
+    "dependencies": {
+        "@yydb/yydb": "workspace:*"
+    },
+    "devDependencies": {
+        "@types/node": "^22.15.0",
+        "typescript": "^5.9.2"
+    },
+    "engines": {
+        "node": ">=18"
+    }
+}

@@ -12,10 +12,12 @@
 
 #![deny(missing_docs)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use napi::bindgen_prelude::{Buffer, Result};
 use napi_derive::napi;
+
+mod sqlite;
 
 fn reason(error: yydb::Error) -> napi::Error {
     let json = serde_json::to_string(&error.to_json()).unwrap_or_else(|_| error.to_string());

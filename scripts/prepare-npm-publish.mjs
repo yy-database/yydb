@@ -98,5 +98,6 @@ preparePackageJson(path.join(root, 'projects', 'packages', 'light-db'));
 preparePackageJson(path.join(root, 'projects', 'packages', 'yydb-client'));
 preparePackageJson(path.join(root, 'projects', 'packages', 'yydb-unknown-wasm32'));
 preparePackageJson(path.join(root, 'projects', 'packages', 'yydb'));
+preparePackageJson(path.join(root, 'projects', 'packages', 'sqlite'));
 
 console.log('npm packages prepared', version || '(package.json versions)');

@@ -1,0 +1,19 @@
+[package]
+name = "yydb-sqlite"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure-Rust SQLite format 3 snapshot reader for YYDB — bounded main-file inspection and typed record decoding"
+publish = false
+readme = "readme.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+yydb-types = { workspace = true }
+
+[dev-dependencies]
+# SQLite format fixtures live under src/assets/blank.sqlite (git-tracked zero-page file).
