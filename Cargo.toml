@@ -25,7 +25,9 @@ yydb = { version = "0.0.18", path = "projects/crates/yydb" }
 # Transport (aggregated by the facade; never depend back on `yydb`)
 yydb-client = { path = "projects/crates/yydb-client" }
 yydb-server = { path = "projects/crates/yydb-server" }
-# SQLite format-3 reader (pure passthrough, no YYDB engine coupling)
+# SQLite split: format primitives, storage runtime, and product facade
+sqlite-formats = { version = "0.1.0", path = "projects/crates/sqlite-formats" }
+sqlite-storage = { version = "0.1.0", path = "projects/crates/sqlite-storage" }
 yydb-sqlite = { version = "0.1.0", path = "projects/crates/yydb-sqlite" }
 # Language bindings (thin; every Rust capability comes from `yydb`)
 yydb-napi = { path = "projects/crates/yydb-napi" }

@@ -8,10 +8,13 @@ use std::{
 
 use yydb_types::{Error, Result};
 
+use sqlite_formats::{
+    ENGINE_LIBRARY_VERSION_NUMBER, blank_database, decode_library_version, stamp_library_version, validate_database,
+};
+
 use crate::{
-    SchemaObject, TableLimits, TableRow,
-    format::{ENGINE_LIBRARY_VERSION_NUMBER, blank_database, decode_library_version, stamp_library_version, validate_database},
-    read_named_table, read_schema,
+    schema::{SchemaObject, read_named_table, read_schema},
+    table::{TableLimits, TableRow},
 };
 
 /// Storage mode for [`SqliteDatabase`].

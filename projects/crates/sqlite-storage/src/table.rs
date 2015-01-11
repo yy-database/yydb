@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use yydb_types::{Error, Result};
 
-use crate::{decode_varint, validate_database};
+use sqlite_formats::{decode_varint, validate_database};
 
 /// Resource bounds for a read-only table b-tree scan.
 #[derive(Debug, Clone, Copy)]

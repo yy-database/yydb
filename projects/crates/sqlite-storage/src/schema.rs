@@ -1,6 +1,8 @@
 use yydb_types::{Error, Result};
 
-use crate::{RecordLimits, RecordValue, TableLimits, TableRow, TextEncoding, decode_record, read_table, validate_database};
+use sqlite_formats::{RecordLimits, RecordValue, TextEncoding, decode_record, validate_database};
+
+use crate::table::{TableLimits, TableRow, read_table};
 
 /// Object types stored in the SQLite schema table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

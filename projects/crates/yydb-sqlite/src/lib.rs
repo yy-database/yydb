@@ -1,24 +1,20 @@
-//! SQLite binary-compatible format-3 snapshot reader (pure Rust).
+//! SQLite product facade — re-exports `sqlite-storage`'s public API and the
+//! legacy product surface constants that downstream consumers still reference.
 //!
-//! This crate inspects on-disk SQLite main files without linking any external
-//! SQLite engine. Snapshot reads are bounded and do not recover WAL or journal
-//! state. Neither path uses YYDB KV storage or embedded engine execution.
+//! This crate exists so the old `yydb-sqlite` import path continues to work
+//! while the real implementation splits into `sqlite-formats` and
+//! `sqlite-storage`. NAPI and TS facade imports stay stable.
 
-mod database;
-mod format;
-mod record;
-mod schema;
-mod table;
+pub use sqlite_storage::{
+    SchemaObject, SchemaObjectKind, SqliteDatabase, TableLimits, TableRow, TextEncoding, decode_record, decode_varint,
+    read_existing, read_named_table, read_schema, read_table, sqlite_library_version,
+};
 
-pub use crate::{
-    database::{SqliteDatabase, read_existing},
-    format::{
-        ENGINE_LIBRARY_VERSION, ENGINE_LIBRARY_VERSION_NUMBER, MAGIC, blank_database, decode_library_version,
-        validate_database, validate_header,
-    },
-    record::{RecordLimits, RecordValue, TextEncoding, decode_record, decode_varint},
-    schema::{SchemaObject, SchemaObjectKind, read_named_table, read_schema},
-    table::{TableLimits, TableRow, read_table},
+// Legacy surface constants and format functions that historical consumers
+// reference through this facade crate.
+pub use sqlite_formats::{
+    ENGINE_LIBRARY_VERSION, ENGINE_LIBRARY_VERSION_NUMBER, MAGIC, RecordLimits, RecordValue, blank_database,
+    decode_library_version, validate_database,
 };
 
 /// Adapter identifier used in logs and diagnostics.
@@ -29,8 +25,3 @@ pub const CONSTRAINT: &str = "upstream SQLite format-3 engine";
 
 /// Why YYDB does not execute SQL through the SQLite engine.
 pub const WHY_NOT_YY_OPTIMIZED: &str = "SQLite requires binary-compatible on-disk bytes. YYDB stores VOS in `.yydb` instead.";
-
-/// Returns the SQLite format reader library version string.
-pub fn sqlite_library_version() -> String {
-    ENGINE_LIBRARY_VERSION.to_string()
-}

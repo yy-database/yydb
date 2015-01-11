@@ -1,0 +1,17 @@
+[package]
+name = "sqlite-storage"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SQLite main-file runtime: file/memory database handle, schema table reads, rowid B-tree scan, and read-only catalog lookup. Built on sqlite-formats."
+publish = false
+readme = "readme.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+sqlite-formats = { workspace = true }
+yydb-types = { workspace = true }
