@@ -28,7 +28,7 @@ yydb-server = { path = "projects/crates/yydb-server" }
 # SQLite split: format primitives, storage runtime, and product facade
 sqlite-formats = { version = "0.1.0", path = "projects/crates/sqlite-formats" }
 sqlite-storage = { version = "0.1.0", path = "projects/crates/sqlite-storage" }
-yydb-sqlite = { version = "0.1.0", path = "projects/crates/yydb-sqlite" }
+sqlite = { version = "0.1.0", path = "projects/crates/sqlite" }
 # Language bindings (thin; every Rust capability comes from `yydb`)
 yydb-napi = { path = "projects/crates/yydb-napi" }
 yydb-pyo3 = { path = "projects/crates/yydb-pyo3" }

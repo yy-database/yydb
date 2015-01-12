@@ -1,9 +1,9 @@
 //! SQLite product facade — re-exports `sqlite-storage`'s public API and the
-//! legacy product surface constants that downstream consumers still reference.
+//! product surface constants that downstream consumers reference.
 //!
-//! This crate exists so the old `yydb-sqlite` import path continues to work
-//! while the real implementation splits into `sqlite-formats` and
-//! `sqlite-storage`. NAPI and TS facade imports stay stable.
+//! The real implementation lives in `sqlite-formats` (binary format
+//! primitives) and `sqlite-storage` (database handle, schema, table scan).
+//! This crate is the stable product entry point above both.
 
 pub use sqlite_storage::{
     SchemaObject, SchemaObjectKind, SqliteDatabase, TableLimits, TableRow, TextEncoding, decode_record, decode_varint,

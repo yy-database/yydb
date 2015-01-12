@@ -2,7 +2,7 @@
 
 use napi::bindgen_prelude::Buffer;
 use napi_derive::napi;
-use yydb_sqlite::{
+use sqlite::{
     RecordLimits, RecordValue, SchemaObjectKind, TableLimits, TextEncoding, blank_database, decode_library_version,
     decode_record, read_existing, read_named_table, read_schema, validate_database,
 };
@@ -136,11 +136,7 @@ fn resolve_encoding_name(bytes: &[u8]) -> napi::Result<&'static str> {
     })
 }
 
-fn build_decoded_rows(
-    bytes: &[u8],
-    rows: Vec<yydb_sqlite::TableRow>,
-    limits: TableLimits,
-) -> napi::Result<Vec<SqliteDecodedRow>> {
+fn build_decoded_rows(bytes: &[u8], rows: Vec<sqlite::TableRow>, limits: TableLimits) -> napi::Result<Vec<SqliteDecodedRow>> {
     let encoding = detect_encoding(bytes)?;
     let record_limits = RecordLimits { max_columns: 1024, max_payload_bytes: limits.max_payload_bytes.max(1_048_576) };
     rows.into_iter()
