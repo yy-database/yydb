@@ -22,20 +22,20 @@ export interface SqliteSchemaObject {
 }
 
 export interface SqliteTableRow {
-    rowid: number;
+    rowid: bigint;
     payload: Buffer;
 }
 
 export interface SqliteRecordValue {
     kind: string;
-    valueInteger?: number | null;
+    valueInteger?: bigint | null;
     valueReal?: number | null;
     valueText?: string | null;
     valueBlob?: Buffer | null;
 }
 
 export interface SqliteDecodedRow {
-    rowid: number;
+    rowid: bigint;
     columns: SqliteRecordValue[];
 }
 
@@ -65,7 +65,7 @@ export interface SqliteDatabaseBinding {
 export type SqliteTextEncoding = "utf8" | "utf16le" | "utf16be";
 
 function loadSqliteNative() {
-    const native = loadNative() as Record<string, unknown>;
+    const native = loadNative() as unknown as Record<string, unknown>;
     if (typeof native.SqliteSnapshot !== "function") {
         throw new Error("Native addon lacks the SQLite snapshot reader. Rebuild the native package.");
     }

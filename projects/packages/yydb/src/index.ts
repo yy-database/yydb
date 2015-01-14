@@ -11,4 +11,5 @@ export {
     type UdfScalarKind,
 } from './shared/udf-types.js';
 export { nativeBindingName, platformKey, resolveYydbBinary, resolveYydbCli } from './native/resolve.js';
+export { loadNative } from './native/binding.js';
 export * from './shared/vos.js';

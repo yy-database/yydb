@@ -5,13 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { isYydsNativeInstalled } from "@yydb/yyds/node";
 import { SqliteSnapshot } from "../src/node.ts";
+import { referencePython } from "./reference.ts";
 
-const nativeAvailable = isYydsNativeInstalled();
-if (process.env.YYDS_SQLITE_NATIVE_REQUIRED === "1") {
-    assert.ok(nativeAvailable, "native SQLite tests require the built platform addon");
-}
+const python = referencePython();
 
 test("snapshot constructor rejects invalid inputs before loading an addon", () => {
     for (const limit of [-1, 0.5, NaN, Infinity, 0x1_0000_0000]) {
@@ -21,11 +18,9 @@ test("snapshot constructor rejects invalid inputs before loading an addon", () =
     assert.throws(() => new SqliteSnapshot("bytes" as unknown as Uint8Array), /Uint8Array/);
 });
 
-test("native snapshot copies bytes and exposes bounded schema scans", {
-    skip: !nativeAvailable,
-}, () => {
+test("native snapshot copies bytes and exposes bounded schema scans", () => {
     const bytes = readFileSync(
-        new URL("../../../crates/sqlite/src/assets/blank.sqlite", import.meta.url),
+        new URL("../../../crates/sqlite-formats/src/assets/blank.sqlite", import.meta.url),
     );
     const snapshot = new SqliteSnapshot(bytes);
     bytes.fill(0);
@@ -44,7 +39,7 @@ test("native snapshot copies bytes and exposes bounded schema scans", {
 });
 
 test("Node native reader interoperates with original SQLite files", {
-    skip: !nativeAvailable || !process.env.YYDS_SQLITE_REFERENCE_PYTHON,
+    skip: python === undefined ? "no python interpreter with the sqlite3 module" : false,
 }, () => {
     const directory = mkdtempSync(join(tmpdir(), "yyds-sqlite-node-"));
     const path = join(directory, "reference.sqlite");
@@ -62,7 +57,7 @@ with sqlite3.connect(sys.argv[1]) as db:
     db.execute('create table unique_probe (value text unique)')
     assert db.execute('pragma integrity_check').fetchone() == ('ok',)
 `;
-    const output = spawnSync(process.env.YYDS_SQLITE_REFERENCE_PYTHON!, ["-c", script, path, sql], {
+    const output = spawnSync(python!, ["-c", script, path, sql], {
         timeout: 15_000,
         encoding: "utf8",
     });
