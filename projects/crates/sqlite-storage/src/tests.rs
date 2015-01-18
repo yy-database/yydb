@@ -11,9 +11,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use sqlite_formats::{
-    RecordLimits, RecordValue, TextEncoding, blank_database, decode_record, validate_database,
-};
+use sqlite_formats::{RecordLimits, RecordValue, TextEncoding, blank_database, decode_record, validate_database};
 
 use crate::{SchemaObjectKind, SqliteDatabase, TableLimits, read_existing, read_named_table, read_schema, read_table};
 
@@ -235,7 +233,12 @@ fn malformed_btree_pages_are_structured_errors() {
 
     let mut bad_pointer = pages.clone();
     write_u16(&mut bad_pointer, 108, 2);
-    assert!(read_table(&bad_pointer, 1, TableLimits::default()).expect_err("pointer").to_string().contains("cell pointer out of bounds"));
+    assert!(
+        read_table(&bad_pointer, 1, TableLimits::default())
+            .expect_err("pointer")
+            .to_string()
+            .contains("cell pointer out of bounds")
+    );
 
     let mut truncated_cell = pages.clone();
     write_u16(&mut truncated_cell, 108, 4090);
@@ -258,7 +261,8 @@ fn scan_limits_are_enforced() {
     assert_eq!(rows.code(), "yydb.unsupported");
     assert!(rows.to_string().contains("row limit"), "{rows}");
 
-    let payload = read_table(&pages, 1, TableLimits { max_payload_bytes: 1, ..TableLimits::default() }).expect_err("payload limit");
+    let payload =
+        read_table(&pages, 1, TableLimits { max_payload_bytes: 1, ..TableLimits::default() }).expect_err("payload limit");
     assert_eq!(payload.code(), "yydb.unsupported");
 
     let total = read_table(&pages, 1, TableLimits { max_total_payload_bytes: 1, ..TableLimits::default() })
@@ -382,10 +386,7 @@ fn utf16_text_and_blob_round_trip_through_files() {
     let opened = SqliteDatabase::open(&path).expect("open utf16le snapshot");
     assert_eq!(opened.pages(), pages.as_slice(), "file read and write must round-trip");
     assert_eq!(read_existing(&path).expect("read existing"), pages);
-    assert_eq!(
-        read_table(opened.pages(), 1, TableLimits::default()).expect("reopen scan")[0].payload,
-        payload
-    );
+    assert_eq!(read_table(opened.pages(), 1, TableLimits::default()).expect("reopen scan")[0].payload, payload);
     fs::remove_file(&path).expect("remove utf16le fixture");
 
     let chinese_be = [0x4e, 0x2d, 0x65, 0x87];
