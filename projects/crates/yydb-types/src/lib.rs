@@ -7,8 +7,17 @@
 
 use std::{collections::BTreeMap, error, fmt, io, result, sync::Arc};
 
+/// Catalog uniqueness metadata.
+pub mod constraint;
+
+/// Exact calendar, clock, instant, and fixed-point decimal scalars.
+pub mod scalar;
+
 /// Pure UDF identity, signature, policy, values, and host metadata.
 pub mod udf;
+
+pub use constraint::{TableUniqueConstraint, UniqueConstraint, UniqueConstraintError};
+pub use scalar::{Date, Decimal, ScalarError, Time, Timestamp};
 
 /// Soft recommendation: prefer CAS above this size instead of row-inline bytes.
 pub const INLINE_BYTES_MAX: usize = 4 * 1024;
@@ -225,6 +234,22 @@ pub enum Error {
         /// Display message the peer reported.
         message: String,
     },
+    /// Exact scalar text or bytes rejected by a temporal/decimal parser.
+    Scalar {
+        /// Scalar kind (`date`, `time`, `timestamp`, `decimal`, or `scalar`).
+        kind: &'static str,
+        /// Human-readable rejection detail.
+        message: String,
+    },
+    /// A write would violate a declared unique constraint.
+    UniqueViolation {
+        /// Storage table name.
+        table: String,
+        /// Constraint name from the catalog.
+        constraint: String,
+        /// Columns covered by the constraint.
+        columns: Vec<String>,
+    },
 }
 
 impl fmt::Display for Error {
@@ -280,6 +305,10 @@ impl fmt::Display for Error {
                 )
             }
             Self::Remote { code, message } => write!(f, "{code}: {message}"),
+            Self::Scalar { kind, message } => write!(f, "invalid {kind}: {message}"),
+            Self::UniqueViolation { table, constraint, columns } => {
+                write!(f, "unique constraint `{constraint}` violated on table `{table}` (columns: {})", columns.join(", "))
+            }
         }
     }
 }
@@ -320,6 +349,8 @@ impl Error {
             Self::AuthInsufficientPermission { .. } => "yydb.auth.insufficient_permission",
             Self::SchemaInvalidated { .. } => "yydb.schema.invalidated",
             Self::Remote { code, .. } => code,
+            Self::Scalar { .. } => "yydb.scalar.invalid",
+            Self::UniqueViolation { .. } => "yydb.unique.violation",
         }
     }
 
@@ -352,6 +383,7 @@ impl Error {
             | Self::AuthConfigMissing { .. }
             | Self::AuthInsufficientPermission { .. } => "auth",
             Self::SchemaInvalidated { .. } => "query",
+            Self::Scalar { .. } | Self::UniqueViolation { .. } => "query",
             Self::Remote { .. } => "remote",
         }
     }
@@ -403,6 +435,12 @@ impl Error {
             Self::Remote { code, message } => {
                 vec![("code", code.clone()), ("message", message.clone())]
             }
+            Self::Scalar { kind, message } => vec![("kind", (*kind).to_owned()), ("message", message.clone())],
+            Self::UniqueViolation { table, constraint, columns } => vec![
+                ("table", table.clone()),
+                ("constraint", constraint.clone()),
+                ("columns", columns.join(",")),
+            ],
         };
         Some(p)
     }
@@ -767,12 +805,79 @@ pub enum Value {
     File(ChunkManifest),
     /// Nested row embedded in query projection results (not persisted inline).
     Row(BTreeMap<String, Value>),
+    /// Calendar date without time or zone.
+    Date(Date),
+    /// Wall-clock time with nanosecond resolution, no zone.
+    Time(Time),
+    /// Absolute UTC instant with microsecond resolution.
+    Timestamp(Timestamp),
+    /// Exact fixed-point decimal with declared precision and scale.
+    Decimal(Decimal),
+}
+
+impl Value {
+    /// Scalar kind label used by catalog, storage, and wire encodings.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Null => "null",
+            Self::Bool(_) => "bool",
+            Self::I64(_) => "i64",
+            Self::U64(_) => "u64",
+            Self::F64(_) => "f64",
+            Self::Bytes(_) => "bytes",
+            Self::Text(_) => "text",
+            Self::Uuid(_) => "uuid",
+            Self::Vector(_) => "vector",
+            Self::Object(_) => "object",
+            Self::File(_) => "file",
+            Self::Row(_) => "row",
+            Self::Date(_) => "date",
+            Self::Time(_) => "time",
+            Self::Timestamp(_) => "timestamp",
+            Self::Decimal(_) => "decimal",
+        }
+    }
+
+    /// Exact key text used by unique-constraint comparison.
+    ///
+    /// Values are length-prefixed so concatenated keys stay unambiguous.
+    pub fn key_component(&self) -> String {
+        match self {
+            Self::Null => "n".to_owned(),
+            Self::Bool(value) => format!("b:{value}"),
+            Self::I64(value) => format!("i:{value}"),
+            Self::U64(value) => format!("u:{value}"),
+            Self::F64(value) => format!("f:{:016x}", value.to_bits()),
+            Self::Bytes(bytes) => format!("y:{}:{}", bytes.len(), hex::encode_vec(bytes)),
+            Self::Text(text) => format!("t:{}:{text}", text.len()),
+            Self::Uuid(uuid) => format!("g:{uuid}"),
+            Self::Date(date) => format!("d:{}", date.days()),
+            Self::Time(time) => format!("h:{}", time.nanos()),
+            Self::Timestamp(timestamp) => format!("s:{}", timestamp.unix_micros()),
+            Self::Decimal(decimal) => {
+                format!("m:{}:{}:{}", decimal.precision(), decimal.scale(), decimal.unscaled())
+            }
+            Self::Row(_) | Self::Vector(_) | Self::Object(_) | Self::File(_) => {
+                format!("x:{}", self.kind())
+            }
+        }
+    }
 }
 
 mod hex {
     pub fn encode(bytes: [u8; 32]) -> String {
         const HEX: &[u8; 16] = b"0123456789abcdef";
         let mut out = String::with_capacity(64);
+        for byte in bytes {
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 0xf) as usize] as char);
+        }
+        out
+    }
+
+    pub fn encode_vec(bytes: &[u8]) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut out = String::with_capacity(bytes.len() * 2);
         for byte in bytes {
             out.push(HEX[(byte >> 4) as usize] as char);
             out.push(HEX[(byte & 0xf) as usize] as char);
