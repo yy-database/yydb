@@ -25,11 +25,15 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
+      - name: Build native addon
+        run: pnpm run build:napi
       - run: pnpm run build:wasm
       - run: pnpm --filter @yydb/yydb build
       - run: pnpm --filter @yydb/yydb-client build
       - run: pnpm --filter @yydb/yydb-client test
       - run: pnpm --filter @yydb/yydb test
+      - name: Test SQLite snapshot reader
+        run: pnpm --filter @yydb/sqlite test
       - run: pnpm --filter @yydb/light-db build
       - run: pnpm --filter @yydb/light-db test
       - run: pnpm --filter @yydb/light-db test:browser
