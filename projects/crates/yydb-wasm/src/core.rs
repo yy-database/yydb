@@ -4,6 +4,7 @@ use serde_json::{Value as JsonValue, json};
 use yydb::{
     Connection, Error, Result, SchemaVersion, Value,
     catalog::{self, ExecutionTypeKind},
+    execution::{Type, VectorMetric},
 };
 
 /// Build the full diagnostic contract JSON object for any error branch.
@@ -68,6 +69,14 @@ pub fn introspect_schema_json(source: &str) -> String {
                                 "name": field.name,
                                 "fieldId": field.field_id,
                                 "virtualField": field.virtual_field,
+                                "type": execution_type_json(field.handle.ty()),
+                            })
+                        }).collect::<Vec<JsonValue>>(),
+                        "uniqueConstraints": entry.unique_constraints.iter().map(|constraint| {
+                            json!({
+                                "name": constraint.name(),
+                                "columns": constraint.columns(),
+                                "nullsDistinct": constraint.nulls_distinct(),
                             })
                         }).collect::<Vec<JsonValue>>(),
                     })
@@ -171,13 +180,44 @@ pub(crate) fn scalar_call_json(result: Result<Value>) -> String {
     }
 }
 
+/// Serialize one execution type as the stable introspection descriptor.
+fn execution_type_json(ty: Type) -> JsonValue {
+    match ty {
+        Type::Null => json!({ "kind": "null" }),
+        Type::Bool => json!({ "kind": "bool" }),
+        Type::I64 => json!({ "kind": "i64" }),
+        Type::Text => json!({ "kind": "text" }),
+        Type::Bytes => json!({ "kind": "bytes" }),
+        Type::File => json!({ "kind": "file" }),
+        Type::Date => json!({ "kind": "date" }),
+        Type::Time => json!({ "kind": "time", "unit": "nanosecond", "timezone": "none" }),
+        Type::Timestamp => json!({ "kind": "timestamp", "unit": "microsecond", "timezone": "utc" }),
+        Type::Decimal { precision, scale } => json!({ "kind": "decimal", "precision": precision, "scale": scale }),
+        Type::Vector { dimension, metric } => json!({
+            "kind": "vector",
+            "dimension": dimension,
+            "metric": match metric {
+                VectorMetric::Cosine => "cosine",
+                VectorMetric::Euclidean => "euclidean",
+                VectorMetric::Dot => "dot",
+            },
+        }),
+        Type::Record { schema_id, field_count } => {
+            json!({ "kind": "record", "schemaId": schema_id, "fieldCount": field_count })
+        }
+    }
+}
+
 fn scalar_value_json(value: &Value) -> Result<JsonValue> {
+    if let Some(tagged) = yydb::types::scalar::tagged_value_json(value) {
+        return Ok(tagged);
+    }
     match value {
         Value::Null => Ok(JsonValue::Null),
         Value::Bool(value) => Ok(json!(value)),
         Value::I64(value) => Ok(json!(value)),
         Value::Text(value) => Ok(json!(value)),
-        _ => Err(yydb::Error::Unsupported("scalar call value type is outside the Phase-1 wire subset")),
+        _ => Err(yydb::Error::Unsupported("scalar call value type is outside the supported scalar subset")),
     }
 }
 
@@ -241,17 +281,24 @@ pub(crate) fn compare_exchange_json(result: Result<bool>) -> String {
     }
 }
 
+fn rows_json(rows: Vec<yydb_query::QueryRow>) -> Result<Vec<JsonValue>> {
+    rows.into_iter()
+        .map(|row| {
+            let mut map = serde_json::Map::new();
+            for (key, value) in row {
+                map.insert(key, scalar_value_json(&value)?);
+            }
+            Ok(JsonValue::Object(map))
+        })
+        .collect()
+}
+
 pub(crate) fn query_rows_json(result: Result<Vec<yydb_query::QueryRow>>) -> String {
-    match result {
+    let rows = result.and_then(rows_json);
+    match rows {
         Ok(rows) => json!({
             "ok": true,
-            "rows": rows.into_iter().map(|row| {
-                let mut map = serde_json::Map::new();
-                for (k, v) in row {
-                    map.insert(k, scalar_value_json(&v).unwrap_or(JsonValue::Null));
-                }
-                JsonValue::Object(map)
-            }).collect::<Vec<JsonValue>>(),
+            "rows": rows,
             "error": JsonValue::Null,
         })
         .to_string(),

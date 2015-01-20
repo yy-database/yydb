@@ -665,6 +665,9 @@ fn parse_udf_type(tag: &str) -> Result<yydb::UdfType> {
 }
 
 fn json_to_value(json: serde_json::Value) -> Result<yydb::Value> {
+    if let Some(value) = yydb::types::scalar::tagged_value_from_json(&json) {
+        return value.map_err(|error| napi::Error::from_reason(error.to_string()));
+    }
     match json {
         serde_json::Value::Null => Ok(yydb::Value::Null),
         serde_json::Value::Bool(b) => Ok(yydb::Value::Bool(b)),
@@ -685,6 +688,9 @@ fn json_to_value(json: serde_json::Value) -> Result<yydb::Value> {
 }
 
 fn value_to_json(value: yydb::Value) -> serde_json::Value {
+    if let Some(tagged) = yydb::types::scalar::tagged_value_json(&value) {
+        return tagged;
+    }
     match value {
         yydb::Value::Null => serde_json::Value::Null,
         yydb::Value::Bool(b) => serde_json::Value::Bool(b),

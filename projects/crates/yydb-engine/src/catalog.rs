@@ -17,7 +17,7 @@ use vos::{
     },
 };
 use yydb_execution::{FieldHandle, LayoutField, RecordLayout, RecordLayoutError, Type};
-use yydb_types::{Error, Result};
+use yydb_types::{Error, Result, UniqueConstraint};
 
 /// Canonical remote used by this workspace for shared VOS semantics.
 pub const VOS_GIT_DEV: &str = "https://github.com/voml/vos-language.git#branch=dev";
@@ -299,6 +299,8 @@ pub struct ExecutionType {
     pub kind: ExecutionTypeKind,
     /// Fields in stable virtual-slot order.
     pub fields: Vec<ExecutionField>,
+    /// Uniqueness rules derived from the VOS document plus host declarations.
+    pub unique_constraints: Vec<UniqueConstraint>,
 }
 
 /// Type declaration kind used by the YYDB execution catalog.
@@ -369,6 +371,7 @@ pub fn execution_catalog_from_resolved_contract(contract: &vos::ResolvedContract
             .cloned()
             .ok_or_else(|| Error::Schema { message: "resolved VOS type has an empty canonical path".into() })?;
         let mut fields = Vec::with_capacity(item.fields.len());
+        let mut unique_constraints = Vec::new();
         for field in &item.fields {
             let virtual_field_index = field.virtual_field_index.ok_or_else(|| Error::Schema {
                 message: format!("resolved VOS field `{}` has no durable virtual slot", field.canonical_name),
@@ -376,6 +379,16 @@ pub fn execution_catalog_from_resolved_contract(contract: &vos::ResolvedContract
             let ty = resolved_execution_type(&field.canonical_type)?;
             let handle = FieldHandle::new(item.type_id, field.field_id, virtual_field_index, ty)
                 .map_err(|_| Error::Schema { message: "resolved VOS contract emitted an invalid field identity".into() })?;
+            if kind == ExecutionTypeKind::Table && field.attributes.iter().any(|attribute| attribute.name == "unique") {
+                unique_constraints.push(
+                    UniqueConstraint::new(
+                        format!("{name}_{}_key", field.canonical_name),
+                        vec![field.canonical_name.clone()],
+                        true,
+                    )
+                    .map_err(|error| Error::Schema { message: format!("invalid unique constraint from VOS attribute: {error}") })?,
+                );
+            }
             fields.push(ExecutionField {
                 field_id: field.field_id,
                 virtual_field: virtual_field_index,
@@ -383,9 +396,90 @@ pub fn execution_catalog_from_resolved_contract(contract: &vos::ResolvedContract
                 handle,
             });
         }
-        types.push(ExecutionType { schema_id: item.type_id, name, kind, fields });
+        types.push(ExecutionType { schema_id: item.type_id, name, kind, fields, unique_constraints });
     }
     Ok(ExecutionCatalog { types })
+}
+
+impl ExecutionCatalog {
+    /// Adds persisted host-declared uniqueness rules, validating every table
+    /// and column against the catalog.
+    ///
+    /// Document-derived rules win when a declared rule reuses their name.
+    pub fn apply_declared_unique_constraints(
+        &mut self,
+        declared: &[yydb_types::TableUniqueConstraint],
+    ) -> Result<()> {
+        for declared in declared {
+            let entry = self
+                .types
+                .iter_mut()
+                .find(|entry| entry.kind == ExecutionTypeKind::Table && entry.name == declared.table())
+                .ok_or_else(|| Error::Schema {
+                    message: format!("unique constraint `{}` refers to unknown table `{}`", declared.constraint().name(), declared.table()),
+                })?;
+            for column in declared.constraint().columns() {
+                if !entry.fields.iter().any(|field| &field.name == column) {
+                    return Err(Error::Schema {
+                        message: format!(
+                            "unique constraint `{}` refers to unknown column `{column}` on table `{}`",
+                            declared.constraint().name(),
+                            declared.table()
+                        ),
+                    });
+                }
+            }
+            if entry
+                .unique_constraints
+                .iter()
+                .any(|existing| existing.name() == declared.constraint().name())
+            {
+                continue;
+            }
+            entry.unique_constraints.push(declared.constraint().clone());
+        }
+        Ok(())
+    }
+
+    /// Whether `table` already owns a constraint with this name.
+    pub fn has_unique_constraint(&self, table: &str, name: &str) -> bool {
+        self.types
+            .iter()
+            .filter(|entry| entry.name == table)
+            .any(|entry| entry.unique_constraints.iter().any(|constraint| constraint.name() == name))
+    }
+}
+
+/// Applies a migration rename map to persisted unique-constraint metadata.
+///
+/// Constraint names stay stable, while table and column names follow the new
+/// schema so the rule keeps pointing at the renamed identity.
+pub fn remap_unique_constraints(
+    constraints: &[yydb_types::TableUniqueConstraint],
+    renames: &RenameMap,
+) -> Result<Vec<yydb_types::TableUniqueConstraint>> {
+    constraints
+        .iter()
+        .map(|declared| {
+            let table = renames.types.get(declared.table()).map(String::as_str).unwrap_or(declared.table());
+            let columns = declared
+                .constraint()
+                .columns()
+                .iter()
+                .map(|column| {
+                    renames
+                        .fields
+                        .get(&FieldPath { type_name: declared.table().to_owned(), field_name: column.clone() })
+                        .cloned()
+                        .unwrap_or_else(|| column.clone())
+                })
+                .collect::<Vec<_>>();
+            let constraint =
+                UniqueConstraint::new(declared.constraint().name(), columns, declared.constraint().nulls_distinct())
+                    .map_err(Error::from)?;
+            yydb_types::TableUniqueConstraint::new(table, constraint).map_err(Error::from)
+        })
+        .collect()
 }
 
 fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Type> {
@@ -396,7 +490,12 @@ fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Typ
         ResolvedCanonicalType::Builtin(path) if path == &["utf8"] => Ok(Type::Text),
         ResolvedCanonicalType::Builtin(path) if path == &["bytes"] => Ok(Type::Bytes),
         ResolvedCanonicalType::Builtin(path) if path == &["file"] => Ok(Type::File),
+        ResolvedCanonicalType::Builtin(path) if path == &["date"] => Ok(Type::Date),
+        ResolvedCanonicalType::Builtin(path) if path == &["time"] => Ok(Type::Time),
+        ResolvedCanonicalType::Builtin(path) if path == &["datetime"] => Ok(Type::Timestamp),
+        ResolvedCanonicalType::Builtin(path) if path == &["decimal"] => Ok(Type::Decimal { precision: 38, scale: 0 }),
         ResolvedCanonicalType::Builtin(_) => Err(Error::Unsupported("resolved VOS scalar type is not in the execution slice")),
+        ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => decimal_type_from_arguments(arguments),
         ResolvedCanonicalType::Optional(_)
         | ResolvedCanonicalType::Reference(_)
         | ResolvedCanonicalType::List(_)
@@ -405,6 +504,26 @@ fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Typ
             Err(Error::Unsupported("resolved VOS composite type is not in the execution slice"))
         }
     }
+}
+
+/// Reads `Decimal<precision, scale>` literal arguments into the execution type.
+fn decimal_type_from_arguments(arguments: &[vos::types::ResolvedCanonicalTypeArgument]) -> Result<Type> {
+    use vos::types::ResolvedCanonicalTypeArgument;
+    let [ResolvedCanonicalTypeArgument::Literal(precision), ResolvedCanonicalTypeArgument::Literal(scale)] = arguments
+    else {
+        return Err(Error::Schema {
+            message: "`Decimal` requires two literal arguments: precision and scale".into(),
+        });
+    };
+    let precision = precision.parse::<u8>().map_err(|_| Error::Schema {
+        message: format!("`Decimal` precision `{precision}` is not an integer in 1..=38"),
+    })?;
+    let scale = scale.parse::<u8>().map_err(|_| Error::Schema {
+        message: format!("`Decimal` scale `{scale}` is not an integer"),
+    })?;
+    yydb_types::Decimal::new(0, precision, scale)
+        .map(|decimal| Type::Decimal { precision: decimal.precision(), scale: decimal.scale() })
+        .map_err(|error| Error::Schema { message: format!("`Decimal<{precision}, {scale}>` rejected: {error}") })
 }
 
 const VERSION_PRAGMA: &str = "// @yydb-schema-version:";

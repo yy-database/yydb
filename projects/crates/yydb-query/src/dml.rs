@@ -7,10 +7,11 @@ use vos::{
     types::{ResolvedCanonicalType, ResolvedContract, ResolvedTypeContract},
 };
 
-use yydb_types::{Error, Result, Value};
+use yydb_types::{Error, Result, TableUniqueConstraint, Value};
 
 use super::{
     catalog::{field_on_table, primary_field_name, table_storage_name, table_type_by_name},
+    constraints,
     ops::QueryRow,
     store,
 };
@@ -45,8 +46,20 @@ pub fn execute(
     schema_document: Option<&str>,
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<()> {
+    execute_with_constraints(source, contract, &[], schema_document, records)
+}
+
+/// Execute writes with host-declared constraints merged into document rules.
+pub fn execute_with_constraints(
+    source: &str,
+    contract: &ResolvedContract,
+    declared: &[TableUniqueConstraint],
+    schema_document: Option<&str>,
+    records: &mut BTreeMap<String, Vec<u8>>,
+) -> Result<()> {
     let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
-    execute_program(&program, contract, schema_document, records)
+    let constraints = constraints::merge(constraints::from_contract(contract)?, declared);
+    execute_program_with_constraints(&program, contract, &constraints, schema_document, records)
 }
 
 /// If `source` is a single `Type::insert({ … })` program, run it and return the stored row.
@@ -67,13 +80,15 @@ pub fn try_insert_returning(
         Ok(value) => value,
         Err(_) => return Ok(None),
     };
-    let stored = upsert_row_for_table(contract, records, &table, &row)?;
+    let constraints = constraints::from_contract(contract)?;
+    let stored = upsert_row_for_table(contract, &constraints, records, &table, &row)?;
     Ok(Some(vec![stored]))
 }
 
-pub fn execute_program(
+fn execute_program_with_constraints(
     program: &VosProgram,
     contract: &ResolvedContract,
+    constraints: &[TableUniqueConstraint],
     schema_document: Option<&str>,
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<()> {
@@ -85,7 +100,7 @@ pub fn execute_program(
         match stmt {
             VosStmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
             VosStmt::Expr(expr) => {
-                apply_insert(expr, contract, records, &bindings)?;
+                apply_insert(expr, contract, constraints, records, &bindings)?;
                 wrote = true;
             }
         }
@@ -95,7 +110,7 @@ pub fn execute_program(
         if is_macro_call(result) {
             return Err(dml_error("macro call could not be expanded (schema document required)"));
         }
-        apply_insert(result, contract, records, &bindings)?;
+        apply_insert(result, contract, constraints, records, &bindings)?;
         wrote = true;
     }
 
@@ -213,16 +228,18 @@ fn is_typed_object_insert(expr: &VosExpr) -> bool {
 fn apply_insert(
     expr: &VosExpr,
     contract: &ResolvedContract,
+    constraints: &[TableUniqueConstraint],
     records: &mut BTreeMap<String, Vec<u8>>,
     bindings: &[(String, VosExpr)],
 ) -> Result<()> {
     let (table, row) = lower_insert(expr, contract, bindings)?;
-    upsert_row_for_table(contract, records, &table, &row)?;
+    upsert_row_for_table(contract, constraints, records, &table, &row)?;
     Ok(())
 }
 
 fn upsert_row_for_table(
     contract: &ResolvedContract,
+    constraints: &[TableUniqueConstraint],
     records: &mut BTreeMap<String, Vec<u8>>,
     table: &str,
     row: &QueryRow,
@@ -230,8 +247,9 @@ fn upsert_row_for_table(
     let entry = table_type_by_name(contract, table)?;
     let pk_field = primary_field_name(entry)?;
     let pk = row.get(pk_field).ok_or_else(|| dml_error(format!("insert row is missing primary key field `{pk_field}`")))?;
-    let pk_text = value_to_key(pk)?;
+    let pk_text = constraints::value_text(pk)?;
     let storage_name = table_storage_name(entry)?.to_string();
+    constraints::check(records, constraints, &storage_name, pk_field, &pk_text, row)?;
     store::upsert_row(records, &storage_name, &pk_text, row)?;
     Ok(row.clone())
 }
@@ -304,27 +322,81 @@ fn eval_literal(expr: &VosExpr, ty: &ResolvedCanonicalType) -> Result<Value> {
     }
 }
 
-fn literal_to_value(literal: &VosLiteral, _ty: &ResolvedCanonicalType) -> Result<Value> {
-    Ok(match literal {
-        VosLiteral::Null => Value::Null,
-        VosLiteral::Bool(value) => Value::Bool(*value),
-        VosLiteral::Int(text) => Value::I64(text.parse().map_err(|_| dml_error(format!("invalid integer literal `{text}`")))?),
-        VosLiteral::String(text) => Value::Text(text.clone()),
-        VosLiteral::Float(text) => Value::Text(text.clone()),
-    })
+fn literal_to_value(literal: &VosLiteral, ty: &ResolvedCanonicalType) -> Result<Value> {
+    let target = scalar_target(ty);
+    match (literal, target) {
+        (VosLiteral::Null, _) => Ok(Value::Null),
+        (VosLiteral::String(text), Some(ScalarTarget::Date)) => {
+            Ok(Value::Date(yydb_types::Date::parse_iso(text).map_err(Error::from)?))
+        }
+        (VosLiteral::String(text), Some(ScalarTarget::Time)) => {
+            Ok(Value::Time(yydb_types::Time::parse_iso(text).map_err(Error::from)?))
+        }
+        (VosLiteral::String(text), Some(ScalarTarget::Timestamp)) => {
+            Ok(Value::Timestamp(yydb_types::Timestamp::parse_iso(text).map_err(Error::from)?))
+        }
+        (VosLiteral::String(text), Some(ScalarTarget::Decimal { precision, scale }))
+        | (VosLiteral::Int(text), Some(ScalarTarget::Decimal { precision, scale }))
+        | (VosLiteral::Float(text), Some(ScalarTarget::Decimal { precision, scale })) => Ok(Value::Decimal(
+            yydb_types::Decimal::parse(text, precision, scale).map_err(Error::from)?,
+        )),
+        (VosLiteral::Bool(_) | VosLiteral::Int(_) | VosLiteral::Float(_), Some(target)) => Err(dml_error(format!(
+            "field `{target}` requires an exact string literal, got a numeric or boolean literal"
+        ))),
+        (VosLiteral::Bool(value), None) => Ok(Value::Bool(*value)),
+        (VosLiteral::Int(text), None) => {
+            Ok(Value::I64(text.parse().map_err(|_| dml_error(format!("invalid integer literal `{text}`")))?))
+        }
+        (VosLiteral::String(text), None) => Ok(Value::Text(text.clone())),
+        (VosLiteral::Float(text), None) => Ok(Value::Text(text.clone())),
+    }
 }
 
-fn value_to_key(value: &Value) -> Result<String> {
-    Ok(match value {
-        Value::Text(text) => text.clone(),
-        Value::Uuid(id) => id.to_string(),
-        Value::I64(number) => number.to_string(),
-        Value::Bool(flag) => flag.to_string(),
-        Value::Null => return Err(dml_error("primary key cannot be null")),
-        _ => {
-            return Err(dml_error("primary key must be text, uuid, integer, or bool in Phase 1 execute"));
+/// Exact scalar target declared by a VOS canonical type.
+#[derive(Debug, Clone, Copy)]
+enum ScalarTarget {
+    Date,
+    Time,
+    Timestamp,
+    Decimal { precision: u8, scale: u8 },
+}
+
+impl std::fmt::Display for ScalarTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Date => f.write_str("date"),
+            Self::Time => f.write_str("time"),
+            Self::Timestamp => f.write_str("datetime"),
+            Self::Decimal { precision, scale } => write!(f, "decimal({precision}, {scale})"),
         }
-    })
+    }
+}
+
+fn scalar_target(ty: &ResolvedCanonicalType) -> Option<ScalarTarget> {
+    use vos::types::ResolvedCanonicalTypeArgument;
+    match ty {
+        ResolvedCanonicalType::Builtin(path) if path == &["date"] => Some(ScalarTarget::Date),
+        ResolvedCanonicalType::Builtin(path) if path == &["time"] => Some(ScalarTarget::Time),
+        ResolvedCanonicalType::Builtin(path) if path == &["datetime"] => Some(ScalarTarget::Timestamp),
+        ResolvedCanonicalType::Builtin(path) if path == &["decimal"] => {
+            Some(ScalarTarget::Decimal { precision: 38, scale: 0 })
+        }
+        ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => {
+            let [
+                ResolvedCanonicalTypeArgument::Literal(precision),
+                ResolvedCanonicalTypeArgument::Literal(scale),
+            ] = arguments.as_slice()
+            else {
+                return None;
+            };
+            let precision = precision.parse::<u8>().ok()?;
+            let scale = scale.parse::<u8>().ok()?;
+            yydb_types::Decimal::new(0, precision, scale)
+                .ok()
+                .map(|decimal| ScalarTarget::Decimal { precision: decimal.precision(), scale: decimal.scale() })
+        }
+        _ => None,
+    }
 }
 
 fn expand_bindings(expr: &VosExpr, bindings: &[(String, VosExpr)]) -> Result<VosExpr> {

@@ -103,7 +103,13 @@ impl Connection {
         self.mutate_active_state_unlocked(|state| {
             let contract = resolved_contract(state)?;
             let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
-            yydb_query::execute_write(source, &contract, schema_document, &mut state.records)
+            yydb_query::execute_write_with_constraints(
+                source,
+                &contract,
+                &state.unique_constraints,
+                schema_document,
+                &mut state.records,
+            )
         })
     }
 }
