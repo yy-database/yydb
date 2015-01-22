@@ -24,10 +24,20 @@ export type { LightDbErrorOptions } from './errors';
 export { Database, TransactionHandle, openLightDatabase } from './api';
 export type {
     BatchChange,
+    DateScalar,
+    DecimalScalar,
     LightDatabase,
     MigrateOptions,
     OpenOptions,
+    ScalarValue,
     ScanOptions,
     ScanRow,
+    SchemaFieldDescriptor,
+    SchemaFieldType,
+    SchemaIntrospection,
+    SchemaTableDescriptor,
     SchemaVersion,
+    TimeScalar,
+    TimestampScalar,
+    UniqueConstraintDescriptor,
 } from './api';

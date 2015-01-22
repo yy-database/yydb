@@ -14,6 +14,63 @@ export type CheckSchemaResult = {
     error?: string;
 };
 
+/** Tagged JSON form of an exact `date` value (days since the Unix epoch). */
+export type DateScalar = { readonly $yydb: 'date'; readonly days: number };
+
+/** Tagged JSON form of an exact `time` value (nanoseconds since midnight, no zone). */
+export type TimeScalar = { readonly $yydb: 'time'; readonly nanos: number };
+
+/** Tagged JSON form of an exact UTC `timestamp` (microseconds as a decimal string). */
+export type TimestampScalar = { readonly $yydb: 'timestamp'; readonly utcMicros: string };
+
+/** Tagged JSON form of an exact fixed-point `decimal` value. */
+export type DecimalScalar = {
+    readonly $yydb: 'decimal';
+    readonly precision: number;
+    readonly scale: number;
+    readonly unscaled: string;
+};
+
+/** Every exact scalar crossing the WASM JSON boundary uses this tagged form. */
+export type ScalarValue = DateScalar | TimeScalar | TimestampScalar | DecimalScalar;
+
+/** Declared execution type of a catalog field. */
+export type SchemaFieldType =
+    | { readonly kind: 'null' | 'bool' | 'i64' | 'text' | 'bytes' | 'file' | 'date' }
+    | { readonly kind: 'time'; readonly unit: 'nanosecond'; readonly timezone: 'none' }
+    | { readonly kind: 'timestamp'; readonly unit: 'microsecond'; readonly timezone: 'utc' }
+    | { readonly kind: 'decimal'; readonly precision: number; readonly scale: number }
+    | { readonly kind: 'vector'; readonly dimension: number; readonly metric: 'cosine' | 'euclidean' | 'dot' }
+    | { readonly kind: 'record'; readonly schemaId: number; readonly fieldCount: number };
+
+/** One uniqueness rule published by the catalog. */
+export type UniqueConstraintDescriptor = {
+    readonly name: string;
+    readonly columns: string[];
+    readonly nullsDistinct: boolean;
+};
+
+/** One field in an introspected table. */
+export type SchemaFieldDescriptor = {
+    readonly name: string;
+    readonly fieldId: number;
+    readonly virtualField: number;
+    readonly type: SchemaFieldType;
+};
+
+/** Parsed payload of {@link introspectSchema}. */
+export type SchemaIntrospection = {
+    readonly ok: boolean;
+    readonly schemaFingerprint: string;
+    readonly tables: ReadonlyArray<{
+        readonly name: string;
+        readonly schemaId: number;
+        readonly fields: ReadonlyArray<SchemaFieldDescriptor>;
+        readonly uniqueConstraints: ReadonlyArray<UniqueConstraintDescriptor>;
+    }>;
+    readonly error: unknown;
+};
+
 export type MicroHostInvokePayload = {
     hostId: number;
     handleVersion: number;
