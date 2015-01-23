@@ -140,16 +140,9 @@ fn migration_remaps_declared_constraints_onto_renamed_tables_and_columns() {
 
     let renames = RenameMap {
         types: BTreeMap::from([("Account".into(), "Membership".into())]),
-        fields: BTreeMap::from([(
-            FieldPath { type_name: "Account".into(), field_name: "handle".into() },
-            "alias".into(),
-        )]),
+        fields: BTreeMap::from([(FieldPath { type_name: "Account".into(), field_name: "handle".into() }, "alias".into())]),
     };
-    conn.migrate_schema(
-        "table Membership { @@account_id: i64, email: utf8, tenant: utf8, alias: utf8 }",
-        &renames,
-    )
-    .unwrap();
+    conn.migrate_schema("table Membership { @@account_id: i64, email: utf8, tenant: utf8, alias: utf8 }", &renames).unwrap();
 
     let constraints = conn.unique_constraints().unwrap();
     assert_eq!(constraints.len(), 1);

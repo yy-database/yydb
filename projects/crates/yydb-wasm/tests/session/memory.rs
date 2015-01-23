@@ -46,10 +46,7 @@ fn memory_session_query_emits_tagged_exact_scalars() {
     assert_eq!(rows[0].get("happened_on"), Some(&json!({ "$yydb": "date", "days": 19782 })));
     assert_eq!(rows[0].get("at_time"), Some(&json!({ "$yydb": "time", "nanos": 45296123456789_i64 })));
     assert_eq!(rows[0].get("created_at"), Some(&json!({ "$yydb": "timestamp", "utcMicros": "1709210096123456" })));
-    assert_eq!(
-        rows[0].get("amount"),
-        Some(&json!({ "$yydb": "decimal", "precision": 38, "scale": 2, "unscaled": "123450" }))
-    );
+    assert_eq!(rows[0].get("amount"), Some(&json!({ "$yydb": "decimal", "precision": 38, "scale": 2, "unscaled": "123450" })));
 }
 
 #[test]

@@ -386,7 +386,9 @@ pub fn execution_catalog_from_resolved_contract(contract: &vos::ResolvedContract
                         vec![field.canonical_name.clone()],
                         true,
                     )
-                    .map_err(|error| Error::Schema { message: format!("invalid unique constraint from VOS attribute: {error}") })?,
+                    .map_err(|error| Error::Schema {
+                        message: format!("invalid unique constraint from VOS attribute: {error}"),
+                    })?,
                 );
             }
             fields.push(ExecutionField {
@@ -406,17 +408,18 @@ impl ExecutionCatalog {
     /// and column against the catalog.
     ///
     /// Document-derived rules win when a declared rule reuses their name.
-    pub fn apply_declared_unique_constraints(
-        &mut self,
-        declared: &[yydb_types::TableUniqueConstraint],
-    ) -> Result<()> {
+    pub fn apply_declared_unique_constraints(&mut self, declared: &[yydb_types::TableUniqueConstraint]) -> Result<()> {
         for declared in declared {
             let entry = self
                 .types
                 .iter_mut()
                 .find(|entry| entry.kind == ExecutionTypeKind::Table && entry.name == declared.table())
                 .ok_or_else(|| Error::Schema {
-                    message: format!("unique constraint `{}` refers to unknown table `{}`", declared.constraint().name(), declared.table()),
+                    message: format!(
+                        "unique constraint `{}` refers to unknown table `{}`",
+                        declared.constraint().name(),
+                        declared.table()
+                    ),
                 })?;
             for column in declared.constraint().columns() {
                 if !entry.fields.iter().any(|field| &field.name == column) {
@@ -429,11 +432,7 @@ impl ExecutionCatalog {
                     });
                 }
             }
-            if entry
-                .unique_constraints
-                .iter()
-                .any(|existing| existing.name() == declared.constraint().name())
-            {
+            if entry.unique_constraints.iter().any(|existing| existing.name() == declared.constraint().name()) {
                 continue;
             }
             entry.unique_constraints.push(declared.constraint().clone());
@@ -511,16 +510,13 @@ fn decimal_type_from_arguments(arguments: &[vos::types::ResolvedCanonicalTypeArg
     use vos::types::ResolvedCanonicalTypeArgument;
     let [ResolvedCanonicalTypeArgument::Literal(precision), ResolvedCanonicalTypeArgument::Literal(scale)] = arguments
     else {
-        return Err(Error::Schema {
-            message: "`Decimal` requires two literal arguments: precision and scale".into(),
-        });
+        return Err(Error::Schema { message: "`Decimal` requires two literal arguments: precision and scale".into() });
     };
-    let precision = precision.parse::<u8>().map_err(|_| Error::Schema {
-        message: format!("`Decimal` precision `{precision}` is not an integer in 1..=38"),
-    })?;
-    let scale = scale.parse::<u8>().map_err(|_| Error::Schema {
-        message: format!("`Decimal` scale `{scale}` is not an integer"),
-    })?;
+    let precision = precision
+        .parse::<u8>()
+        .map_err(|_| Error::Schema { message: format!("`Decimal` precision `{precision}` is not an integer in 1..=38") })?;
+    let scale =
+        scale.parse::<u8>().map_err(|_| Error::Schema { message: format!("`Decimal` scale `{scale}` is not an integer") })?;
     yydb_types::Decimal::new(0, precision, scale)
         .map(|decimal| Type::Decimal { precision: decimal.precision(), scale: decimal.scale() })
         .map_err(|error| Error::Schema { message: format!("`Decimal<{precision}, {scale}>` rejected: {error}") })

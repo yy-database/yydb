@@ -337,12 +337,12 @@ fn literal_to_value(literal: &VosLiteral, ty: &ResolvedCanonicalType) -> Result<
         }
         (VosLiteral::String(text), Some(ScalarTarget::Decimal { precision, scale }))
         | (VosLiteral::Int(text), Some(ScalarTarget::Decimal { precision, scale }))
-        | (VosLiteral::Float(text), Some(ScalarTarget::Decimal { precision, scale })) => Ok(Value::Decimal(
-            yydb_types::Decimal::parse(text, precision, scale).map_err(Error::from)?,
-        )),
-        (VosLiteral::Bool(_) | VosLiteral::Int(_) | VosLiteral::Float(_), Some(target)) => Err(dml_error(format!(
-            "field `{target}` requires an exact string literal, got a numeric or boolean literal"
-        ))),
+        | (VosLiteral::Float(text), Some(ScalarTarget::Decimal { precision, scale })) => {
+            Ok(Value::Decimal(yydb_types::Decimal::parse(text, precision, scale).map_err(Error::from)?))
+        }
+        (VosLiteral::Bool(_) | VosLiteral::Int(_) | VosLiteral::Float(_), Some(target)) => {
+            Err(dml_error(format!("field `{target}` requires an exact string literal, got a numeric or boolean literal")))
+        }
         (VosLiteral::Bool(value), None) => Ok(Value::Bool(*value)),
         (VosLiteral::Int(text), None) => {
             Ok(Value::I64(text.parse().map_err(|_| dml_error(format!("invalid integer literal `{text}`")))?))
@@ -378,14 +378,10 @@ fn scalar_target(ty: &ResolvedCanonicalType) -> Option<ScalarTarget> {
         ResolvedCanonicalType::Builtin(path) if path == &["date"] => Some(ScalarTarget::Date),
         ResolvedCanonicalType::Builtin(path) if path == &["time"] => Some(ScalarTarget::Time),
         ResolvedCanonicalType::Builtin(path) if path == &["datetime"] => Some(ScalarTarget::Timestamp),
-        ResolvedCanonicalType::Builtin(path) if path == &["decimal"] => {
-            Some(ScalarTarget::Decimal { precision: 38, scale: 0 })
-        }
+        ResolvedCanonicalType::Builtin(path) if path == &["decimal"] => Some(ScalarTarget::Decimal { precision: 38, scale: 0 }),
         ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => {
-            let [
-                ResolvedCanonicalTypeArgument::Literal(precision),
-                ResolvedCanonicalTypeArgument::Literal(scale),
-            ] = arguments.as_slice()
+            let [ResolvedCanonicalTypeArgument::Literal(precision), ResolvedCanonicalTypeArgument::Literal(scale)] =
+                arguments.as_slice()
             else {
                 return None;
             };

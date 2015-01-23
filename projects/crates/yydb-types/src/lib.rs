@@ -436,11 +436,9 @@ impl Error {
                 vec![("code", code.clone()), ("message", message.clone())]
             }
             Self::Scalar { kind, message } => vec![("kind", (*kind).to_owned()), ("message", message.clone())],
-            Self::UniqueViolation { table, constraint, columns } => vec![
-                ("table", table.clone()),
-                ("constraint", constraint.clone()),
-                ("columns", columns.join(",")),
-            ],
+            Self::UniqueViolation { table, constraint, columns } => {
+                vec![("table", table.clone()), ("constraint", constraint.clone()), ("columns", columns.join(","))]
+            }
         };
         Some(p)
     }

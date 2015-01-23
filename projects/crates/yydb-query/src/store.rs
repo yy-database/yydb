@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value as JsonValue};
-use yydb_types::{scalar, Error, Result, Value};
+use yydb_types::{Error, Result, Value, scalar};
 
 use super::ops::QueryRow;
 
@@ -73,7 +73,9 @@ fn encode_value(value: &Value) -> Result<JsonValue> {
             scalar::tagged_value_json(value).expect("temporal and decimal values always have a tagged form")
         }
         _ => {
-            return Err(Error::Unsupported("query row encoding supports null, bool, i64, text, uuid, date, time, timestamp, and decimal only"));
+            return Err(Error::Unsupported(
+                "query row encoding supports null, bool, i64, text, uuid, date, time, timestamp, and decimal only",
+            ));
         }
     })
 }
@@ -82,15 +84,17 @@ fn decode_value(value: &JsonValue) -> Result<Value> {
     Ok(match value {
         JsonValue::Null => Value::Null,
         JsonValue::Bool(b) => Value::Bool(*b),
-        JsonValue::Number(n) => Value::I64(
-            n.as_i64().ok_or_else(|| Error::Corrupt("row json integer is outside the signed 64-bit range"))?,
-        ),
+        JsonValue::Number(n) => {
+            Value::I64(n.as_i64().ok_or_else(|| Error::Corrupt("row json integer is outside the signed 64-bit range"))?)
+        }
         JsonValue::String(s) => Value::Text(s.clone()),
         JsonValue::Object(_) => match scalar::tagged_value_from_json(value) {
             Some(Ok(value)) => value,
             Some(Err(error)) => return Err(error.into()),
             None => {
-                return Err(Error::Unsupported("query row decoding supports tagged date, time, timestamp, and decimal objects only"));
+                return Err(Error::Unsupported(
+                    "query row decoding supports tagged date, time, timestamp, and decimal objects only",
+                ));
             }
         },
         JsonValue::Array(_) => {

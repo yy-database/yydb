@@ -240,7 +240,8 @@ fn encode_unique_constraints(constraints: &[yydb_types::TableUniqueConstraint]) 
 }
 
 fn decode_unique_constraints(bytes: Option<Vec<u8>>) -> Result<Vec<yydb_types::TableUniqueConstraint>> {
-    let Some(bytes) = bytes else {
+    let Some(bytes) = bytes
+    else {
         return Ok(Vec::new());
     };
     match bytes.first() {
@@ -254,8 +255,8 @@ fn decode_unique_constraints(bytes: Option<Vec<u8>>) -> Result<Vec<yydb_types::T
             if bytes.len() != end {
                 return Err(Error::Corrupt("unique constraint meta length mismatch"));
             }
-            let entries: Vec<serde_json::Value> = serde_json::from_slice(&bytes[5..end])
-                .map_err(|_| Error::Corrupt("unique constraint meta is invalid JSON"))?;
+            let entries: Vec<serde_json::Value> =
+                serde_json::from_slice(&bytes[5..end]).map_err(|_| Error::Corrupt("unique constraint meta is invalid JSON"))?;
             entries
                 .into_iter()
                 .map(|entry| {

@@ -80,7 +80,8 @@ fn declared_composite_constraint_rejects_a_duplicate_column_set() {
     let composite = declared("Account_tenant_handle_key", &["tenant", "handle"], true);
     let mut records = BTreeMap::new();
     insert(&contract, &[composite.clone()], &mut records, 1, Some("a@example.test"), "t1", Some("ada")).expect("first insert");
-    insert(&contract, &[composite.clone()], &mut records, 2, Some("b@example.test"), "t1", Some("linus")).expect("distinct set");
+    insert(&contract, &[composite.clone()], &mut records, 2, Some("b@example.test"), "t1", Some("linus"))
+        .expect("distinct set");
     let (name, columns) = conflict(
         insert(&contract, &[composite], &mut records, 3, Some("c@example.test"), "t1", Some("ada")).expect_err("duplicate set"),
     );
@@ -104,8 +105,9 @@ fn nulls_collide_when_the_constraint_declares_one_shared_null() {
     let single_null = declared("Account_handle_null_key", &["handle"], false);
     let mut records = BTreeMap::new();
     insert(&contract, &[single_null.clone()], &mut records, 1, Some("a@example.test"), "t1", None).expect("first null");
-    let (name, columns) =
-        conflict(insert(&contract, &[single_null], &mut records, 2, Some("b@example.test"), "t1", None).expect_err("shared null"));
+    let (name, columns) = conflict(
+        insert(&contract, &[single_null], &mut records, 2, Some("b@example.test"), "t1", None).expect_err("shared null"),
+    );
     assert_eq!(name, "Account_handle_null_key");
     assert_eq!(columns, vec!["handle".to_owned()]);
     assert_eq!(records.len(), 1);
@@ -122,10 +124,7 @@ fn conflicting_write_leaves_the_previous_row_intact() {
 
     let rows = execute("Account.all().collect()", Some(&contract), &records).expect("read rows");
     assert_eq!(rows.len(), 2);
-    let second = rows
-        .iter()
-        .find(|row| row.get("account_id") == Some(&Value::I64(2)))
-        .expect("second row still present");
+    let second = rows.iter().find(|row| row.get("account_id") == Some(&Value::I64(2))).expect("second row still present");
     assert_eq!(second.get("email"), Some(&Value::Text("linus@example.test".into())));
     assert_eq!(second.get("handle"), Some(&Value::Text("linus".into())));
 }
