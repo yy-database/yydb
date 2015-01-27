@@ -11,7 +11,7 @@ use yydb_types::{Error, Result, TableUniqueConstraint, Value};
 
 use super::{
     catalog::{field_on_table, primary_field_name, table_storage_name, table_type_by_name},
-    constraints,
+    coerce, constraints,
     ops::QueryRow,
     store,
 };
@@ -317,81 +317,19 @@ fn lower_field_inits(entry: &ResolvedTypeContract, fields: &[VosFieldInit]) -> R
 
 fn eval_literal(expr: &VosExpr, ty: &ResolvedCanonicalType) -> Result<Value> {
     match expr {
-        VosExpr::Literal(literal) => literal_to_value(literal, ty),
-        _ => Err(dml_error("Phase 1 execute only supports literal field initializers")),
-    }
-}
-
-fn literal_to_value(literal: &VosLiteral, ty: &ResolvedCanonicalType) -> Result<Value> {
-    let target = scalar_target(ty);
-    match (literal, target) {
-        (VosLiteral::Null, _) => Ok(Value::Null),
-        (VosLiteral::String(text), Some(ScalarTarget::Date)) => {
-            Ok(Value::Date(yydb_types::Date::parse_iso(text).map_err(Error::from)?))
-        }
-        (VosLiteral::String(text), Some(ScalarTarget::Time)) => {
-            Ok(Value::Time(yydb_types::Time::parse_iso(text).map_err(Error::from)?))
-        }
-        (VosLiteral::String(text), Some(ScalarTarget::Timestamp)) => {
-            Ok(Value::Timestamp(yydb_types::Timestamp::parse_iso(text).map_err(Error::from)?))
-        }
-        (VosLiteral::String(text), Some(ScalarTarget::Decimal { precision, scale }))
-        | (VosLiteral::Int(text), Some(ScalarTarget::Decimal { precision, scale }))
-        | (VosLiteral::Float(text), Some(ScalarTarget::Decimal { precision, scale })) => {
-            Ok(Value::Decimal(yydb_types::Decimal::parse(text, precision, scale).map_err(Error::from)?))
-        }
-        (VosLiteral::Bool(_) | VosLiteral::Int(_) | VosLiteral::Float(_), Some(target)) => {
-            Err(dml_error(format!("field `{target}` requires an exact string literal, got a numeric or boolean literal")))
-        }
-        (VosLiteral::Bool(value), None) => Ok(Value::Bool(*value)),
-        (VosLiteral::Int(text), None) => {
-            Ok(Value::I64(text.parse().map_err(|_| dml_error(format!("invalid integer literal `{text}`")))?))
-        }
-        (VosLiteral::String(text), None) => Ok(Value::Text(text.clone())),
-        (VosLiteral::Float(text), None) => Ok(Value::Text(text.clone())),
-    }
-}
-
-/// Exact scalar target declared by a VOS canonical type.
-#[derive(Debug, Clone, Copy)]
-enum ScalarTarget {
-    Date,
-    Time,
-    Timestamp,
-    Decimal { precision: u8, scale: u8 },
-}
-
-impl std::fmt::Display for ScalarTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Date => f.write_str("date"),
-            Self::Time => f.write_str("time"),
-            Self::Timestamp => f.write_str("datetime"),
-            Self::Decimal { precision, scale } => write!(f, "decimal({precision}, {scale})"),
-        }
-    }
-}
-
-fn scalar_target(ty: &ResolvedCanonicalType) -> Option<ScalarTarget> {
-    use vos::types::ResolvedCanonicalTypeArgument;
-    match ty {
-        ResolvedCanonicalType::Builtin(path) if path == &["date"] => Some(ScalarTarget::Date),
-        ResolvedCanonicalType::Builtin(path) if path == &["time"] => Some(ScalarTarget::Time),
-        ResolvedCanonicalType::Builtin(path) if path == &["datetime"] => Some(ScalarTarget::Timestamp),
-        ResolvedCanonicalType::Builtin(path) if path == &["decimal"] => Some(ScalarTarget::Decimal { precision: 38, scale: 0 }),
-        ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => {
-            let [ResolvedCanonicalTypeArgument::Literal(precision), ResolvedCanonicalTypeArgument::Literal(scale)] =
-                arguments.as_slice()
-            else {
-                return None;
+        VosExpr::Literal(literal) => {
+            let raw = match literal {
+                VosLiteral::Null => Value::Null,
+                VosLiteral::Bool(value) => Value::Bool(*value),
+                VosLiteral::Int(text) => {
+                    Value::I64(text.parse().map_err(|_| dml_error(format!("invalid integer literal `{text}`")))?)
+                }
+                VosLiteral::String(text) => Value::Text(text.clone()),
+                VosLiteral::Float(text) => Value::Text(text.clone()),
             };
-            let precision = precision.parse::<u8>().ok()?;
-            let scale = scale.parse::<u8>().ok()?;
-            yydb_types::Decimal::new(0, precision, scale)
-                .ok()
-                .map(|decimal| ScalarTarget::Decimal { precision: decimal.precision(), scale: decimal.scale() })
+            coerce::value_to_scalar(raw, ty)
         }
-        _ => None,
+        _ => Err(dml_error("Phase 1 execute only supports literal field initializers")),
     }
 }
 
