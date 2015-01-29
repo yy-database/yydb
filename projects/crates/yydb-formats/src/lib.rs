@@ -43,10 +43,12 @@ pub use page::{PAGE_HEADER_LEN, PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL, PAGE_TYPE_
 pub use pager::PageStore;
 pub use shm::{SHM_BYTES, SHM_MAGIC, ShmBlock, encode_empty_shm, encode_shm, parse_shm, shm_sidecar_path, sync_shm_from_wal};
 pub use wal::{
-    WAL_MAGIC, WalFile, WalFrame, WalHeader, committed_tail_lsn, committed_transactions, parse_frame, parse_header, parse_wal,
-    parse_wal_recover, wal_frame_offsets,
+    MAX_WAL_RECORD_BYTES, WAL_HEADER_BYTES, WAL_MAGIC, WAL_RECORD_HEADER_BYTES, WAL_RECORD_TRAILER_BYTES, WalFile, WalFrame,
+    WalHeader, WalRecordError, WalScan, WalTail, committed_tail_lsn, committed_transactions, parse_frame, parse_header,
+    parse_wal, parse_wal_recover, scan_wal, wal_frame_offsets,
 };
 pub use wal_append::{
-    WalWriter, read_wal_file, replay_wal_pages, strip_incomplete_txn_after_last_page_image, strip_trailing_txn_commit,
-    truncate_wal_after_frame, truncate_wal_to_recoverable_prefix, wal_recoverable_byte_len, wal_sidecar_path,
+    WalWriter, encode_frame, encode_wal_header, read_wal_file, replay_wal_pages, strip_incomplete_txn_after_last_page_image,
+    strip_trailing_txn_commit, truncate_wal_after_frame, truncate_wal_to_recoverable_prefix, wal_recoverable_byte_len,
+    wal_sidecar_path,
 };

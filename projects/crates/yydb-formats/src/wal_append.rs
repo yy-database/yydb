@@ -13,7 +13,7 @@ use crate::{
     blob_refs::{BlobManifestDelta, FRAME_BLOB_REFS, commit_digest, encode_blob_refs_body},
     crc32c::crc32c,
     header::PAGE_SIZE,
-    wal::{WAL_MAGIC, WalFile, parse_frame, parse_header, parse_wal, wal_frame_offsets},
+    wal::{WAL_MAGIC, WalFile, WalTail, parse_frame, parse_wal, parse_wal_recover, scan_wal, wal_frame_offsets},
 };
 
 const FRAME_TXN_BEGIN: u8 = 0x01;
@@ -37,7 +37,7 @@ impl WalWriter {
         let mut next_txid = 1_u64;
         if path.exists() {
             let bytes = std::fs::read(&path)?;
-            let wal = parse_wal(&bytes)?;
+            let wal = parse_wal_recover(&bytes)?;
             next_lsn = wal.frames.iter().map(|frame| frame.frame_lsn).max().unwrap_or(0) + 1;
             next_txid = wal.frames.iter().filter(|frame| frame.frame_type == FRAME_TXN_BEGIN).count() as u64 + 1;
         }
@@ -180,15 +180,15 @@ pub fn strip_trailing_txn_commit(bytes: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Byte length of the recoverable WAL prefix (header plus complete frames).
+///
+/// Only a torn tail is reduced. Checksum, length and LSN failures keep the whole
+/// input invalid and are returned as errors.
 pub fn wal_recoverable_byte_len(bytes: &[u8]) -> Result<usize> {
-    let (_, mut offset) = parse_header(bytes)?;
-    while offset < bytes.len() {
-        match parse_frame(bytes, offset) {
-            Ok((_, consumed)) => offset += consumed,
-            Err(_) => break,
-        }
-    }
-    Ok(offset)
+    let scan = scan_wal(bytes)?;
+    Ok(match scan.tail {
+        WalTail::Clean => bytes.len(),
+        WalTail::Torn { .. } => scan.valid_len,
+    })
 }
 
 /// Truncate WAL bytes to the recoverable prefix, dropping a torn tail frame.
