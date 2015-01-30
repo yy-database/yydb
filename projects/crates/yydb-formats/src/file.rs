@@ -21,7 +21,7 @@ use crate::{
     pager::PageStore,
     shm::{shm_sidecar_path, sync_shm_from_wal},
     wal::committed_tail_lsn,
-    wal_append::{WalWriter, read_wal_file, replay_wal_pages, wal_sidecar_path},
+    wal_append::{WalWriter, read_wal_file, replay_wal_pages, truncate_wal_torn_tail, wal_sidecar_path},
 };
 
 /// Persistent page store backed by a single `YDPG` main file.
@@ -46,8 +46,9 @@ impl FilePager {
             file_pager.persist_all()?;
         }
         if enable_wal {
-            file_pager.ensure_wal()?;
+            file_pager.recover_wal_tail()?;
             file_pager.replay_wal_if_present()?;
+            file_pager.ensure_wal()?;
         }
         Ok(file_pager)
     }
@@ -198,11 +199,16 @@ impl FilePager {
         Ok(committed_tail_lsn(&read_wal_file(&wal_path)?))
     }
 
+    fn recover_wal_tail(&self) -> Result<()> {
+        let wal_path = wal_sidecar_path(&self.path);
+        if wal_path.exists() {
+            truncate_wal_torn_tail(&wal_path)?;
+        }
+        Ok(())
+    }
+
     fn replay_wal_if_present(&mut self) -> Result<()> {
-        let Some(wal_path) = self.wal_path()
-        else {
-            return Ok(());
-        };
+        let wal_path = wal_sidecar_path(&self.path);
         if !wal_path.exists() {
             return Ok(());
         }

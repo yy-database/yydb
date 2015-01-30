@@ -3,7 +3,7 @@
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
-    io::Write,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
@@ -13,33 +13,85 @@ use crate::{
     blob_refs::{BlobManifestDelta, FRAME_BLOB_REFS, commit_digest, encode_blob_refs_body},
     crc32c::crc32c,
     header::PAGE_SIZE,
-    wal::{WAL_MAGIC, WalFile, WalTail, parse_frame, parse_wal, parse_wal_recover, scan_wal, wal_frame_offsets},
+    wal::{WAL_MAGIC, WalFile, WalTail, parse_frame, parse_wal, scan_wal, wal_frame_offsets},
 };
 
 const FRAME_TXN_BEGIN: u8 = 0x01;
 const FRAME_PAGE_IMAGE: u8 = 0x02;
 const FRAME_TXN_COMMIT: u8 = 0x04;
+const WRITER_POISONED: &str = "wal writer poisoned after a failed append";
+
+/// Durability level declared by a [`WalWriter`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WalDurability {
+    /// Append every frame of one transaction, then call [`WalSink::sync`] once
+    /// before reporting the commit LSN. A failed sync is not a commit.
+    #[default]
+    SyncOnCommit,
+}
+
+/// Append-only byte sink behind [`WalWriter`].
+///
+/// Production uses [`FileWalSink`]. Tests inject failing sinks to model disk
+/// full, short writes and lost syncs without touching the file format.
+pub trait WalSink {
+    /// Append the whole buffer or fail. A short write must be reported as an error.
+    fn append(&mut self, bytes: &[u8]) -> io::Result<()>;
+    /// Durability barrier for every byte appended so far.
+    fn sync(&mut self) -> io::Result<()>;
+}
+
+/// File-backed [`WalSink`] using `fsync` (`sync_all`) for both data and length.
+pub struct FileWalSink {
+    file: File,
+}
+
+impl FileWalSink {
+    /// Open `path` for appending, creating it when absent.
+    pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        Ok(Self { file })
+    }
+}
+
+impl WalSink for FileWalSink {
+    fn append(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.file.write_all(bytes)
+    }
+
+    fn sync(&mut self) -> io::Result<()> {
+        self.file.sync_all()
+    }
+}
 
 /// Append-only WAL writer for page-image transactions.
 pub struct WalWriter {
     path: PathBuf,
-    #[allow(dead_code)]
     database_id: [u8; 16],
     next_lsn: u64,
     next_txid: u64,
+    durability: WalDurability,
+    sink: Box<dyn WalSink>,
+    poisoned: bool,
 }
 
 impl WalWriter {
     /// Open or create a WAL sidecar for `database_id`.
+    ///
+    /// A torn tail is rejected here. Callers must truncate the tail through
+    /// recovery before appending, otherwise new records would follow garbage.
     pub fn open(path: impl AsRef<Path>, database_id: [u8; 16]) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let mut next_lsn = 1_u64;
         let mut next_txid = 1_u64;
         if path.exists() {
             let bytes = std::fs::read(&path)?;
-            let wal = parse_wal_recover(&bytes)?;
-            next_lsn = wal.frames.iter().map(|frame| frame.frame_lsn).max().unwrap_or(0) + 1;
-            next_txid = wal.frames.iter().filter(|frame| frame.frame_type == FRAME_TXN_BEGIN).count() as u64 + 1;
+            let scan = scan_wal(&bytes)?;
+            if !matches!(scan.tail, WalTail::Clean) {
+                return Err(Error::Corrupt("wal torn tail requires recovery before append"));
+            }
+            next_lsn = scan.frames.iter().map(|frame| frame.frame_lsn).max().unwrap_or(0) + 1;
+            next_txid = scan.frames.iter().filter(|frame| frame.frame_type == FRAME_TXN_BEGIN).count() as u64 + 1;
         }
         else {
             let header = encode_wal_header(database_id, 0);
@@ -47,51 +99,133 @@ impl WalWriter {
             file.write_all(&header)?;
             file.sync_all()?;
         }
-        Ok(Self { path, database_id, next_lsn, next_txid })
+        let sink = FileWalSink::open(&path)?;
+        Ok(Self {
+            path,
+            database_id,
+            next_lsn,
+            next_txid,
+            durability: WalDurability::SyncOnCommit,
+            sink: Box::new(sink),
+            poisoned: false,
+        })
+    }
+
+    /// Build a writer over a caller-supplied sink.
+    ///
+    /// The path is metadata only. Tests use this to inject disk-full and short
+    /// write failures while keeping the v0 record format unchanged.
+    pub fn with_sink(path: impl AsRef<Path>, database_id: [u8; 16], sink: Box<dyn WalSink>) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+            database_id,
+            next_lsn: 1,
+            next_txid: 1,
+            durability: WalDurability::SyncOnCommit,
+            sink,
+            poisoned: false,
+        }
+    }
+
+    /// Declared durability level.
+    pub fn durability(&self) -> WalDurability {
+        self.durability
     }
 
     /// Append one committed transaction that publishes `pages` and optional blob refs.
+    ///
+    /// The returned LSN is reported only after the sink accepted every frame and
+    /// completed the durability barrier. Any append or sync failure poisons this
+    /// writer: further appends fail until the WAL is recovered and reopened.
     pub fn append_commit(&mut self, pages: &[(u32, Vec<u8>)], blob_refs: &[BlobManifestDelta]) -> Result<u64> {
+        if self.poisoned {
+            return Err(Error::Corrupt(WRITER_POISONED));
+        }
         let txid = self.next_txid;
-        self.next_txid += 1;
-        let mut file = OpenOptions::new().append(true).open(&self.path)?;
-        file.write_all(&encode_frame(FRAME_TXN_BEGIN, self.next_lsn, &txid.to_le_bytes())?)?;
-        self.next_lsn += 1;
-        for (page_id, image) in pages {
-            if image.len() != PAGE_SIZE {
-                return Err(Error::Corrupt("wal page image wrong size"));
+        let (bytes, commit_lsn, next_lsn) = encode_commit(self.next_lsn, txid, pages, blob_refs)?;
+        let written = self.sink.append(&bytes).and_then(|()| match self.durability {
+            WalDurability::SyncOnCommit => self.sink.sync(),
+        });
+        match written {
+            Ok(()) => {
+                self.next_txid = txid + 1;
+                self.next_lsn = next_lsn;
+                Ok(commit_lsn)
             }
-            let mut body = Vec::with_capacity(20 + PAGE_SIZE);
-            body.extend_from_slice(&txid.to_le_bytes());
-            body.extend_from_slice(&page_id.to_le_bytes());
-            body.extend_from_slice(&1_u64.to_le_bytes());
-            body.extend_from_slice(image);
-            file.write_all(&encode_frame(FRAME_PAGE_IMAGE, self.next_lsn, &body)?)?;
-            self.next_lsn += 1;
+            Err(error) => {
+                self.poisoned = true;
+                Err(Error::Io(error))
+            }
         }
-        if !blob_refs.is_empty() {
-            let body = encode_blob_refs_body(txid, blob_refs)?;
-            file.write_all(&encode_frame(FRAME_BLOB_REFS, self.next_lsn, &body)?)?;
-            self.next_lsn += 1;
-        }
-        let commit_lsn = self.next_lsn;
-        let digest = commit_digest(pages, blob_refs);
-        let mut commit_body = Vec::with_capacity(56);
-        commit_body.extend_from_slice(&txid.to_le_bytes());
-        commit_body.extend_from_slice(&commit_lsn.to_le_bytes());
-        commit_body.extend_from_slice(&(pages.len() as u32).to_le_bytes());
-        commit_body.extend_from_slice(&(blob_refs.len() as u32).to_le_bytes());
-        commit_body.extend_from_slice(&digest);
-        file.write_all(&encode_frame(FRAME_TXN_COMMIT, commit_lsn, &commit_body)?)?;
-        self.next_lsn += 1;
-        file.sync_all()?;
-        Ok(commit_lsn)
     }
 
     /// Sidecar path.
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Database id printed into a fresh WAL header.
+    pub fn database_id(&self) -> [u8; 16] {
+        self.database_id
+    }
+}
+
+/// Encode one complete transaction and report the commit LSN plus the next LSN.
+fn encode_commit(
+    start_lsn: u64,
+    txid: u64,
+    pages: &[(u32, Vec<u8>)],
+    blob_refs: &[BlobManifestDelta],
+) -> Result<(Vec<u8>, u64, u64)> {
+    let mut lsn = start_lsn;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&encode_frame(FRAME_TXN_BEGIN, lsn, &txid.to_le_bytes())?);
+    lsn += 1;
+    for (page_id, image) in pages {
+        if image.len() != PAGE_SIZE {
+            return Err(Error::Corrupt("wal page image wrong size"));
+        }
+        let mut body = Vec::with_capacity(20 + PAGE_SIZE);
+        body.extend_from_slice(&txid.to_le_bytes());
+        body.extend_from_slice(&page_id.to_le_bytes());
+        body.extend_from_slice(&1_u64.to_le_bytes());
+        body.extend_from_slice(image);
+        bytes.extend_from_slice(&encode_frame(FRAME_PAGE_IMAGE, lsn, &body)?);
+        lsn += 1;
+    }
+    if !blob_refs.is_empty() {
+        let body = encode_blob_refs_body(txid, blob_refs)?;
+        bytes.extend_from_slice(&encode_frame(FRAME_BLOB_REFS, lsn, &body)?);
+        lsn += 1;
+    }
+    let commit_lsn = lsn;
+    let digest = commit_digest(pages, blob_refs);
+    let mut commit_body = Vec::with_capacity(56);
+    commit_body.extend_from_slice(&txid.to_le_bytes());
+    commit_body.extend_from_slice(&commit_lsn.to_le_bytes());
+    commit_body.extend_from_slice(&(pages.len() as u32).to_le_bytes());
+    commit_body.extend_from_slice(&(blob_refs.len() as u32).to_le_bytes());
+    commit_body.extend_from_slice(&digest);
+    bytes.extend_from_slice(&encode_frame(FRAME_TXN_COMMIT, commit_lsn, &commit_body)?);
+    lsn += 1;
+    Ok((bytes, commit_lsn, lsn))
+}
+
+/// Truncate a torn tail from a WAL file and fsync the result.
+///
+/// Returns the number of dropped bytes. Damaged records (checksum, length, LSN)
+/// are returned as errors and the file is left unchanged.
+pub fn truncate_wal_torn_tail(path: &Path) -> Result<usize> {
+    let bytes = std::fs::read(path)?;
+    let scan = scan_wal(&bytes)?;
+    if matches!(scan.tail, WalTail::Clean) {
+        return Ok(0);
+    }
+    let dropped = bytes.len() - scan.valid_len;
+    let file = OpenOptions::new().write(true).open(path)?;
+    file.set_len(scan.valid_len as u64)?;
+    file.sync_all()?;
+    Ok(dropped)
 }
 
 /// Encode a v0 WAL file header with checksum.
