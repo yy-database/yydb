@@ -7,8 +7,8 @@ use std::{
 };
 
 use yydb_formats::{
-    BlobManifestDelta, FilePager, MemoryPager, PAGE_MAGIC, WAL_MAGIC, main_bytes_from_memory_pager,
-    memory_pager_from_main_bytes, parse_wal,
+    BlobManifestDelta, FilePager, MemoryPager, PAGE_MAGIC, RecoveryReport, WAL_MAGIC, main_bytes_from_memory_pager,
+    memory_pager_from_main_bytes, parse_wal_recover,
 };
 use yydb_types::{Error, Result};
 
@@ -90,6 +90,15 @@ impl Database {
         self.pager.checkpoint()
     }
 
+    /// Re-run WAL recovery.
+    ///
+    /// `open` already performs one pass. This entry point makes the report
+    /// observable and lets callers prove that a second pass neither truncates
+    /// more bytes nor changes the recovered snapshot.
+    pub fn recover(&mut self) -> Result<RecoveryReport> {
+        self.pager.recover()
+    }
+
     /// Committed frame count recorded in the `-wal` sidecar.
     pub fn wal_frame_count(&self) -> Result<u32> {
         let wal = wal_path(&self.path);
@@ -100,7 +109,7 @@ impl Database {
         if bytes.get(0..5) != Some(WAL_MAGIC.as_slice()) {
             return Err(Error::Corrupt("wal magic mismatch"));
         }
-        Ok(parse_wal(&bytes)?.frames.len() as u32)
+        Ok(parse_wal_recover(&bytes)?.frames.len() as u32)
     }
 
     /// Uncheckpointed WAL bytes on disk (0 when the sidecar is absent).

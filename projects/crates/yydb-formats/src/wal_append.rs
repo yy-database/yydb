@@ -30,6 +30,21 @@ pub enum WalDurability {
     SyncOnCommit,
 }
 
+/// Result of one startup WAL recovery pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RecoveryReport {
+    /// Torn tail bytes dropped by this pass.
+    pub dropped_torn_bytes: u64,
+    /// Complete frames after truncation.
+    pub frames: usize,
+    /// Frames above the database checkpoint LSN.
+    pub frames_after_checkpoint: usize,
+    /// Committed transactions found in the WAL.
+    pub committed_transactions: usize,
+    /// Highest commit LSN in the WAL.
+    pub committed_lsn: u64,
+}
+
 /// Append-only byte sink behind [`WalWriter`].
 ///
 /// Production uses [`FileWalSink`]. Tests inject failing sinks to model disk

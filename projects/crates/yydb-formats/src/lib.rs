@@ -48,8 +48,8 @@ pub use wal::{
     parse_wal, parse_wal_recover, scan_wal, wal_frame_offsets,
 };
 pub use wal_append::{
-    FileWalSink, WalDurability, WalSink, WalWriter, encode_frame, encode_wal_header, read_wal_file, replay_wal_pages,
-    replay_wal_pages_after, strip_incomplete_txn_after_last_page_image, strip_trailing_txn_commit, truncate_wal_after_frame,
-    truncate_wal_records, truncate_wal_to_recoverable_prefix, truncate_wal_torn_tail, wal_recoverable_byte_len,
-    wal_sidecar_path,
+    FileWalSink, RecoveryReport, WalDurability, WalSink, WalWriter, encode_frame, encode_wal_header, read_wal_file,
+    replay_wal_pages, replay_wal_pages_after, strip_incomplete_txn_after_last_page_image, strip_trailing_txn_commit,
+    truncate_wal_after_frame, truncate_wal_records, truncate_wal_to_recoverable_prefix, truncate_wal_torn_tail,
+    wal_recoverable_byte_len, wal_sidecar_path,
 };

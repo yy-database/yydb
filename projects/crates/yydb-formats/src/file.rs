@@ -20,9 +20,10 @@ use crate::{
     memory::MemoryPager,
     pager::PageStore,
     shm::{shm_sidecar_path, sync_shm_from_wal},
-    wal::committed_tail_lsn,
+    wal::{committed_tail_lsn, committed_transactions},
     wal_append::{
-        WalWriter, read_wal_file, replay_wal_pages_after, truncate_wal_records, truncate_wal_torn_tail, wal_sidecar_path,
+        RecoveryReport, WalWriter, read_wal_file, replay_wal_pages_after, truncate_wal_records, truncate_wal_torn_tail,
+        wal_sidecar_path,
     },
 };
 
@@ -32,6 +33,7 @@ pub struct FilePager {
     inner: MemoryPager,
     wal_enabled: bool,
     wal: Option<WalWriter>,
+    last_recovery: RecoveryReport,
 }
 
 impl FilePager {
@@ -43,13 +45,13 @@ impl FilePager {
         }
         let existed = path.exists();
         let inner = if existed { load_main_file(&path)? } else { MemoryPager::new_empty(fresh_database_id(), 0x01) };
-        let mut file_pager = Self { path: path.clone(), inner, wal_enabled: enable_wal, wal: None };
+        let mut file_pager =
+            Self { path: path.clone(), inner, wal_enabled: enable_wal, wal: None, last_recovery: RecoveryReport::default() };
         if !existed {
             file_pager.persist_all()?;
         }
         if enable_wal {
-            file_pager.recover_wal_tail()?;
-            file_pager.replay_wal_if_present()?;
+            file_pager.recover()?;
             file_pager.ensure_wal()?;
         }
         Ok(file_pager)
@@ -215,28 +217,41 @@ impl FilePager {
         Ok(committed_tail_lsn(&read_wal_file(&wal_path)?).max(header_lsn))
     }
 
-    fn recover_wal_tail(&self) -> Result<()> {
-        let wal_path = wal_sidecar_path(&self.path);
-        if wal_path.exists() {
-            truncate_wal_torn_tail(&wal_path)?;
-        }
-        Ok(())
-    }
-
-    fn replay_wal_if_present(&mut self) -> Result<()> {
+    /// Run startup recovery: truncate a torn tail, replay complete committed
+    /// frames above the checkpoint LSN and publish the sidecar status.
+    ///
+    /// A checksum, length or LSN failure aborts recovery with a structured
+    /// [`crate::WalRecordError`] instead of silently skipping damaged records.
+    /// Running this twice yields the same data and drops no further bytes.
+    pub fn recover(&mut self) -> Result<RecoveryReport> {
         let wal_path = wal_sidecar_path(&self.path);
         if !wal_path.exists() {
-            return Ok(());
+            self.last_recovery = RecoveryReport::default();
+            return Ok(self.last_recovery);
         }
+        let dropped_torn_bytes = truncate_wal_torn_tail(&wal_path)? as u64;
         let wal = read_wal_file(&wal_path)?;
         let checkpoint_lsn = self.inner.header()?.slot.checkpoint_lsn;
+        let frames_after_checkpoint = wal.frames.iter().filter(|frame| frame.frame_lsn > checkpoint_lsn).count();
         let mut pages = self.inner.pages_snapshot();
         replay_wal_pages_after(&wal, checkpoint_lsn, &mut pages)?;
         for (page_id, image) in pages {
             self.inner.put_page(page_id, image)?;
         }
         sync_shm_from_wal(&self.path, &wal_path)?;
-        Ok(())
+        self.last_recovery = RecoveryReport {
+            dropped_torn_bytes,
+            frames: wal.frames.len(),
+            frames_after_checkpoint,
+            committed_transactions: committed_transactions(&wal),
+            committed_lsn: committed_tail_lsn(&wal).max(checkpoint_lsn),
+        };
+        Ok(self.last_recovery)
+    }
+
+    /// Report from the most recent recovery pass.
+    pub fn last_recovery(&self) -> RecoveryReport {
+        self.last_recovery
     }
 
     fn persist_all(&self) -> Result<()> {
