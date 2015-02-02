@@ -1,6 +1,10 @@
 //! Explicit WAL durability contract and injectable append failures.
 
-use std::{cell::RefCell, io, path::PathBuf, rc::Rc};
+use std::{
+    io,
+    path::PathBuf,
+    sync::{Arc, Mutex, MutexGuard},
+};
 
 use yydb_formats::{
     PAGE_SIZE, WalDurability, WalSink, WalTail, WalWriter, committed_transactions, encode_wal_header, replay_wal_pages,
@@ -21,11 +25,11 @@ struct SinkState {
 }
 
 #[derive(Clone, Default)]
-struct TestSink(Rc<RefCell<SinkState>>);
+struct TestSink(Arc<Mutex<SinkState>>);
 
 impl TestSink {
-    fn state(&self) -> std::cell::RefMut<'_, SinkState> {
-        self.0.borrow_mut()
+    fn state(&self) -> MutexGuard<'_, SinkState> {
+        self.0.lock().expect("test sink state is not poisoned")
     }
 }
 
