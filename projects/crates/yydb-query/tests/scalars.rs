@@ -78,6 +78,25 @@ fn out_of_range_and_malformed_scalars_are_rejected_without_writing() {
 }
 
 #[test]
+fn unsupported_canonical_scalars_are_rejected_before_storage() {
+    let contract = resolved_contract_from_document(
+        r#"
+table Payload {
+    @@payload_id: i64,
+    body: utf16,
+}
+"#,
+    )
+    .expect("utf16 is a canonical scalar");
+    let mut records = BTreeMap::new();
+    let error = execute_write(r#"Payload::insert({ payload_id: 1, body: "text" })"#, &contract, None, &mut records)
+        .expect_err("utf16 has no execution scalar");
+    assert!(matches!(error, Error::Schema { .. }), "unexpected error: {error}");
+    assert_eq!(error.code(), "yydb.schema.invalid");
+    assert!(records.is_empty(), "rejected write mutated the record map");
+}
+
+#[test]
 fn decimal_negative_zero_normalizes_and_never_truncates() {
     let (contract, records) = insert(
         r#"Event::insert({
