@@ -17,7 +17,7 @@ fn resolved_user_contract() -> yydb::vos::ResolvedContract {
                 field_id: 11,
                 virtual_field_index: Some(3),
                 canonical_name: "id".into(),
-                canonical_type: yydb::vos::types::ResolvedCanonicalType::Builtin(vec!["i64".into()]),
+                canonical_type: yydb::vos::types::ResolvedCanonicalType::Scalar(yydb::vos::types::CanonicalScalar::I64),
                 attributes: vec![],
                 default_value: None,
             }],
