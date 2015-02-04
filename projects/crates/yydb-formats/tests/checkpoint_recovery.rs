@@ -7,7 +7,7 @@ use std::{
 
 use yydb_formats::{
     FilePager, PAGE_SIZE, WalFile, WalHeader, encode_frame, encode_wal_header, parse_page0, parse_wal, replay_wal_pages,
-    replay_wal_pages_after, wal_sidecar_path,
+    replay_wal_pages_after, truncate_wal_records, wal_sidecar_path,
 };
 
 const DB_ID: [u8; 16] = [0x77; 16];
@@ -86,6 +86,58 @@ fn checkpoint_crash_after_header_commit_does_not_replay_folded_records() {
     assert_eq!(reopened.get_kv(b"alpha").unwrap().as_deref(), Some(b"one".as_slice()));
     reopened.checkpoint().unwrap();
     assert!(!wal_path.exists());
+    cleanup(&path);
+}
+
+#[test]
+fn checkpoint_rotation_keeps_new_wal_lsns_above_the_checkpoint() {
+    let path = temp_db("rotation-before-header");
+    let mut pager = FilePager::open(&path, true).unwrap();
+    pager.put_kv(b"baseline", b"ok").unwrap();
+    pager.checkpoint().unwrap();
+    let folded = checkpoint_lsn(&path);
+    assert!(folded >= 4, "the baseline checkpoint is durable in page 0");
+    drop(pager);
+
+    let mut rotated = FilePager::open(&path, true).unwrap();
+    rotated.put_kv(b"pending", b"wal").unwrap();
+    drop(rotated);
+
+    assert!(wal_sidecar_path(&path).exists(), "the rotated WAL still holds the pending commit");
+    let mut reopened = FilePager::open(&path, true).unwrap();
+    assert_eq!(reopened.get_kv(b"baseline").unwrap().as_deref(), Some(b"ok".as_slice()));
+    assert_eq!(
+        reopened.get_kv(b"pending").unwrap().as_deref(),
+        Some(b"wal".as_slice()),
+        "a WAL created after a checkpoint must not reuse LSNs at or below the checkpoint"
+    );
+    cleanup(&path);
+}
+
+#[test]
+fn checkpoint_crash_after_wal_truncation_keeps_folded_data() {
+    let path = temp_db("after-truncate");
+    let mut pager = FilePager::open(&path, true).unwrap();
+    pager.put_kv(b"alpha", b"one").unwrap();
+    pager.simulate_checkpoint_crash_after_header_commit().unwrap();
+    drop(pager);
+
+    let wal = wal_sidecar_path(&path);
+    assert!(wal.exists(), "the crash window between truncation and unlink leaves the sidecar");
+    truncate_wal_records(&wal).unwrap();
+
+    let mut reopened = FilePager::open(&path, true).unwrap();
+    assert_eq!(reopened.get_kv(b"alpha").unwrap().as_deref(), Some(b"one".as_slice()));
+    reopened.put_kv(b"beta", b"two").unwrap();
+    drop(reopened);
+
+    let mut reopened = FilePager::open(&path, true).unwrap();
+    assert_eq!(reopened.get_kv(b"alpha").unwrap().as_deref(), Some(b"one".as_slice()));
+    assert_eq!(
+        reopened.get_kv(b"beta").unwrap().as_deref(),
+        Some(b"two".as_slice()),
+        "writes appended to an emptied WAL must stay above the checkpoint LSN"
+    );
     cleanup(&path);
 }
 
