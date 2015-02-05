@@ -142,6 +142,26 @@ fn checkpoint_crash_after_wal_truncation_keeps_folded_data() {
 }
 
 #[test]
+fn repeated_recovery_after_a_checkpoint_crash_is_idempotent() {
+    let path = temp_db("idempotent");
+    let mut pager = FilePager::open(&path, true).unwrap();
+    pager.put_kv(b"alpha", b"one").unwrap();
+    pager.simulate_checkpoint_crash_after_header_commit().unwrap();
+    drop(pager);
+
+    let mut reopened = FilePager::open(&path, true).unwrap();
+    let first = reopened.last_recovery();
+    let second = reopened.recover().unwrap();
+    assert_eq!(second, first, "a second recovery pass must report and drop the same bytes");
+    assert_eq!(reopened.get_kv(b"alpha").unwrap().as_deref(), Some(b"one".as_slice()));
+
+    let third = reopened.recover().unwrap();
+    assert_eq!(third, first);
+    assert_eq!(reopened.get_kv(b"alpha").unwrap().as_deref(), Some(b"one".as_slice()));
+    cleanup(&path);
+}
+
+#[test]
 fn checkpoint_failure_keeps_committed_wal() {
     let path = temp_db("readonly");
     let mut pager = FilePager::open(&path, true).unwrap();

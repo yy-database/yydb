@@ -100,17 +100,39 @@ fn rejects_whole_state_database_magic() {
     crate::fixtures::yydb::cleanup(&path);
 }
 
+/// A trailing half record is a torn tail, not corruption.
+///
+/// Recovery must truncate the incomplete record and keep every earlier
+/// committed transaction. A complete record that fails its CRC stays
+/// corruption and must never be truncated away.
 #[test]
-fn rejects_an_incomplete_wal_tail() {
+fn recovers_an_incomplete_wal_tail() {
     let path = crate::fixtures::yydb::temp_db_path("wal-tail");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     connection.ensure_schema(INITIAL).unwrap();
     connection.put("value", b"complete").unwrap();
+    let schema = connection.schema().unwrap();
     drop(connection);
-    let mut bytes = std::fs::read(yydb::journal::wal_path(&path)).unwrap();
-    bytes.truncate(bytes.len() - 3);
-    std::fs::write(yydb::journal::wal_path(&path), bytes).unwrap();
-    assert!(matches!(Connection::open_with_flags(&path, OpenFlags::wal()), Err(Error::Corrupt(_))));
+
+    let wal = yydb::journal::wal_path(&path);
+    let mut bytes = std::fs::read(&wal).unwrap();
+    let intact_len = bytes.len();
+    bytes.truncate(intact_len - 3);
+    std::fs::write(&wal, &bytes).unwrap();
+
+    let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
+    assert_eq!(connection.schema().unwrap(), schema, "the committed schema survives the dropped half record");
+    assert_eq!(connection.get("value").unwrap(), None, "the torn commit must not be applied");
+    let recovered_len = std::fs::metadata(&wal).unwrap().len();
+    assert!(recovered_len < bytes.len() as u64, "recovery truncates the half record");
+    yydb_formats::parse_wal(&std::fs::read(&wal).unwrap()).expect("recovery stops on the last complete record boundary");
+    drop(connection);
+
+    let second = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
+    assert_eq!(second.schema().unwrap(), schema);
+    assert_eq!(second.get("value").unwrap(), None);
+    assert_eq!(std::fs::metadata(&wal).unwrap().len(), recovered_len, "a second recovery drops no more bytes");
+
     crate::fixtures::yydb::cleanup(&path);
 }
 
@@ -122,9 +144,15 @@ fn rejects_a_complete_wal_frame_with_a_bad_checksum() {
     drop(connection);
     let wal = yydb::journal::wal_path(&path);
     let mut bytes = std::fs::read(&wal).unwrap();
+    let intact_len = bytes.len();
     let last = bytes.len() - 1;
     bytes[last] ^= 0x80;
     std::fs::write(&wal, bytes).unwrap();
     assert!(matches!(Connection::open_with_flags(&path, OpenFlags::wal()), Err(Error::Corrupt(_))));
+    assert_eq!(
+        std::fs::metadata(&wal).unwrap().len(),
+        intact_len as u64,
+        "a complete record with a bad checksum is not a torn tail and must not be truncated"
+    );
     crate::fixtures::yydb::cleanup(&path);
 }
