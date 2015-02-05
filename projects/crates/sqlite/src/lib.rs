@@ -1,9 +1,24 @@
-//! SQLite product facade — re-exports `sqlite-storage`'s public API and the
-//! product surface constants that downstream consumers reference.
+//! SQLite product facade.
 //!
-//! The real implementation lives in `sqlite-formats` (binary format
-//! primitives) and `sqlite-storage` (database handle, schema, table scan).
-//! This crate is the stable product entry point above both.
+//! Two distinct capabilities share this crate:
+//!
+//! | Capability | Entry point | Storage |
+//! |------------|-------------|---------|
+//! | SQLite **dialect** over YYDB | [`SqliteConnection`] | `.yydb` file, YYDB engine and operators |
+//! | Read-only **file import** | [`SqliteDatabase`] | existing upstream `.sqlite` bytes, parsed in place |
+//!
+//! [`SqliteConnection`] executes SQL with YYDB's own engine: `oak-sql` parses,
+//! `yydb-query` lowers the AST into the same internal operators VOS uses, and
+//! `yydb-engine` supplies transactions, catalog and storage. No SQLite C
+//! library or C sys-binding is involved.
+//!
+//! [`SqliteDatabase`] only reads an existing SQLite file so its rows can be
+//! adopted into a YYDB database; it never becomes the execution engine.
+//!
+//! Schema creation stays VOS-owned: both surfaces use a VOS schema document as
+//! DDL, and SQL statements cover rows (see [`SqliteConnection::ensure_schema`]).
+
+#![deny(missing_docs)]
 
 pub use sqlite_storage::{
     SchemaObject, SchemaObjectKind, SqliteDatabase, TableLimits, TableRow, TextEncoding, decode_record, decode_varint,
@@ -17,11 +32,15 @@ pub use sqlite_formats::{
     decode_library_version, validate_database,
 };
 
+mod connection;
+
+pub use connection::SqliteConnection;
+
 /// Adapter identifier used in logs and diagnostics.
 pub const BACKEND_ID: &str = "sqlite";
 
 /// Short label for the binary-compatibility constraint.
 pub const CONSTRAINT: &str = "upstream SQLite format-3 engine";
 
-/// Why YYDB does not execute SQL through the SQLite engine.
-pub const WHY_NOT_YY_OPTIMIZED: &str = "SQLite requires binary-compatible on-disk bytes. YYDB stores VOS in `.yydb` instead.";
+/// Why YYDB executes SQL itself instead of calling the SQLite engine.
+pub const WHY_NOT_YY_OPTIMIZED: &str = "SQL execution uses YYDB operators. The SQLite engine is only a read-only file source.";

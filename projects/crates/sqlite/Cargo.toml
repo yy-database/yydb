@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "SQLite product facade — re-exports sqlite-storage public API and legacy product constants. Real implementation splits into sqlite-formats + sqlite-storage."
+description = "SQLite product facade: writable SQL dialect over the YYDB engine plus read-only upstream file inspection."
 publish = false
 readme = "readme.md"
 
@@ -15,3 +15,8 @@ path = "src/lib.rs"
 [dependencies]
 sqlite-formats = { workspace = true }
 sqlite-storage = { workspace = true }
+yydb = { workspace = true }
+yydb-query = { workspace = true }
+
+[dev-dependencies]
+yydb-types = { workspace = true }
