@@ -70,7 +70,10 @@ fn sql_update_and_delete_report_affected_rows() {
         .execute_sql_write("UPDATE Account SET score = ? WHERE account_id = ?", &[Value::I64(99), Value::I64(1)])
         .expect("update");
     assert_eq!(updated, 1);
-    assert_eq!(conn.query_sql("SELECT score FROM Account WHERE account_id = 1").unwrap()[0].get("score"), Some(&Value::I64(99)));
+    assert_eq!(
+        conn.query_sql("SELECT score FROM Account WHERE account_id = 1").unwrap()[0].get("score"),
+        Some(&Value::I64(99))
+    );
 
     let deleted = conn.execute_sql_write("DELETE FROM Account WHERE tenant = ?", &[Value::Text("t1".into())]).expect("delete");
     assert_eq!(deleted, 2);
@@ -103,9 +106,7 @@ fn sql_and_vos_address_the_same_rows() {
     let vos_rows = conn.query_vos("Account.all().collect()").expect("vos query");
     assert_eq!(vos_rows.len(), 2);
 
-    conn.execute_vos_write(
-        r#"Account::insert({ account_id: 3, email: "grace@example.test", tenant: "t2", score: 20 })"#,
-    )
-    .expect("vos insert");
+    conn.execute_vos_write(r#"Account::insert({ account_id: 3, email: "grace@example.test", tenant: "t2", score: 20 })"#)
+        .expect("vos insert");
     assert_eq!(account_ids(&conn, "SELECT account_id FROM Account"), vec![1, 2, 3]);
 }
