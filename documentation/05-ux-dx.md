@@ -80,7 +80,7 @@
 | 读者                | 位置                                                | 内容                                     |
 |---------------------|-----------------------------------------------------|------------------------------------------|
 | 修改实现的人        | 本目录                                              | 不变量、分层、编码、工程门槛、UX/DX 准则 |
-| 集成与终端用户      | `projects/packages/homepage/documentation/zh-hans/` | 安装、使用、协议说明、示例               |
+| 集成与终端用户      | `projects/yydb.ts/homepage/documentation/zh-hans/` | 安装、使用、协议说明、示例               |
 | 单个 crate 的使用者 | 各 crate `readme.md` / docs.rs                      | API 用法与最小示例                       |
 | 仓库维护者          | `.agents/skills/yydb-release/SKILL.md`              | 发布操作流程                             |
 

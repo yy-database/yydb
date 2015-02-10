@@ -58,7 +58,6 @@ function preparePackageJson(pkgDir) {
         rewriteWorkspaceDeps(j.optionalDependencies);
     }
     // Provenance: repository.url must match the publishing GitHub repo.
-    // Keep monorepo `directory` so npm links to projects/packages/<pkg>.
     const ghRepo = (process.env.GITHUB_REPOSITORY || '').trim() || 'yy-database/yydb';
     const directory = path.relative(root, pkgDir).split(path.sep).join('/');
     j.repository = {
@@ -76,7 +75,7 @@ function preparePackageJson(pkgDir) {
 import { NATIVE_ARTIFACTS } from './native-artifacts.mjs';
 
 for (const { pkg, fileName } of NATIVE_ARTIFACTS) {
-    const destDir = path.join(root, 'projects', 'packages', pkg);
+    const destDir = path.join(root, 'projects', 'yydb.ts', 'platforms', pkg);
     const libDir = path.join(destDir, 'lib');
     const dest = path.join(libDir, fileName);
     const src = findNativeBinding(fileName);
@@ -94,10 +93,10 @@ for (const { pkg, fileName } of NATIVE_ARTIFACTS) {
     preparePackageJson(destDir);
 }
 
-preparePackageJson(path.join(root, 'projects', 'packages', 'light-db'));
-preparePackageJson(path.join(root, 'projects', 'packages', 'yydb-client'));
-preparePackageJson(path.join(root, 'projects', 'packages', 'yydb-unknown-wasm32'));
-preparePackageJson(path.join(root, 'projects', 'packages', 'yydb'));
-preparePackageJson(path.join(root, 'projects', 'packages', 'sqlite'));
+preparePackageJson(path.join(root, 'projects', 'yydb.ts', 'packages', 'light-db'));
+preparePackageJson(path.join(root, 'projects', 'yydb.ts', 'packages', 'yydb-client'));
+preparePackageJson(path.join(root, 'projects', 'yydb.ts', 'platforms', 'yydb-unknown-wasm32'));
+preparePackageJson(path.join(root, 'projects', 'yydb.ts', 'packages', 'yydb'));
+preparePackageJson(path.join(root, 'projects', 'yydb.ts', 'emulators', 'sqlite'));
 
 console.log('npm packages prepared', version || '(package.json versions)');

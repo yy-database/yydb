@@ -1,0 +1,37 @@
+# `@yydb/yydb-skills`
+
+Docs-only Agent Skills for YYDB integrators: wire protocol and legacy bytes notes. Install when an agent must implement or review clients or `yydb serve` â€?not when you only need the runtime (`@yydb/yydb`).
+
+## Install
+
+```bash
+npx skills add @yydb/yydb-skills --skill yydb-serve-protocol -y
+```
+
+List available skills:
+
+```bash
+npx skills add @yydb/yydb-skills --list
+```
+
+Requires Node.js 18+. Skills do not ship `@yydb/yydb` or `@yydb/yydb-client`.
+
+## Skills
+
+| Skill | Load when |
+|-------|-----------|
+| [`yydb-serve-protocol`](https://github.com/yy-database/yydb/tree/dev/projects/yydb.ts/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md) | Wire frames, TCP/WebSocket, `yydb serve`, `@yydb/yydb-client` codec |
+| [`yydb-bytes-storage`](https://github.com/yy-database/yydb/tree/dev/projects/yydb.ts/packages/yydb-skills/skills/yydb-bytes-storage/SKILL.md) | Legacy per-object CAS layout only â€?**not** current `.yydb` |
+
+Human guides: [YYDB user documentation](https://github.com/yy-database/yydb/tree/dev/projects/yydb.ts/homepage/documentation/zh-hans).
+
+## Example prompts
+
+```text
+Load yydb-serve-protocol. Review this WebSocket client against YY wire 0000 framing and loopback threat model.
+```
+
+```text
+Load yydb-bytes-storage. Compare this draft CAS layout to current single-file .yydb â€?flag anything obsolete.
+```
+

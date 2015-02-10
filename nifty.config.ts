@@ -15,7 +15,7 @@ export default defineConfig({
             lineWidth: 144,
             quoteStyle: 'single',
         },
-        includes: ['package.json', 'nifty.config.ts', 'scripts/**', 'projects/packages/**'],
+        includes: ['package.json', 'nifty.config.ts', 'scripts/**', 'projects/yydb.ts/**'],
         excludes: [
             '**/node_modules/**',
             '**/dist/**',
@@ -25,7 +25,7 @@ export default defineConfig({
             '**/*.md',
             '**/*.css',
             '**/*.vue',
-            'projects/packages/yydb-unknown-wasm32/lib/**',
+            'projects/yydb.ts/platforms/yydb-unknown-wasm32/lib/**',
         ],
     },
     trust: {

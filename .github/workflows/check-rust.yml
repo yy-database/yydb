@@ -11,6 +11,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+defaults:
+  run:
+    working-directory: projects/yydb.rs
+
 jobs:
   rust-fmt:
     name: rustfmt
@@ -39,5 +43,7 @@ jobs:
         with:
           toolchain: nightly-2026-07-20
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: projects/yydb.rs
       - run: cargo test --workspace
       - run: cargo build -p yydb-napi --release

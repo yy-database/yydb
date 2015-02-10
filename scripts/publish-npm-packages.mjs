@@ -1,5 +1,5 @@
 /**
- * Publish prepared projects/packages/* packages. Skips versions already on the registry
+ * Publish prepared projects/yydb.ts/* packages. Skips versions already on the registry
  * (idempotent retry after partial failure).
  *
  * Env:
@@ -19,6 +19,16 @@ const dirs = (
     .split(/\s+/)
     .filter(Boolean);
 
+function resolvePackageDir(dirName) {
+    if (NATIVE_PKG_NAMES.has(dirName) || dirName === 'yydb-unknown-wasm32') {
+        return path.join(root, 'projects', 'yydb.ts', 'platforms', dirName);
+    }
+    if (dirName === 'sqlite') {
+        return path.join(root, 'projects', 'yydb.ts', 'emulators', dirName);
+    }
+    return path.join(root, 'projects', 'yydb.ts', 'packages', dirName);
+}
+
 function npmViewVersion(name, version) {
     const r = spawnSync('npm', ['view', `${name}@${version}`, 'version', '--registry', 'https://registry.npmjs.org'], {
         encoding: 'utf8',
@@ -29,7 +39,7 @@ function npmViewVersion(name, version) {
 }
 
 function publishDir(dirName) {
-    const dir = path.join(root, 'projects', 'packages', dirName);
+    const dir = resolvePackageDir(dirName);
     const pkgPath = path.join(dir, 'package.json');
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
     const { name, version } = pkg;

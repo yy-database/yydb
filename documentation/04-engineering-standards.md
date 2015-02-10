@@ -20,7 +20,7 @@
 
 | 范围              | 工具                                                             | 门槛                             |
 |-------------------|------------------------------------------------------------------|----------------------------------|
-| Rust              | `rustfmt`，工具链 pin 在 `rust-toolchain.toml`                   | `cargo fmt --all --check`        |
+| Rust              | `rustfmt`，工具链 pin 在 `../projects/yydb.rs/rust-toolchain.toml`                   | `cargo fmt --all --check`        |
 | TypeScript / 配置 | Nifty preset                                                     | `pnpm exec nifty format --check` |
 | 编译              | `cargo test --workspace` 与 `cargo build -p yydb-napi --release` | 必须通过                         |
 
@@ -28,8 +28,8 @@
 
 1. 不为通过检查而放宽 lint 或删除文档检查。
 2. 格式化只改变排版，不得改变 token 语义。出现语义变化视为缺陷。
-3. `Cargo.lock` 与 `pnpm-lock.yaml` 不纳入版本控制。CI 使用无 frozen 安装。
-4. `.cargo/config.toml` 是本机 path patch 与 registry override，被忽略，且不得提交。
+3. `../projects/yydb.rs/Cargo.lock` 与 `pnpm-lock.yaml` 不纳入版本控制。CI 使用无 frozen 安装。
+4. `../projects/yydb.rs/.cargo` 是本机 path patch 与 registry override，被忽略，且不得提交。
 
 ## 4. CI
 

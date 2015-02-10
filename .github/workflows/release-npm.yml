@@ -54,15 +54,16 @@ jobs:
         run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
+          workspaces: projects/yydb.rs
           key: ${{ matrix.target }}
       - name: Build yydb-napi
-        run: cargo build -p yydb-napi --release --target ${{ matrix.target }}
+        run: cargo build --manifest-path projects/yydb.rs/Cargo.toml -p yydb-napi --release --target ${{ matrix.target }}
       - name: Stage native binding
         shell: bash
         run: |
           set -euo pipefail
-          SRC="target/${{ matrix.target }}/release/${{ matrix.lib }}"
-          DEST="projects/packages/${{ matrix.pkg }}/lib/${{ matrix.node_file }}"
+          SRC="projects/yydb.rs/target/${{ matrix.target }}/release/${{ matrix.lib }}"
+          DEST="projects/yydb.ts/platforms/${{ matrix.pkg }}/lib/${{ matrix.node_file }}"
           mkdir -p "$(dirname "$DEST")"
           cp "$SRC" "$DEST"
           chmod +x "$DEST" || true
@@ -70,7 +71,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: engine-${{ matrix.pkg }}
-          path: projects/packages/${{ matrix.pkg }}/lib/${{ matrix.node_file }}
+          path: projects/yydb.ts/platforms/${{ matrix.pkg }}/lib/${{ matrix.node_file }}
           if-no-files-found: error
 
   publish-npm:

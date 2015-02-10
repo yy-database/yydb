@@ -13,11 +13,13 @@ Thumbs.db
 *.iml
 *.log
 *.txt
-!projects/crates/**/tests/fixtures/**/*.txt
+!projects/yydb.rs/crates/**/tests/fixtures/**/*.txt
 
-# Rust
+# Rust (`projects/yydb.rs/` workspace only)
+projects/yydb.rs/target/
+projects/yydb.rs/.cargo/config.toml
+projects/yydb.rs/Cargo.lock
 target/
-Cargo.lock
 
 # Node
 node_modules/
@@ -32,10 +34,6 @@ pnpm-lock.yaml
 *.war
 *.ear
 
-
-# Rust — local path patches / registry overrides (never commit)
-.cargo/config.toml
-
 # Temp files
 *.swp
 *.swo
@@ -48,8 +46,7 @@ pnpm-lock.yaml
 *.yydx
 
 # Light DB test artifacts
-projects/packages/light-db/temp/
+projects/yydb.ts/packages/light-db/temp/
 
 # Nifty change-logs draft index (local only — regenerate with `nifty change-logs --version X.Y.Z --write`)
 documentation/maintenance/releases/*.reference.md
-

@@ -15,7 +15,7 @@
 | 内容                       | 位置                                                |
 |----------------------------|-----------------------------------------------------|
 | 路线图、阶段计划、发布排期 | 不进入仓库；本目录不记录                            |
-| 终端用户安装与使用         | `projects/packages/homepage/documentation/zh-hans/` |
+| 终端用户安装与使用         | `projects/yydb.ts/homepage/documentation/zh-hans/` |
 | 单项 API 用法              | 各 crate 的 `readme.md` 与 docs.rs                  |
 | 维护者发布操作流程         | `.agents/skills/yydb-release/SKILL.md`              |
 

@@ -1,0 +1,43 @@
+{
+    "bugs": {
+        "url": "https://github.com/yy-database/yydb/issues"
+    },
+    "description": "Browser WebAssembly binary for `@yydb/yydb`",
+    "devDependencies": {
+        "@types/node": "^20.10.0",
+        "typescript": "~5.3.0"
+    },
+    "exports": {
+        ".": {
+            "default": "./src/index.ts",
+            "import": "./src/index.ts",
+            "types": "./src/index.ts"
+        },
+        "./wasm": "./lib/yydb_wasm_bg.wasm"
+    },
+    "files": [
+        "src",
+        "lib",
+        "README.md"
+    ],
+    "homepage": "https://github.com/yy-database/yydb/tree/dev/projects/yydb.ts/platforms/yydb-unknown-wasm32#readme",
+    "license": "MPL-2.0",
+    "name": "@yydb/yydb-unknown-wasm32",
+    "publishConfig": {
+        "access": "public"
+    },
+    "repository": {
+        "directory": "projects/yydb.ts/platforms/yydb-unknown-wasm32",
+        "type": "git",
+        "url": "git+https://github.com/yy-database/yydb.git"
+    },
+    "scripts": {
+        "test": "pnpm run typecheck",
+        "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "sideEffects": [
+        "./lib/yydb_wasm.js"
+    ],
+    "type": "module",
+    "version": "0.1.6"
+}
