@@ -2,4 +2,5 @@ packages:
   - "projects/yydb.ts/packages/*"
   - "projects/yydb.ts/platforms/*"
   - "projects/yydb.ts/emulators/*"
+  - "projects/yydb.ts/examples/*"
   - "projects/yydb.ts/homepage"

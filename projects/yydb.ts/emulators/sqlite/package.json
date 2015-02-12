@@ -1,7 +1,7 @@
 {
     "name": "@yydb/sqlite",
     "version": "0.1.6",
-    "description": "Bounded read-only SQLite format-3 snapshot reader for YYDB â€?schema inspection, typed record decoding, and blank database creation.",
+    "description": "Bounded read-only SQLite format-3 snapshot reader for YYDB - schema inspection, typed record decoding, and blank database creation.",
     "license": "MPL-2.0",
     "type": "module",
     "sideEffects": false,
