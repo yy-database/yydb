@@ -1,0 +1,26 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "yydb"
+version = "0.0.18"
+description = "Python bindings for the YYDB VOS database"
+readme = "readme.md"
+requires-python = ">=3.11"
+license = "MPL-2.0"
+authors = [{ name = "Yggdrasill Team", email = "192607617@qq.com" }]
+keywords = ["yydb", "vos", "database", "embedded", "python"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+]
+
+[tool.maturin]
+manifest-path = "../../../yydb.rs/ffis/yydb-pyo3/Cargo.toml"
+module-name = "yydb_pyo3"
+python-source = "src"
+python-packages = ["yydb"]
+features = ["pyo3/extension-module"]

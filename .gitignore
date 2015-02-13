@@ -34,6 +34,12 @@ pnpm-lock.yaml
 *.war
 *.ear
 
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
 # Temp files
 *.swp
 *.swo
