@@ -76,4 +76,4 @@ jobs:
         shell: pwsh
         run: |
           $python = if ($env:RUNNER_OS -eq "Windows") { "./.venv/Scripts/python.exe" } else { "./.venv/bin/python" }
-          & $python examples/embedded/main.py
+          & $python ../../examples/embedded/main.py
