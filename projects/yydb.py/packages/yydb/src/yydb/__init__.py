@@ -104,7 +104,7 @@ class Database:
 
     @classmethod
     def open(cls, path: str | os.PathLike[str]) -> "Database":
-        """Open ``path``, creating a blank schema when the file is new."""
+        """Open ``path`` without writing a schema document."""
         resolved = _resolve_path(path, "path")
         database = cls(resolved)
         native = _require_native()

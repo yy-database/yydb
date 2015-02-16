@@ -26,18 +26,18 @@ fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> PyResult
     Ok(())
 }
 
-/// Open `db_path` and ensure the VOS schema when needed.
+/// Open `db_path` and, when a document is given, ensure the VOS schema.
+///
+/// A new database stays schema-less until a document is provided, so callers
+/// can open a handle first and apply the schema afterwards.
 #[pyfunction]
 #[pyo3(signature = (db_path, schema_document=None))]
 fn init_db(db_path: String, schema_document: Option<String>) -> PyResult<()> {
     let conn = yydb::Connection::open(&db_path).map_err(map_err)?;
-    let schema = conn.schema().map_err(map_err)?;
-    let document = match schema_document {
-        Some(document) => document,
-        None if schema.is_none() => String::new(),
-        None => return Ok(()),
-    };
-    conn.ensure_schema(&document).map_err(map_err)?;
+    conn.schema().map_err(map_err)?;
+    if let Some(document) = schema_document {
+        conn.ensure_schema(&document).map_err(map_err)?;
+    }
     Ok(())
 }
 
