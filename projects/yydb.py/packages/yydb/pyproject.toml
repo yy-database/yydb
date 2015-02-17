@@ -24,3 +24,4 @@ module-name = "yydb_pyo3"
 python-source = "src"
 python-packages = ["yydb"]
 features = ["pyo3/extension-module"]
+exclude = ["**/__pycache__/**", "**/*.pyc", "dist/**"]
