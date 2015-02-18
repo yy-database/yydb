@@ -1,0 +1,15 @@
+{
+    "name": "@yydb/sqlite-fixtures",
+    "version": "0.0.0",
+    "description": "Upstream SQLite reference corpus and manifest helpers for YYDB interoperability tests",
+    "private": true,
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "devDependencies": {
+        "@types/node": "^22.15.0",
+        "@yydb/sqlite": "workspace:*",
+        "typescript": "^5.9.2"
+    }
+}
