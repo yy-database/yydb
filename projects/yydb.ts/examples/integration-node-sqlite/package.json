@@ -1,7 +1,7 @@
 {
     "name": "@yydb-examples/node-sqlite",
     "version": "0.0.0",
-    "description": "Private example: inspect a node:sqlite database with the @yydb/sqlite snapshot reader",
+    "description": "Private example: bidirectional node:sqlite and @yydb/sqlite format-3 interoperability",
     "private": true,
     "type": "module",
     "scripts": {
@@ -9,6 +9,7 @@
         "test": "node --experimental-strip-types --test \"./tests/**/*.test.ts\""
     },
     "dependencies": {
+        "@yydb/sqlite-fixtures": "workspace:*",
         "@yydb/sqlite": "workspace:*"
     },
     "devDependencies": {
