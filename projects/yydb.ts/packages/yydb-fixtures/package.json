@@ -1,0 +1,18 @@
+{
+    "name": "@yydb/yydb-fixtures",
+    "version": "0.0.0",
+    "description": "YYDB VOS adoption fixtures and SQLite-to-YYDB conversion helpers for integration tests",
+    "private": true,
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "dependencies": {
+        "@yydb/sqlite": "workspace:*",
+        "@yydb/sqlite-fixtures": "workspace:*"
+    },
+    "devDependencies": {
+        "@types/node": "^22.15.0",
+        "typescript": "^5.9.2"
+    }
+}
