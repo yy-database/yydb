@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { YydbError, YydbClientErrorCodes, isYydbError } from './errors.ts';
+import { YydbError, YydbClientErrorCodes, isYydbError } from '../src/errors.ts';
 
 test('YydbError carries code, operation and retryable flag', () => {
     const error = new YydbError('yydb.schema.invalid', 'VOS schema: boom', {

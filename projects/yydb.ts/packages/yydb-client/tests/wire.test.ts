@@ -9,7 +9,7 @@ import {
     encodeKvPut,
     encodeMicroRegister,
     MsgType,
-} from './wire.ts';
+} from '../src/wire.ts';
 
 test('frame roundtrip', () => {
     const encoded = encodeFrame({
@@ -33,7 +33,7 @@ test('kv put body encodes lengths', () => {
 });
 
 test('micro host invoke roundtrip codec', async () => {
-    const { decodeMicroHostInvoke, encodeMicroHostInvokeOk } = await import('./wire.ts');
+    const { decodeMicroHostInvoke, encodeMicroHostInvokeOk } = await import('../src/wire.ts');
     // use inline encode via scalar call helper - import decode only tested via manual body
     const body = new Uint8Array([
         9,
