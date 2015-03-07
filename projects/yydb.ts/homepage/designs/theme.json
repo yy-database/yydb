@@ -1,0 +1,8 @@
+{
+    "default": "default",
+    "activationAttr": "data-theme",
+    "prefersColorScheme": {
+        "dark": "dark",
+        "light": "default"
+    }
+}

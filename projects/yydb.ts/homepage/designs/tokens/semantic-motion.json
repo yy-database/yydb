@@ -1,0 +1,28 @@
+{
+    "entries": [
+        {
+            "key": { "path": ["motion", "control", "duration"] },
+            "value": "120ms"
+        },
+        {
+            "key": { "path": ["motion", "control", "easing"] },
+            "value": "cubic-bezier(0.2, 0, 0, 1)"
+        },
+        {
+            "key": { "path": ["motion", "emphasis", "duration"] },
+            "value": "240ms"
+        },
+        {
+            "key": { "path": ["motion", "emphasis", "easing"] },
+            "value": "cubic-bezier(0.16, 1, 0.3, 1)"
+        },
+        {
+            "key": { "path": ["motion", "overlay", "duration"] },
+            "value": "160ms"
+        },
+        {
+            "key": { "path": ["motion", "overlay", "easing"] },
+            "value": "cubic-bezier(0.2, 0, 0, 1)"
+        }
+    ]
+}
