@@ -1,0 +1,19 @@
+<template>
+    <div v-html="html != null ? html : highlightSync(code, lang, theme)" class="shiki-host" />
+</template>
+<script client>
+import { highlight, highlightSync } from "@vmz/plugin-shiki/runtime";
+
+export default class Shiki {
+    public code: string = "";
+    public lang: string = "text";
+    public theme: string = "vitesse-dark";
+
+    /** null → sync fallback / prewarm cache; set after async highlight. */
+    html: string | null = null;
+
+    async onMount() {
+        this.html = await highlight(this.code, this.lang, this.theme);
+    }
+}
+</script>

@@ -1,0 +1,12 @@
+<template>
+  <Shiki v-if="(engine || 'shiki') === 'shiki'" :code="code" :lang="lang" :theme="theme" />
+</template>
+
+<script client>
+export default class Code {
+  public code: string = '';
+  public lang: string = 'text';
+  public theme: string | null = null;
+  public engine: string | null = null;
+}
+</script>

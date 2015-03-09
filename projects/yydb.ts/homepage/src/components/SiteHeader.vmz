@@ -1,0 +1,80 @@
+<template>
+    <header data-vmz-fixture="site-header" class="site-header">
+        <div class="site-header__inner">
+            <a class="site-brand" href="/" :aria-label="homeAriaLabel">
+                <span class="site-brand__mark">{{ brandShortLabel }}</span>
+                <span class="site-brand__tag">{{ brandFullLabel }}</span>
+            </a>
+
+            <nav class="site-nav" :aria-label="navPrimaryLabel">
+                <a href="/" :aria-current="homeCurrent">{{ navHomeLabel }}</a>
+                <a href="/d/" :aria-current="docsCurrent">{{ navDocsLabel }}</a>
+                <a href="/wire" :aria-current="wireCurrent">{{ navWireLabel }}</a>
+            </nav>
+
+            <div class="site-header__aside">
+                <a href="/d/" class="button button--primary">{{ navDocsLabel }}</a>
+            </div>
+        </div>
+    </header>
+</template>
+
+<script client>
+import {
+    brandShort,
+    brandFull,
+    navHome,
+    navDocs,
+    navWire,
+    navPrimary,
+} from "#locales/common";
+import { isActivePath, readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
+
+export default class SiteHeader {
+    brandShortLabel = "";
+    brandFullLabel = "";
+    navHomeLabel = "";
+    navDocsLabel = "";
+    navWireLabel = "";
+    navPrimaryLabel = "";
+    homeAriaLabel = "";
+    homeCurrent = null;
+    docsCurrent = null;
+    wireCurrent = null;
+    _unwatchLocale = null;
+
+    onMount() {
+        this.applyLocaleCopy();
+        this._unwatchLocale = watchDocumentLocale((id) => this.applyLocaleCopy(id));
+        this.syncNavState();
+    }
+
+    onDestroy() {
+        if (typeof this._unwatchLocale === "function") {
+            this._unwatchLocale();
+        }
+        this._unwatchLocale = null;
+    }
+
+    syncNavState() {
+        this.homeCurrent = isActivePath("/") ? "page" : null;
+        this.docsCurrent = isActivePath("/d") ? "page" : null;
+        this.wireCurrent = isActivePath("/wire") ? "page" : null;
+    }
+
+    refreshCopy() {
+        this.brandShortLabel = brandShort();
+        this.brandFullLabel = brandFull();
+        this.navHomeLabel = navHome();
+        this.navDocsLabel = navDocs();
+        this.navWireLabel = navWire();
+        this.navPrimaryLabel = navPrimary();
+        this.homeAriaLabel = `${this.brandShortLabel} home`;
+        this.syncNavState();
+    }
+
+    applyLocaleCopy(preferred) {
+        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
+    }
+}
+</script>

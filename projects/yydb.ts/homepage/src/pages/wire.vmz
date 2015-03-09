@@ -1,0 +1,48 @@
+<template>
+    <SiteHeader />
+    <main class="main" id="main">
+        <div class="wire-page">
+            <header>
+                <p class="wire-page__eyebrow">{{ wireEyebrowLabel }}</p>
+                <h1>{{ wireTitleLabel }}</h1>
+                <p class="wire-page__lede">{{ wireLedeLabel }}</p>
+            </header>
+            <WireDemo />
+        </div>
+    </main>
+    <SiteFooter />
+</template>
+
+<script client>
+import { wireEyebrow, wireTitle, wireLede } from "#locales/common";
+import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
+
+export default class WirePage {
+    wireEyebrowLabel = "";
+    wireTitleLabel = "";
+    wireLedeLabel = "";
+    _unwatchLocale = null;
+
+    onMount() {
+        this.applyLocaleCopy();
+        this._unwatchLocale = watchDocumentLocale((id) => this.applyLocaleCopy(id));
+    }
+
+    onDestroy() {
+        if (typeof this._unwatchLocale === "function") {
+            this._unwatchLocale();
+        }
+        this._unwatchLocale = null;
+    }
+
+    refreshCopy() {
+        this.wireEyebrowLabel = wireEyebrow();
+        this.wireTitleLabel = wireTitle();
+        this.wireLedeLabel = wireLede();
+    }
+
+    applyLocaleCopy(preferred) {
+        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
+    }
+}
+</script>

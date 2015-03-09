@@ -1,0 +1,185 @@
+<template>
+    <SiteHeader />
+    <main class="main">
+        <div class="home">
+            <section class="home__hero">
+                <div>
+                    <p class="home__eyebrow">{{ homeEyebrowLabel }}</p>
+                    <h1 class="home__brand">{{ brandShortLabel }}</h1>
+                    <p>{{ brandFullLabel }}</p>
+                    <p class="home__lede">{{ homeLedeLabel }}</p>
+                    <div class="home__actions">
+                        <Button type="button" @click="goDocs">{{ homeOpenDocsLabel }}</Button>
+                        <Button type="button" variant="secondary" @click="goWire">{{ homeOpenWireLabel }}</Button>
+                    </div>
+                </div>
+                <div class="home__card">
+                    <code>@yydb/yydb-client</code>
+                    <p>Hello 帧本地编解码，默认不连接 live serve。</p>
+                    <Button type="button" variant="secondary" @click="goWire">{{ homeTryWireLabel }}</Button>
+                </div>
+            </section>
+
+            <section class="home__section">
+                <div class="home__section-head">
+                    <h2>{{ homeWhyTitleLabel }}</h2>
+                    <p>{{ homeWhyLedeLabel }}</p>
+                </div>
+                <div class="home__feature-grid">
+                    <article>
+                        <h3>{{ homeFeatureVosTitleLabel }}</h3>
+                        <p>{{ homeFeatureVosBodyLabel }}</p>
+                    </article>
+                    <article>
+                        <h3>{{ homeFeatureWireTitleLabel }}</h3>
+                        <p>{{ homeFeatureWireBodyLabel }}</p>
+                    </article>
+                    <article>
+                        <h3>{{ homeFeatureSqliteTitleLabel }}</h3>
+                        <p>{{ homeFeatureSqliteBodyLabel }}</p>
+                    </article>
+                    <article>
+                        <h3>{{ homeFeatureServeTitleLabel }}</h3>
+                        <p>{{ homeFeatureServeBodyLabel }}</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="home__section">
+                <div class="home__section-head">
+                    <h2>{{ homePackagesTitleLabel }}</h2>
+                    <p>{{ homePackagesLedeLabel }}</p>
+                </div>
+                <div class="home__pkg-grid">
+                    <article>
+                        <code>@yydb/yydb</code>
+                        <p>{{ homePkgYydbLabel }}</p>
+                    </article>
+                    <article>
+                        <code>@yydb/yydb-client</code>
+                        <p>{{ homePkgClientLabel }}</p>
+                    </article>
+                    <article>
+                        <code>@yydb/sqlite</code>
+                        <p>{{ homePkgSqliteLabel }}</p>
+                    </article>
+                    <article>
+                        <code>@yydb/yydb-skills</code>
+                        <p>{{ homePkgSkillsLabel }}</p>
+                    </article>
+                </div>
+            </section>
+        </div>
+    </main>
+    <SiteFooter />
+</template>
+
+<script client>
+import {
+    brandShort,
+    brandFull,
+    homeEyebrow,
+    homeLede,
+    homeOpenDocs,
+    homeOpenWire,
+    homeWhyTitle,
+    homeWhyLede,
+    homeFeatureVosTitle,
+    homeFeatureVosBody,
+    homeFeatureWireTitle,
+    homeFeatureWireBody,
+    homeFeatureSqliteTitle,
+    homeFeatureSqliteBody,
+    homeFeatureServeTitle,
+    homeFeatureServeBody,
+    homePackagesTitle,
+    homePackagesLede,
+    homePkgYydb,
+    homePkgClient,
+    homePkgSqlite,
+    homePkgSkills,
+    homeTryWire,
+} from "#locales/common";
+import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
+
+export default class IndexPage {
+    brandShortLabel = "";
+    brandFullLabel = "";
+    homeEyebrowLabel = "";
+    homeLedeLabel = "";
+    homeOpenDocsLabel = "";
+    homeOpenWireLabel = "";
+    homeWhyTitleLabel = "";
+    homeWhyLedeLabel = "";
+    homeFeatureVosTitleLabel = "";
+    homeFeatureVosBodyLabel = "";
+    homeFeatureWireTitleLabel = "";
+    homeFeatureWireBodyLabel = "";
+    homeFeatureSqliteTitleLabel = "";
+    homeFeatureSqliteBodyLabel = "";
+    homeFeatureServeTitleLabel = "";
+    homeFeatureServeBodyLabel = "";
+    homePackagesTitleLabel = "";
+    homePackagesLedeLabel = "";
+    homePkgYydbLabel = "";
+    homePkgClientLabel = "";
+    homePkgSqliteLabel = "";
+    homePkgSkillsLabel = "";
+    homeTryWireLabel = "";
+    _unwatchLocale = null;
+
+    onMount() {
+        this.applyLocaleCopy();
+        this._unwatchLocale = watchDocumentLocale((id) => this.applyLocaleCopy(id));
+    }
+
+    onDestroy() {
+        if (typeof this._unwatchLocale === "function") {
+            this._unwatchLocale();
+        }
+        this._unwatchLocale = null;
+    }
+
+    refreshCopy() {
+        this.brandShortLabel = brandShort();
+        this.brandFullLabel = brandFull();
+        this.homeEyebrowLabel = homeEyebrow();
+        this.homeLedeLabel = homeLede();
+        this.homeOpenDocsLabel = homeOpenDocs();
+        this.homeOpenWireLabel = homeOpenWire();
+        this.homeWhyTitleLabel = homeWhyTitle();
+        this.homeWhyLedeLabel = homeWhyLede();
+        this.homeFeatureVosTitleLabel = homeFeatureVosTitle();
+        this.homeFeatureVosBodyLabel = homeFeatureVosBody();
+        this.homeFeatureWireTitleLabel = homeFeatureWireTitle();
+        this.homeFeatureWireBodyLabel = homeFeatureWireBody();
+        this.homeFeatureSqliteTitleLabel = homeFeatureSqliteTitle();
+        this.homeFeatureSqliteBodyLabel = homeFeatureSqliteBody();
+        this.homeFeatureServeTitleLabel = homeFeatureServeTitle();
+        this.homeFeatureServeBodyLabel = homeFeatureServeBody();
+        this.homePackagesTitleLabel = homePackagesTitle();
+        this.homePackagesLedeLabel = homePackagesLede();
+        this.homePkgYydbLabel = homePkgYydb();
+        this.homePkgClientLabel = homePkgClient();
+        this.homePkgSqliteLabel = homePkgSqlite();
+        this.homePkgSkillsLabel = homePkgSkills();
+        this.homeTryWireLabel = homeTryWire();
+    }
+
+    applyLocaleCopy(preferred) {
+        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
+    }
+
+    goDocs() {
+        if (typeof window !== "undefined") {
+            window.location.href = "/d/";
+        }
+    }
+
+    goWire() {
+        if (typeof window !== "undefined") {
+            window.location.href = "/wire";
+        }
+    }
+}
+</script>

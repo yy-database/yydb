@@ -1,0 +1,82 @@
+<template>
+    <footer data-vmz-fixture="site-footer" class="site-footer">
+        <div class="site-footer__inner">
+            <div>
+                <p class="site-footer__brand">{{ brandShortLabel }}</p>
+                <p>{{ brandFullLabel }}</p>
+                <p class="site-footer__blurb">{{ footerBlurbLabel }}</p>
+            </div>
+            <div>
+                <h2>{{ footerExploreLabel }}</h2>
+                <ul>
+                    <li><a href="/">{{ navHomeLabel }}</a></li>
+                    <li><a href="/d/">{{ footerDocsLabel }}</a></li>
+                    <li><a href="/wire">{{ navWireLabel }}</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="site-footer__bar">
+            <p>{{ footerCopyrightLine }}</p>
+            <p>{{ footerMonoLabel }}</p>
+        </div>
+    </footer>
+</template>
+
+<script client>
+import {
+    brandShort,
+    brandFull,
+    navHome,
+    navWire,
+    footerBlurb,
+    footerExplore,
+    footerDocs,
+    footerCopyright,
+    footerMono,
+} from "#locales/common";
+import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
+
+export default class SiteFooter {
+    brandShortLabel = "";
+    brandFullLabel = "";
+    navHomeLabel = "";
+    navWireLabel = "";
+    footerBlurbLabel = "";
+    footerExploreLabel = "";
+    footerDocsLabel = "";
+    footerCopyrightLabel = "";
+    footerCopyrightLine = "";
+    footerMonoLabel = "";
+    yearLabel = String(new Date().getFullYear());
+    _unwatchLocale = null;
+
+    onMount() {
+        this.applyLocaleCopy();
+        this._unwatchLocale = watchDocumentLocale((id) => this.applyLocaleCopy(id));
+    }
+
+    onDestroy() {
+        if (typeof this._unwatchLocale === "function") {
+            this._unwatchLocale();
+        }
+        this._unwatchLocale = null;
+    }
+
+    refreshCopy() {
+        this.brandShortLabel = brandShort();
+        this.brandFullLabel = brandFull();
+        this.navHomeLabel = navHome();
+        this.navWireLabel = navWire();
+        this.footerBlurbLabel = footerBlurb();
+        this.footerExploreLabel = footerExplore();
+        this.footerDocsLabel = footerDocs();
+        this.footerCopyrightLabel = footerCopyright();
+        this.footerCopyrightLine = `© ${this.yearLabel} ${this.footerCopyrightLabel}`;
+        this.footerMonoLabel = footerMono();
+    }
+
+    applyLocaleCopy(preferred) {
+        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
+    }
+}
+</script>

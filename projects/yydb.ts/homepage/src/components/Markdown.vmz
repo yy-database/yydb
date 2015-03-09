@@ -1,0 +1,10 @@
+<template>
+  <MarkdownIt v-if="(engine || 'markdown-it') === 'markdown-it'" :source="source" />
+</template>
+
+<script client>
+export default class Markdown {
+  public source: string = '';
+  public engine: string | null = null;
+}
+</script>

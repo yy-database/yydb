@@ -1,0 +1,105 @@
+<template>
+    <section class="wire-panel" aria-labelledby="wire-demo-title">
+        <h2 id="wire-demo-title">{{ wireTitleLabel }}</h2>
+        <p class="wire-page__lede">{{ wireLedeLabel }}</p>
+
+        <Field
+            :label="wireRequestIdLabel"
+            type="number"
+            control-id="wire-request-id"
+            description-id="wire-request-id-desc"
+            error-id="wire-request-id-err"
+            :value="String(requestId)"
+            @input="onRequestIdInput"
+        />
+        <Field
+            :label="wireBodyLabel"
+            control-id="wire-body"
+            description-id="wire-body-desc"
+            error-id="wire-body-err"
+            :value="bodyText"
+            @input="onBodyInput"
+        />
+
+        <div class="wire-panel__row">
+            <Button type="button" @click="encode">{{ wireEncodeLabel }}</Button>
+            <Button type="button" variant="secondary" @click="roundtrip">{{ wireRoundtripLabel }}</Button>
+        </div>
+
+        <pre class="wire-panel__mono">{{ hex }}</pre>
+        <pre v-if="decoded" class="wire-panel__mono">{{ decoded }}</pre>
+    </section>
+</template>
+
+<script client>
+import {
+    wireTitle,
+    wireLede,
+    wireRequestId,
+    wireBody,
+    wireEncode,
+    wireRoundtrip,
+} from "#locales/common";
+import { decodeHelloHex, encodeHello } from "../lib/wire-demo.ts";
+import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
+
+export default class WireDemo {
+    requestId = 1;
+    bodyText = "";
+    hex = "";
+    decoded = "";
+    wireTitleLabel = "";
+    wireLedeLabel = "";
+    wireRequestIdLabel = "";
+    wireBodyLabel = "";
+    wireEncodeLabel = "";
+    wireRoundtripLabel = "";
+    _unwatchLocale = null;
+
+    onMount() {
+        this.applyLocaleCopy();
+        this._unwatchLocale = watchDocumentLocale((id) => this.applyLocaleCopy(id));
+        this.encode();
+    }
+
+    onDestroy() {
+        if (typeof this._unwatchLocale === "function") {
+            this._unwatchLocale();
+        }
+        this._unwatchLocale = null;
+    }
+
+    refreshCopy() {
+        this.wireTitleLabel = wireTitle();
+        this.wireLedeLabel = wireLede();
+        this.wireRequestIdLabel = wireRequestId();
+        this.wireBodyLabel = wireBody();
+        this.wireEncodeLabel = wireEncode();
+        this.wireRoundtripLabel = wireRoundtrip();
+    }
+
+    applyLocaleCopy(preferred) {
+        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
+    }
+
+    onRequestIdInput(event) {
+        const value = Number(event?.target?.value ?? this.requestId);
+        this.requestId = Number.isFinite(value) ? value : 1;
+    }
+
+    onBodyInput(event) {
+        this.bodyText = event?.target?.value ?? "";
+    }
+
+    encode() {
+        const result = encodeHello(this.requestId, this.bodyText);
+        this.hex = result.hex;
+        this.decoded = "";
+    }
+
+    roundtrip() {
+        this.encode();
+        this.decoded = decodeHelloHex(this.hex);
+    }
+}
+</script>
