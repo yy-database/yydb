@@ -6,6 +6,7 @@
     "private": true,
     "type": "module",
     "scripts": {
+        "postinstall": "node ./scripts/fix-ui-icons-registry.mjs",
         "check": "vmz check .",
         "dev": "vmz dev .",
         "build": "vmz build . --release --profile static",
