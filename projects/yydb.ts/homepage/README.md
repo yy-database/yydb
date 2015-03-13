@@ -14,6 +14,7 @@ pnpm --filter @yydb/yydb-homepage document:check
 
 | Path | Purpose |
 |------|---------|
+| `/welcome` | Full-screen welcome |
 | `/` | Product landing |
 | `/d/` | Integrated Chinese documentation |
 | `/wire` | Local `@yydb/yydb-client` frame encode/decode demo |

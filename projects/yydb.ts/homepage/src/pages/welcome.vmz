@@ -1,0 +1,76 @@
+<template>
+    <SiteHeader />
+    <main class="welcome" id="main" aria-labelledby="welcome-title">
+        <div class="welcome__backdrop" aria-hidden="true" />
+        <div class="welcome__inner">
+            <p class="welcome__kicker">
+                <span class="welcome__kicker-dot" aria-hidden="true" />
+                {{ welcomeKickerLabel }}
+            </p>
+            <h1 id="welcome-title" class="welcome__title">
+                {{ welcomeTitleLeadLabel }}
+                <em>{{ welcomeTitleEmLabel }}</em>
+            </h1>
+            <p class="welcome__lede">{{ welcomeLedeLabel }}</p>
+            <div class="welcome__actions">
+                <a href="/" class="welcome__cta welcome__cta--primary">{{ welcomeEnterLabel }}</a>
+                <a href="/d/" class="welcome__cta welcome__cta--secondary">{{ welcomeDocsLabel }}</a>
+                <a href="/wire" class="welcome__cta welcome__cta--ghost">{{ welcomeWireLabel }}</a>
+            </div>
+            <p class="welcome__note">{{ welcomeNoteLabel }}</p>
+        </div>
+    </main>
+</template>
+
+<script client>
+import {
+    welcomeKicker,
+    welcomeTitleLead,
+    welcomeTitleEm,
+    welcomeLede,
+    welcomeEnter,
+    welcomeDocs,
+    welcomeWire,
+    welcomeNote,
+} from "#locales/common";
+import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
+
+export default class WelcomePage {
+    welcomeKickerLabel = "";
+    welcomeTitleLeadLabel = "";
+    welcomeTitleEmLabel = "";
+    welcomeLedeLabel = "";
+    welcomeEnterLabel = "";
+    welcomeDocsLabel = "";
+    welcomeWireLabel = "";
+    welcomeNoteLabel = "";
+    _unwatchLocale = null;
+
+    onMount() {
+        this.applyLocaleCopy();
+        this._unwatchLocale = watchDocumentLocale((id) => this.applyLocaleCopy(id));
+    }
+
+    onDestroy() {
+        if (typeof this._unwatchLocale === "function") {
+            this._unwatchLocale();
+        }
+        this._unwatchLocale = null;
+    }
+
+    refreshCopy() {
+        this.welcomeKickerLabel = welcomeKicker();
+        this.welcomeTitleLeadLabel = welcomeTitleLead();
+        this.welcomeTitleEmLabel = welcomeTitleEm();
+        this.welcomeLedeLabel = welcomeLede();
+        this.welcomeEnterLabel = welcomeEnter();
+        this.welcomeDocsLabel = welcomeDocs();
+        this.welcomeWireLabel = welcomeWire();
+        this.welcomeNoteLabel = welcomeNote();
+    }
+
+    applyLocaleCopy(preferred) {
+        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
+    }
+}
+</script>
