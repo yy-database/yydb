@@ -1,0 +1,459 @@
+<template>
+    <div class="yydb-webui-page">
+        <ConsoleShell
+            brand="YYDB"
+            home-href="/"
+            active-nav-id="database"
+            :title="titleLabel"
+            :subtitle="subtitleLabel"
+            :breadcrumb-label="breadcrumbLabel"
+            :nav="navItems"
+            nav-label="Navigation"
+        >
+            <div class="yydb-webui-content">
+                <Alert
+                    v-if="securityTitleLabel"
+                    :title="securityTitleLabel"
+                    :description="securityBodyLabel"
+                    tone="warning"
+                />
+
+                <section class="yydb-webui-panel" :aria-label="connectionTitleLabel">
+                    <h2 class="yydb-webui-panel__title">{{ connectionTitleLabel }}</h2>
+                    <div class="yydb-webui-row">
+                        <Field
+                            :label="endpointLabel"
+                            :placeholder="endpointPlaceholder"
+                            control-id="yydb-endpoint"
+                            description-id="yydb-endpoint-desc"
+                            error-id="yydb-endpoint-err"
+                            described-by="yydb-endpoint-desc"
+                            :value="endpoint"
+                            @input="onEndpointInput"
+                        />
+                        <div class="yydb-webui-actions">
+                            <Button
+                                v-if="!client"
+                                type="button"
+                                variant="primary"
+                                :disabled="connecting"
+                                @click="connect"
+                            >
+                                {{ connecting ? connectingLabel : connectLabel }}
+                            </Button>
+                            <Button v-else type="button" variant="secondary" @click="disconnect">
+                                {{ disconnectLabel }}
+                            </Button>
+                        </div>
+                    </div>
+                    <p v-if="status" role="status" class="yydb-webui-status">{{ status }}</p>
+                    <p v-if="error" role="alert" class="yydb-webui-error">{{ error }}</p>
+                </section>
+
+                <div v-if="client" class="yydb-webui-grid">
+                    <section class="yydb-webui-panel" :aria-label="infoTitleLabel">
+                        <div class="yydb-webui-panel__head">
+                            <h2 class="yydb-webui-panel__title">{{ infoTitleLabel }}</h2>
+                            <Button type="button" variant="secondary" @click="refreshInfo">
+                                {{ infoRefreshLabel }}
+                            </Button>
+                        </div>
+                        <pre class="yydb-webui-mono">{{ infoText || infoEmptyLabel }}</pre>
+                    </section>
+
+                    <section class="yydb-webui-panel" :aria-label="schemaTitleLabel">
+                        <h2 class="yydb-webui-panel__title">{{ schemaTitleLabel }}</h2>
+                        <Field
+                            :label="schemaVersionLabel"
+                            type="number"
+                            control-id="yydb-schema-version"
+                            description-id="yydb-schema-version-desc"
+                            error-id="yydb-schema-version-err"
+                            described-by="yydb-schema-version-desc"
+                            :value="String(schemaVersion)"
+                            @input="onSchemaVersionInput"
+                        />
+                        <TextArea
+                            :label="schemaDocumentLabel"
+                            control-id="yydb-schema-document"
+                            description-id="yydb-schema-document-desc"
+                            error-id="yydb-schema-document-err"
+                            described-by="yydb-schema-document-desc"
+                            :value="schemaDocument"
+                            @input="onSchemaDocumentInput"
+                        />
+                        <div class="yydb-webui-actions">
+                            <Button type="button" variant="secondary" @click="loadSchema">
+                                {{ schemaLoadLabel }}
+                            </Button>
+                            <Button type="button" variant="primary" @click="saveSchema">
+                                {{ schemaEnsureLabel }}
+                            </Button>
+                        </div>
+                    </section>
+
+                    <section class="yydb-webui-panel yydb-webui-panel--wide" :aria-label="kvTitleLabel">
+                        <h2 class="yydb-webui-panel__title">{{ kvTitleLabel }}</h2>
+                        <div class="yydb-webui-kv-grid">
+                            <Field
+                                :label="kvKeyLabel"
+                                control-id="yydb-kv-key"
+                                description-id="yydb-kv-key-desc"
+                                error-id="yydb-kv-key-err"
+                                described-by="yydb-kv-key-desc"
+                                :value="kvKey"
+                                @input="onKvKeyInput"
+                            />
+                            <Field
+                                :label="kvValueLabel"
+                                control-id="yydb-kv-value"
+                                description-id="yydb-kv-value-desc"
+                                error-id="yydb-kv-value-err"
+                                described-by="yydb-kv-value-desc"
+                                :value="kvValue"
+                                @input="onKvValueInput"
+                            />
+                        </div>
+                        <div class="yydb-webui-actions">
+                            <Button type="button" variant="secondary" @click="kvGet">
+                                {{ kvGetLabel }}
+                            </Button>
+                            <Button type="button" variant="primary" @click="kvPut">
+                                {{ kvPutLabel }}
+                            </Button>
+                        </div>
+                        <pre class="yydb-webui-mono">{{ kvResult }}</pre>
+                    </section>
+                </div>
+            </div>
+        </ConsoleShell>
+    </div>
+</template>
+
+<style>
+.yydb-webui-page {
+    min-width: 0;
+}
+
+.yydb-webui-content {
+    display: grid;
+    gap: var(--vmz-space-4);
+    min-width: 0;
+}
+
+.yydb-webui-panel {
+    display: grid;
+    gap: var(--vmz-space-3);
+    padding: var(--vmz-space-4);
+    border: 1px solid var(--vmz-line-default);
+    border-radius: var(--vmz-radius-lg);
+    background: var(--vmz-surface-paper);
+}
+
+.yydb-webui-panel--wide {
+    grid-column: 1 / -1;
+}
+
+.yydb-webui-panel__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--vmz-space-3);
+}
+
+.yydb-webui-panel__title {
+    margin: 0;
+    font-size: var(--vmz-type-subtitle);
+    line-height: 1.4;
+}
+
+.yydb-webui-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--vmz-space-3);
+    align-items: end;
+}
+
+.yydb-webui-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--vmz-space-4);
+}
+
+.yydb-webui-kv-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--vmz-space-3);
+}
+
+.yydb-webui-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--vmz-space-2);
+}
+
+.yydb-webui-status {
+    margin: 0;
+    color: var(--vmz-text-steel);
+    font-family: var(--vmz-font-mono);
+    font-size: var(--vmz-type-caption);
+}
+
+.yydb-webui-error {
+    margin: 0;
+    color: var(--vmz-status-error);
+    font-family: var(--vmz-font-mono);
+    font-size: var(--vmz-type-caption);
+}
+
+.yydb-webui-mono {
+    margin: 0;
+    padding: var(--vmz-space-3);
+    overflow: auto;
+    border-radius: var(--vmz-radius-md);
+    background: var(--vmz-surface-code);
+    color: var(--vmz-text-on-inverse);
+    font-family: var(--vmz-font-mono);
+    font-size: var(--vmz-type-caption);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+@media (max-width: 900px) {
+    .yydb-webui-grid,
+    .yydb-webui-kv-grid,
+    .yydb-webui-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+</style>
+
+<script client>
+import { Client } from "@yydb/yydb-client";
+import {
+    webuiTitle,
+    webuiSubtitle,
+    webuiBreadcrumb,
+    webuiSecurityTitle,
+    webuiSecurityBody,
+    webuiConnectionTitle,
+    webuiEndpointLabel,
+    webuiEndpointPlaceholder,
+    webuiConnect,
+    webuiDisconnect,
+    webuiInfoTitle,
+    webuiInfoRefresh,
+    webuiInfoEmpty,
+    webuiSchemaTitle,
+    webuiSchemaVersion,
+    webuiSchemaDocument,
+    webuiSchemaLoad,
+    webuiSchemaEnsure,
+    webuiKvTitle,
+    webuiKvKey,
+    webuiKvValue,
+    webuiKvGet,
+    webuiKvPut,
+    webuiKvMissing,
+    webuiKvPutOk,
+    webuiSchemaEnsured,
+    webuiConnecting,
+} from "#locales/common";
+import { readLocaleId, watchDocumentLocale, withLocaleHint } from "../lib/locale-copy.ts";
+
+export default class WebuiIndexPage {
+    endpoint = "ws://127.0.0.1:7700/wire";
+    client = null;
+    connecting = false;
+    autoConnect = false;
+    status = "";
+    error = "";
+    infoText = "";
+    schemaVersion = 1;
+    schemaDocument = "table Project { @@id: uuid, title: utf8 }";
+    kvKey = "demo";
+    kvValue = "hello";
+    kvResult = "";
+
+    titleLabel = "";
+    subtitleLabel = "";
+    breadcrumbLabel = "";
+    securityTitleLabel = "";
+    securityBodyLabel = "";
+    connectionTitleLabel = "";
+    endpointLabel = "";
+    endpointPlaceholder = "";
+    connectLabel = "";
+    connectingLabel = "";
+    disconnectLabel = "";
+    infoTitleLabel = "";
+    infoRefreshLabel = "";
+    infoEmptyLabel = "";
+    schemaTitleLabel = "";
+    schemaVersionLabel = "";
+    schemaDocumentLabel = "";
+    schemaLoadLabel = "";
+    schemaEnsureLabel = "";
+    kvTitleLabel = "";
+    kvKeyLabel = "";
+    kvValueLabel = "";
+    kvGetLabel = "";
+    kvPutLabel = "";
+    kvMissingLabel = "";
+    kvPutOkLabel = "";
+    schemaEnsuredLabel = "";
+
+    navItems = [{ id: "database", title: "Database", href: "/" }];
+
+    _unwatchLocale = null;
+
+    onMount() {
+        this.readEndpointFromQuery();
+        this.applyLocaleCopy();
+        this._unwatchLocale = watchDocumentLocale((id) => this.applyLocaleCopy(id));
+        if (this.autoConnect) {
+            void this.connect();
+        }
+    }
+
+    onDestroy() {
+        this.disconnect();
+        if (typeof this._unwatchLocale === "function") {
+            this._unwatchLocale();
+        }
+        this._unwatchLocale = null;
+    }
+
+    readEndpointFromQuery() {
+        if (typeof window === "undefined") return;
+        const params = new URLSearchParams(window.location.search);
+        const next = params.get("endpoint");
+        if (next) {
+            this.endpoint = next;
+            this.autoConnect = true;
+        }
+    }
+
+    refreshCopy() {
+        this.titleLabel = webuiTitle();
+        this.subtitleLabel = webuiSubtitle();
+        this.breadcrumbLabel = webuiBreadcrumb();
+        this.securityTitleLabel = webuiSecurityTitle();
+        this.securityBodyLabel = webuiSecurityBody();
+        this.connectionTitleLabel = webuiConnectionTitle();
+        this.endpointLabel = webuiEndpointLabel();
+        this.endpointPlaceholder = webuiEndpointPlaceholder();
+        this.connectLabel = webuiConnect();
+        this.connectingLabel = webuiConnecting();
+        this.disconnectLabel = webuiDisconnect();
+        this.infoTitleLabel = webuiInfoTitle();
+        this.infoRefreshLabel = webuiInfoRefresh();
+        this.infoEmptyLabel = webuiInfoEmpty();
+        this.schemaTitleLabel = webuiSchemaTitle();
+        this.schemaVersionLabel = webuiSchemaVersion();
+        this.schemaDocumentLabel = webuiSchemaDocument();
+        this.schemaLoadLabel = webuiSchemaLoad();
+        this.schemaEnsureLabel = webuiSchemaEnsure();
+        this.kvTitleLabel = webuiKvTitle();
+        this.kvKeyLabel = webuiKvKey();
+        this.kvValueLabel = webuiKvValue();
+        this.kvGetLabel = webuiKvGet();
+        this.kvPutLabel = webuiKvPut();
+        this.kvMissingLabel = webuiKvMissing();
+        this.kvPutOkLabel = webuiKvPutOk();
+        this.schemaEnsuredLabel = webuiSchemaEnsured();
+    }
+
+    applyLocaleCopy(preferred) {
+        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
+    }
+
+    onEndpointInput(event) {
+        this.endpoint = event?.target?.value ?? this.endpoint;
+    }
+
+    onSchemaVersionInput(event) {
+        const value = Number(event?.target?.value ?? this.schemaVersion);
+        this.schemaVersion = Number.isFinite(value) ? value : 1;
+    }
+
+    onSchemaDocumentInput(event) {
+        this.schemaDocument = event?.target?.value ?? this.schemaDocument;
+    }
+
+    onKvKeyInput(event) {
+        this.kvKey = event?.target?.value ?? this.kvKey;
+    }
+
+    onKvValueInput(event) {
+        this.kvValue = event?.target?.value ?? this.kvValue;
+    }
+
+    async connect() {
+        if (this.connecting || this.client) return;
+        this.connecting = true;
+        this.error = "";
+        try {
+            const next = await Client.connect(this.endpoint);
+            this.client = next;
+            const version = await next.serverVersion();
+            this.status = `${this.connectLabel} · server ${version}`;
+            await this.refreshInfo();
+            await this.loadSchema();
+        } catch (err) {
+            this.error = String(err);
+            this.client = null;
+        } finally {
+            this.connecting = false;
+        }
+    }
+
+    disconnect() {
+        this.client?.close();
+        this.client = null;
+        this.status = this.disconnectLabel;
+    }
+
+    async refreshInfo() {
+        if (!this.client) return;
+        this.infoText = await this.client.info();
+    }
+
+    async loadSchema() {
+        if (!this.client) return;
+        const schema = await this.client.getSchema();
+        if (!schema) {
+            this.schemaDocument = "";
+            return;
+        }
+        this.schemaVersion = schema.version;
+        this.schemaDocument = schema.document;
+    }
+
+    async saveSchema() {
+        if (!this.client) return;
+        this.error = "";
+        try {
+            await this.client.ensureSchema(this.schemaVersion, this.schemaDocument);
+            this.status = this.schemaEnsuredLabel;
+            await this.refreshInfo();
+        } catch (err) {
+            this.error = String(err);
+        }
+    }
+
+    async kvGet() {
+        if (!this.client) return;
+        const value = await this.client.get(this.kvKey);
+        this.kvResult = value ? new TextDecoder().decode(value) : this.kvMissingLabel;
+    }
+
+    async kvPut() {
+        if (!this.client) return;
+        await this.client.put(this.kvKey, this.kvValue);
+        this.kvResult = this.kvPutOkLabel;
+        await this.refreshInfo();
+    }
+}
+</script>

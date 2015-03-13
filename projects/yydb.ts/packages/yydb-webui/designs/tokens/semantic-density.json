@@ -1,0 +1,108 @@
+{
+    "entries": [
+        {
+            "key": { "path": ["density", "control", "padding-y"] },
+            "value": "0.25rem"
+        },
+        {
+            "key": { "path": ["density", "control", "padding-x"] },
+            "value": "0.75rem"
+        },
+        {
+            "key": { "path": ["density", "control", "gap"] },
+            "value": "0.5rem"
+        },
+        {
+            "key": { "path": ["density", "compact", "padding-y"] },
+            "value": "0.125rem"
+        },
+        {
+            "key": { "path": ["density", "compact", "padding-x"] },
+            "value": "0.625rem"
+        },
+        {
+            "key": { "path": ["density", "compact", "gap"] },
+            "value": "0.375rem"
+        },
+        {
+            "key": { "path": ["density", "dense", "padding-y"] },
+            "value": "0"
+        },
+        {
+            "key": { "path": ["density", "dense", "padding-x"] },
+            "value": "0.4375rem"
+        },
+        {
+            "key": { "path": ["density", "dense", "gap"] },
+            "value": "0.25rem"
+        },
+        {
+            "key": { "path": ["control", "height"] },
+            "value": "2rem"
+        },
+        {
+            "key": { "path": ["control", "height", "sm"] },
+            "value": "1.5rem"
+        },
+        {
+            "key": { "path": ["control", "height", "lg"] },
+            "value": "2.5rem"
+        },
+        {
+            "key": { "path": ["control", "height", "mobile"] },
+            "value": "2.75rem"
+        },
+        {
+            "key": { "path": ["radius", "xs"] },
+            "value": "2px"
+        },
+        {
+            "key": { "path": ["radius", "sm"] },
+            "value": "4px"
+        },
+        {
+            "key": { "path": ["radius", "md"] },
+            "value": "6px"
+        },
+        {
+            "key": { "path": ["radius", "lg"] },
+            "value": "8px"
+        },
+        {
+            "key": { "path": ["radius", "xl"] },
+            "value": "12px"
+        },
+        {
+            "key": { "path": ["radius", "pill"] },
+            "value": "999px"
+        },
+        {
+            "key": { "path": ["shadow", "card"] },
+            "value": "none"
+        },
+        {
+            "key": { "path": ["shadow", "card", "hover"] },
+            "value": "none"
+        },
+        {
+            "key": { "path": ["shadow", "popup"] },
+            "value": "0 12px 32px 0 rgba(15,23,42,.12), 0 2px 8px 0 rgba(15,23,42,.06)"
+        },
+        {
+            "key": { "path": ["layout", "max", "width"] },
+            "value": "75rem"
+        },
+        {
+            "key": { "path": ["surface", "page"] },
+            "value": "#F5F6F8"
+        },
+        {
+            "key": { "path": ["surface", "fill"] },
+            "value": "#FAFBFC"
+        },
+        {
+            "key": { "path": ["line", "subtle"] },
+            "value": "#F0F1F3"
+        }
+    ]
+}

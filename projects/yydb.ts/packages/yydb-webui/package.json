@@ -6,9 +6,19 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "dev": "vite",
-        "build": "vite build",
-        "preview": "vite preview"
+        "postinstall": "node ./scripts/fix-ui-icons-registry.mjs",
+        "check": "vmz check .",
+        "dev": "vmz dev .",
+        "build": "vmz build . --release --profile static",
+        "preview": "vmz serve . --profile static"
+    },
+    "files": [
+        "dist",
+        "README.md"
+    ],
+    "exports": {
+        "./package.json": "./package.json",
+        "./dist/cdn/*": "./dist/cdn/*"
     },
     "repository": {
         "type": "git",
@@ -20,13 +30,14 @@
         "url": "https://github.com/yy-database/yydb/issues"
     },
     "dependencies": {
-        "@yydb/yydb-client": "workspace:*",
-        "vue": "^3.4.0"
+        "@vmz/core": "0.3.8",
+        "@vmz/plugin": "0.3.8",
+        "@vmz/ui": "0.3.8",
+        "@vmz/ui-icons": "0.3.8",
+        "@yydb/yydb-client": "workspace:*"
     },
     "devDependencies": {
-        "@vitejs/plugin-vue": "^5.0.0",
-        "typescript": "~5.3.0",
-        "vite": "^5.0.0",
-        "vue-tsc": "^2.0.0"
+        "@vmz/vmz": "0.3.8",
+        "typescript": "^5.9.2"
     }
 }

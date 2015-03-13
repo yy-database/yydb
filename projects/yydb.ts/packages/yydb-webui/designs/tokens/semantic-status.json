@@ -1,0 +1,68 @@
+{
+    "entries": [
+        {
+            "key": { "path": ["status", "info", "accent"] },
+            "value": "#1677FF"
+        },
+        {
+            "key": { "path": ["status", "info", "foreground"] },
+            "value": "#0958D9"
+        },
+        {
+            "key": { "path": ["status", "info", "background"] },
+            "value": "#E6F4FF"
+        },
+        {
+            "key": { "path": ["status", "info", "border"] },
+            "value": "#91CAFF"
+        },
+        {
+            "key": { "path": ["status", "success", "accent"] },
+            "value": "#52C41A"
+        },
+        {
+            "key": { "path": ["status", "success", "foreground"] },
+            "value": "#237804"
+        },
+        {
+            "key": { "path": ["status", "success", "background"] },
+            "value": "#F6FFED"
+        },
+        {
+            "key": { "path": ["status", "success", "border"] },
+            "value": "#B7EB8F"
+        },
+        {
+            "key": { "path": ["status", "warning", "accent"] },
+            "value": "#FAAD14"
+        },
+        {
+            "key": { "path": ["status", "warning", "foreground"] },
+            "value": "#874D00"
+        },
+        {
+            "key": { "path": ["status", "warning", "background"] },
+            "value": "#FFFBE6"
+        },
+        {
+            "key": { "path": ["status", "warning", "border"] },
+            "value": "#FFE58F"
+        },
+        {
+            "key": { "path": ["status", "danger", "accent"] },
+            "value": "#FF4D4F"
+        },
+        {
+            "key": { "path": ["status", "danger", "foreground"] },
+            "value": "#A8071A"
+        },
+        {
+            "key": { "path": ["status", "danger", "background"] },
+            "value": "#FFF1F0"
+        },
+        {
+            "key": { "path": ["status", "danger", "border"] },
+            "value": "#FFA39E"
+        }
+    ]
+}

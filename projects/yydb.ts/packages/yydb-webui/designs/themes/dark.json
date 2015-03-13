@@ -1,0 +1,204 @@
+{
+    "entries": [
+        {
+            "key": { "path": ["action", "primary", "background"] },
+            "value": "#4096FF"
+        },
+        {
+            "key": { "path": ["action", "primary", "foreground"] },
+            "value": "#FFFFFF"
+        },
+        {
+            "key": { "path": ["action", "primary", "hover"] },
+            "value": "#69B1FF"
+        },
+        {
+            "key": { "path": ["action", "primary", "active"] },
+            "value": "#1677FF"
+        },
+        {
+            "key": { "path": ["action", "primary", "soft"] },
+            "value": "#102A4C"
+        },
+        {
+            "key": { "path": ["focus", "ring"] },
+            "value": "color-mix(in srgb, #4096FF 35%, transparent)"
+        },
+        {
+            "key": { "path": ["brand", "primary"] },
+            "value": "#4096FF"
+        },
+        {
+            "key": { "path": ["brand", "energy"] },
+            "value": "#FFC53D"
+        },
+        {
+            "key": { "path": ["surface", "paper"] },
+            "value": "#1A1D21"
+        },
+        {
+            "key": { "path": ["surface", "mist"] },
+            "value": "#23272D"
+        },
+        {
+            "key": { "path": ["surface", "page"] },
+            "value": "#121417"
+        },
+        {
+            "key": { "path": ["surface", "fill"] },
+            "value": "#1F2328"
+        },
+        {
+            "key": { "path": ["surface", "ink"] },
+            "value": "#F5F7FA"
+        },
+        {
+            "key": { "path": ["surface", "graphite"] },
+            "value": "#2A2F36"
+        },
+        {
+            "key": { "path": ["surface", "code"] },
+            "value": "#0D0F12"
+        },
+        {
+            "key": { "path": ["surface", "inverse"] },
+            "value": "#F5F7FA"
+        },
+        {
+            "key": { "path": ["text", "ink"] },
+            "value": "#F5F7FA"
+        },
+        {
+            "key": { "path": ["text", "steel"] },
+            "value": "#B6BEC9"
+        },
+        {
+            "key": { "path": ["text", "tertiary"] },
+            "value": "#9AA3AF"
+        },
+        {
+            "key": { "path": ["text", "muted"] },
+            "value": "#7C8592"
+        },
+        {
+            "key": { "path": ["text", "on-brand"] },
+            "value": "#FFFFFF"
+        },
+        {
+            "key": { "path": ["text", "on-ink"] },
+            "value": "#121417"
+        },
+        {
+            "key": { "path": ["text", "on-inverse"] },
+            "value": "#1F2329"
+        },
+        {
+            "key": { "path": ["line", "default"] },
+            "value": "#363B42"
+        },
+        {
+            "key": { "path": ["line", "subtle"] },
+            "value": "#262A30"
+        },
+        {
+            "key": { "path": ["line", "strong"] },
+            "value": "#5A626D"
+        },
+        {
+            "key": { "path": ["action", "secondary", "background"] },
+            "value": "#23272D"
+        },
+        {
+            "key": { "path": ["action", "secondary", "foreground"] },
+            "value": "#F5F7FA"
+        },
+        {
+            "key": { "path": ["action", "secondary", "border"] },
+            "value": "#363B42"
+        },
+        {
+            "key": { "path": ["action", "secondary", "hover"] },
+            "value": "#2C3138"
+        },
+        {
+            "key": { "path": ["action", "secondary", "active"] },
+            "value": "#333941"
+        },
+        {
+            "key": { "path": ["action", "link", "foreground"] },
+            "value": "#69B1FF"
+        },
+        {
+            "key": { "path": ["action", "link", "hover"] },
+            "value": "#91CAFF"
+        },
+        {
+            "key": { "path": ["status", "info", "accent"] },
+            "value": "#4096FF"
+        },
+        {
+            "key": { "path": ["status", "info", "foreground"] },
+            "value": "#69B1FF"
+        },
+        {
+            "key": { "path": ["status", "info", "background"] },
+            "value": "#102A4C"
+        },
+        {
+            "key": { "path": ["status", "info", "border"] },
+            "value": "#1D4C85"
+        },
+        {
+            "key": { "path": ["status", "success", "foreground"] },
+            "value": "#73D13D"
+        },
+        {
+            "key": { "path": ["status", "success", "background"] },
+            "value": "#162B12"
+        },
+        {
+            "key": { "path": ["status", "success", "border"] },
+            "value": "#2F5A22"
+        },
+        {
+            "key": { "path": ["status", "warning", "foreground"] },
+            "value": "#FFC53D"
+        },
+        {
+            "key": { "path": ["status", "warning", "background"] },
+            "value": "#33260A"
+        },
+        {
+            "key": { "path": ["status", "warning", "border"] },
+            "value": "#66491A"
+        },
+        {
+            "key": { "path": ["status", "danger", "foreground"] },
+            "value": "#FF7875"
+        },
+        {
+            "key": { "path": ["status", "danger", "background"] },
+            "value": "#3A1717"
+        },
+        {
+            "key": { "path": ["status", "danger", "border"] },
+            "value": "#6B2A2A"
+        },
+        {
+            "key": { "path": ["shadow", "popup"] },
+            "value": "0 12px 32px 0 rgba(0,0,0,.48), 0 2px 8px 0 rgba(0,0,0,.32)"
+        },
+        {
+            "key": { "path": ["elevation", "1"] },
+            "value": "0 1px 2px 0 rgba(0,0,0,.4), 0 1px 4px -1px rgba(0,0,0,.32)"
+        },
+        {
+            "key": { "path": ["elevation", "2"] },
+            "value": "0 4px 12px 0 rgba(0,0,0,.4), 0 1px 3px 0 rgba(0,0,0,.32)"
+        },
+        {
+            "key": { "path": ["elevation", "3"] },
+            "value": "0 12px 32px 0 rgba(0,0,0,.48), 0 2px 8px 0 rgba(0,0,0,.32)"
+        }
+    ]
+}
