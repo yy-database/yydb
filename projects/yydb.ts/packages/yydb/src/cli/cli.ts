@@ -10,6 +10,7 @@ import { registerInfoCommand } from './info-cmd.js';
 import { registerInitCommand } from './init-cmd.js';
 import { registerServeCommand } from './serve-cmd.js';
 import { registerVerifyCommand } from './verify-cmd.js';
+import { registerWebuiCommand } from './webui-cmd.js';
 import { registerVersionCommand } from './version-cmd.js';
 
 const CLI_CATALOG: Record<string, string> = JSON.parse(
@@ -25,6 +26,7 @@ function buildYydbCli() {
     registerInfoCommand(cli);
     registerVerifyCommand(cli);
     registerServeCommand(cli);
+    registerWebuiCommand(cli);
 
     return cli;
 }

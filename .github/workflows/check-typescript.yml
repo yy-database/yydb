@@ -38,5 +38,5 @@ jobs:
       - run: pnpm --filter @yydb/light-db build
       - run: pnpm --filter @yydb/light-db test
       - run: pnpm --filter @yydb/light-db test:browser
-      - run: pnpm --filter @yydb/yydb-webui build
+      - run: pnpm --filter @yydb/yydb-webui check
       - run: pnpm --filter @yydb/yydb-homepage build
