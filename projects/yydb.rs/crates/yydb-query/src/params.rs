@@ -18,11 +18,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use yydb_types::{Error, Result, Value};
 
 use super::{
-    exec,
+    exec, lower,
     ops::{BoundValue, QueryOp, QueryRow, SlotTy, WriteOp},
     sql,
     write::{self, WriteOutcome},
-    lower,
 };
 use vos::syntax::{VosExpr, VosProgram, VosStmt};
 
@@ -319,9 +318,7 @@ pub(crate) fn name_to_slot(name: &str, parameters: &[ParameterDescriptor]) -> Re
     else {
         return Err(Error::Schema { message: format!("expected rewritten parameter Name, got `{name}`") });
     };
-    let index: u32 = slot
-        .parse()
-        .map_err(|_| Error::Schema { message: format!("malformed parameter slot `{name}`") })?;
+    let index: u32 = slot.parse().map_err(|_| Error::Schema { message: format!("malformed parameter slot `{name}`") })?;
     let param = parameters
         .get(index as usize)
         .ok_or_else(|| Error::Schema { message: format!("parameter slot {index} is not declared") })?;
@@ -799,5 +796,3 @@ mod tests {
         assert_eq!(stmt.parameters[0].slot_ty, SlotTy::Any);
     }
 }
-
-

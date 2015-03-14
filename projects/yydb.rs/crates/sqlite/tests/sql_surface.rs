@@ -31,11 +31,10 @@ fn sql_round_trip_on_a_file_backed_database() {
         conn.ensure_schema(SCHEMA).expect("schema");
         conn.execute("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@example.test', 10)").expect("insert");
         conn.execute("INSERT INTO Account (account_id, email, score) VALUES (2, 'linus@example.test', 30)").expect("insert");
-        conn.execute_with_params("INSERT INTO Account (account_id, email, score) VALUES (?, ?, ?)", &[
-            Value::I64(3),
-            Value::Text("grace@example.test".into()),
-            Value::I64(20),
-        ])
+        conn.execute_with_params(
+            "INSERT INTO Account (account_id, email, score) VALUES (?, ?, ?)",
+            &[Value::I64(3), Value::Text("grace@example.test".into()), Value::I64(20)],
+        )
         .expect("parameterized insert");
         assert_eq!(ids(&conn.query("SELECT account_id FROM Account ORDER BY score DESC").unwrap()), vec![2, 3, 1]);
         conn.execute_with_params("UPDATE Account SET score = ? WHERE account_id = ?", &[Value::I64(99), Value::I64(1)])

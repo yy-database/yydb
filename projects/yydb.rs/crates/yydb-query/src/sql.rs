@@ -11,9 +11,7 @@ use oak_sql::ast::{
 use yydb_types::{Error, Result, Value};
 
 use super::{
-    ops::{
-        BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, SortKey, WriteAssignment, WriteField, WriteOp,
-    },
+    ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, SortKey, WriteAssignment, WriteField, WriteOp},
     params::{ParameterDescriptor, name_to_slot},
 };
 
@@ -67,23 +65,38 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
         }
         SqlStatement::Insert(insert) => {
             let op = lower_insert(insert, parameters)?;
-            Ok(SqlPlan { read_ops: Vec::new(), write_ops: vec![op], read_set: Vec::new(), write_set: vec![insert.table_name.name.name.to_string()] })
+            Ok(SqlPlan {
+                read_ops: Vec::new(),
+                write_ops: vec![op],
+                read_set: Vec::new(),
+                write_set: vec![insert.table_name.name.name.to_string()],
+            })
         }
         SqlStatement::Update(update) => {
             let op = lower_update(update, parameters)?;
-            Ok(SqlPlan { read_ops: Vec::new(), write_ops: vec![op], read_set: Vec::new(), write_set: vec![update.table_name.name.name.to_string()] })
+            Ok(SqlPlan {
+                read_ops: Vec::new(),
+                write_ops: vec![op],
+                read_set: Vec::new(),
+                write_set: vec![update.table_name.name.name.to_string()],
+            })
         }
         SqlStatement::Delete(delete) => {
             let op = lower_delete(delete, parameters)?;
-            Ok(SqlPlan { read_ops: Vec::new(), write_ops: vec![op], read_set: Vec::new(), write_set: vec![delete.table_name.name.name.to_string()] })
+            Ok(SqlPlan {
+                read_ops: Vec::new(),
+                write_ops: vec![op],
+                read_set: Vec::new(),
+                write_set: vec![delete.table_name.name.name.to_string()],
+            })
         }
         SqlStatement::Error { message, .. } => Err(sql_error(format!("SQL statement error: {message}"))),
-        SqlStatement::Create(_) | SqlStatement::Drop(_) | SqlStatement::Alter(_) => Err(sql_error(
-            "DDL is owned by the schema document, not by SQL statements",
-        )),
-        SqlStatement::Transaction(_) | SqlStatement::SetNames(_) | SqlStatement::SetVariable(_) => Err(sql_error(
-            "session statements are applied through the connection surface, not lowered into operators",
-        )),
+        SqlStatement::Create(_) | SqlStatement::Drop(_) | SqlStatement::Alter(_) => {
+            Err(sql_error("DDL is owned by the schema document, not by SQL statements"))
+        }
+        SqlStatement::Transaction(_) | SqlStatement::SetNames(_) | SqlStatement::SetVariable(_) => {
+            Err(sql_error("session statements are applied through the connection surface, not lowered into operators"))
+        }
         SqlStatement::Show(_) | SqlStatement::Pragma(_) => {
             Err(sql_error("session introspection is not part of the YYDB SQL query surface"))
         }
@@ -133,10 +146,7 @@ fn lower_sort_key(item: &OrderByItem) -> Result<SortKey> {
     else {
         return Err(sql_error("ORDER BY supports plain column references only"));
     };
-    Ok(SortKey {
-        field: identifier.name.to_string(),
-        ascending: !matches!(item.direction, oak_sql::ast::OrderDirection::Desc),
-    })
+    Ok(SortKey { field: identifier.name.to_string(), ascending: !matches!(item.direction, oak_sql::ast::OrderDirection::Desc) })
 }
 
 fn lower_limit(limit: &LimitClause, parameters: &[ParameterDescriptor], ops: &mut Vec<QueryOp>) -> Result<()> {
@@ -176,14 +186,12 @@ fn lower_projection(items: &[SelectItem]) -> Result<Option<Vec<ProjectField>>> {
 fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<Pred> {
     match expr {
         Expression::Literal(Literal::Boolean(value, _)) => Ok(if *value { Pred::True } else { Pred::False }),
-        Expression::Binary { left, op: BinaryOperator::And, right, .. } => Ok(Pred::And(
-            Box::new(lower_predicate(left, parameters)?),
-            Box::new(lower_predicate(right, parameters)?),
-        )),
-        Expression::Binary { left, op: BinaryOperator::Or, right, .. } => Ok(Pred::Or(
-            Box::new(lower_predicate(left, parameters)?),
-            Box::new(lower_predicate(right, parameters)?),
-        )),
+        Expression::Binary { left, op: BinaryOperator::And, right, .. } => {
+            Ok(Pred::And(Box::new(lower_predicate(left, parameters)?), Box::new(lower_predicate(right, parameters)?)))
+        }
+        Expression::Binary { left, op: BinaryOperator::Or, right, .. } => {
+            Ok(Pred::Or(Box::new(lower_predicate(left, parameters)?), Box::new(lower_predicate(right, parameters)?)))
+        }
         Expression::Binary { left, op, right, .. } => {
             let cmp = match op {
                 BinaryOperator::Equal => CmpOp::Eq,
@@ -199,9 +207,7 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Res
             let value = lower_value(right, parameters)?;
             Ok(Pred::FieldCmp { path, op: cmp, value })
         }
-        Expression::Unary { op: UnaryOperator::Not, expr, .. } => {
-            Ok(Pred::Not(Box::new(lower_predicate(expr, parameters)?)))
-        }
+        Expression::Unary { op: UnaryOperator::Not, expr, .. } => Ok(Pred::Not(Box::new(lower_predicate(expr, parameters)?))),
         Expression::IsNull { expr, negated, .. } => Ok(Pred::FieldCmp {
             path: column_path(expr)?,
             op: if *negated { CmpOp::Ne } else { CmpOp::Eq },
@@ -216,13 +222,11 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Res
             let path = column_path(expr)?;
             let mut branches = Vec::with_capacity(list.len());
             for item in list {
-                branches.push(Pred::FieldCmp {
-                    path: path.clone(),
-                    op: CmpOp::Eq,
-                    value: lower_value(item, parameters)?,
-                });
+                branches.push(Pred::FieldCmp { path: path.clone(), op: CmpOp::Eq, value: lower_value(item, parameters)? });
             }
-            let mut predicate = branches.into_iter().reduce(|left, right| Pred::Or(Box::new(left), Box::new(right)))
+            let mut predicate = branches
+                .into_iter()
+                .reduce(|left, right| Pred::Or(Box::new(left), Box::new(right)))
                 .ok_or_else(|| sql_error("IN requires at least one value"))?;
             if *negated {
                 predicate = Pred::Not(Box::new(predicate));

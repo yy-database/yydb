@@ -10,10 +10,7 @@ use vos::types::{ResolvedContract, ResolvedTypeContract};
 use yydb_types::{Error, Result, TableUniqueConstraint, Value};
 
 use super::{
-    catalog,
-    coerce,
-    constraints,
-    exec,
+    catalog, coerce, constraints, exec,
     ops::{BoundValue, Pred, QueryRow, WriteAssignment, WriteField, WriteOp},
     store,
 };
@@ -68,9 +65,9 @@ fn resolve_table<'a>(contract: &'a ResolvedContract, table: &str) -> Result<(&'a
 fn resolve_value<'a>(bound: &'a BoundValue, bound_values: &'a [Value]) -> Result<&'a Value> {
     match bound {
         BoundValue::Literal(value) => Ok(value),
-        BoundValue::Slot { index, .. } => bound_values
-            .get(*index as usize)
-            .ok_or_else(|| write_error(format!("bound parameter index {index} out of range"))),
+        BoundValue::Slot { index, .. } => {
+            bound_values.get(*index as usize).ok_or_else(|| write_error(format!("bound parameter index {index} out of range")))
+        }
     }
 }
 

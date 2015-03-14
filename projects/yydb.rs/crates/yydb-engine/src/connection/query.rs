@@ -33,11 +33,7 @@ impl Connection {
         self.prepare_with(source, yydb_query::prepare_sql)
     }
 
-    fn prepare_with(
-        &self,
-        source: &str,
-        frontend: fn(&str) -> Result<PreparedStatement>,
-    ) -> Result<PreparedStatement> {
+    fn prepare_with(&self, source: &str, frontend: fn(&str) -> Result<PreparedStatement>) -> Result<PreparedStatement> {
         self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         // The frontend already classifies ops and fills `query_kind` — the
@@ -177,13 +173,8 @@ impl Connection {
         self.mutate_active_state_unlocked(|state| {
             self.check_schema_drift(&stmt, state)?;
             let contract = resolved_contract(state)?;
-            let outcome = yydb_query::execute_write_prepared(
-                &stmt,
-                &values,
-                &contract,
-                &state.unique_constraints,
-                &mut state.records,
-            )?;
+            let outcome =
+                yydb_query::execute_write_prepared(&stmt, &values, &contract, &state.unique_constraints, &mut state.records)?;
             affected = outcome.affected;
             Ok(())
         })?;

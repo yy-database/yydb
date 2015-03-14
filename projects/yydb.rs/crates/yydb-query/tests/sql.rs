@@ -46,10 +46,12 @@ fn seed(contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>) {
 }
 
 fn ids(rows: &[BTreeMap<String, Value>]) -> Vec<i64> {
-    rows.iter().map(|row| match row.get("account_id") {
-        Some(Value::I64(id)) => *id,
-        other => panic!("unexpected account_id {other:?}"),
-    }).collect()
+    rows.iter()
+        .map(|row| match row.get("account_id") {
+            Some(Value::I64(id)) => *id,
+            other => panic!("unexpected account_id {other:?}"),
+        })
+        .collect()
 }
 
 #[test]
@@ -88,8 +90,8 @@ fn select_star_returns_every_stored_column() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql("SELECT * FROM Account WHERE account_id = 1", &[], &contract, &[], &mut records)
-        .expect("select star");
+    let outcome =
+        execute_sql("SELECT * FROM Account WHERE account_id = 1", &[], &contract, &[], &mut records).expect("select star");
     assert_eq!(outcome.rows.len(), 1);
     assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text("t1".into())));
 }
@@ -123,8 +125,14 @@ fn insert_update_delete_round_trip() {
     seed(&contract, &mut records);
     assert_eq!(records.len(), 3);
 
-    let update = execute_sql("UPDATE Account SET score = 99, email = 'ada@new.test' WHERE account_id = 1", &[], &contract, &[], &mut records)
-        .expect("update");
+    let update = execute_sql(
+        "UPDATE Account SET score = 99, email = 'ada@new.test' WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("update");
     assert_eq!(update.affected, 1);
 
     let rows = execute_sql("SELECT score, email FROM Account WHERE account_id = 1", &[], &contract, &[], &mut records)
