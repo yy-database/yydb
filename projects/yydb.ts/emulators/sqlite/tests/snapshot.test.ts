@@ -20,7 +20,7 @@ test("snapshot constructor rejects invalid inputs before loading an addon", () =
 
 test("native snapshot copies bytes and exposes bounded schema scans", () => {
     const bytes = readFileSync(
-        new URL("../../../crates/sqlite-formats/src/assets/blank.sqlite", import.meta.url),
+        new URL("../../../../yydb.rs/crates/sqlite-formats/src/assets/blank.sqlite", import.meta.url),
     );
     const snapshot = new SqliteSnapshot(bytes);
     bytes.fill(0);
