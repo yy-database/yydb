@@ -8,8 +8,14 @@ use std::{
     env, fs,
     path::PathBuf,
     process::{Command, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+/// Disambiguates fixtures created within the same clock tick. Windows system
+/// time updates on a coarse timer, so parallel tests can otherwise generate
+/// into the same temporary directory.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Upstream SQLite fixture builder. Writes `db.sqlite` and `manifest.txt`.
 const PYTHON_FIXTURE: &str = r#"
@@ -281,9 +287,10 @@ pub const EXPECTED_COLUMNS: &[(&str, &[ExpectedColumn])] = &[
 pub fn generate(page_size: usize) -> Option<Fixture> {
     let python = reference_python()?;
     let directory = env::temp_dir().join(format!(
-        "yydb-sqlite-interop-{}-{}",
+        "yydb-sqlite-interop-{}-{}-{}",
         std::process::id(),
-        SystemTime::now().duration_since(UNIX_EPOCH).expect("clock before epoch").as_nanos()
+        SystemTime::now().duration_since(UNIX_EPOCH).expect("clock before epoch").as_nanos(),
+        FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
     fs::create_dir_all(&directory).expect("create fixture directory");
 
