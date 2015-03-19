@@ -26,7 +26,7 @@ beforeAll(async () => {
     if (!wasmReady) {
         const __dirname = dirname(fileURLToPath(import.meta.url));
         const wasmBytes = readFileSync(
-            join(__dirname, '..', '..', '..', 'packages', 'yydb-unknown-wasm32', 'lib', 'yydb_wasm_bg.wasm'),
+            join(__dirname, '..', '..', '..', 'platforms', 'yydb-unknown-wasm32', 'lib', 'yydb_wasm_bg.wasm'),
         );
         await initWasm({ module: new Uint8Array(wasmBytes) });
         wasmReady = true;
