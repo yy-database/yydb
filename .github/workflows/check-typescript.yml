@@ -29,8 +29,8 @@ jobs:
       - name: Build native addon
         run: pnpm run build:napi
       - run: pnpm run build:wasm
-      - run: pnpm --filter @yydb/yydb build
       - run: pnpm --filter @yydb/yydb-client build
+      - run: pnpm --filter @yydb/yydb build
       - run: pnpm --filter @yydb/yydb-client test
       - run: pnpm --filter @yydb/yydb test
       - name: Test SQLite snapshot reader
