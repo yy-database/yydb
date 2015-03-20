@@ -3,9 +3,9 @@
     <main class="main" id="main">
         <div class="wire-page">
             <header>
-                <p class="wire-page__eyebrow">{{ wireEyebrowLabel }}</p>
-                <h1>{{ wireTitleLabel }}</h1>
-                <p class="wire-page__lede">{{ wireLedeLabel }}</p>
+                <p class="page__eyebrow">{{ wireEyebrowLabel }}</p>
+                <h1 class="page__title">{{ wireTitleLabel }}</h1>
+                <p class="page__lede">{{ wireLedeLabel }}</p>
             </header>
             <WireDemo />
         </div>

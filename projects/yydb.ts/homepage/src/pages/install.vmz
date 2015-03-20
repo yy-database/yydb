@@ -1,0 +1,577 @@
+<template>
+    <SiteHeader />
+    <main class="main" id="main">
+        <div class="page">
+            <p class="page__eyebrow">{{ installEyebrowLabel }}</p>
+            <h1 class="page__title">{{ installTitleLabel }}</h1>
+            <p class="page__lede">{{ installLedeLabel }}</p>
+
+            <nav class="install-toc" :aria-label="installTitleLabel" style="margin-top:1.5rem">
+                <a href="#requirements">{{ installTocRequirementsLabel }}</a>
+                <a href="#node">{{ installTocNodeLabel }}</a>
+                <a href="#platforms">{{ installTocPlatformLabel }}</a>
+                <a href="#rust">{{ installTocRustLabel }}</a>
+                <a href="#browser">{{ installTocBrowserLabel }}</a>
+                <a href="#cli">{{ installTocCliLabel }}</a>
+                <a href="#verify">{{ installTocVerifyLabel }}</a>
+                <a href="#errors">{{ installTocErrorsLabel }}</a>
+                <a href="#uninstall">{{ installTocRemoveLabel }}</a>
+            </nav>
+
+            <section class="section" id="requirements" style="border-top:0;margin-top:1.5rem">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ installReqTitleLabel }}</h2>
+                        <p class="section__lede">{{ installReqBodyLabel }}</p>
+                    </div>
+                </div>
+                <table class="rule-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ installReqColRequirementLabel }}</th>
+                            <th scope="col">{{ installReqColValueLabel }}</th>
+                            <th scope="col">{{ installReqColNoteLabel }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <th scope="row">{{ installReqRowNodeLabel }}</th>
+                            <td><code>18+</code></td>
+                            <td>{{ installReqRowNodeNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ installReqRowNpmLabel }}</th>
+                            <td><code>npm / pnpm / yarn</code></td>
+                            <td>{{ installReqRowNpmNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ installReqRowOsLabel }}</th>
+                            <td><code>win32-x64 · linux-x64 · darwin-x64 · darwin-arm64</code></td>
+                            <td>{{ installReqRowOsNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ installReqRowBrowserLabel }}</th>
+                            <td><code>OPFS + WebAssembly</code></td>
+                            <td>{{ installReqRowBrowserNoteLabel }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section class="section" id="node">
+                <div class="install-step">
+                    <div class="install-step__label">01 · npm</div>
+                    <div>
+                        <h2>{{ installNodeTitleLabel }}</h2>
+                        <p>{{ installNodeBodyLabel }}</p>
+                        <div class="code-block">
+                            <div class="code-block__bar">shell</div>
+                            <pre>npm install @yydb/yydb</pre>
+                        </div>
+                        <div class="code-block">
+                            <div class="code-block__bar">app.ts</div>
+                            <pre>import { Database } from "@yydb/yydb";
+
+const db = await Database.open("app.yydb");
+await db.ensureSchema(`
+table User {
+    @@id: i64,
+    name: utf8,
+}
+`);
+
+await db.execute('User { id: 1, name: "Ada" }.insert()');
+const rows = await db.query("User.all().collect()");
+
+console.log(rows);
+await db.close();</pre>
+                        </div>
+                        <p style="margin-top:0.75rem">{{ installNodeNoteLabel }}</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="platforms">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ installPlatformTitleLabel }}</h2>
+                        <p class="section__lede">{{ installPlatformBodyLabel }}</p>
+                    </div>
+                </div>
+                <table class="rule-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ installPlatformColPackageLabel }}</th>
+                            <th scope="col">{{ installPlatformColTargetLabel }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>@yydb/yydb-win32-x64</code></td>
+                            <td>{{ installPlatformWinLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>@yydb/yydb-linux-x64</code></td>
+                            <td>{{ installPlatformLinuxLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>@yydb/yydb-darwin-x64</code></td>
+                            <td>{{ installPlatformDarwinX64Label }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>@yydb/yydb-darwin-arm64</code></td>
+                            <td>{{ installPlatformDarwinArmLabel }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="note">{{ installPlatformNoteLabel }}</p>
+            </section>
+
+            <section class="section" id="rust">
+                <div class="install-step">
+                    <div class="install-step__label">02 · cargo</div>
+                    <div>
+                        <h2>{{ installRustTitleLabel }}</h2>
+                        <p>{{ installRustBodyLabel }}</p>
+                        <div class="code-block">
+                            <div class="code-block__bar">shell</div>
+                            <pre>cargo add yydb</pre>
+                        </div>
+                        <div class="code-block">
+                            <div class="code-block__bar">main.rs</div>
+                            <pre>use yydb::prelude::*;
+
+fn main() {
+    let db = Connection::open("app.yydb").expect("open database");
+    // db.session() 为每个 peer 创建会话
+}</pre>
+                        </div>
+                        <p style="margin-top:0.75rem">{{ installRustNoteLabel }}</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="browser">
+                <div class="install-step">
+                    <div class="install-step__label">03 · browser</div>
+                    <div>
+                        <h2>{{ installBrowserTitleLabel }}</h2>
+                        <p>{{ installBrowserBodyLabel }}</p>
+                        <div class="code-block">
+                            <div class="code-block__bar">shell</div>
+                            <pre>npm install @yydb/light-db</pre>
+                        </div>
+                        <div class="code-block">
+                            <div class="code-block__bar">client.ts</div>
+                            <pre>import { openLightDatabase } from "@yydb/light-db";
+
+const db = await openLightDatabase("app");
+const rows = await db.query("User.all().collect()");</pre>
+                        </div>
+                        <p style="margin-top:0.75rem">{{ installBrowserNoteLabel }}</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="install-step">
+                    <div class="install-step__label">04 · wire client</div>
+                    <div>
+                        <h2>{{ installClientTitleLabel }}</h2>
+                        <p>{{ installClientBodyLabel }}</p>
+                        <div class="code-block">
+                            <div class="code-block__bar">shell</div>
+                            <pre>npm install @yydb/yydb-client</pre>
+                        </div>
+                        <div class="code-block">
+                            <div class="code-block__bar">client.ts</div>
+                            <pre>import { Client } from "@yydb/yydb-client";
+
+const client = await Client.connect("ws://127.0.0.1:7700/wire");</pre>
+                        </div>
+                        <p style="margin-top:0.75rem">{{ installClientNodeNoteLabel }}</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="cli">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ installCliTitleLabel }}</h2>
+                        <p class="section__lede">{{ installCliBodyLabel }}</p>
+                    </div>
+                </div>
+                <table class="rule-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ installCliColCommandLabel }}</th>
+                            <th scope="col">{{ installCliColUseLabel }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>yydb version</code></td>
+                            <td>{{ installCliVersionLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>yydb init ./app.yydb --schema-file schema.vos</code></td>
+                            <td>{{ installCliInitLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>yydb info ./app.yydb --doctor</code></td>
+                            <td>{{ installCliInfoLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>yydb verify ./app.yydb</code></td>
+                            <td>{{ installCliVerifyLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>yydb serve ./app.yydb --bind 127.0.0.1:7700</code></td>
+                            <td>{{ installCliServeLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>yydb webui ./app.yydb</code></td>
+                            <td>{{ installCliWebuiLabel }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="note">{{ installCliNoteLabel }}</p>
+            </section>
+
+            <section class="section" id="verify">
+                <div class="install-step">
+                    <div class="install-step__label">05 · verify</div>
+                    <div>
+                        <h2>{{ installVerifyTitleLabel }}</h2>
+                        <p>{{ installVerifyBodyLabel }}</p>
+                        <div class="code-block">
+                            <div class="code-block__bar">shell</div>
+                            <pre>npx @yydb/yydb version
+npx @yydb/yydb init ./app.yydb
+npx @yydb/yydb info ./app.yydb</pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="errors">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ installErrorsTitleLabel }}</h2>
+                        <p class="section__lede">{{ installErrorsLedeLabel }}</p>
+                    </div>
+                </div>
+                <table class="rule-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ installErrColSymptomLabel }}</th>
+                            <th scope="col">{{ installErrColCauseLabel }}</th>
+                            <th scope="col">{{ installErrColActionLabel }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <th scope="row">{{ installErrOpenTitleLabel }}</th>
+                            <td>{{ installErrOpenCauseLabel }}</td>
+                            <td>{{ installErrOpenActionLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ installErrBindingTitleLabel }}</th>
+                            <td>{{ installErrBindingCauseLabel }}</td>
+                            <td>{{ installErrBindingActionLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ installErrSchemaTitleLabel }}</th>
+                            <td>{{ installErrSchemaCauseLabel }}</td>
+                            <td>{{ installErrSchemaActionLabel }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section class="section">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ installSecurityTitleLabel }}</h2>
+                        <p class="section__lede">{{ installSecurityBodyLabel }}</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="uninstall">
+                <div class="install-step">
+                    <div class="install-step__label">06 · remove</div>
+                    <div>
+                        <h2>{{ installRemoveTitleLabel }}</h2>
+                        <p>{{ installRemoveBodyLabel }}</p>
+                        <div class="code-block">
+                            <div class="code-block__bar">shell</div>
+                            <pre>npm uninstall @yydb/yydb</pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+    <SiteFooter />
+</template>
+
+<script client>
+import {
+    installEyebrow,
+    installTitle,
+    installLede,
+    installTocRequirements,
+    installTocNode,
+    installTocPlatform,
+    installTocRust,
+    installTocBrowser,
+    installTocCli,
+    installTocVerify,
+    installTocErrors,
+    installTocRemove,
+    installReqTitle,
+    installReqBody,
+    installReqColRequirement,
+    installReqColValue,
+    installReqColNote,
+    installReqRowNode,
+    installReqRowNodeNote,
+    installReqRowNpm,
+    installReqRowNpmNote,
+    installReqRowOs,
+    installReqRowOsNote,
+    installReqRowBrowser,
+    installReqRowBrowserNote,
+    installNodeTitle,
+    installNodeBody,
+    installNodeNote,
+    installPlatformTitle,
+    installPlatformBody,
+    installPlatformColPackage,
+    installPlatformColTarget,
+    installPlatformWin,
+    installPlatformLinux,
+    installPlatformDarwinX64,
+    installPlatformDarwinArm,
+    installPlatformNote,
+    installRustTitle,
+    installRustBody,
+    installRustNote,
+    installBrowserTitle,
+    installBrowserBody,
+    installBrowserNote,
+    installClientTitle,
+    installClientBody,
+    installClientNodeNote,
+    installCliTitle,
+    installCliBody,
+    installCliColCommand,
+    installCliColUse,
+    installCliVersion,
+    installCliInit,
+    installCliInfo,
+    installCliVerify,
+    installCliServe,
+    installCliWebui,
+    installCliNote,
+    installVerifyTitle,
+    installVerifyBody,
+    installRemoveTitle,
+    installRemoveBody,
+    installErrorsTitle,
+    installErrorsLede,
+    installErrColSymptom,
+    installErrColCause,
+    installErrColAction,
+    installErrOpenTitle,
+    installErrOpenCause,
+    installErrOpenAction,
+    installErrBindingTitle,
+    installErrBindingCause,
+    installErrBindingAction,
+    installErrSchemaTitle,
+    installErrSchemaCause,
+    installErrSchemaAction,
+    installSecurityTitle,
+    installSecurityBody,
+} from "#locales/common";
+import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
+
+export default class InstallPage {
+    installEyebrowLabel = "";
+    installTitleLabel = "";
+    installLedeLabel = "";
+    installTocRequirementsLabel = "";
+    installTocNodeLabel = "";
+    installTocPlatformLabel = "";
+    installTocRustLabel = "";
+    installTocBrowserLabel = "";
+    installTocCliLabel = "";
+    installTocVerifyLabel = "";
+    installTocErrorsLabel = "";
+    installTocRemoveLabel = "";
+    installReqTitleLabel = "";
+    installReqBodyLabel = "";
+    installReqColRequirementLabel = "";
+    installReqColValueLabel = "";
+    installReqColNoteLabel = "";
+    installReqRowNodeLabel = "";
+    installReqRowNodeNoteLabel = "";
+    installReqRowNpmLabel = "";
+    installReqRowNpmNoteLabel = "";
+    installReqRowOsLabel = "";
+    installReqRowOsNoteLabel = "";
+    installReqRowBrowserLabel = "";
+    installReqRowBrowserNoteLabel = "";
+    installNodeTitleLabel = "";
+    installNodeBodyLabel = "";
+    installNodeNoteLabel = "";
+    installPlatformTitleLabel = "";
+    installPlatformBodyLabel = "";
+    installPlatformColPackageLabel = "";
+    installPlatformColTargetLabel = "";
+    installPlatformWinLabel = "";
+    installPlatformLinuxLabel = "";
+    installPlatformDarwinX64Label = "";
+    installPlatformDarwinArmLabel = "";
+    installPlatformNoteLabel = "";
+    installRustTitleLabel = "";
+    installRustBodyLabel = "";
+    installRustNoteLabel = "";
+    installBrowserTitleLabel = "";
+    installBrowserBodyLabel = "";
+    installBrowserNoteLabel = "";
+    installClientTitleLabel = "";
+    installClientBodyLabel = "";
+    installClientNodeNoteLabel = "";
+    installCliTitleLabel = "";
+    installCliBodyLabel = "";
+    installCliColCommandLabel = "";
+    installCliColUseLabel = "";
+    installCliVersionLabel = "";
+    installCliInitLabel = "";
+    installCliInfoLabel = "";
+    installCliVerifyLabel = "";
+    installCliServeLabel = "";
+    installCliWebuiLabel = "";
+    installCliNoteLabel = "";
+    installVerifyTitleLabel = "";
+    installVerifyBodyLabel = "";
+    installRemoveTitleLabel = "";
+    installRemoveBodyLabel = "";
+    installErrorsTitleLabel = "";
+    installErrorsLedeLabel = "";
+    installErrColSymptomLabel = "";
+    installErrColCauseLabel = "";
+    installErrColActionLabel = "";
+    installErrOpenTitleLabel = "";
+    installErrOpenCauseLabel = "";
+    installErrOpenActionLabel = "";
+    installErrBindingTitleLabel = "";
+    installErrBindingCauseLabel = "";
+    installErrBindingActionLabel = "";
+    installErrSchemaTitleLabel = "";
+    installErrSchemaCauseLabel = "";
+    installErrSchemaActionLabel = "";
+    installSecurityTitleLabel = "";
+    installSecurityBodyLabel = "";
+    _unwatchLocale = null;
+
+    onMount() {
+        this.applyLocaleCopy();
+        this._unwatchLocale = watchDocumentLocale((id) => this.applyLocaleCopy(id));
+    }
+
+    onDestroy() {
+        if (typeof this._unwatchLocale === "function") {
+            this._unwatchLocale();
+        }
+        this._unwatchLocale = null;
+    }
+
+    refreshCopy() {
+        this.installEyebrowLabel = installEyebrow();
+        this.installTitleLabel = installTitle();
+        this.installLedeLabel = installLede();
+        this.installTocRequirementsLabel = installTocRequirements();
+        this.installTocNodeLabel = installTocNode();
+        this.installTocPlatformLabel = installTocPlatform();
+        this.installTocRustLabel = installTocRust();
+        this.installTocBrowserLabel = installTocBrowser();
+        this.installTocCliLabel = installTocCli();
+        this.installTocVerifyLabel = installTocVerify();
+        this.installTocErrorsLabel = installTocErrors();
+        this.installTocRemoveLabel = installTocRemove();
+        this.installReqTitleLabel = installReqTitle();
+        this.installReqBodyLabel = installReqBody();
+        this.installReqColRequirementLabel = installReqColRequirement();
+        this.installReqColValueLabel = installReqColValue();
+        this.installReqColNoteLabel = installReqColNote();
+        this.installReqRowNodeLabel = installReqRowNode();
+        this.installReqRowNodeNoteLabel = installReqRowNodeNote();
+        this.installReqRowNpmLabel = installReqRowNpm();
+        this.installReqRowNpmNoteLabel = installReqRowNpmNote();
+        this.installReqRowOsLabel = installReqRowOs();
+        this.installReqRowOsNoteLabel = installReqRowOsNote();
+        this.installReqRowBrowserLabel = installReqRowBrowser();
+        this.installReqRowBrowserNoteLabel = installReqRowBrowserNote();
+        this.installNodeTitleLabel = installNodeTitle();
+        this.installNodeBodyLabel = installNodeBody();
+        this.installNodeNoteLabel = installNodeNote();
+        this.installPlatformTitleLabel = installPlatformTitle();
+        this.installPlatformBodyLabel = installPlatformBody();
+        this.installPlatformColPackageLabel = installPlatformColPackage();
+        this.installPlatformColTargetLabel = installPlatformColTarget();
+        this.installPlatformWinLabel = installPlatformWin();
+        this.installPlatformLinuxLabel = installPlatformLinux();
+        this.installPlatformDarwinX64Label = installPlatformDarwinX64();
+        this.installPlatformDarwinArmLabel = installPlatformDarwinArm();
+        this.installPlatformNoteLabel = installPlatformNote();
+        this.installRustTitleLabel = installRustTitle();
+        this.installRustBodyLabel = installRustBody();
+        this.installRustNoteLabel = installRustNote();
+        this.installBrowserTitleLabel = installBrowserTitle();
+        this.installBrowserBodyLabel = installBrowserBody();
+        this.installBrowserNoteLabel = installBrowserNote();
+        this.installClientTitleLabel = installClientTitle();
+        this.installClientBodyLabel = installClientBody();
+        this.installClientNodeNoteLabel = installClientNodeNote();
+        this.installCliTitleLabel = installCliTitle();
+        this.installCliBodyLabel = installCliBody();
+        this.installCliColCommandLabel = installCliColCommand();
+        this.installCliColUseLabel = installCliColUse();
+        this.installCliVersionLabel = installCliVersion();
+        this.installCliInitLabel = installCliInit();
+        this.installCliInfoLabel = installCliInfo();
+        this.installCliVerifyLabel = installCliVerify();
+        this.installCliServeLabel = installCliServe();
+        this.installCliWebuiLabel = installCliWebui();
+        this.installCliNoteLabel = installCliNote();
+        this.installVerifyTitleLabel = installVerifyTitle();
+        this.installVerifyBodyLabel = installVerifyBody();
+        this.installRemoveTitleLabel = installRemoveTitle();
+        this.installRemoveBodyLabel = installRemoveBody();
+        this.installErrorsTitleLabel = installErrorsTitle();
+        this.installErrorsLedeLabel = installErrorsLede();
+        this.installErrColSymptomLabel = installErrColSymptom();
+        this.installErrColCauseLabel = installErrColCause();
+        this.installErrColActionLabel = installErrColAction();
+        this.installErrOpenTitleLabel = installErrOpenTitle();
+        this.installErrOpenCauseLabel = installErrOpenCause();
+        this.installErrOpenActionLabel = installErrOpenAction();
+        this.installErrBindingTitleLabel = installErrBindingTitle();
+        this.installErrBindingCauseLabel = installErrBindingCause();
+        this.installErrBindingActionLabel = installErrBindingAction();
+        this.installErrSchemaTitleLabel = installErrSchemaTitle();
+        this.installErrSchemaCauseLabel = installErrSchemaCause();
+        this.installErrSchemaActionLabel = installErrSchemaAction();
+        this.installSecurityTitleLabel = installSecurityTitle();
+        this.installSecurityBodyLabel = installSecurityBody();
+    }
+
+    applyLocaleCopy(preferred) {
+        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
+    }
+}
+</script>

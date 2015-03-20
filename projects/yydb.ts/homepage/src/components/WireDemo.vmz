@@ -1,7 +1,6 @@
 <template>
     <section class="wire-panel" aria-labelledby="wire-demo-title">
-        <h2 id="wire-demo-title">{{ wireTitleLabel }}</h2>
-        <p class="wire-page__lede">{{ wireLedeLabel }}</p>
+        <h2 id="wire-demo-title">{{ wirePanelTitleLabel }}</h2>
 
         <Field
             :label="wireRequestIdLabel"
@@ -28,17 +27,18 @@
 
         <pre class="wire-panel__mono">{{ hex }}</pre>
         <pre v-if="decoded" class="wire-panel__mono">{{ decoded }}</pre>
+        <p class="hero__install-note">{{ wireNoteLabel }}</p>
     </section>
 </template>
 
 <script client>
 import {
-    wireTitle,
-    wireLede,
+    wirePanelTitle,
     wireRequestId,
     wireBody,
     wireEncode,
     wireRoundtrip,
+    wireNote,
 } from "#locales/common";
 import { decodeHelloHex, encodeHello } from "../lib/wire-demo.ts";
 import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
@@ -48,12 +48,12 @@ export default class WireDemo {
     bodyText = "";
     hex = "";
     decoded = "";
-    wireTitleLabel = "";
-    wireLedeLabel = "";
+    wirePanelTitleLabel = "";
     wireRequestIdLabel = "";
     wireBodyLabel = "";
     wireEncodeLabel = "";
     wireRoundtripLabel = "";
+    wireNoteLabel = "";
     _unwatchLocale = null;
 
     onMount() {
@@ -70,12 +70,12 @@ export default class WireDemo {
     }
 
     refreshCopy() {
-        this.wireTitleLabel = wireTitle();
-        this.wireLedeLabel = wireLede();
+        this.wirePanelTitleLabel = wirePanelTitle();
         this.wireRequestIdLabel = wireRequestId();
         this.wireBodyLabel = wireBody();
         this.wireEncodeLabel = wireEncode();
         this.wireRoundtripLabel = wireRoundtrip();
+        this.wireNoteLabel = wireNote();
     }
 
     applyLocaleCopy(preferred) {

@@ -1,72 +1,407 @@
 <template>
     <SiteHeader />
-    <main class="main">
-        <div class="home">
-            <section class="home__hero">
-                <div>
-                    <p class="home__eyebrow">{{ homeEyebrowLabel }}</p>
-                    <h1 class="home__brand">{{ brandShortLabel }}</h1>
-                    <p>{{ brandFullLabel }}</p>
-                    <p class="home__lede">{{ homeLedeLabel }}</p>
-                    <div class="home__actions">
-                        <Button type="button" @click="goDocs">{{ homeOpenDocsLabel }}</Button>
-                        <Button type="button" variant="secondary" @click="goWire">{{ homeOpenWireLabel }}</Button>
+    <main class="main" id="main">
+        <section class="hero">
+            <div>
+                <p class="page__eyebrow">{{ homeEyebrowLabel }}</p>
+                <h1 class="hero__title">{{ homeTitleLabel }}</h1>
+                <p class="hero__tagline">{{ homeTaglineLabel }}</p>
+                <p class="hero__lede">{{ homeLedeLabel }}</p>
+                <div class="btn-row hero__actions">
+                    <a class="btn btn--primary" href="/install">{{ homeActionInstallLabel }}</a>
+                    <a class="btn" href="/d/">{{ homeActionDocsLabel }}</a>
+                </div>
+                <dl class="hero__facts">
+                    <div class="hero__fact">
+                        <dt>{{ homeMetaVersionLabel }}</dt>
+                        <dd>{{ homeMetaVersionValueLabel }}</dd>
+                    </div>
+                    <div class="hero__fact">
+                        <dt>{{ homeMetaStorageLabel }}</dt>
+                        <dd>{{ homeMetaStorageValueLabel }}</dd>
+                    </div>
+                    <div class="hero__fact">
+                        <dt>{{ homeMetaWireLabel }}</dt>
+                        <dd>{{ homeMetaWireValueLabel }}</dd>
+                    </div>
+                    <div class="hero__fact">
+                        <dt>{{ homeMetaLicenseLabel }}</dt>
+                        <dd>{{ homeMetaLicenseValueLabel }}</dd>
+                    </div>
+                </dl>
+            </div>
+            <div>
+                <div class="hero__install">
+                    <code>npm install @yydb/yydb</code>
+                    <a class="btn btn--quiet" href="/install">{{ navInstallLabel }}</a>
+                </div>
+                <p class="hero__install-note">{{ homeQuickNoteLabel }}</p>
+                <div class="terminal">
+                    <div class="terminal__bar">
+                        <span>{{ homeQuickFileNameLabel }} · Node.js</span>
+                        <a href="/d/">{{ navDocsLabel }}</a>
+                    </div>
+                    <pre>// open or create a single-file database
+import { Database } from "@yydb/yydb";
+
+const db = await Database.open("app.yydb");
+
+await db.ensureSchema(`
+table User {
+    @@id: i64,
+    name: utf8,
+    email: utf8,
+}
+`);
+
+await db.execute(
+    'User { id: 1, name: "Ada", email: "ada@example.com" }.insert()',
+);
+
+const users = await db.query("User.all().collect()");
+console.log(users.length); // 1
+
+await db.close();</pre>
+                </div>
+            </div>
+        </section>
+
+        <div class="page">
+            <section class="section" style="margin-top:0;border-top:0;padding-top:0">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ homeFeatureTitleLabel }}</h2>
+                        <p class="section__lede">{{ homeFeatureLedeLabel }}</p>
                     </div>
                 </div>
-                <div class="home__card">
-                    <code>@yydb/yydb-client</code>
-                    <p>Hello 帧本地编解码，默认不连接 live serve。</p>
-                    <Button type="button" variant="secondary" @click="goWire">{{ homeTryWireLabel }}</Button>
-                </div>
-            </section>
-
-            <section class="home__section">
-                <div class="home__section-head">
-                    <h2>{{ homeWhyTitleLabel }}</h2>
-                    <p>{{ homeWhyLedeLabel }}</p>
-                </div>
-                <div class="home__feature-grid">
+                <div class="grid-cards">
                     <article>
-                        <h3>{{ homeFeatureVosTitleLabel }}</h3>
-                        <p>{{ homeFeatureVosBodyLabel }}</p>
+                        <h3>{{ homeFeatureSchemaTitleLabel }}</h3>
+                        <p>{{ homeFeatureSchemaBodyLabel }}</p>
+                    </article>
+                    <article>
+                        <h3>{{ homeFeatureDurabilityTitleLabel }}</h3>
+                        <p>{{ homeFeatureDurabilityBodyLabel }}</p>
+                    </article>
+                    <article>
+                        <h3>{{ homeFeatureObjectTitleLabel }}</h3>
+                        <p>{{ homeFeatureObjectBodyLabel }}</p>
+                    </article>
+                    <article>
+                        <h3>{{ homeFeatureScalarTitleLabel }}</h3>
+                        <p>{{ homeFeatureScalarBodyLabel }}</p>
+                    </article>
+                    <article>
+                        <h3>{{ homeFeatureHostTitleLabel }}</h3>
+                        <p>{{ homeFeatureHostBodyLabel }}</p>
                     </article>
                     <article>
                         <h3>{{ homeFeatureWireTitleLabel }}</h3>
                         <p>{{ homeFeatureWireBodyLabel }}</p>
                     </article>
-                    <article>
-                        <h3>{{ homeFeatureSqliteTitleLabel }}</h3>
-                        <p>{{ homeFeatureSqliteBodyLabel }}</p>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ homeMatrixTitleLabel }}</h2>
+                        <p class="section__lede">{{ homeMatrixLedeLabel }}</p>
+                    </div>
+                </div>
+                <table class="rule-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ homeMatrixColItemLabel }}</th>
+                            <th scope="col">{{ homeMatrixColStateLabel }}</th>
+                            <th scope="col">{{ homeMatrixColNoteLabel }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <th scope="row">{{ homeRowEngineLabel }}</th>
+                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
+                            <td>{{ homeRowEngineNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowVosSchemaLabel }}</th>
+                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
+                            <td>{{ homeRowVosSchemaNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowQueryLabel }}</th>
+                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
+                            <td>{{ homeRowQueryNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowWriteLabel }}</th>
+                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
+                            <td>{{ homeRowWriteNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowStmtLabel }}</th>
+                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
+                            <td>{{ homeRowStmtNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowTxLabel }}</th>
+                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
+                            <td>{{ homeRowTxNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowObjectLabel }}</th>
+                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
+                            <td>{{ homeRowObjectNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowVectorLabel }}</th>
+                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
+                            <td>{{ homeRowVectorNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowUdfLabel }}</th>
+                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
+                            <td>{{ homeRowUdfNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowAnnLabel }}</th>
+                            <td class="is-status status-out">{{ stateRoadmapLabel }}</td>
+                            <td>{{ homeRowAnnNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowDistLabel }}</th>
+                            <td class="is-status status-out">{{ stateExcludedLabel }}</td>
+                            <td>{{ homeRowDistNoteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">{{ homeRowSqlLabel }}</th>
+                            <td class="is-status status-out">{{ stateExcludedLabel }}</td>
+                            <td>{{ homeRowSqlNoteLabel }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section class="section">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ homePathTitleLabel }}</h2>
+                        <p class="section__lede">{{ homePathLedeLabel }}</p>
+                    </div>
+                </div>
+                <div class="path-list">
+                    <article class="path-card">
+                        <p class="path-card__label">{{ homePathEmbeddedLabel }}</p>
+                        <h3>{{ homePathEmbeddedTitleLabel }}</h3>
+                        <ul class="path-card__flow">
+                            <li>{{ homePathEmbeddedStepAppLabel }}</li>
+                            <li>{{ homePathEmbeddedStepEngineLabel }}</li>
+                            <li>{{ homePathEmbeddedStepFileLabel }}</li>
+                        </ul>
                     </article>
-                    <article>
-                        <h3>{{ homeFeatureServeTitleLabel }}</h3>
-                        <p>{{ homeFeatureServeBodyLabel }}</p>
+                    <article class="path-card">
+                        <p class="path-card__label">{{ homePathServeLabel }}</p>
+                        <h3>{{ homePathServeTitleLabel }}</h3>
+                        <ul class="path-card__flow">
+                            <li>{{ homePathServeStepClientLabel }}</li>
+                            <li>{{ homePathServeStepWireLabel }}</li>
+                            <li>{{ homePathServeStepEngineLabel }}</li>
+                        </ul>
+                    </article>
+                    <article class="path-card">
+                        <p class="path-card__label">{{ homePathBrowserLabel }}</p>
+                        <h3>{{ homePathBrowserTitleLabel }}</h3>
+                        <ul class="path-card__flow">
+                            <li>{{ homePathBrowserStepContextLabel }}</li>
+                            <li>{{ homePathBrowserStepLightLabel }}</li>
+                            <li>{{ homePathBrowserStepStoreLabel }}</li>
+                        </ul>
                     </article>
                 </div>
             </section>
 
-            <section class="home__section">
-                <div class="home__section-head">
-                    <h2>{{ homePackagesTitleLabel }}</h2>
-                    <p>{{ homePackagesLedeLabel }}</p>
+            <section class="section">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ homeWireTitleLabel }}</h2>
+                        <p class="section__lede">{{ homeWireLedeLabel }}</p>
+                    </div>
+                    <p class="section__aside"><a href="/wire">{{ homeWireLinkLabel }}</a></p>
                 </div>
-                <div class="home__pkg-grid">
-                    <article>
-                        <code>@yydb/yydb</code>
-                        <p>{{ homePkgYydbLabel }}</p>
-                    </article>
-                    <article>
-                        <code>@yydb/yydb-client</code>
-                        <p>{{ homePkgClientLabel }}</p>
-                    </article>
-                    <article>
-                        <code>@yydb/sqlite</code>
-                        <p>{{ homePkgSqliteLabel }}</p>
-                    </article>
-                    <article>
-                        <code>@yydb/yydb-skills</code>
-                        <p>{{ homePkgSkillsLabel }}</p>
-                    </article>
+                <table class="rule-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ homeWireColOffsetLabel }}</th>
+                            <th scope="col">{{ homeWireColLenLabel }}</th>
+                            <th scope="col">{{ homeWireColFieldLabel }}</th>
+                            <th scope="col">{{ homeWireColValueLabel }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>0</code></td>
+                            <td><code>4</code></td>
+                            <td><code>magic</code></td>
+                            <td>{{ homeWireRowMagicValueLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>4</code></td>
+                            <td><code>4</code></td>
+                            <td><code>version</code></td>
+                            <td>{{ homeWireRowVersionValueLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>8</code></td>
+                            <td><code>1</code></td>
+                            <td><code>msg_type</code></td>
+                            <td>{{ homeWireRowMsgValueLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>9</code></td>
+                            <td><code>3</code></td>
+                            <td><code>flags</code></td>
+                            <td>{{ homeWireRowFlagsValueLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>12</code></td>
+                            <td><code>4</code></td>
+                            <td><code>request_id</code></td>
+                            <td>{{ homeWireRowReqValueLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>16</code></td>
+                            <td><code>4</code></td>
+                            <td><code>body_len</code></td>
+                            <td>{{ homeWireRowLenValueLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>20</code></td>
+                            <td><code>body_len</code></td>
+                            <td><code>body</code></td>
+                            <td>{{ homeWireRowBodyValueLabel }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="note" style="margin-top:0.875rem">{{ homeWireNoteLabel }}</p>
+            </section>
+
+            <section class="section">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ homePackagesTitleLabel }}</h2>
+                        <p class="section__lede">{{ homePackagesLedeLabel }}</p>
+                    </div>
+                    <p class="section__aside"><a href="/install">{{ homePkgInstallHintLabel }}</a></p>
+                </div>
+                <table class="rule-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ homePkgColPackageLabel }}</th>
+                            <th scope="col">{{ homePkgColUseLabel }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>@yydb/yydb</code></td>
+                            <td>{{ homePkgYydbLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>@yydb/light-db</code></td>
+                            <td>{{ homePkgLightLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>@yydb/yydb-client</code></td>
+                            <td>{{ homePkgClientLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>@yydb/webui</code></td>
+                            <td>{{ homePkgWebuiLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>@yydb/sqlite</code></td>
+                            <td>{{ homePkgSqliteLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>@yydb/yydb-skills</code></td>
+                            <td>{{ homePkgSkillsLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>yydb</code> (crate)</td>
+                            <td>{{ homePkgRustLabel }}</td>
+                        </tr>
+                        <tr>
+                            <td><code>@yydb/yydb-win32-x64</code> …</td>
+                            <td>{{ homePkgPlatformLabel }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section class="section">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ homeDocsTitleLabel }}</h2>
+                        <p class="section__lede">{{ homeDocsLedeLabel }}</p>
+                    </div>
+                    <p class="section__aside"><a href="/d/">{{ navDocsLabel }}</a></p>
+                </div>
+                <ul class="doc-list">
+                    <li>
+                        <a :href="docQuickstartHref">{{ homeDocsQuickStartLabel }}</a>
+                        <p>{{ homeDocsQuickStartDescLabel }}</p>
+                    </li>
+                    <li>
+                        <a :href="docInstallHref">{{ homeDocsInstallLabel }}</a>
+                        <p>{{ homeDocsInstallDescLabel }}</p>
+                    </li>
+                    <li>
+                        <a :href="docSchemaHref">{{ homeDocsSchemaLabel }}</a>
+                        <p>{{ homeDocsSchemaDescLabel }}</p>
+                    </li>
+                    <li>
+                        <a :href="docReadWriteHref">{{ homeDocsReadWriteLabel }}</a>
+                        <p>{{ homeDocsReadWriteDescLabel }}</p>
+                    </li>
+                    <li>
+                        <a :href="docNodeHref">{{ homeDocsNodeLabel }}</a>
+                        <p>{{ homeDocsNodeDescLabel }}</p>
+                    </li>
+                    <li>
+                        <a :href="docBrowserHref">{{ homeDocsBrowserLabel }}</a>
+                        <p>{{ homeDocsBrowserDescLabel }}</p>
+                    </li>
+                    <li>
+                        <a :href="docServeHref">{{ homeDocsServeLabel }}</a>
+                        <p>{{ homeDocsServeDescLabel }}</p>
+                    </li>
+                    <li>
+                        <a :href="docWireHref">{{ homeDocsWireLabel }}</a>
+                        <p>{{ homeDocsWireDescLabel }}</p>
+                    </li>
+                    <li>
+                        <a :href="docPackagesHref">{{ homeDocsPackagesLabel }}</a>
+                        <p>{{ homeDocsPackagesDescLabel }}</p>
+                    </li>
+                    <li>
+                        <a :href="docErrorsHref">{{ homeDocsErrorsLabel }}</a>
+                        <p>{{ homeDocsErrorsDescLabel }}</p>
+                    </li>
+                </ul>
+            </section>
+
+            <section class="section">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ homeCommunityTitleLabel }}</h2>
+                        <p class="section__lede">{{ homeCommunityBodyLabel }}</p>
+                    </div>
+                </div>
+                <div class="community">
+                    <p>{{ homeCommunityBodyLabel }}</p>
+                    <div class="btn-row">
+                        <a class="btn" :href="discussionsHref">{{ homeCommunityDiscussionsLabel }}</a>
+                        <a class="btn btn--quiet" :href="issuesHref">{{ homeCommunityIssuesLabel }}</a>
+                    </div>
                 </div>
             </section>
         </div>
@@ -76,56 +411,294 @@
 
 <script client>
 import {
-    brandShort,
-    brandFull,
+    navInstall,
+    navDocs,
     homeEyebrow,
+    homeTitle,
+    homeTagline,
     homeLede,
-    homeOpenDocs,
-    homeOpenWire,
-    homeWhyTitle,
-    homeWhyLede,
-    homeFeatureVosTitle,
-    homeFeatureVosBody,
+    homeActionInstall,
+    homeActionDocs,
+    homeMetaVersionLabel,
+    homeMetaVersionValue,
+    homeMetaStorageLabel,
+    homeMetaStorageValue,
+    homeMetaWireLabel,
+    homeMetaWireValue,
+    homeMetaLicenseLabel,
+    homeMetaLicenseValue,
+    homeQuickNote,
+    homeQuickFileName,
+    homeFeatureTitle,
+    homeFeatureLede,
+    homeFeatureSchemaTitle,
+    homeFeatureSchemaBody,
+    homeFeatureDurabilityTitle,
+    homeFeatureDurabilityBody,
+    homeFeatureObjectTitle,
+    homeFeatureObjectBody,
+    homeFeatureScalarTitle,
+    homeFeatureScalarBody,
+    homeFeatureHostTitle,
+    homeFeatureHostBody,
     homeFeatureWireTitle,
     homeFeatureWireBody,
-    homeFeatureSqliteTitle,
-    homeFeatureSqliteBody,
-    homeFeatureServeTitle,
-    homeFeatureServeBody,
+    homeMatrixTitle,
+    homeMatrixLede,
+    homeMatrixColItem,
+    homeMatrixColState,
+    homeMatrixColNote,
+    homeRowEngine,
+    homeRowEngineNote,
+    homeRowVosSchema,
+    homeRowVosSchemaNote,
+    homeRowQuery,
+    homeRowQueryNote,
+    homeRowWrite,
+    homeRowWriteNote,
+    homeRowStmt,
+    homeRowStmtNote,
+    homeRowTx,
+    homeRowTxNote,
+    homeRowObject,
+    homeRowObjectNote,
+    homeRowVector,
+    homeRowVectorNote,
+    homeRowUdf,
+    homeRowUdfNote,
+    homeRowAnn,
+    homeRowAnnNote,
+    homeRowDist,
+    homeRowDistNote,
+    homeRowSql,
+    homeRowSqlNote,
+    stateAvailable,
+    stateRoadmap,
+    stateExcluded,
+    homePathTitle,
+    homePathLede,
+    homePathEmbeddedLabel,
+    homePathEmbeddedTitle,
+    homePathEmbeddedStepApp,
+    homePathEmbeddedStepEngine,
+    homePathEmbeddedStepFile,
+    homePathServeLabel,
+    homePathServeTitle,
+    homePathServeStepClient,
+    homePathServeStepWire,
+    homePathServeStepEngine,
+    homePathBrowserLabel,
+    homePathBrowserTitle,
+    homePathBrowserStepContext,
+    homePathBrowserStepLight,
+    homePathBrowserStepStore,
+    homeWireTitle,
+    homeWireLede,
+    homeWireColOffset,
+    homeWireColLen,
+    homeWireColField,
+    homeWireColValue,
+    homeWireRowMagicValue,
+    homeWireRowVersionValue,
+    homeWireRowMsgValue,
+    homeWireRowFlagsValue,
+    homeWireRowReqValue,
+    homeWireRowLenValue,
+    homeWireRowBodyValue,
+    homeWireNote,
+    homeWireLink,
     homePackagesTitle,
     homePackagesLede,
+    homePkgColPackage,
+    homePkgColUse,
     homePkgYydb,
+    homePkgLight,
     homePkgClient,
+    homePkgWebui,
     homePkgSqlite,
     homePkgSkills,
-    homeTryWire,
+    homePkgRust,
+    homePkgPlatform,
+    homePkgInstallHint,
+    homeDocsTitle,
+    homeDocsLede,
+    homeDocsQuickStart,
+    homeDocsQuickStartDesc,
+    homeDocsInstall,
+    homeDocsInstallDesc,
+    homeDocsSchema,
+    homeDocsSchemaDesc,
+    homeDocsReadWrite,
+    homeDocsReadWriteDesc,
+    homeDocsNode,
+    homeDocsNodeDesc,
+    homeDocsBrowser,
+    homeDocsBrowserDesc,
+    homeDocsServe,
+    homeDocsServeDesc,
+    homeDocsWire,
+    homeDocsWireDesc,
+    homeDocsPackages,
+    homeDocsPackagesDesc,
+    homeDocsErrors,
+    homeDocsErrorsDesc,
+    homeCommunityTitle,
+    homeCommunityBody,
+    homeCommunityDiscussions,
+    homeCommunityIssues,
 } from "#locales/common";
 import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
 
+const REPO = "https://github.com/yy-database/yydb";
+
 export default class IndexPage {
-    brandShortLabel = "";
-    brandFullLabel = "";
+    navInstallLabel = "";
+    navDocsLabel = "";
     homeEyebrowLabel = "";
+    homeTitleLabel = "";
+    homeTaglineLabel = "";
     homeLedeLabel = "";
-    homeOpenDocsLabel = "";
-    homeOpenWireLabel = "";
-    homeWhyTitleLabel = "";
-    homeWhyLedeLabel = "";
-    homeFeatureVosTitleLabel = "";
-    homeFeatureVosBodyLabel = "";
+    homeActionInstallLabel = "";
+    homeActionDocsLabel = "";
+    homeMetaVersionLabel = "";
+    homeMetaVersionValueLabel = "";
+    homeMetaStorageLabel = "";
+    homeMetaStorageValueLabel = "";
+    homeMetaWireLabel = "";
+    homeMetaWireValueLabel = "";
+    homeMetaLicenseLabel = "";
+    homeMetaLicenseValueLabel = "";
+    homeQuickNoteLabel = "";
+    homeQuickFileNameLabel = "";
+    homeFeatureTitleLabel = "";
+    homeFeatureLedeLabel = "";
+    homeFeatureSchemaTitleLabel = "";
+    homeFeatureSchemaBodyLabel = "";
+    homeFeatureDurabilityTitleLabel = "";
+    homeFeatureDurabilityBodyLabel = "";
+    homeFeatureObjectTitleLabel = "";
+    homeFeatureObjectBodyLabel = "";
+    homeFeatureScalarTitleLabel = "";
+    homeFeatureScalarBodyLabel = "";
+    homeFeatureHostTitleLabel = "";
+    homeFeatureHostBodyLabel = "";
     homeFeatureWireTitleLabel = "";
     homeFeatureWireBodyLabel = "";
-    homeFeatureSqliteTitleLabel = "";
-    homeFeatureSqliteBodyLabel = "";
-    homeFeatureServeTitleLabel = "";
-    homeFeatureServeBodyLabel = "";
+    homeMatrixTitleLabel = "";
+    homeMatrixLedeLabel = "";
+    homeMatrixColItemLabel = "";
+    homeMatrixColStateLabel = "";
+    homeMatrixColNoteLabel = "";
+    homeRowEngineLabel = "";
+    homeRowEngineNoteLabel = "";
+    homeRowVosSchemaLabel = "";
+    homeRowVosSchemaNoteLabel = "";
+    homeRowQueryLabel = "";
+    homeRowQueryNoteLabel = "";
+    homeRowWriteLabel = "";
+    homeRowWriteNoteLabel = "";
+    homeRowStmtLabel = "";
+    homeRowStmtNoteLabel = "";
+    homeRowTxLabel = "";
+    homeRowTxNoteLabel = "";
+    homeRowObjectLabel = "";
+    homeRowObjectNoteLabel = "";
+    homeRowVectorLabel = "";
+    homeRowVectorNoteLabel = "";
+    homeRowUdfLabel = "";
+    homeRowUdfNoteLabel = "";
+    homeRowAnnLabel = "";
+    homeRowAnnNoteLabel = "";
+    homeRowDistLabel = "";
+    homeRowDistNoteLabel = "";
+    homeRowSqlLabel = "";
+    homeRowSqlNoteLabel = "";
+    stateAvailableLabel = "";
+    stateRoadmapLabel = "";
+    stateExcludedLabel = "";
+    homePathTitleLabel = "";
+    homePathLedeLabel = "";
+    homePathEmbeddedLabel = "";
+    homePathEmbeddedTitleLabel = "";
+    homePathEmbeddedStepAppLabel = "";
+    homePathEmbeddedStepEngineLabel = "";
+    homePathEmbeddedStepFileLabel = "";
+    homePathServeLabel = "";
+    homePathServeTitleLabel = "";
+    homePathServeStepClientLabel = "";
+    homePathServeStepWireLabel = "";
+    homePathServeStepEngineLabel = "";
+    homePathBrowserLabel = "";
+    homePathBrowserTitleLabel = "";
+    homePathBrowserStepContextLabel = "";
+    homePathBrowserStepLightLabel = "";
+    homePathBrowserStepStoreLabel = "";
+    homeWireTitleLabel = "";
+    homeWireLedeLabel = "";
+    homeWireColOffsetLabel = "";
+    homeWireColLenLabel = "";
+    homeWireColFieldLabel = "";
+    homeWireColValueLabel = "";
+    homeWireRowMagicValueLabel = "";
+    homeWireRowVersionValueLabel = "";
+    homeWireRowMsgValueLabel = "";
+    homeWireRowFlagsValueLabel = "";
+    homeWireRowReqValueLabel = "";
+    homeWireRowLenValueLabel = "";
+    homeWireRowBodyValueLabel = "";
+    homeWireNoteLabel = "";
+    homeWireLinkLabel = "";
     homePackagesTitleLabel = "";
     homePackagesLedeLabel = "";
+    homePkgColPackageLabel = "";
+    homePkgColUseLabel = "";
     homePkgYydbLabel = "";
+    homePkgLightLabel = "";
     homePkgClientLabel = "";
+    homePkgWebuiLabel = "";
     homePkgSqliteLabel = "";
     homePkgSkillsLabel = "";
-    homeTryWireLabel = "";
+    homePkgRustLabel = "";
+    homePkgPlatformLabel = "";
+    homePkgInstallHintLabel = "";
+    homeDocsTitleLabel = "";
+    homeDocsLedeLabel = "";
+    homeDocsQuickStartLabel = "";
+    homeDocsQuickStartDescLabel = "";
+    homeDocsInstallLabel = "";
+    homeDocsInstallDescLabel = "";
+    homeDocsSchemaLabel = "";
+    homeDocsSchemaDescLabel = "";
+    homeDocsReadWriteLabel = "";
+    homeDocsReadWriteDescLabel = "";
+    homeDocsNodeLabel = "";
+    homeDocsNodeDescLabel = "";
+    homeDocsBrowserLabel = "";
+    homeDocsBrowserDescLabel = "";
+    homeDocsServeLabel = "";
+    homeDocsServeDescLabel = "";
+    homeDocsWireLabel = "";
+    homeDocsWireDescLabel = "";
+    homeDocsPackagesLabel = "";
+    homeDocsPackagesDescLabel = "";
+    homeDocsErrorsLabel = "";
+    homeDocsErrorsDescLabel = "";
+    homeCommunityTitleLabel = "";
+    homeCommunityBodyLabel = "";
+    homeCommunityDiscussionsLabel = "";
+    homeCommunityIssuesLabel = "";
+    discussionsHref = `${REPO}/discussions`;
+    issuesHref = `${REPO}/issues`;
+    docQuickstartHref = "";
+    docInstallHref = "";
+    docSchemaHref = "";
+    docReadWriteHref = "";
+    docNodeHref = "";
+    docBrowserHref = "";
+    docServeHref = "";
+    docWireHref = "";
+    docPackagesHref = "";
+    docErrorsHref = "";
     _unwatchLocale = null;
 
     onMount() {
@@ -140,46 +713,163 @@ export default class IndexPage {
         this._unwatchLocale = null;
     }
 
+    syncDocHrefs(localeId) {
+        const base = localeId === "en" ? "/d/en/" : "/d/zh-hans/";
+        const href = (slug) => `${base}guide/${slug}.html`;
+        this.docQuickstartHref = href("01-quickstart");
+        this.docInstallHref = href("02-install");
+        this.docSchemaHref = href("03-schema");
+        this.docReadWriteHref = href("04-read-write");
+        this.docNodeHref = href("05-node");
+        this.docBrowserHref = href("06-browser");
+        this.docServeHref = href("07-serve");
+        this.docWireHref = href("08-wire");
+        this.docPackagesHref = href("09-packages");
+        this.docErrorsHref = href("10-errors");
+    }
+
     refreshCopy() {
-        this.brandShortLabel = brandShort();
-        this.brandFullLabel = brandFull();
+        this.navInstallLabel = navInstall();
+        this.navDocsLabel = navDocs();
         this.homeEyebrowLabel = homeEyebrow();
+        this.homeTitleLabel = homeTitle();
+        this.homeTaglineLabel = homeTagline();
         this.homeLedeLabel = homeLede();
-        this.homeOpenDocsLabel = homeOpenDocs();
-        this.homeOpenWireLabel = homeOpenWire();
-        this.homeWhyTitleLabel = homeWhyTitle();
-        this.homeWhyLedeLabel = homeWhyLede();
-        this.homeFeatureVosTitleLabel = homeFeatureVosTitle();
-        this.homeFeatureVosBodyLabel = homeFeatureVosBody();
+        this.homeActionInstallLabel = homeActionInstall();
+        this.homeActionDocsLabel = homeActionDocs();
+        this.homeMetaVersionLabel = homeMetaVersionLabel();
+        this.homeMetaVersionValueLabel = homeMetaVersionValue();
+        this.homeMetaStorageLabel = homeMetaStorageLabel();
+        this.homeMetaStorageValueLabel = homeMetaStorageValue();
+        this.homeMetaWireLabel = homeMetaWireLabel();
+        this.homeMetaWireValueLabel = homeMetaWireValue();
+        this.homeMetaLicenseLabel = homeMetaLicenseLabel();
+        this.homeMetaLicenseValueLabel = homeMetaLicenseValue();
+        this.homeQuickNoteLabel = homeQuickNote();
+        this.homeQuickFileNameLabel = homeQuickFileName();
+        this.homeFeatureTitleLabel = homeFeatureTitle();
+        this.homeFeatureLedeLabel = homeFeatureLede();
+        this.homeFeatureSchemaTitleLabel = homeFeatureSchemaTitle();
+        this.homeFeatureSchemaBodyLabel = homeFeatureSchemaBody();
+        this.homeFeatureDurabilityTitleLabel = homeFeatureDurabilityTitle();
+        this.homeFeatureDurabilityBodyLabel = homeFeatureDurabilityBody();
+        this.homeFeatureObjectTitleLabel = homeFeatureObjectTitle();
+        this.homeFeatureObjectBodyLabel = homeFeatureObjectBody();
+        this.homeFeatureScalarTitleLabel = homeFeatureScalarTitle();
+        this.homeFeatureScalarBodyLabel = homeFeatureScalarBody();
+        this.homeFeatureHostTitleLabel = homeFeatureHostTitle();
+        this.homeFeatureHostBodyLabel = homeFeatureHostBody();
         this.homeFeatureWireTitleLabel = homeFeatureWireTitle();
         this.homeFeatureWireBodyLabel = homeFeatureWireBody();
-        this.homeFeatureSqliteTitleLabel = homeFeatureSqliteTitle();
-        this.homeFeatureSqliteBodyLabel = homeFeatureSqliteBody();
-        this.homeFeatureServeTitleLabel = homeFeatureServeTitle();
-        this.homeFeatureServeBodyLabel = homeFeatureServeBody();
+        this.homeMatrixTitleLabel = homeMatrixTitle();
+        this.homeMatrixLedeLabel = homeMatrixLede();
+        this.homeMatrixColItemLabel = homeMatrixColItem();
+        this.homeMatrixColStateLabel = homeMatrixColState();
+        this.homeMatrixColNoteLabel = homeMatrixColNote();
+        this.homeRowEngineLabel = homeRowEngine();
+        this.homeRowEngineNoteLabel = homeRowEngineNote();
+        this.homeRowVosSchemaLabel = homeRowVosSchema();
+        this.homeRowVosSchemaNoteLabel = homeRowVosSchemaNote();
+        this.homeRowQueryLabel = homeRowQuery();
+        this.homeRowQueryNoteLabel = homeRowQueryNote();
+        this.homeRowWriteLabel = homeRowWrite();
+        this.homeRowWriteNoteLabel = homeRowWriteNote();
+        this.homeRowStmtLabel = homeRowStmt();
+        this.homeRowStmtNoteLabel = homeRowStmtNote();
+        this.homeRowTxLabel = homeRowTx();
+        this.homeRowTxNoteLabel = homeRowTxNote();
+        this.homeRowObjectLabel = homeRowObject();
+        this.homeRowObjectNoteLabel = homeRowObjectNote();
+        this.homeRowVectorLabel = homeRowVector();
+        this.homeRowVectorNoteLabel = homeRowVectorNote();
+        this.homeRowUdfLabel = homeRowUdf();
+        this.homeRowUdfNoteLabel = homeRowUdfNote();
+        this.homeRowAnnLabel = homeRowAnn();
+        this.homeRowAnnNoteLabel = homeRowAnnNote();
+        this.homeRowDistLabel = homeRowDist();
+        this.homeRowDistNoteLabel = homeRowDistNote();
+        this.homeRowSqlLabel = homeRowSql();
+        this.homeRowSqlNoteLabel = homeRowSqlNote();
+        this.stateAvailableLabel = stateAvailable();
+        this.stateRoadmapLabel = stateRoadmap();
+        this.stateExcludedLabel = stateExcluded();
+        this.homePathTitleLabel = homePathTitle();
+        this.homePathLedeLabel = homePathLede();
+        this.homePathEmbeddedLabel = homePathEmbeddedLabel();
+        this.homePathEmbeddedTitleLabel = homePathEmbeddedTitle();
+        this.homePathEmbeddedStepAppLabel = homePathEmbeddedStepApp();
+        this.homePathEmbeddedStepEngineLabel = homePathEmbeddedStepEngine();
+        this.homePathEmbeddedStepFileLabel = homePathEmbeddedStepFile();
+        this.homePathServeLabel = homePathServeLabel();
+        this.homePathServeTitleLabel = homePathServeTitle();
+        this.homePathServeStepClientLabel = homePathServeStepClient();
+        this.homePathServeStepWireLabel = homePathServeStepWire();
+        this.homePathServeStepEngineLabel = homePathServeStepEngine();
+        this.homePathBrowserLabel = homePathBrowserLabel();
+        this.homePathBrowserTitleLabel = homePathBrowserTitle();
+        this.homePathBrowserStepContextLabel = homePathBrowserStepContext();
+        this.homePathBrowserStepLightLabel = homePathBrowserStepLight();
+        this.homePathBrowserStepStoreLabel = homePathBrowserStepStore();
+        this.homeWireTitleLabel = homeWireTitle();
+        this.homeWireLedeLabel = homeWireLede();
+        this.homeWireColOffsetLabel = homeWireColOffset();
+        this.homeWireColLenLabel = homeWireColLen();
+        this.homeWireColFieldLabel = homeWireColField();
+        this.homeWireColValueLabel = homeWireColValue();
+        this.homeWireRowMagicValueLabel = homeWireRowMagicValue();
+        this.homeWireRowVersionValueLabel = homeWireRowVersionValue();
+        this.homeWireRowMsgValueLabel = homeWireRowMsgValue();
+        this.homeWireRowFlagsValueLabel = homeWireRowFlagsValue();
+        this.homeWireRowReqValueLabel = homeWireRowReqValue();
+        this.homeWireRowLenValueLabel = homeWireRowLenValue();
+        this.homeWireRowBodyValueLabel = homeWireRowBodyValue();
+        this.homeWireNoteLabel = homeWireNote();
+        this.homeWireLinkLabel = homeWireLink();
         this.homePackagesTitleLabel = homePackagesTitle();
         this.homePackagesLedeLabel = homePackagesLede();
+        this.homePkgColPackageLabel = homePkgColPackage();
+        this.homePkgColUseLabel = homePkgColUse();
         this.homePkgYydbLabel = homePkgYydb();
+        this.homePkgLightLabel = homePkgLight();
         this.homePkgClientLabel = homePkgClient();
+        this.homePkgWebuiLabel = homePkgWebui();
         this.homePkgSqliteLabel = homePkgSqlite();
         this.homePkgSkillsLabel = homePkgSkills();
-        this.homeTryWireLabel = homeTryWire();
+        this.homePkgRustLabel = homePkgRust();
+        this.homePkgPlatformLabel = homePkgPlatform();
+        this.homePkgInstallHintLabel = homePkgInstallHint();
+        this.homeDocsTitleLabel = homeDocsTitle();
+        this.homeDocsLedeLabel = homeDocsLede();
+        this.homeDocsQuickStartLabel = homeDocsQuickStart();
+        this.homeDocsQuickStartDescLabel = homeDocsQuickStartDesc();
+        this.homeDocsInstallLabel = homeDocsInstall();
+        this.homeDocsInstallDescLabel = homeDocsInstallDesc();
+        this.homeDocsSchemaLabel = homeDocsSchema();
+        this.homeDocsSchemaDescLabel = homeDocsSchemaDesc();
+        this.homeDocsReadWriteLabel = homeDocsReadWrite();
+        this.homeDocsReadWriteDescLabel = homeDocsReadWriteDesc();
+        this.homeDocsNodeLabel = homeDocsNode();
+        this.homeDocsNodeDescLabel = homeDocsNodeDesc();
+        this.homeDocsBrowserLabel = homeDocsBrowser();
+        this.homeDocsBrowserDescLabel = homeDocsBrowserDesc();
+        this.homeDocsServeLabel = homeDocsServe();
+        this.homeDocsServeDescLabel = homeDocsServeDesc();
+        this.homeDocsWireLabel = homeDocsWire();
+        this.homeDocsWireDescLabel = homeDocsWireDesc();
+        this.homeDocsPackagesLabel = homeDocsPackages();
+        this.homeDocsPackagesDescLabel = homeDocsPackagesDesc();
+        this.homeDocsErrorsLabel = homeDocsErrors();
+        this.homeDocsErrorsDescLabel = homeDocsErrorsDesc();
+        this.homeCommunityTitleLabel = homeCommunityTitle();
+        this.homeCommunityBodyLabel = homeCommunityBody();
+        this.homeCommunityDiscussionsLabel = homeCommunityDiscussions();
+        this.homeCommunityIssuesLabel = homeCommunityIssues();
     }
 
     applyLocaleCopy(preferred) {
-        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
-    }
-
-    goDocs() {
-        if (typeof window !== "undefined") {
-            window.location.href = "/d/";
-        }
-    }
-
-    goWire() {
-        if (typeof window !== "undefined") {
-            window.location.href = "/wire";
-        }
+        const localeId = readLocaleId(preferred);
+        this.syncDocHrefs(localeId);
+        withLocaleHint(localeId, () => this.refreshCopy());
     }
 }
 </script>

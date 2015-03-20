@@ -1,25 +1,22 @@
 <template>
     <SiteHeader />
     <main class="welcome" id="main" aria-labelledby="welcome-title">
-        <div class="welcome__backdrop" aria-hidden="true" />
         <div class="welcome__inner">
-            <p class="welcome__kicker">
-                <span class="welcome__kicker-dot" aria-hidden="true" />
-                {{ welcomeKickerLabel }}
-            </p>
-            <h1 id="welcome-title" class="welcome__title">
+            <p class="welcome__kicker">{{ welcomeKickerLabel }}</p>
+            <h1 class="welcome__title" id="welcome-title">
                 {{ welcomeTitleLeadLabel }}
                 <em>{{ welcomeTitleEmLabel }}</em>
             </h1>
             <p class="welcome__lede">{{ welcomeLedeLabel }}</p>
             <div class="welcome__actions">
-                <a href="/" class="welcome__cta welcome__cta--primary">{{ welcomeEnterLabel }}</a>
-                <a href="/d/" class="welcome__cta welcome__cta--secondary">{{ welcomeDocsLabel }}</a>
-                <a href="/wire" class="welcome__cta welcome__cta--ghost">{{ welcomeWireLabel }}</a>
+                <a class="btn btn--primary" href="/">{{ welcomeEnterLabel }}</a>
+                <a class="btn" href="/d/">{{ welcomeDocsLabel }}</a>
+                <a class="btn btn--quiet" href="/wire">{{ welcomeWireLabel }}</a>
             </div>
             <p class="welcome__note">{{ welcomeNoteLabel }}</p>
         </div>
     </main>
+    <SiteFooter />
 </template>
 
 <script client>

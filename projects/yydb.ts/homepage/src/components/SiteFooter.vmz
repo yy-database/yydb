@@ -3,20 +3,36 @@
         <div class="site-footer__inner">
             <div>
                 <p class="site-footer__brand">{{ brandShortLabel }}</p>
-                <p>{{ brandFullLabel }}</p>
+                <p class="site-footer__name">{{ brandFullLabel }}</p>
                 <p class="site-footer__blurb">{{ footerBlurbLabel }}</p>
             </div>
-            <div>
-                <h2>{{ footerExploreLabel }}</h2>
+            <nav :aria-label="footerProductLabel">
+                <h2>{{ footerProductLabel }}</h2>
                 <ul>
-                    <li><a href="/">{{ navHomeLabel }}</a></li>
+                    <li><a href="/">{{ footerHomeLabel }}</a></li>
+                    <li><a href="/install">{{ footerInstallLabel }}</a></li>
                     <li><a href="/d/">{{ footerDocsLabel }}</a></li>
-                    <li><a href="/wire">{{ navWireLabel }}</a></li>
+                    <li><a href="/wire">{{ footerWireLabel }}</a></li>
                 </ul>
-            </div>
+            </nav>
+            <nav :aria-label="footerResourcesLabel">
+                <h2>{{ footerResourcesLabel }}</h2>
+                <ul>
+                    <li><a :href="releasesHref" target="_blank" rel="noopener noreferrer">{{ footerChangelogLabel }}</a></li>
+                    <li><a :href="rustApiHref" target="_blank" rel="noopener noreferrer">{{ footerRustApiLabel }}</a></li>
+                </ul>
+            </nav>
+            <nav :aria-label="footerCommunityLabel">
+                <h2>{{ footerCommunityLabel }}</h2>
+                <ul>
+                    <li><a :href="githubHref" target="_blank" rel="noopener noreferrer">{{ githubLabel }}</a></li>
+                    <li><a :href="discussionsHref" target="_blank" rel="noopener noreferrer">{{ footerDiscussionsLabel }}</a></li>
+                    <li><a :href="issuesHref" target="_blank" rel="noopener noreferrer">{{ footerIssuesLabel }}</a></li>
+                </ul>
+            </nav>
         </div>
         <div class="site-footer__bar">
-            <p>{{ footerCopyrightLine }}</p>
+            <p>{{ copyrightLabel }}</p>
             <p>{{ footerMonoLabel }}</p>
         </div>
     </footer>
@@ -26,28 +42,49 @@
 import {
     brandShort,
     brandFull,
-    navHome,
-    navWire,
+    github,
     footerBlurb,
-    footerExplore,
-    footerDocs,
+    footerProduct,
+    footerResources,
+    footerCommunity,
+    footerHome,
+    footerInstall,
+    footerOverviewDocs,
+    footerWire,
+    footerChangelog,
+    footerRustApi,
+    footerIssues,
+    footerDiscussions,
     footerCopyright,
     footerMono,
 } from "#locales/common";
 import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
 
+const REPO = "https://github.com/yy-database/yydb";
+
 export default class SiteFooter {
     brandShortLabel = "";
     brandFullLabel = "";
-    navHomeLabel = "";
-    navWireLabel = "";
     footerBlurbLabel = "";
-    footerExploreLabel = "";
+    footerProductLabel = "";
+    footerResourcesLabel = "";
+    footerCommunityLabel = "";
+    footerHomeLabel = "";
+    footerInstallLabel = "";
     footerDocsLabel = "";
-    footerCopyrightLabel = "";
-    footerCopyrightLine = "";
+    footerWireLabel = "";
+    footerChangelogLabel = "";
+    footerRustApiLabel = "";
+    footerIssuesLabel = "";
+    footerDiscussionsLabel = "";
+    githubLabel = "";
+    copyrightLabel = "";
     footerMonoLabel = "";
-    yearLabel = String(new Date().getFullYear());
+    githubHref = REPO;
+    issuesHref = `${REPO}/issues`;
+    discussionsHref = `${REPO}/discussions`;
+    releasesHref = `${REPO}/releases`;
+    rustApiHref = "https://docs.rs/yydb";
     _unwatchLocale = null;
 
     onMount() {
@@ -65,13 +102,20 @@ export default class SiteFooter {
     refreshCopy() {
         this.brandShortLabel = brandShort();
         this.brandFullLabel = brandFull();
-        this.navHomeLabel = navHome();
-        this.navWireLabel = navWire();
         this.footerBlurbLabel = footerBlurb();
-        this.footerExploreLabel = footerExplore();
-        this.footerDocsLabel = footerDocs();
-        this.footerCopyrightLabel = footerCopyright();
-        this.footerCopyrightLine = `© ${this.yearLabel} ${this.footerCopyrightLabel}`;
+        this.footerProductLabel = footerProduct();
+        this.footerResourcesLabel = footerResources();
+        this.footerCommunityLabel = footerCommunity();
+        this.footerHomeLabel = footerHome();
+        this.footerInstallLabel = footerInstall();
+        this.footerDocsLabel = footerOverviewDocs();
+        this.footerWireLabel = footerWire();
+        this.footerChangelogLabel = footerChangelog();
+        this.footerRustApiLabel = footerRustApi();
+        this.footerIssuesLabel = footerIssues();
+        this.footerDiscussionsLabel = footerDiscussions();
+        this.githubLabel = github();
+        this.copyrightLabel = `© ${footerCopyright()}`;
         this.footerMonoLabel = footerMono();
     }
 
