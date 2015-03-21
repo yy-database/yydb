@@ -1,6 +1,6 @@
 # `@yydb/yydb-homepage`
 
-YYDB product homepage and Chinese user guides. Built with [`@vmz/vmz`](https://www.npmjs.com/package/@vmz/vmz) `0.3.8`.
+YYDB product homepage and user guides (Simplified Chinese and English). Built with [`@vmz/vmz`](https://www.npmjs.com/package/@vmz/vmz) `0.3.8`.
 
 ## Commands
 
@@ -16,7 +16,8 @@ pnpm --filter @yydb/yydb-homepage document:check
 |------|---------|
 | `/welcome` | Full-screen welcome |
 | `/` | Product landing |
-| `/d/` | Integrated Chinese documentation |
+| `/install` | Install and platform guide |
+| `/d/` | Integrated documentation (`/d/zh-hans/`, `/d/en/`) |
 | `/wire` | Local `@yydb/yydb-client` frame encode/decode demo |
 
 ## Related packages
@@ -28,4 +29,4 @@ pnpm --filter @yydb/yydb-homepage document:check
 | [`@yydb/yydb-webui`](https://www.npmjs.com/package/@yydb/yydb-webui) | Local database explorer |
 | [`@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills) | Agent skills for integrators |
 
-[YYDB overview](https://github.com/yy-database/yydb) · [Rust API](https://docs.rs/yydb)
+[YYDB overview](https://github.com/yy-database/yydb) Â· [Rust API](https://docs.rs/yydb)
