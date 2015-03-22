@@ -17,7 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { RUST_MANIFEST } from './rust-manifest.mjs';
+import { RUST_WS_DIR } from './rust-manifest.mjs';
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 const checkOnly = process.argv.includes('--check');
@@ -25,11 +25,12 @@ const checkOnly = process.argv.includes('--check');
 /**
  * @param {string} file
  * @param {string[]} args
+ * @param {string} [cwd]
  */
-function runFile(file, args) {
+function runFile(file, args, cwd = rootDir) {
     console.log(`$ ${file} ${args.join(' ')}`);
     execFileSync(file, args, {
-        cwd: rootDir,
+        cwd,
         stdio: 'inherit',
         env: process.env,
         shell: process.platform === 'win32',
@@ -39,7 +40,10 @@ function runFile(file, args) {
 console.log(checkOnly ? '=== Format check ===\n' : '=== Format (write) ===\n');
 
 console.log('--- Rust ---');
-runFile('cargo', ['fmt', '--manifest-path', RUST_MANIFEST, '--all', ...(checkOnly ? ['--check'] : [])]);
+// Run inside the Rust workspace so rustup picks up `projects/yydb.rs/rust-toolchain.toml`.
+// Resolving the toolchain from the repo root would fall back to stable and silently drop
+// the nightly-only rustfmt options configured in `rustfmt.toml`.
+runFile('cargo', ['fmt', '--all', ...(checkOnly ? ['--check'] : [])], join(rootDir, RUST_WS_DIR));
 
 console.log('\n--- Nifty (json/js/ts) ---');
 runFile('pnpm', ['exec', 'nifty', 'format', ...(checkOnly ? ['--check'] : [])]);
