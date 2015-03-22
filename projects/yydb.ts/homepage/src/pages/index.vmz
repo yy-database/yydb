@@ -2,46 +2,29 @@
     <SiteHeader />
     <main class="main" id="main">
         <section class="hero">
-            <div>
-                <p class="page__eyebrow">{{ homeEyebrowLabel }}</p>
-                <h1 class="hero__title">{{ homeTitleLabel }}</h1>
-                <p class="hero__tagline">{{ homeTaglineLabel }}</p>
-                <p class="hero__lede">{{ homeLedeLabel }}</p>
-                <div class="btn-row hero__actions">
-                    <a class="btn btn--primary" href="/install">{{ homeActionInstallLabel }}</a>
-                    <a class="btn" href="/d/">{{ homeActionDocsLabel }}</a>
+            <div class="hero__inner">
+                <div class="hero__copy">
+                    <p class="hero__eyebrow">{{ homeEyebrowLabel }}</p>
+                    <h1 class="hero__title">{{ homeTitleLabel }}</h1>
+                    <p class="hero__tagline">{{ homeTaglineLabel }}</p>
+                    <p class="hero__lede">{{ homeLedeLabel }}</p>
+                    <div class="btn-row hero__actions">
+                        <a class="btn btn--primary" href="/install">{{ homeActionInstallLabel }}</a>
+                        <a class="btn" href="/d/">{{ homeActionDocsLabel }}</a>
+                    </div>
                 </div>
-                <dl class="hero__facts">
-                    <div class="hero__fact">
-                        <dt>{{ homeMetaVersionLabel }}</dt>
-                        <dd>{{ homeMetaVersionValueLabel }}</dd>
+                <div class="hero__visual">
+                    <div class="hero__install">
+                        <code>npm install @yydb/yydb</code>
+                        <a class="btn btn--quiet" href="/install">{{ navInstallLabel }}</a>
                     </div>
-                    <div class="hero__fact">
-                        <dt>{{ homeMetaStorageLabel }}</dt>
-                        <dd>{{ homeMetaStorageValueLabel }}</dd>
-                    </div>
-                    <div class="hero__fact">
-                        <dt>{{ homeMetaWireLabel }}</dt>
-                        <dd>{{ homeMetaWireValueLabel }}</dd>
-                    </div>
-                    <div class="hero__fact">
-                        <dt>{{ homeMetaLicenseLabel }}</dt>
-                        <dd>{{ homeMetaLicenseValueLabel }}</dd>
-                    </div>
-                </dl>
-            </div>
-            <div>
-                <div class="hero__install">
-                    <code>npm install @yydb/yydb</code>
-                    <a class="btn btn--quiet" href="/install">{{ navInstallLabel }}</a>
-                </div>
-                <p class="hero__install-note">{{ homeQuickNoteLabel }}</p>
-                <div class="terminal">
-                    <div class="terminal__bar">
-                        <span>{{ homeQuickFileNameLabel }} · Node.js</span>
-                        <a href="/d/">{{ navDocsLabel }}</a>
-                    </div>
-                    <pre>// open or create a single-file database
+                    <p class="hero__install-note">{{ homeQuickNoteLabel }}</p>
+                    <div class="terminal">
+                        <div class="terminal__bar">
+                            <span>{{ homeQuickFileNameLabel }} · Node.js</span>
+                            <a href="/d/">{{ navDocsLabel }}</a>
+                        </div>
+                        <pre>// open or create a single-file database
 import { Database } from "@yydb/yydb";
 
 const db = await Database.open("app.yydb");
@@ -62,8 +45,32 @@ const users = await db.query("User.all().collect()");
 console.log(users.length); // 1
 
 await db.close();</pre>
+                    </div>
+                    <div class="hero__float">
+                        <p class="hero__float-label">{{ homeMetaStorageLabel }}</p>
+                        <p class="hero__float-value">app.yydb</p>
+                        <p class="hero__float-note">YDPG · YYWL · CRC32C</p>
+                    </div>
                 </div>
             </div>
+            <dl class="hero__facts">
+                <div class="hero__fact">
+                    <dt>{{ homeMetaVersionLabel }}</dt>
+                    <dd>{{ homeMetaVersionValueLabel }}</dd>
+                </div>
+                <div class="hero__fact">
+                    <dt>{{ homeMetaStorageLabel }}</dt>
+                    <dd>{{ homeMetaStorageValueLabel }}</dd>
+                </div>
+                <div class="hero__fact">
+                    <dt>{{ homeMetaWireLabel }}</dt>
+                    <dd>{{ homeMetaWireValueLabel }}</dd>
+                </div>
+                <div class="hero__fact">
+                    <dt>{{ homeMetaLicenseLabel }}</dt>
+                    <dd>{{ homeMetaLicenseValueLabel }}</dd>
+                </div>
+            </dl>
         </section>
 
         <div class="page">

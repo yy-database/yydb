@@ -13,13 +13,11 @@
 .site--docs > .doc-body {
     flex: 1 0 auto;
     display: grid;
-    grid-template-columns: 16rem minmax(0, 1fr);
+    grid-template-columns: 17rem minmax(0, 1fr);
     align-items: start;
     width: 100%;
-    max-width: 96rem;
+    max-width: 94rem;
     margin: 0 auto;
-    border-left: 1px solid var(--vmz-line-default);
-    border-right: 1px solid var(--vmz-line-default);
     background: var(--vmz-surface-paper);
 }
 
@@ -29,18 +27,17 @@
     align-self: start;
     max-height: calc(100vh - var(--vmz-layout-header-height-compact));
     overflow-y: auto;
-    padding: 1.25rem 1rem 2rem;
+    padding: 2rem 1.25rem 3rem 1.5rem;
     border-right: 1px solid var(--vmz-line-default);
-    background: var(--vmz-surface-fill);
+    background: var(--vmz-surface-paper);
 }
 
 .doc-sidebar__label {
-    font-family: var(--vmz-font-mono);
-    font-size: 0.625rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
     color: var(--vmz-text-muted);
-    margin-bottom: 0.625rem;
+    margin-bottom: 0.75rem;
 }
 
 .doc-subnav ul {
@@ -48,18 +45,19 @@
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 1px;
+    gap: 2px;
 }
 
 .doc-subnav a {
     display: block;
-    padding: 0.3125rem 0.5rem;
-    font-size: 0.8125rem;
-    line-height: 1.4;
+    padding: 0.4375rem 0.625rem;
+    font-size: 0.875rem;
+    line-height: 1.45;
     color: var(--vmz-text-steel);
     text-decoration: none;
     border-left: 2px solid transparent;
-    border-radius: 0 var(--vmz-radius-xs) var(--vmz-radius-xs) 0;
+    border-radius: 0 4px 4px 0;
+    transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
 .doc-subnav a:hover {
@@ -92,9 +90,9 @@
 
 .doc-content {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 12rem;
-    gap: 2rem;
-    padding: 2rem 2rem 3rem;
+    grid-template-columns: minmax(0, 1fr) 13rem;
+    gap: 3rem;
+    padding: 3rem 3rem 4rem;
     min-width: 0;
     background: var(--vmz-surface-paper);
 }
@@ -155,50 +153,48 @@
 
 .doc-content main h1 {
     font-family: var(--vmz-font-display);
-    font-size: clamp(1.5rem, 2.2vw, 1.875rem);
-    letter-spacing: -0.02em;
-    line-height: 1.2;
-    margin: 0 0 0.875rem;
-    padding-bottom: 0.75rem;
-    border-bottom: 1px solid var(--vmz-line-default);
+    font-size: clamp(2rem, 2.8vw, 2.5rem);
+    font-weight: 650;
+    letter-spacing: -0.03em;
+    line-height: 1.12;
+    margin: 0 0 1.25rem;
 }
 
 .doc-content main h2 {
-    font-size: 1.0625rem;
-    margin: 2rem 0 0.625rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--vmz-line-subtle);
+    font-size: 1.4375rem;
+    letter-spacing: -0.02em;
+    margin: 3rem 0 0.875rem;
 }
 
 .doc-content main h3 {
-    font-size: 0.9375rem;
-    margin: 1.5rem 0 0.5rem;
+    font-size: 1.125rem;
+    margin: 2rem 0 0.5rem;
 }
 
 .doc-content main h4 {
-    font-size: 0.875rem;
-    margin: 1.25rem 0 0.375rem;
+    font-size: 1rem;
+    margin: 1.75rem 0 0.375rem;
 }
 
 .doc-content main p,
 .doc-content main li {
-    font-size: 0.875rem;
+    font-size: 1rem;
     line-height: 1.75;
     color: var(--vmz-text-steel);
 }
 
 .doc-content main p {
-    margin: 0 0 0.875rem;
+    margin: 0 0 1.125rem;
 }
 
 .doc-content main ul,
 .doc-content main ol {
-    margin: 0 0 1rem;
-    padding-left: 1.25rem;
+    margin: 0 0 1.25rem;
+    padding-left: 1.375rem;
 }
 
 .doc-content main li + li {
-    margin-top: 0.25rem;
+    margin-top: 0.375rem;
 }
 
 .doc-content main li::marker {
@@ -230,26 +226,25 @@
 /* Inline code */
 .doc-content main :not(pre) > code {
     font-family: var(--vmz-font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--vmz-text-ink);
     background: var(--vmz-surface-mist);
     border: 1px solid var(--vmz-line-subtle);
-    border-radius: var(--vmz-radius-xs);
-    padding: 0.05rem 0.3rem;
+    border-radius: 4px;
+    padding: 0.0625rem 0.3125rem;
     word-break: break-word;
 }
 
 /* Code blocks */
 .doc-content main pre {
-    margin: 0 0 1rem;
-    padding: 0.875rem 1rem;
+    margin: 0 0 1.375rem;
+    padding: 1.125rem 1.25rem;
     overflow-x: auto;
     border: 1px solid var(--vmz-line-default);
-    border-left: 2px solid var(--vmz-line-strong);
-    border-radius: var(--vmz-radius-xs);
-    background: var(--vmz-surface-fill);
-    font-size: 0.8125rem;
-    line-height: 1.65;
+    border-radius: 8px;
+    background: #f8fafc;
+    font-size: 0.84375rem;
+    line-height: 1.7;
     tab-size: 4;
 }
 
@@ -264,34 +259,36 @@
 /* Tables */
 .doc-content main table {
     width: 100%;
-    border-collapse: collapse;
-    margin: 0.5rem 0 1.25rem;
-    font-size: 0.8125rem;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 0.75rem 0 1.5rem;
+    font-size: 0.9375rem;
     border: 1px solid var(--vmz-line-default);
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
     display: block;
     overflow-x: auto;
 }
 
 .doc-content main thead th {
-    background: var(--vmz-surface-mist);
+    background: #f7f9fb;
     border-bottom: 1px solid var(--vmz-line-default);
-    font-family: var(--vmz-font-mono);
-    font-size: 0.6875rem;
-    font-weight: 500;
-    letter-spacing: 0.06em;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--vmz-text-steel);
+    color: var(--vmz-text-muted);
     text-align: left;
-    padding: 0.5rem 0.75rem;
+    padding: 0.6875rem 1rem;
     white-space: nowrap;
 }
 
 .doc-content main td,
 .doc-content main tbody th {
-    border-bottom: 1px solid var(--vmz-line-subtle);
-    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #eef2f6;
+    padding: 0.6875rem 1rem;
     vertical-align: top;
-    line-height: 1.55;
+    line-height: 1.6;
     color: var(--vmz-text-steel);
 }
 
@@ -300,38 +297,40 @@
 }
 
 .doc-content main tbody tr:hover td {
-    background: var(--vmz-surface-fill);
+    background: #f9fbfd;
 }
 
 .doc-content main td code {
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
 }
 
 /* Blockquote / callouts */
 .doc-content main blockquote {
-    margin: 0 0 1rem;
-    padding: 0.625rem 0.875rem;
-    border-left: 2px solid var(--vmz-brand-primary);
+    margin: 0 0 1.25rem;
+    padding: 0.875rem 1.125rem;
+    border: 1px solid var(--vmz-line-default);
+    border-left: 3px solid var(--vmz-brand-primary);
+    border-radius: 0 8px 8px 0;
     background: var(--vmz-surface-mist);
-    font-size: 0.8125rem;
+    font-size: 1rem;
     color: var(--vmz-text-steel);
 }
 
 .doc-content main blockquote p {
     margin: 0;
-    font-size: 0.8125rem;
+    font-size: 1rem;
 }
 
 .doc-content main .warn {
     background: var(--vmz-status-warning-background);
     border: 1px solid var(--vmz-status-warning-border);
-    border-left: 2px solid var(--vmz-status-warning-accent);
+    border-left: 3px solid var(--vmz-status-warning-accent);
     color: var(--vmz-status-warning-foreground);
-    padding: 0.625rem 0.875rem;
-    border-radius: var(--vmz-radius-xs);
-    margin: 0 0 1rem;
-    font-size: 0.8125rem;
-    line-height: 1.6;
+    padding: 0.875rem 1.125rem;
+    border-radius: 0 8px 8px 0;
+    margin: 0 0 1.25rem;
+    font-size: 0.9375rem;
+    line-height: 1.65;
 }
 
 .doc-content main .warn p {
