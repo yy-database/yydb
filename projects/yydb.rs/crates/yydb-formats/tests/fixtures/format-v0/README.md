@@ -1,6 +1,6 @@
 # v0 golden bytes
 
-格式与兼容合同：[`03-encoding-and-compatibility.md`](../../../../../../documentation/03-encoding-and-compatibility.md) · 存储架构：[`02-architecture.md`](../../../../../../documentation/02-architecture.md)
+格式与兼容合同以 `yydb-formats` crate 的编码/解码实现与 `manifest.toml` 期望为准，本目录不复制设计文本。
 
 本目录冻结 v0 page file、WAL、SHM、blob 的独立 golden 与损坏样例。实现仓 `yydb` 须逐文件断言这些样例。
 

@@ -84,7 +84,7 @@ Tag release runs `scripts/prepare-npm-publish.mjs` then `scripts/publish-npm-pac
 
 ## Changelog and GitHub Release
 
-Release bodies live in `documentation/maintenance/releases/vX.Y.Z.md` (English, committed). Draft from git history:
+Release bodies live in `changelog/releases/vX.Y.Z.md` (English, committed). Draft from git history:
 
 ```bash
 pnpm exec nifty change-logs --from v0.0.17 --to v0.0.18 --version 0.0.18 --write
@@ -94,7 +94,7 @@ pnpm exec nifty change-logs --from v0.0.17 --to v0.0.18 --version 0.0.18 --write
 plus `Features` / `Bug Fixes` / `Breaking Changes` / `Contributors` — then publish it to GitHub:
 
 ```bash
-gh release create v0.0.18 --title v0.0.18 --notes-file documentation/maintenance/releases/v0.0.18.md
+gh release create v0.0.18 --title v0.0.18 --notes-file changelog/releases/v0.0.18.md
 ```
 
 For an existing release, use `gh release edit v0.0.18 --notes-file …`. `author-github.json` maps commit emails to

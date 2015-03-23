@@ -1,4 +1,4 @@
-# Maintenance
+# Changelog
 
 | Path | Purpose |
 |------|---------|
@@ -8,3 +8,5 @@
 Local draft index only (gitignored): `releases/vX.Y.Z.reference.md` via `nifty change-logs --version X.Y.Z --write`.
 
 Release bodies are English. Keep one file per git tag; `vX.Y.Z.md` is the source of truth for the release of that tag.
+
+This directory is operational history, not design documentation. Architecture, invariants and roadmaps live outside the repository.

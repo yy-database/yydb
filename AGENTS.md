@@ -14,9 +14,7 @@ For repository agents only. Do not link these from user-facing READMEs or homepa
 
 User- and integrator-facing Agent Skills live in `projects/yydb.ts/packages/yydb-skills/`.
 
-Human guides stay in `projects/yydb.ts/homepage/documentation/zh-hans/`.
-
-Root `documentation/` is developer-facing design guidance: invariants, layering, encoding and compatibility, engineering standards, UX/DX rules. It is not user usage docs and not a roadmap. Do not create `/docs`.
+Human guides stay in `projects/yydb.ts/homepage/documentation/zh-hans/`. Design decisions, crate boundaries and roadmaps are internal and live outside this repository — locate them from the workspace root `AGENTS.md` index. Do not recreate `documentation/`, `docs/` or design notes here.
 
 ## Quick commands
 

@@ -165,7 +165,7 @@ have no CLI.
 | `projects/yydb.rs/`  | Rust workspace: crates, ffis, toolchain                         |
 | `projects/yydb.ts/`  | TypeScript: packages, platforms, emulators, homepage            |
 | `projects/examples/` | Runnable examples (if present)                                  |
-| `documentation/`     | Developer design guidance (invariants, layering, encoding)     |
+| `changelog/`         | Release bodies and commit-author map used by the release flow   |
 
 ## 📚 Documentation
 
@@ -174,8 +174,8 @@ have no CLI.
 | Install and use          | [User guides (Chinese)](./projects/yydb.ts/homepage/documentation/zh-hans/index.md)                        |
 | Wire protocol            | [`yydb-serve-protocol`](./projects/yydb.ts/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md)                |
 | Rust API                 | [docs.rs/yydb](https://docs.rs/yydb)                                                                       |
-| Format and compatibility | [`documentation/03-encoding-and-compatibility.md`](./documentation/03-encoding-and-compatibility.md)        |
-| Release history          | [GitHub Releases](https://github.com/yy-database/yydb/releases) and [`releases/`](./documentation/maintenance/releases/) |
+| Format and compatibility | [`yydb-formats`](./projects/yydb.rs/crates/yydb-formats/readme.md)                                          |
+| Release history          | [GitHub Releases](https://github.com/yy-database/yydb/releases) and [`changelog/releases/`](./changelog/releases/) |
 
 ## 📜 License
 

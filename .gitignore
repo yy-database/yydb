@@ -55,4 +55,4 @@ __pycache__/
 projects/yydb.ts/packages/light-db/temp/
 
 # Nifty change-logs draft index (local only — regenerate with `nifty change-logs --version X.Y.Z --write`)
-documentation/maintenance/releases/*.reference.md
+changelog/releases/*.reference.md
