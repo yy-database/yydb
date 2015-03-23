@@ -19,6 +19,121 @@
                         <a class="btn btn--quiet" href="/install">{{ navInstallLabel }}</a>
                     </div>
                     <p class="hero__install-note">{{ homeQuickNoteLabel }}</p>
+                    <div class="file-card">
+                        <div class="file-card__header">
+                            <span class="file-card__name">app.yydb</span>
+                            <span class="file-card__title">{{ homeAnatomyTitleLabel }}</span>
+                        </div>
+                        <div class="file-card__body">
+                            <div class="file-layer">
+                                <span class="file-layer__kind">SCHEMA</span>
+                                <span class="file-layer__name">schema document</span>
+                                <span class="file-layer__meta">v1 · VOS</span>
+                                <span class="file-layer__bar"><span style="width:42%"></span></span>
+                            </div>
+                            <div class="file-layer">
+                                <span class="file-layer__kind">YDPG</span>
+                                <span class="file-layer__name">data pages</span>
+                                <span class="file-layer__meta">4096 B</span>
+                                <span class="file-layer__bar"><span style="width:78%"></span></span>
+                            </div>
+                            <div class="file-layer">
+                                <span class="file-layer__kind">YYWL</span>
+                                <span class="file-layer__name">write-ahead log</span>
+                                <span class="file-layer__meta">CRC32C</span>
+                                <span class="file-layer__bar"><span style="width:56%"></span></span>
+                            </div>
+                            <div class="file-layer file-layer--muted">
+                                <span class="file-layer__kind">OBJECTS</span>
+                                <span class="file-layer__name">app-objects/</span>
+                                <span class="file-layer__meta">content addressed</span>
+                                <span class="file-layer__bar"><span style="width:28%"></span></span>
+                            </div>
+                        </div>
+                        <div class="file-card__foot">
+                            <span>single writer</span>
+                            <span><code>checkpoint()</code> folds the WAL</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <dl class="hero__facts">
+                <div class="hero__fact">
+                    <dt>{{ homeMetaVersionLabel }}</dt>
+                    <dd>{{ homeMetaVersionValueLabel }}</dd>
+                </div>
+                <div class="hero__fact">
+                    <dt>{{ homeMetaStorageLabel }}</dt>
+                    <dd>{{ homeMetaStorageValueLabel }}</dd>
+                </div>
+                <div class="hero__fact">
+                    <dt>{{ homeMetaWireLabel }}</dt>
+                    <dd>{{ homeMetaWireValueLabel }}</dd>
+                </div>
+                <div class="hero__fact">
+                    <dt>{{ homeMetaLicenseLabel }}</dt>
+                    <dd>{{ homeMetaLicenseValueLabel }}</dd>
+                </div>
+            </dl>
+        </section>
+
+        <div class="stats-band">
+            <div class="stats-band__inner">
+                <div class="stat">
+                    <p class="stat__value">4096 B</p>
+                    <p class="stat__label">{{ homeStatsPageLabel }}</p>
+                </div>
+                <div class="stat">
+                    <p class="stat__value">CRC32C</p>
+                    <p class="stat__label">{{ homeStatsIntegrityLabel }}</p>
+                </div>
+                <div class="stat">
+                    <p class="stat__value">16 MiB</p>
+                    <p class="stat__label">{{ homeStatsFrameLabel }}</p>
+                </div>
+                <div class="stat">
+                    <p class="stat__value">20 B</p>
+                    <p class="stat__label">{{ homeStatsHeaderLabel }}</p>
+                </div>
+                <div class="stat">
+                    <p class="stat__value">4</p>
+                    <p class="stat__label">{{ homeStatsPlatformLabel }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="page">
+            <section class="section" style="margin-top:0;border-top:0;padding-top:0">
+                <div class="section__head">
+                    <div>
+                        <h2 class="section__title">{{ homeHowTitleLabel }}</h2>
+                        <p class="section__lede">{{ homeHowLedeLabel }}</p>
+                    </div>
+                </div>
+                <div class="how">
+                    <ol class="how__steps">
+                        <li class="how__step">
+                            <span class="how__index">01</span>
+                            <div>
+                                <h3>{{ homeHowStep1TitleLabel }}</h3>
+                                <p>{{ homeHowStep1BodyLabel }}</p>
+                            </div>
+                        </li>
+                        <li class="how__step">
+                            <span class="how__index">02</span>
+                            <div>
+                                <h3>{{ homeHowStep2TitleLabel }}</h3>
+                                <p>{{ homeHowStep2BodyLabel }}</p>
+                            </div>
+                        </li>
+                        <li class="how__step">
+                            <span class="how__index">03</span>
+                            <div>
+                                <h3>{{ homeHowStep3TitleLabel }}</h3>
+                                <p>{{ homeHowStep3BodyLabel }}</p>
+                            </div>
+                        </li>
+                    </ol>
                     <div class="terminal">
                         <div class="terminal__bar">
                             <span>{{ homeQuickFileNameLabel }} · Node.js</span>
@@ -46,35 +161,10 @@ console.log(users.length); // 1
 
 await db.close();</pre>
                     </div>
-                    <div class="hero__float">
-                        <p class="hero__float-label">{{ homeMetaStorageLabel }}</p>
-                        <p class="hero__float-value">app.yydb</p>
-                        <p class="hero__float-note">YDPG · YYWL · CRC32C</p>
-                    </div>
                 </div>
-            </div>
-            <dl class="hero__facts">
-                <div class="hero__fact">
-                    <dt>{{ homeMetaVersionLabel }}</dt>
-                    <dd>{{ homeMetaVersionValueLabel }}</dd>
-                </div>
-                <div class="hero__fact">
-                    <dt>{{ homeMetaStorageLabel }}</dt>
-                    <dd>{{ homeMetaStorageValueLabel }}</dd>
-                </div>
-                <div class="hero__fact">
-                    <dt>{{ homeMetaWireLabel }}</dt>
-                    <dd>{{ homeMetaWireValueLabel }}</dd>
-                </div>
-                <div class="hero__fact">
-                    <dt>{{ homeMetaLicenseLabel }}</dt>
-                    <dd>{{ homeMetaLicenseValueLabel }}</dd>
-                </div>
-            </dl>
-        </section>
+            </section>
 
-        <div class="page">
-            <section class="section" style="margin-top:0;border-top:0;padding-top:0">
+            <section class="section">
                 <div class="section__head">
                     <div>
                         <h2 class="section__title">{{ homeFeatureTitleLabel }}</h2>
@@ -109,7 +199,7 @@ await db.close();</pre>
                 </div>
             </section>
 
-            <section class="section">
+            <section class="section section--panel">
                 <div class="section__head">
                     <div>
                         <h2 class="section__title">{{ homeMatrixTitleLabel }}</h2>
@@ -412,6 +502,19 @@ await db.close();</pre>
                 </div>
             </section>
         </div>
+
+        <section class="band--cta">
+            <div class="band--cta__inner">
+                <div>
+                    <h2>{{ homeCtaTitleLabel }}</h2>
+                    <p>{{ homeCtaBodyLabel }}</p>
+                </div>
+                <div class="btn-row">
+                    <a class="btn" href="/install">{{ homeActionInstallLabel }}</a>
+                    <a class="btn btn--quiet" href="/d/">{{ homeActionDocsLabel }}</a>
+                </div>
+            </div>
+        </section>
     </main>
     <SiteFooter />
 </template>
@@ -436,6 +539,22 @@ import {
     homeMetaLicenseValue,
     homeQuickNote,
     homeQuickFileName,
+    homeAnatomyTitle,
+    homeStatsPage,
+    homeStatsIntegrity,
+    homeStatsFrame,
+    homeStatsHeader,
+    homeStatsPlatform,
+    homeHowTitle,
+    homeHowLede,
+    homeHowStep1Title,
+    homeHowStep1Body,
+    homeHowStep2Title,
+    homeHowStep2Body,
+    homeHowStep3Title,
+    homeHowStep3Body,
+    homeCtaTitle,
+    homeCtaBody,
     homeFeatureTitle,
     homeFeatureLede,
     homeFeatureSchemaTitle,
@@ -577,6 +696,22 @@ export default class IndexPage {
     homeMetaLicenseValueLabel = "";
     homeQuickNoteLabel = "";
     homeQuickFileNameLabel = "";
+    homeAnatomyTitleLabel = "";
+    homeStatsPageLabel = "";
+    homeStatsIntegrityLabel = "";
+    homeStatsFrameLabel = "";
+    homeStatsHeaderLabel = "";
+    homeStatsPlatformLabel = "";
+    homeHowTitleLabel = "";
+    homeHowLedeLabel = "";
+    homeHowStep1TitleLabel = "";
+    homeHowStep1BodyLabel = "";
+    homeHowStep2TitleLabel = "";
+    homeHowStep2BodyLabel = "";
+    homeHowStep3TitleLabel = "";
+    homeHowStep3BodyLabel = "";
+    homeCtaTitleLabel = "";
+    homeCtaBodyLabel = "";
     homeFeatureTitleLabel = "";
     homeFeatureLedeLabel = "";
     homeFeatureSchemaTitleLabel = "";
@@ -754,6 +889,22 @@ export default class IndexPage {
         this.homeMetaLicenseValueLabel = homeMetaLicenseValue();
         this.homeQuickNoteLabel = homeQuickNote();
         this.homeQuickFileNameLabel = homeQuickFileName();
+        this.homeAnatomyTitleLabel = homeAnatomyTitle();
+        this.homeStatsPageLabel = homeStatsPage();
+        this.homeStatsIntegrityLabel = homeStatsIntegrity();
+        this.homeStatsFrameLabel = homeStatsFrame();
+        this.homeStatsHeaderLabel = homeStatsHeader();
+        this.homeStatsPlatformLabel = homeStatsPlatform();
+        this.homeHowTitleLabel = homeHowTitle();
+        this.homeHowLedeLabel = homeHowLede();
+        this.homeHowStep1TitleLabel = homeHowStep1Title();
+        this.homeHowStep1BodyLabel = homeHowStep1Body();
+        this.homeHowStep2TitleLabel = homeHowStep2Title();
+        this.homeHowStep2BodyLabel = homeHowStep2Body();
+        this.homeHowStep3TitleLabel = homeHowStep3Title();
+        this.homeHowStep3BodyLabel = homeHowStep3Body();
+        this.homeCtaTitleLabel = homeCtaTitle();
+        this.homeCtaBodyLabel = homeCtaBody();
         this.homeFeatureTitleLabel = homeFeatureTitle();
         this.homeFeatureLedeLabel = homeFeatureLede();
         this.homeFeatureSchemaTitleLabel = homeFeatureSchemaTitle();
