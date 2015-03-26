@@ -75,7 +75,16 @@ pub mod catalog {
 
 /// Durable connection handle and statement surface.
 pub mod connection {
-    pub use yydb_engine::connection::*;
+    pub use yydb_engine::connection::Connection;
+}
+
+/// Private SQL bridge — not part of the `@yydb/yydb` public author surface.
+///
+/// Internal crates (`sqlite`, integration tests) access SQL lowering and
+/// execution through this module. Downstream authors should not depend on it.
+#[doc(hidden)]
+pub mod __sql_private {
+    pub use yydb_query::{Dialect, SqlOutcome, SqlPlan, execute_sql, prepare_sql};
 }
 
 /// Batched write operations.
@@ -93,9 +102,14 @@ pub mod objects {
     pub use yydb_engine::objects::*;
 }
 
-/// Query planning and DML operations.
+/// Query planning and DML operations (VOS frontend only on the public surface).
 pub mod query {
-    pub use yydb_query::*;
+    pub use yydb_query::{
+        BoundStatement, BoundValue, CmpOp, ParameterDescriptor, Pred, PreparedStatement, ProjectExpr, ProjectField,
+        QueryKind, QueryOp, QueryRow, SlotTy, SortKey, WriteAssignment, WriteField, WriteOp, WriteOutcome, bind_named,
+        bind_ordered, execute, execute_prepared, execute_write, execute_write_prepared, execute_write_with_constraints,
+        fingerprint, prepare, resolved_contract_from_document, try_insert_returning, upsert_row,
+    };
 }
 
 /// Local expression programs used by UDF execution.
