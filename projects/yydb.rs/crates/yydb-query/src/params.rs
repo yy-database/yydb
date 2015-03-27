@@ -30,6 +30,7 @@ use vos::syntax::{VosExpr, VosProgram, VosStmt};
 /// Both frontends lower into the same physical operators; the dialect is kept
 /// only for diagnostics and for re-preparing against the right parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[doc(hidden)]
 pub enum Dialect {
     /// VOS pipeline / write program.
     Vos,
@@ -185,6 +186,9 @@ pub fn prepare(source: &str) -> Result<PreparedStatement> {
 /// SQL and VOS differ only in the front half: parameter extraction, parsing and
 /// lowering. The resulting plan is the same operator set, so execution and
 /// schema-drift handling are shared with [`prepare`].
+///
+/// **Not part of the `@yydb/yydb` public author surface.**
+#[doc(hidden)]
 pub fn prepare_sql(source: &str) -> Result<PreparedStatement> {
     let (parameters, rewritten) = scan_and_rewrite(source, Dialect::Sql)?;
     let source_fingerprint = fingerprint(source);

@@ -29,6 +29,11 @@ impl Connection {
     /// differs. `?` placeholders are declared as `?1`, `?2`, … parameters and
     /// bind positionally through [`Self::query_sql_with_params`] and
     /// [`Self::execute_sql_write`].
+    ///
+    /// **Not part of the `@yydb/yydb` public author surface.** SQL remains an
+    /// internal execution path; downstream authors should use the VOS frontend
+    /// only.
+    #[doc(hidden)]
     pub fn prepare_sql(&self, source: &str) -> Result<PreparedStatement> {
         self.prepare_with(source, yydb_query::prepare_sql)
     }
@@ -129,12 +134,18 @@ impl Connection {
     }
 
     /// Execute a SQL read statement with positional parameter values.
+    ///
+    /// **Not part of the `@yydb/yydb` public author surface.**
+    #[doc(hidden)]
     pub fn query_sql_with_params(&self, source: &str, values: &[Value]) -> Result<Vec<QueryRow>> {
         let stmt = self.prepare_sql(source)?;
         self.query_prepared_ordered(&stmt, values)
     }
 
     /// Execute a SQL read statement with no parameters.
+    ///
+    /// **Not part of the `@yydb/yydb` public author surface.**
+    #[doc(hidden)]
     pub fn query_sql(&self, source: &str) -> Result<Vec<QueryRow>> {
         self.query_sql_with_params(source, &[])
     }
@@ -164,6 +175,9 @@ impl Connection {
     ///
     /// Mutates the active connection state. When a transaction is open, changes
     /// stay in the snapshot until [`Self::commit`] or [`Self::rollback`].
+    ///
+    /// **Not part of the `@yydb/yydb` public author surface.**
+    #[doc(hidden)]
     pub fn execute_sql_write(&self, source: &str, values: &[Value]) -> Result<usize> {
         let stmt = self.prepare_sql(source)?;
         let values = yydb_query::bind_ordered(&stmt, values)?;

@@ -37,9 +37,12 @@ pub use ops::{
     WriteOp,
 };
 pub use params::{
-    BoundStatement, Dialect, ParameterDescriptor, PreparedStatement, QueryKind, bind_named, bind_ordered, execute_prepared,
-    execute_write_prepared, fingerprint, prepare, prepare_sql,
+    BoundStatement, ParameterDescriptor, PreparedStatement, QueryKind, bind_named, bind_ordered, execute_prepared,
+    execute_write_prepared, fingerprint, prepare,
 };
+#[doc(hidden)]
+pub use params::{Dialect, prepare_sql};
+#[doc(hidden)]
 pub use sql::SqlPlan;
 pub use store::upsert_row;
 pub use write::WriteOutcome;
@@ -85,6 +88,7 @@ pub fn try_insert_returning(
 
 /// Result of one SQL statement.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[doc(hidden)]
 pub struct SqlOutcome {
     /// Rows produced by a read statement (empty for writes).
     pub rows: Vec<QueryRow>,
@@ -97,6 +101,9 @@ pub struct SqlOutcome {
 /// `values` binds the statement's parameters in declaration order, so
 /// `?` placeholders map to the first, second, … supplied value. Reads return
 /// rows, writes return the affected-row count.
+///
+/// **Not part of the `@yydb/yydb` public author surface.**
+#[doc(hidden)]
 pub fn execute_sql(
     source: &str,
     values: &[Value],
