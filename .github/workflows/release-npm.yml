@@ -133,9 +133,10 @@ jobs:
           INPUT_VERSION: ${{ steps.ver.outputs.version }}
         run: node scripts/prepare-npm-publish.mjs
 
-      - run: pnpm --filter @yydb/yydb build
+      # Build client and light-db first so yydb-webui's bundle step can resolve @yydb/yydb-client
       - run: pnpm --filter @yydb/yydb-client build
       - run: pnpm --filter @yydb/light-db build
+      - run: pnpm --filter @yydb/yydb build
 
       - name: Strip token-style npmrc (OIDC only)
         shell: bash
