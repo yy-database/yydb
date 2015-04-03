@@ -1,6 +1,6 @@
 {
     "name": "@yydb/yydb-darwin-arm64",
-    "version": "0.1.7",
+    "version": "0.1.8",
     "description": "YYDB native binding for Apple Silicon macOS; installed automatically by @yydb/yydb",
     "license": "MPL-2.0",
     "type": "module",
