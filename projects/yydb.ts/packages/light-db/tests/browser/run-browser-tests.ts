@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright-core";
 
-import type { BrowserTestResult } from "../browser/runner.ts";
+import type { BrowserTestResult } from "./runner.ts";
 
 const root = dirname(fileURLToPath(import.meta.url));
-const dist = join(root, "..", "dist");
+const dist = join(root, "dist");
 const mime: Record<string, string> = {
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
