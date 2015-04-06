@@ -52,6 +52,8 @@
     },
     "devDependencies": {
         "@types/node": "^22.15.0",
+        "@yydb/sqlite-fixtures": "workspace:*",
+        "@yydb/yydb": "workspace:*",
         "typescript": "^5.9.2"
     },
     "engines": {
