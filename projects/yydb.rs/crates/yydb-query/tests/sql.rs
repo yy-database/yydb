@@ -741,3 +741,398 @@ fn insert_rejects_multiple_value_groups() {
         "expected an error for multi-row insert"
     );
 }
+
+// ─── Parameterized DML ──────────────────────────────────────────────────
+
+#[test]
+fn insert_bind_positional_parameters_in_values() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+
+    let stmt = prepare_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, ?, ?)",
+    )
+    .expect("param insert prepares");
+    assert_eq!(stmt.parameters.len(), 5);
+
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, ?, ?)",
+        &[
+            Value::I64(4),
+            Value::Text("ada@param.test".into()),
+            Value::Text("tp".into()),
+            Value::I64(99),
+            Value::Bool(true),
+        ],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("param insert executes");
+
+    let outcome = execute_sql(
+        "SELECT account_id, email, score FROM Account WHERE account_id = 4",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read param-inserted row");
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("ada@param.test".into())));
+    assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(99)));
+}
+
+#[test]
+fn update_with_positional_parameter_in_where() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let update = execute_sql(
+        "UPDATE Account SET score = 777 WHERE account_id = ?",
+        &[Value::I64(2)],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("param update");
+    assert_eq!(update.affected, 1);
+
+    let outcome = execute_sql(
+        "SELECT score FROM Account WHERE account_id = 2",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read updated");
+    assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(777)));
+}
+
+#[test]
+fn delete_with_positional_parameter_in_where() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let delete = execute_sql(
+        "DELETE FROM Account WHERE tenant = ?",
+        &[Value::Text("t1".into())],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("param delete");
+    assert_eq!(delete.affected, 2);
+
+    let remaining = execute_sql(
+        "SELECT account_id FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read remaining");
+    assert_eq!(ids(&remaining.rows), vec![3]);
+}
+
+// ─── Integer boundary values in INSERT ─────────────────────────────────
+
+#[test]
+fn insert_i64_boundary_values() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+
+    // I64::MAX
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (9223372036854775807, 'max@test', 't', 0, true)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert i64 max");
+
+    // A large negative number (close to MIN but safely within range when
+    // parsed as UnaryMinus of a Number literal). The exact I64::MIN is not
+    // representable as `UnaryMinus(Number(9223372036854775808))` because
+    // 9223372036854775808 exceeds i64::MAX — this is a known lowering gap.
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (-9223372036854775807, 'min@test', 't', 0, false)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert near-min negative");
+
+    // Negative normal
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (-42, 'neg@test', 't', -100, true)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert negative");
+
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read boundary ids");
+    let got: Vec<i64> = outcome.rows.iter()
+        .map(|r| match r.get("account_id") { Some(Value::I64(n)) => *n, _ => panic!() })
+        .collect();
+    assert_eq!(got, vec![-9223372036854775807, -42, 9223372036854775807]);
+}
+
+// ─── Special text values ───────────────────────────────────────────────
+
+#[test]
+fn insert_empty_string_and_special_chars() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (10, '', '', 0, true)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert empty strings");
+
+    // Use parameter binding for strings that contain special characters
+    // (apostrophes etc.) because the parser does not perform SQL-style
+    // doubled-quote escaping inside literals.
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, 0, true)",
+        &[
+            Value::I64(11),
+            Value::Text("o'brien@test".into()),
+            Value::Text("it's".into()),
+        ],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert via params");
+
+    let outcome = execute_sql(
+        "SELECT account_id, email, tenant FROM Account WHERE account_id >= 10 ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read special text");
+    assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("".into())));
+    assert_eq!(outcome.rows[1].get("email"), Some(&Value::Text("o'brien@test".into())));
+    assert_eq!(outcome.rows[1].get("tenant"), Some(&Value::Text("it's".into())));
+}
+
+#[test]
+fn insert_unicode_text() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (12, '邮件@测试.中文', '租户', 0, true)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert unicode");
+
+    let outcome = execute_sql(
+        "SELECT email, tenant FROM Account WHERE account_id = 12",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read unicode");
+    assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("邮件@测试.中文".into())));
+    assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text("租户".into())));
+}
+
+// ─── Boolean edge values in DML ────────────────────────────────────────
+
+#[test]
+fn insert_and_filter_with_boolean_values() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (20, 'a@t', 'x', 0, true)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert true");
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (21, 'b@t', 'x', 0, false)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert false");
+
+    let active = execute_sql(
+        "SELECT account_id FROM Account WHERE active IS TRUE ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("where true");
+    assert_eq!(ids(&active.rows), vec![20]);
+
+    let inactive = execute_sql(
+        "SELECT account_id FROM Account WHERE active IS FALSE ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("where false");
+    assert_eq!(ids(&inactive.rows), vec![21]);
+}
+
+// ─── UPDATE multiple fields + WHERE combination ─────────────────────────
+
+#[test]
+fn update_multiple_fields_then_read_all_back() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    execute_sql(
+        "UPDATE Account SET score = 500, email = 'changed@test', tenant = 'zzz' WHERE account_id = 3",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("multi-col update");
+
+    let outcome = execute_sql(
+        "SELECT score, email, tenant FROM Account WHERE account_id = 3",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read updated multi-col");
+    assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(500)));
+    assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("changed@test".into())));
+    assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text("zzz".into())));
+}
+
+// ─── DELETE + INSERT idempotency ──────────────────────────────────────
+
+#[test]
+fn delete_then_insert_same_row_preserves_visibility() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    execute_sql(
+        "DELETE FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("delete ada");
+
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'ada.2@new.test', 't99', 42, false)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("reinsert ada");
+
+    let outcome = execute_sql(
+        "SELECT email, tenant, score, active FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read reinserted");
+    assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("ada.2@new.test".into())));
+    assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text("t99".into())));
+    assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(42)));
+    assert_eq!(outcome.rows[0].get("active"), Some(&Value::Bool(false)));
+}
+
+// ─── WHERE IS NULL path for non-nullable columns (always empty) ────────
+
+#[test]
+fn select_with_is_null_on_populated_column_yields_empty() {
+    // All seed rows have non-NULL email, so `email IS NULL` returns empty.
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account WHERE email IS NULL",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("IS NULL empty");
+    assert!(outcome.rows.is_empty());
+}
+
+// ─── UPDATE with NULL value ─────────────────────────────────────────────
+
+#[test]
+fn update_can_set_null_on_nullable_column() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let update = execute_sql(
+        "UPDATE Account SET tenant = NULL WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("set null");
+    assert_eq!(update.affected, 1);
+
+    let outcome = execute_sql(
+        "SELECT tenant FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read null tenant");
+    assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Null));
+
+    // IS NULL now finds this row
+    let nulls = execute_sql(
+        "SELECT account_id FROM Account WHERE tenant IS NULL",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("find null tenant");
+    assert_eq!(ids(&nulls.rows), vec![1]);
+}
