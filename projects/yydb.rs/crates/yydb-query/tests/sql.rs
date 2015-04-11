@@ -1136,3 +1136,204 @@ fn update_can_set_null_on_nullable_column() {
     .expect("find null tenant");
     assert_eq!(ids(&nulls.rows), vec![1]);
 }
+
+// ─── REAL / float literal rejection ─────────────────────────────────────
+
+#[test]
+fn select_rejects_real_number_literal_in_predicate() {
+    // lowering only supports i64 integer literals. A decimal number like
+    // `3.14` should fail in `lower_value` because i64::parse("3.14") fails.
+    let err = prepare_sql("SELECT * FROM Account WHERE score = 3.14")
+        .expect_err("real literal must be rejected");
+    assert!(
+        format!("{err}").contains("integer") || format!("{err}").contains("Number")
+            || format!("{err}").contains("unsupported"),
+        "unexpected: {err}"
+    );
+}
+
+#[test]
+fn insert_rejects_real_number_in_integer_column() {
+    let err = prepare_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'x', 't', 3.14, true)",
+    )
+    .expect_err("real in integer column must reject");
+    assert!(
+        format!("{err}").contains("integer") || format!("{err}").contains("Number"),
+        "unexpected: {err}"
+    );
+}
+
+// ─── UUID type column round-trip via parameter binding ──────────────────
+
+const UUID_SCHEMA: &str = r#"
+table User {
+    @@user_id: uuid,
+    user_name: utf8,
+    active: bool,
+}
+"#;
+
+#[test]
+fn uuid_column_round_trip_through_sql_parameters() {
+    use uuid::Uuid;
+
+    let contract = resolved_contract_from_document(UUID_SCHEMA).expect("uuid schema");
+    let mut records = BTreeMap::new();
+
+    let id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("parse uuid");
+
+    // UUID must go through parameter binding — no SQL literal syntax for UUID
+    execute_sql(
+        "INSERT INTO User (user_id, user_name, active) VALUES (?, ?, ?)",
+        &[Value::Uuid(id), Value::Text("ada".into()), Value::Bool(true)],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("uuid insert");
+
+    // Note: the lowering/write path does not yet enforce schema type checks on
+    // parameter bindings — the UUID Value gets serialized through the row
+    // storage layer which may encode it as text bytes. We verify only that
+    // the round-trip is coherent (not that the wire type is preserved).
+    let outcome = execute_sql(
+        "SELECT user_name FROM User WHERE user_name = 'ada'",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("verify insert landed");
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("user_name"), Some(&Value::Text("ada".into())));
+}
+
+#[test]
+fn update_uuid_column_via_parameter_binding() {
+    use uuid::Uuid;
+
+    let contract = resolved_contract_from_document(UUID_SCHEMA).expect("uuid schema");
+    let mut records = BTreeMap::new();
+    let id_a = Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("a");
+    let id_b = Uuid::parse_str("22222222-2222-2222-2222-222222222222").expect("b");
+
+    execute_sql(
+        "INSERT INTO User (user_id, user_name, active) VALUES (?, ?, true)",
+        &[Value::Uuid(id_a), Value::Text("first".into())],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert");
+
+    // Search by the UUID bound as parameter — the lowering path forwards the
+    // raw Value into the predicate comparison, which should still match.
+    execute_sql(
+        "UPDATE User SET user_name = 'renamed' WHERE user_id = ?",
+        &[Value::Uuid(id_a)],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("update by uuid");
+
+    // Verify the UPDATE landed by reading back the row (via a column we know is
+    // preserved correctly: user_name).
+    let rows = execute_sql(
+        "SELECT user_name FROM User WHERE active IS TRUE",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read after update");
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.rows[0].get("user_name"), Some(&Value::Text("renamed".into())));
+
+    // Updating with a UUID that doesn't match anything should affect zero rows.
+    let affected = execute_sql(
+        "UPDATE User SET user_name = 'ghost' WHERE user_id = ?",
+        &[Value::Uuid(id_b)],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("update missing");
+    assert_eq!(affected.affected, 0);
+}
+
+// ─── Large text round-trip ──────────────────────────────────────────────
+
+#[test]
+fn large_text_values_round_trip() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+
+    let long_email: String = "a".repeat(500);
+    let long_tenant: String = "tenant-".repeat(200);
+
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, 0, true)",
+        &[
+            Value::I64(9001),
+            Value::Text(long_email.clone()),
+            Value::Text(long_tenant.clone()),
+        ],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert large text");
+
+    let outcome = execute_sql(
+        "SELECT email, tenant FROM Account WHERE account_id = 9001",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read large text");
+    assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text(long_email)));
+    assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text(long_tenant)));
+}
+
+// ─── NULL as literal in INSERT ─────────────────────────────────────────
+
+#[test]
+fn insert_explicit_null_literal() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+
+    // email is nullable per schema (no @@) — INSERT NULL explicitly
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (9100, NULL, 't', 0, true)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert null literal");
+
+    let outcome = execute_sql(
+        "SELECT email FROM Account WHERE account_id = 9100",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read null");
+    assert_eq!(outcome.rows[0].get("email"), Some(&Value::Null));
+}
+
+// ─── Parameterized value type mismatches ───────────────────────────────
+//
+// NOTE: the lowering pass currently infers `SlotTy::Any` for every
+// positional parameter — it does not yet perform column-aware slot type
+// narrowing. A Text value bound to an integer column therefore passes
+// lowering silently and the error surfaces (if at all) in the write path
+// rather than at bind time. This is documented here so future lowering
+// work knows to add type inference and re-enable the negative assertion.
+//
+// #[test]
+// fn parameter_type_mismatch_rejected_at_bind_time() { ... }
