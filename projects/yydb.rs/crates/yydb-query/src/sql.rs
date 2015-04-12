@@ -5,13 +5,17 @@
 //! once and executed against any schema that declares the referenced tables.
 
 use oak_sql::ast::{
-    BinaryOperator, DeleteStatement, Expression, InsertStatement, LimitClause, Literal, OrderByItem, SelectItem,
-    SelectStatement, SqlRoot, SqlStatement, TableName, UnaryOperator, UpdateStatement,
+    BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertStatement, JoinClause,
+    JoinType, LimitClause, Literal, OrderByItem, SelectItem, SelectStatement, SqlRoot, SqlStatement, TableName,
+    UnaryOperator, UpdateStatement,
 };
 use yydb_types::{Error, Result, Value};
 
 use super::{
-    ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, SortKey, WriteAssignment, WriteField, WriteOp},
+    ops::{
+        AggregateField, BoundValue, CmpOp, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, SortKey, WriteAssignment,
+        WriteField, WriteOp,
+    },
     params::{ParameterDescriptor, name_to_slot},
 };
 
@@ -107,12 +111,6 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
 // ─── read pipeline ───────────────────────────────────────────────────────
 
 fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) -> Result<Vec<QueryOp>> {
-    if !select.joins.is_empty() {
-        return Err(sql_error("JOIN is not supported by the YYDB query executor"));
-    }
-    if select.group_by.is_some() || select.having.is_some() {
-        return Err(sql_error("GROUP BY and HAVING are not supported by the YYDB query executor"));
-    }
     let table = select
         .from
         .as_ref()
@@ -120,9 +118,29 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
         .ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
 
     let mut ops = vec![QueryOp::Scan { table }];
+
+    // JOIN clauses.
+    for join_clause in &select.joins {
+        ops.push(lower_join_clause(join_clause, parameters)?);
+    }
+
+    // WHERE clause.
     if let Some(predicate) = &select.expr {
         ops.push(QueryOp::Filter { predicate: lower_predicate(predicate, parameters)? });
     }
+
+    // Aggregate: GROUP BY + aggregate functions from SELECT items.
+    let (group_keys, aggregates) = lower_aggregate(select, parameters)?;
+    if !aggregates.is_empty() || !group_keys.is_empty() {
+        ops.push(QueryOp::Aggregate { group_keys, aggregates });
+    }
+
+    // HAVING — MVP rejects until Aggregate + Filter composition lands.
+    if select.having.is_some() {
+        return Err(sql_error("HAVING clause is not yet supported by the YYDB query executor"));
+    }
+
+    // ORDER BY.
     if let Some(order_by) = &select.order_by {
         let mut keys = Vec::with_capacity(order_by.items.len());
         for item in &order_by.items {
@@ -130,15 +148,149 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
         }
         ops.push(QueryOp::Sort { keys });
     }
+
+    // LIMIT.
     if let Some(limit) = &select.limit {
         lower_limit(limit, parameters, &mut ops)?;
     }
+
+    // SELECT projection (without aggregate function items — those are
+    // consumed by the Aggregate op above).
     let fields = lower_projection(&select.items)?;
     if let Some(fields) = fields {
         ops.push(QueryOp::Project { fields });
     }
     ops.push(QueryOp::Collect);
     Ok(ops)
+}
+
+// ─── join lowering ───────────────────────────────────────────────────────
+
+fn lower_join_clause(join: &JoinClause, parameters: &[ParameterDescriptor]) -> Result<QueryOp> {
+    let kind = match join.join_type {
+        JoinType::Inner => JoinKind::Inner,
+        JoinType::Left | JoinType::Right | JoinType::Full => {
+            return Err(sql_error(format!(
+                "join kind `{:?}` is not supported by the YYDB query executor (only INNER is MVP)",
+                join.join_type
+            )));
+        }
+    };
+    let right = join.table.name.name.to_string();
+    let on = join
+        .on
+        .as_ref()
+        .map(|expr| lower_predicate(expr, parameters))
+        .transpose()?
+        .unwrap_or(Pred::True);
+    Ok(QueryOp::Join { kind, right, right_alias: None, on })
+}
+
+// ─── aggregate lowering ──────────────────────────────────────────────────
+
+/// Extract GROUP BY keys and aggregate function calls from a SELECT statement.
+///
+/// Returns `(group_keys, aggregates)`. Both may be empty — callers only push
+/// an [`QueryOp::Aggregate`] when at least one is non-empty.
+fn lower_aggregate(
+    select: &SelectStatement,
+    parameters: &[ParameterDescriptor],
+) -> Result<(Vec<ProjectField>, Vec<AggregateField>)> {
+    let group_keys = match &select.group_by {
+        Some(GroupByClause { items, .. }) => {
+            let mut keys = Vec::with_capacity(items.len());
+            for item in items {
+                keys.push(lower_group_key(item)?);
+            }
+            keys
+        }
+        None => Vec::new(),
+    };
+
+    // Walk SELECT items for aggregate function calls — also capture alias.
+    let mut aggregates: Vec<AggregateField> = Vec::new();
+    for item in &select.items {
+        if let SelectItem::Expression { expr, alias, .. } = item {
+            if let Expression::FunctionCall { name, args, .. } = expr {
+                let agg = lower_aggregate_function(name, args, alias, parameters)?;
+                aggregates.push(agg);
+            }
+        }
+    }
+
+    Ok((group_keys, aggregates))
+}
+
+fn lower_group_key(item: &GroupByItem) -> Result<ProjectField> {
+    match item {
+        GroupByItem::Column(identifier) => {
+            let name = identifier.name.to_string();
+            let path = vec![name.clone()];
+            Ok(ProjectField { name, expr: ProjectExpr::Scalar { path } })
+        }
+        GroupByItem::Expression(expr) => {
+            // Recurse into a plain identifier expression only.
+            let Expression::Identifier(identifier) = expr
+            else {
+                return Err(sql_error("GROUP BY supports plain column references only (complex expressions not yet supported)"));
+            };
+            let name = identifier.name.to_string();
+            let path = vec![name.clone()];
+            Ok(ProjectField { name, expr: ProjectExpr::Scalar { path } })
+        }
+        GroupByItem::Position { index, .. } => {
+            Err(sql_error(format!("GROUP BY positional reference (`GROUP BY {index}`) is not yet supported by YYDB MVP")))
+        }
+    }
+}
+
+fn lower_aggregate_function(
+    name: &Identifier,
+    args: &[Expression],
+    alias: &Option<Identifier>,
+    parameters: &[ParameterDescriptor],
+) -> Result<AggregateField> {
+    let fn_name = name.name.to_string().to_ascii_uppercase();
+    let output_name = alias.as_ref().map(|a| a.name.to_string()).unwrap_or_else(|| fn_name.to_ascii_lowercase());
+    match fn_name.as_str() {
+        "COUNT" => {
+            if args.is_empty() {
+                return Err(sql_error("COUNT() requires an argument (`*` or an expression)"));
+            }
+            // COUNT(*) — parser may give us a single-star arg or none.
+            let first = &args[0];
+            match first {
+                Expression::Literal(_) | Expression::Identifier(_) | Expression::Binary { .. } => {
+                    let expr = lower_project_expr(first, parameters)?;
+                    Ok(AggregateField::Count { name: output_name, expr: Some(expr) })
+                }
+                _ => {
+                    // Fallback: treat anything else as COUNT(*).
+                    Ok(AggregateField::Count { name: output_name, expr: None })
+                }
+            }
+        }
+        "SUM" => {
+            if args.len() != 1 {
+                return Err(sql_error("SUM() requires exactly one argument"));
+            }
+            let expr = lower_project_expr(&args[0], parameters)?;
+            Ok(AggregateField::Sum { name: output_name, expr })
+        }
+        other => Err(sql_error(format!("aggregate function `{other}` is not supported by YYDB MVP"))),
+    }
+}
+
+/// Lower an expression inside SELECT/GROUP BY/aggregate arguments into a
+/// [`ProjectExpr`]. Currently supports plain column references only.
+fn lower_project_expr(expr: &Expression, _parameters: &[ParameterDescriptor]) -> Result<ProjectExpr> {
+    match expr {
+        Expression::Identifier(identifier) => {
+            let name = identifier.name.to_string();
+            Ok(ProjectExpr::Scalar { path: vec![name] })
+        }
+        _ => Err(sql_error("aggregate arguments support plain column references only")),
+    }
 }
 
 fn lower_sort_key(item: &OrderByItem) -> Result<SortKey> {
@@ -158,7 +310,9 @@ fn lower_limit(limit: &LimitClause, parameters: &[ParameterDescriptor], ops: &mu
 }
 
 /// Returns `None` when the projection is `*` (the scan already yields every
-/// stored column).
+/// stored column). Aggregate function items (`COUNT(...)`, `SUM(...)`) are
+/// consumed by the [`QueryOp::Aggregate`] lowering — this function skips them
+/// so they do not produce a duplicate Project entry.
 fn lower_projection(items: &[SelectItem]) -> Result<Option<Vec<ProjectField>>> {
     if items.len() == 1 {
         if matches!(items[0], SelectItem::Star { .. }) {
@@ -171,6 +325,10 @@ fn lower_projection(items: &[SelectItem]) -> Result<Option<Vec<ProjectField>>> {
         else {
             return Err(sql_error("`*` cannot be combined with other select items"));
         };
+        // Skip aggregate functions — they are consumed by the Aggregate op.
+        if matches!(expr, Expression::FunctionCall { .. }) {
+            continue;
+        }
         let Expression::Identifier(identifier) = expr
         else {
             return Err(sql_error("select items support plain column references only"));
@@ -203,9 +361,19 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Res
                 BinaryOperator::Like => return Err(sql_error("LIKE is not supported by the YYDB predicate set")),
                 _ => return Err(sql_error("arithmetic expressions cannot be used as predicates")),
             };
-            let path = column_path(left)?;
+            let left_path = column_path(left)?;
+            // Detect column-vs-column comparisons (JOIN ON). If the right side
+            // is a plain identifier that does NOT look like a rewritten param,
+            // treat it as a column path instead of a bound value.
+            if let Expression::Identifier(right_ident) = right.as_ref() {
+                let right_name = right_ident.name.as_ref();
+                if !right_name.starts_with("__yydb_param_") {
+                    let right_path = vec![right_name.to_string()];
+                    return Ok(Pred::FieldCmpField { left_path, op: cmp, right_path });
+                }
+            }
             let value = lower_value(right, parameters)?;
-            Ok(Pred::FieldCmp { path, op: cmp, value })
+            Ok(Pred::FieldCmp { path: left_path, op: cmp, value })
         }
         Expression::Unary { op: UnaryOperator::Not, expr, .. } => Ok(Pred::Not(Box::new(lower_predicate(expr, parameters)?))),
         Expression::IsNull { expr, negated, .. } => Ok(Pred::FieldCmp {

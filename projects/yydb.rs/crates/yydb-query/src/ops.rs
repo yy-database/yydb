@@ -107,6 +107,15 @@ pub enum Pred {
         /// Right-hand side.
         value: BoundValue,
     },
+    /// Comparison between two row fields (used by JOIN ON conditions).
+    FieldCmpField {
+        /// Left field path.
+        left_path: Vec<String>,
+        /// Comparison operator.
+        op: CmpOp,
+        /// Right field path.
+        right_path: Vec<String>,
+    },
     /// Conjunction.
     And(Box<Pred>, Box<Pred>),
     /// Disjunction.
@@ -150,6 +159,33 @@ pub struct SortKey {
     pub ascending: bool,
 }
 
+/// Kind of SQL join. MVP supports [`JoinKind::Inner`] only; other kinds
+/// return an explicit error at lowering time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JoinKind {
+    /// `INNER JOIN` — rows with no match on either side are dropped.
+    Inner,
+}
+
+/// One aggregate function call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AggregateField {
+    /// `COUNT(*)` or `COUNT(expr)`. `expr` is `None` for `COUNT(*)`.
+    Count {
+        /// Output column name (from SELECT alias, or `count` if none).
+        name: String,
+        /// Optional expression to count non-null values of.
+        expr: Option<ProjectExpr>,
+    },
+    /// `SUM(expr)` — sums non-null numeric values.
+    Sum {
+        /// Output column name (from SELECT alias, or `sum` if none).
+        name: String,
+        /// Expression to aggregate.
+        expr: ProjectExpr,
+    },
+}
+
 /// Closed physical op set for read pipelines.
 #[derive(Debug, Clone, PartialEq)]
 pub enum QueryOp {
@@ -162,6 +198,25 @@ pub enum QueryOp {
     Filter {
         /// Row predicate.
         predicate: Pred,
+    },
+    /// Merge the accumulating row stream with another table via a join.
+    Join {
+        /// Join kind — currently only inner is supported.
+        kind: JoinKind,
+        /// Right-hand table name as written by the frontend.
+        right: String,
+        /// Optional alias for the right-hand table (used as column prefix
+        /// in the joined rows when supplied).
+        right_alias: Option<String>,
+        /// Join condition evaluated against each left/right row pair.
+        on: Pred,
+    },
+    /// Group rows by zero or more keys and compute aggregate values.
+    Aggregate {
+        /// GROUP BY columns (empty means a single aggregate over all rows).
+        group_keys: Vec<ProjectField>,
+        /// Aggregate function outputs, in SELECT order.
+        aggregates: Vec<AggregateField>,
     },
     /// Replace each row with the projected column set.
     Project {

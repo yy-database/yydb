@@ -1,6 +1,6 @@
 //! Execute Phase 1 query ops against stored table rows.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use vos::types::ResolvedContract;
 use yydb_types::{Error, Result, Value};
@@ -8,7 +8,7 @@ use yydb_types::{Error, Result, Value};
 use super::{
     catalog::table_row_key_name,
     lower,
-    ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow},
+    ops::{AggregateField, BoundValue, CmpOp, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow},
     resolve, store,
 };
 
@@ -49,6 +49,28 @@ pub fn execute_ops(
                     .as_deref()
                     .ok_or_else(|| Error::Schema { message: "filter without a preceding table scan".into() })?;
                 rows.retain(|row| eval_pred(predicate, row, table, contract, records, bound_values));
+            }
+            QueryOp::Join { kind, right, right_alias, on } => {
+                let table = current_table
+                    .as_deref()
+                    .ok_or_else(|| Error::Schema { message: "join without a preceding table scan".into() })?;
+                match kind {
+                    JoinKind::Inner => {
+                        rows = execute_inner_join(
+                            &rows,
+                            table,
+                            right,
+                            right_alias.as_deref(),
+                            on,
+                            contract,
+                            records,
+                            bound_values,
+                        )?;
+                    }
+                }
+            }
+            QueryOp::Aggregate { group_keys, aggregates } => {
+                rows = execute_aggregate(&rows, group_keys, aggregates, contract, records, bound_values)?;
             }
             QueryOp::Project { fields } => {
                 let table = current_table
@@ -164,6 +186,11 @@ pub(crate) fn eval_pred(
             };
             cmp_values(&left, *op, &right)
         }
+        Pred::FieldCmpField { left_path, op, right_path } => {
+            let left = read_path(left_path, row, table, contract, records);
+            let right = read_path(right_path, row, table, contract, records);
+            cmp_values(&left, *op, &right)
+        }
         Pred::And(left, right) => {
             eval_pred(left, row, table, contract, records, bound_values)
                 && eval_pred(right, row, table, contract, records, bound_values)
@@ -217,4 +244,212 @@ fn cmp_values(left: &Value, op: CmpOp, right: &Value) -> bool {
         CmpOp::Gt => ord == std::cmp::Ordering::Greater,
         CmpOp::Ge => ord != std::cmp::Ordering::Less,
     }
+}
+
+// ─── join ────────────────────────────────────────────────────────────────
+
+fn execute_inner_join(
+    left_rows: &[QueryRow],
+    _left_table: &str,
+    right: &str,
+    right_alias: Option<&str>,
+    on: &Pred,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
+    // Load right table rows.
+    let storage_right = match contract {
+        Some(contract) => table_row_key_name(contract, right)?,
+        None => right.to_string(),
+    };
+    let right_rows = store::load_table(records, &storage_right)?;
+
+    // Column prefix for the right table in the joined row.
+    let prefix = match right_alias {
+        Some(a) => a.to_string(),
+        None => right.to_string(),
+    };
+
+    // Nested loop: for each left row, for each right row, check ON condition.
+    // The ON predicate operates on a merged row where both sides are
+    // addressable via their table-qualified column names (prefix.column).
+    let mut out: Vec<QueryRow> = Vec::with_capacity(left_rows.len().min(right_rows.len()));
+    for left_row in left_rows {
+        for right_row in &right_rows {
+            let merged = merge_rows(left_row, right_row, &prefix);
+            // JOIN ON condition — eval_pred reads directly from the merged
+            // row by table-qualified column name, so `table` is irrelevant
+            // for single-element paths.
+            if eval_pred(on, &merged, "", contract, records, bound_values) {
+                out.push(merged);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Merge a left and right row. Left columns are kept as-is; right columns
+/// are prefixed with `prefix.column_name`.
+fn merge_rows(left: &QueryRow, right: &QueryRow, prefix: &str) -> QueryRow {
+    let mut merged = QueryRow::new();
+    for (key, value) in left {
+        merged.insert(key.clone(), value.clone());
+    }
+    for (key, value) in right {
+        let qualified = format!("{prefix}.{key}");
+        merged.insert(qualified, value.clone());
+    }
+    merged
+}
+
+// ─── aggregate ───────────────────────────────────────────────────────────
+
+fn execute_aggregate(
+    rows: &[QueryRow],
+    group_keys: &[ProjectField],
+    aggregates: &[AggregateField],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
+    if group_keys.is_empty() {
+        // Global aggregate: all rows form one group.
+        let mut out = QueryRow::new();
+        for agg in aggregates {
+            let (name, value) = eval_aggregate(agg, rows, contract, records, bound_values)?;
+            out.insert(name, value);
+        }
+        return Ok(vec![out]);
+    }
+
+    // Group rows by the group key values using a string key (Value is not
+    // Hash/Eq). We generate a canonical key from each row's GROUP BY values.
+    let mut groups: HashMap<String, Vec<&QueryRow>> = HashMap::new();
+    for row in rows {
+        let mut key_values: Vec<Value> = Vec::with_capacity(group_keys.len());
+        for gk in group_keys {
+            let value = match &gk.expr {
+                ProjectExpr::Scalar { path } => read_path(path, row, "", contract, records),
+                ProjectExpr::Nested { .. } => Value::Null, // nested in GROUP BY → unsupported
+            };
+            key_values.push(value);
+        }
+        let group_key = group_key_to_string(&key_values);
+        groups.entry(group_key).or_default().push(row);
+    }
+
+    let mut out_rows: Vec<QueryRow> = Vec::with_capacity(groups.len());
+    for (_, group_rows) in &groups {
+        let mut out = QueryRow::new();
+        // Group key columns — read from the first row of the group.
+        if let Some(first_row) = group_rows.first() {
+            for gk in group_keys {
+                let value = match &gk.expr {
+                    ProjectExpr::Scalar { path } => read_path(path, first_row, "", contract, records),
+                    ProjectExpr::Nested { .. } => Value::Null,
+                };
+                out.insert(gk.name.clone(), value);
+            }
+        }
+        // Aggregate values.
+        let group_row_vec: Vec<QueryRow> = group_rows.iter().cloned().cloned().collect();
+        for agg in aggregates {
+            let (name, value) = eval_aggregate(agg, &group_row_vec, contract, records, bound_values)?;
+            out.insert(name, value);
+        }
+        out_rows.push(out);
+    }
+    Ok(out_rows)
+}
+
+fn eval_aggregate(
+    agg: &AggregateField,
+    group_rows: &[QueryRow],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<(String, Value)> {
+    match agg {
+        AggregateField::Count { name, expr: None } => {
+            // COUNT(*) — number of rows in the group.
+            Ok((name.clone(), Value::I64(group_rows.len() as i64)))
+        }
+        AggregateField::Count { name, expr: Some(inner) } => {
+            // COUNT(expr) — non-null values of the expression.
+            let count = group_rows
+                .iter()
+                .filter(|row| eval_project_expr(inner, row, contract, records, bound_values) != Value::Null)
+                .count();
+            Ok((name.clone(), Value::I64(count as i64)))
+        }
+        AggregateField::Sum { name, expr } => {
+            let mut sum: i64 = 0;
+            let mut saw_any = false;
+            for row in group_rows {
+                let value = eval_project_expr(expr, row, contract, records, bound_values);
+                match value {
+                    Value::Null => {}
+                    Value::I64(n) => {
+                        sum = sum.wrapping_add(n);
+                        saw_any = true;
+                    }
+                    Value::U64(n) => {
+                        // Clamp to i64 range conservatively.
+                        sum = sum.wrapping_add(n.min(i64::MAX as u64) as i64);
+                        saw_any = true;
+                    }
+                    _ => {}
+                }
+            }
+            let result = if saw_any { Value::I64(sum) } else { Value::Null };
+            Ok((name.clone(), result))
+        }
+    }
+}
+
+/// Evaluate a `ProjectExpr` against a single row (used inside aggregate
+/// evaluation where we have no table context).
+fn eval_project_expr(
+    expr: &ProjectExpr,
+    row: &QueryRow,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    _bound_values: &[Value],
+) -> Value {
+    match expr {
+        ProjectExpr::Scalar { path } => read_path(path, row, "", contract, records),
+        ProjectExpr::Nested { path, .. } => read_path(path, row, "", contract, records),
+    }
+}
+
+/// Build a canonical string key for a GROUP BY value vector.
+///
+/// `Value` does not implement `Hash`/`Eq`, so we serialize each value into a
+/// stable text form and join with a separator that cannot appear inside a
+/// serialized value. This is correct because YYDB group keys are primitive
+/// scalars — never row or blob values.
+fn group_key_to_string(values: &[Value]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(values.len() * 8);
+    for (i, value) in values.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\x1f"); // Unit separator — cannot appear in user data
+        }
+        match value {
+            Value::Null => out.push_str("null"),
+            Value::Bool(b) => write!(out, "bool:{b}").unwrap(),
+            Value::I64(n) => write!(out, "i64:{n}").unwrap(),
+            Value::U64(n) => write!(out, "u64:{n}").unwrap(),
+            Value::F64(n) => write!(out, "f64:{n}").unwrap(),
+            Value::Text(s) => {
+                out.push_str("text:");
+                out.push_str(s.as_str());
+            }
+            Value::Bytes(b) => write!(out, "bytes:<{}>", b.len()).unwrap(),
+            Value::Uuid(u) => write!(out, "uuid:{u}").unwrap(),
+            _ => write!(out, "other:{value:?}").unwrap(),
+        }
+    }
+    out
 }

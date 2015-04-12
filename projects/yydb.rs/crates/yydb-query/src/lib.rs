@@ -33,8 +33,8 @@ use yydb_types::{TableUniqueConstraint, Value};
 
 pub use catalog::resolved_contract_from_document;
 pub use ops::{
-    BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow, SlotTy, SortKey, WriteAssignment, WriteField,
-    WriteOp,
+    AggregateField, BoundValue, CmpOp, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow, SlotTy, SortKey,
+    WriteAssignment, WriteField, WriteOp,
 };
 pub use params::{
     BoundStatement, ParameterDescriptor, PreparedStatement, QueryKind, bind_named, bind_ordered, execute_prepared,

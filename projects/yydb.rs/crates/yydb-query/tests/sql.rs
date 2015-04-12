@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use vos::types::ResolvedContract;
-use yydb_query::{Dialect, QueryKind, execute_sql, prepare_sql, resolved_contract_from_document};
+use yydb_query::{Dialect, Pred, QueryKind, QueryOp, execute_sql, prepare_sql, resolved_contract_from_document};
 use yydb_types::Value;
 
 const SCHEMA: &str = r#"
@@ -174,8 +174,19 @@ fn update_rejects_primary_key_reassignment() {
 #[test]
 fn ddl_and_joins_are_rejected_explicitly() {
     assert!(prepare_sql("CREATE TABLE T (id INTEGER)").is_err());
-    assert!(prepare_sql("SELECT * FROM Account JOIN Other ON Account.account_id = Other.id").is_err());
-    assert!(prepare_sql("SELECT * FROM Account GROUP BY tenant").is_err());
+    // INNER JOIN is now supported.
+    let result = prepare_sql("SELECT * FROM Account JOIN Other ON Account.account_id = Other.id");
+    match &result {
+        Ok(_) => {}
+        Err(e) => eprintln!("JOIN prepare error: {e}"),
+    }
+    assert!(result.is_ok());
+    // GROUP BY is now supported.
+    assert!(prepare_sql("SELECT * FROM Account GROUP BY tenant").is_ok());
+    // HAVING is still MVP-rejected.
+    assert!(prepare_sql("SELECT COUNT(*) FROM Account HAVING COUNT(*) > 1").is_err());
+    // Non-INNER joins are still rejected.
+    assert!(prepare_sql("SELECT * FROM Account LEFT JOIN Other ON Account.id = Other.id").is_err());
 }
 
 #[test]
@@ -625,18 +636,15 @@ fn bare_bool_column_reference_as_predicate_is_rejected_by_parser() {
 
 #[test]
 fn select_rejects_column_to_column_comparison_on_rhs() {
-    // WHERE account_id = account_id — right-hand side is treated as a
-    // parameter placeholder candidate by `lower_value`, so it fails before
-    // reaching execution. This confirms column-to-column comparison is not
-    // part of the lowering surface.
-    let err = prepare_sql("SELECT * FROM Account WHERE account_id = account_id")
-        .expect_err("column-to-column comparison must be rejected");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("rewritten parameter Name") || msg.contains("expected rewritten")
-            || msg.contains("unsupported SQL value"),
-        "unexpected error: {msg}"
-    );
+    // Column-to-column comparison is now supported by lowering (used by
+    // JOIN ON and WHERE self-comparison). Verify it lowers to the right Pred.
+    let stmt = prepare_sql("SELECT * FROM Account WHERE account_id = account_id")
+        .expect("column-to-column comparison now lowers successfully");
+    // The Filter predicate should be FieldCmpField.
+    let has_field_cmp_field = stmt.ops.iter().any(|op| matches!(
+        op, QueryOp::Filter { predicate: Pred::FieldCmpField { .. } }
+    ));
+    assert!(has_field_cmp_field, "expected FieldCmpField in lowered ops: {stmt:?}");
 }
 
 // ─── Multiple statements rejected ──────────────────────────────────────
