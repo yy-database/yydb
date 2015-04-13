@@ -405,6 +405,31 @@ fn eval_aggregate(
             let result = if saw_any { Value::I64(sum) } else { Value::Null };
             Ok((name.clone(), result))
         }
+        AggregateField::Avg { name, expr } => {
+            let mut sum: f64 = 0.0;
+            let mut count: u64 = 0;
+            for row in group_rows {
+                let value = eval_project_expr(expr, row, contract, records, bound_values);
+                match value {
+                    Value::Null => {}
+                    Value::I64(n) => {
+                        sum += n as f64;
+                        count += 1;
+                    }
+                    Value::U64(n) => {
+                        sum += n as f64;
+                        count += 1;
+                    }
+                    Value::F64(n) => {
+                        sum += n;
+                        count += 1;
+                    }
+                    _ => {}
+                }
+            }
+            let result = if count > 0 { Value::F64(sum / count as f64) } else { Value::Null };
+            Ok((name.clone(), result))
+        }
     }
 }
 

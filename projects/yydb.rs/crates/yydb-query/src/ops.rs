@@ -184,6 +184,14 @@ pub enum AggregateField {
         /// Expression to aggregate.
         expr: ProjectExpr,
     },
+    /// `AVG(expr)` — average of non-null numeric values. Returns `NULL` when
+    /// the group has no non-null values. Output is a `Value::F64`.
+    Avg {
+        /// Output column name (from SELECT alias, or `avg` if none).
+        name: String,
+        /// Expression to aggregate.
+        expr: ProjectExpr,
+    },
 }
 
 /// Closed physical op set for read pipelines.

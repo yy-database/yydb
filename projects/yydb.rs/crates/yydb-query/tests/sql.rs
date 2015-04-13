@@ -568,7 +568,7 @@ fn select_rejects_arithmetic_on_rhs_of_predicate() {
     );
 }
 
-// ─── LIKE / CASE are rejected by design ─────────────────────────────────
+// ─── LIKE is rejected ──────────────────────────────────────────────────
 
 #[test]
 fn select_rejects_like_operator() {
@@ -1332,6 +1332,109 @@ fn insert_explicit_null_literal() {
     )
     .expect("read null");
     assert_eq!(outcome.rows[0].get("email"), Some(&Value::Null));
+}
+
+// ─── Aggregate functions: COUNT / SUM / AVG ─────────────────────────────
+
+#[test]
+fn aggregate_count_star_global() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql("SELECT COUNT(*) AS c FROM Account", &[], &contract, &[], &mut records).expect("count");
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("c"), Some(&Value::I64(3)));
+}
+
+#[test]
+fn aggregate_count_expr_skips_null() {
+    // First, update one row's tenant to NULL so we can verify COUNT(tenant)
+    // excludes it while COUNT(*) counts it.
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 1", &[], &contract, &mut records);
+
+    let outcome =
+        execute_sql("SELECT COUNT(*) AS c_all, COUNT(tenant) AS c_nonnull FROM Account", &[], &contract, &[], &mut records)
+            .expect("count expr");
+    assert_eq!(outcome.rows[0].get("c_all"), Some(&Value::I64(3)));
+    assert_eq!(outcome.rows[0].get("c_nonnull"), Some(&Value::I64(2)));
+}
+
+#[test]
+fn aggregate_sum_global() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql("SELECT SUM(score) AS s FROM Account", &[], &contract, &[], &mut records).expect("sum");
+    // 10 + 30 + 20 = 60
+    assert_eq!(outcome.rows[0].get("s"), Some(&Value::I64(60)));
+}
+
+#[test]
+fn aggregate_avg_global() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql("SELECT AVG(score) AS a FROM Account", &[], &contract, &[], &mut records).expect("avg");
+    // (10 + 30 + 20) / 3 = 20.0
+    assert_eq!(outcome.rows[0].get("a"), Some(&Value::F64(20.0)));
+}
+
+#[test]
+fn aggregate_avg_with_null_yields_null() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET score = NULL WHERE account_id = 1", &[], &contract, &mut records);
+
+    // After the UPDATE, tenant='t1' has linus(30) only — ada's score is NULL.
+    let outcome =
+        execute_sql("SELECT AVG(score) AS a FROM Account WHERE tenant = 't1'", &[], &contract, &[], &mut records)
+            .expect("avg partial");
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("a"), Some(&Value::F64(30.0)));
+
+    // A WHERE clause that matches zero rows should yield NULL for AVG
+    let empty =
+        execute_sql("SELECT AVG(score) AS a FROM Account WHERE score IS NULL", &[], &contract, &[], &mut records)
+            .expect("avg no match");
+    assert_eq!(empty.rows.len(), 1);
+    assert_eq!(empty.rows[0].get("a"), Some(&Value::Null));
+}
+
+#[test]
+fn aggregate_count_sum_avg_group_by() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // t1: ada(10), linus(30) → count=2 sum=40 avg=20
+    // t2: grace(20) → count=1 sum=20 avg=20
+    let outcome = execute_sql(
+        "SELECT tenant, COUNT(*) AS c, SUM(score) AS s, AVG(score) AS a FROM Account GROUP BY tenant ORDER BY tenant",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("grouped aggregates");
+
+    assert_eq!(outcome.rows.len(), 2);
+    // t1
+    assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text("t1".into())));
+    assert_eq!(outcome.rows[0].get("c"), Some(&Value::I64(2)));
+    assert_eq!(outcome.rows[0].get("s"), Some(&Value::I64(40)));
+    assert_eq!(outcome.rows[0].get("a"), Some(&Value::F64(20.0)));
+    // t2
+    assert_eq!(outcome.rows[1].get("tenant"), Some(&Value::Text("t2".into())));
+    assert_eq!(outcome.rows[1].get("c"), Some(&Value::I64(1)));
+    assert_eq!(outcome.rows[1].get("s"), Some(&Value::I64(20)));
+    assert_eq!(outcome.rows[1].get("a"), Some(&Value::F64(20.0)));
 }
 
 // ─── Parameterized value type mismatches ───────────────────────────────

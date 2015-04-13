@@ -131,7 +131,8 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
 
     // Aggregate: GROUP BY + aggregate functions from SELECT items.
     let (group_keys, aggregates) = lower_aggregate(select, parameters)?;
-    if !aggregates.is_empty() || !group_keys.is_empty() {
+    let has_aggregate = !aggregates.is_empty() || !group_keys.is_empty();
+    if has_aggregate {
         ops.push(QueryOp::Aggregate { group_keys, aggregates });
     }
 
@@ -155,10 +156,18 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
     }
 
     // SELECT projection (without aggregate function items — those are
-    // consumed by the Aggregate op above).
-    let fields = lower_projection(&select.items)?;
-    if let Some(fields) = fields {
-        ops.push(QueryOp::Project { fields });
+    // consumed by the Aggregate op above). When an Aggregate op was pushed
+    // the row already carries every output column with its final name (GROUP
+    // BY columns + aggregate aliases), so we skip Project entirely —
+    // pushing Project with only the non-aggregate items would drop the
+    // aggregate columns.
+    if !has_aggregate {
+        let fields = lower_projection(&select.items)?;
+        if let Some(fields) = fields
+            && !fields.is_empty()
+        {
+            ops.push(QueryOp::Project { fields });
+        }
     }
     ops.push(QueryOp::Collect);
     Ok(ops)
@@ -276,6 +285,13 @@ fn lower_aggregate_function(
             }
             let expr = lower_project_expr(&args[0], parameters)?;
             Ok(AggregateField::Sum { name: output_name, expr })
+        }
+        "AVG" => {
+            if args.len() != 1 {
+                return Err(sql_error("AVG() requires exactly one argument"));
+            }
+            let expr = lower_project_expr(&args[0], parameters)?;
+            Ok(AggregateField::Avg { name: output_name, expr })
         }
         other => Err(sql_error(format!("aggregate function `{other}` is not supported by YYDB MVP"))),
     }
