@@ -706,15 +706,92 @@ fn update_with_zero_affected_rows_still_succeeds() {
 }
 
 #[test]
-fn update_rejects_self_reference_arithmetic() {
-    // SET score = score + 1 — RHS is Binary, must be rejected by lowering
-    let err = prepare_sql("UPDATE Account SET score = score + 1 WHERE account_id = 1")
-        .expect_err("self-ref arithmetic must reject");
-    assert!(
-        format!("{err}").contains("unsupported") || format!("{err}").contains("arithmetic")
-            || format!("{err}").contains("plain column"),
-        "unexpected: {err}"
-    );
+fn update_self_reference_arithmetic_increments_row() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // score 10 → 11
+    let outcome = execute_sql(
+        "UPDATE Account SET score = score + 1 WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("update arithmetic");
+    assert_eq!(outcome.affected, 1);
+
+    let rows = execute_sql(
+        "SELECT account_id, score FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read back");
+    assert_eq!(rows.rows.len(), 3);
+    assert_eq!(rows.rows[0].get("account_id"), Some(&Value::I64(1)));
+    assert_eq!(rows.rows[0].get("score"), Some(&Value::I64(11)));
+    // untouched
+    assert_eq!(rows.rows[1].get("account_id"), Some(&Value::I64(2)));
+    assert_eq!(rows.rows[1].get("score"), Some(&Value::I64(30)));
+}
+
+#[test]
+fn update_arithmetic_with_parameter_slot() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // score * score + 2 → 10 * 10 + 2 = 102
+    let outcome = execute_sql(
+        "UPDATE Account SET score = score * score + 2 WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("update compound arithmetic");
+    assert_eq!(outcome.affected, 1);
+
+    let rows = execute_sql(
+        "SELECT account_id, score FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read back");
+    assert_eq!(rows.rows[0].get("score"), Some(&Value::I64(102)));
+}
+
+#[test]
+fn update_arithmetic_with_bound_parameter() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // score + ? → 30 + 5 = 35
+    let outcome = execute_sql(
+        "UPDATE Account SET score = score + ? WHERE account_id = 2",
+        &[Value::I64(5)],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("update arithmetic with bound param");
+    assert_eq!(outcome.affected, 1);
+
+    let rows = execute_sql(
+        "SELECT score FROM Account WHERE account_id = 2",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("read back");
+    assert_eq!(rows.rows[0].get("score"), Some(&Value::I64(35)));
 }
 
 // ─── INSERT edge cases ─────────────────────────────────────────────────

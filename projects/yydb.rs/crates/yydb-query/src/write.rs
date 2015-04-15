@@ -11,7 +11,7 @@ use yydb_types::{Error, Result, TableUniqueConstraint, Value};
 
 use super::{
     catalog, coerce, constraints, exec,
-    ops::{BoundValue, Pred, QueryRow, WriteAssignment, WriteField, WriteOp},
+    ops::{BoundValue, Pred, QueryRow, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp},
     store,
 };
 
@@ -71,6 +71,71 @@ fn resolve_value<'a>(bound: &'a BoundValue, bound_values: &'a [Value]) -> Result
     }
 }
 
+/// Evaluate a [`WriteExpr`] against a single row (for `UPDATE … SET col = …`).
+///
+/// Unlike [`resolve_value`] this can read columns from the row being updated,
+/// which is how the lowering of `score = score + 1` turns into a concrete
+/// increment at execution time. `NULL` participating in arithmetic propagates
+/// as `NULL` — three-valued semantics for write expressions.
+fn eval_write_expr(expr: &WriteExpr, row: &QueryRow, bound_values: &[Value]) -> Result<Value> {
+    match expr {
+        WriteExpr::Bound(bound) => Ok(resolve_value(bound, bound_values)?.clone()),
+        WriteExpr::Column { path } => {
+            let Some(first) = path.first() else {
+                return Err(write_error("empty column path in UPDATE expression"));
+            };
+            Ok(row.get(first).cloned().unwrap_or(Value::Null))
+        }
+        WriteExpr::Binary { op, left, right } => {
+            let l = eval_write_expr(left, row, bound_values)?;
+            let r = eval_write_expr(right, row, bound_values)?;
+            if matches!(l, Value::Null) || matches!(r, Value::Null) {
+                return Ok(Value::Null);
+            }
+            let (li64, ri64) = match (&l, &r) {
+                (Value::I64(a), Value::I64(b)) => (*a, *b),
+                (Value::I64(a), Value::U64(b)) => (*a, *b as i64),
+                (Value::U64(a), Value::I64(b)) => (*a as i64, *b),
+                (Value::U64(a), Value::U64(b)) => (*a as i64, *b as i64),
+                (Value::F64(a), Value::F64(b)) => return Ok(Value::F64(eval_float_bin(*op, *a, *b)?)),
+                (Value::F64(a), Value::I64(b)) => return Ok(Value::F64(eval_float_bin(*op, *a, *b as f64)?)),
+                (Value::I64(a), Value::F64(b)) => return Ok(Value::F64(eval_float_bin(*op, *a as f64, *b)?)),
+                (Value::F64(a), Value::U64(b)) => return Ok(Value::F64(eval_float_bin(*op, *a, *b as f64)?)),
+                (Value::U64(a), Value::F64(b)) => return Ok(Value::F64(eval_float_bin(*op, *a as f64, *b)?)),
+                _ => return Err(write_error(format!("UPDATE expression cannot combine {:?} and {:?}", l, r))),
+            };
+            let result = match op {
+                WriteBinOp::Plus => li64.wrapping_add(ri64),
+                WriteBinOp::Minus => li64.wrapping_sub(ri64),
+                WriteBinOp::Star => li64.wrapping_mul(ri64),
+                WriteBinOp::Slash => {
+                    if ri64 == 0 {
+                        return Ok(Value::Null);
+                    }
+                    li64.wrapping_div(ri64)
+                }
+                WriteBinOp::Percent => {
+                    if ri64 == 0 {
+                        return Ok(Value::Null);
+                    }
+                    li64.wrapping_rem(ri64)
+                }
+            };
+            Ok(Value::I64(result))
+        }
+    }
+}
+
+fn eval_float_bin(op: WriteBinOp, l: f64, r: f64) -> Result<f64> {
+    Ok(match op {
+        WriteBinOp::Plus => l + r,
+        WriteBinOp::Minus => l - r,
+        WriteBinOp::Star => l * r,
+        WriteBinOp::Slash => l / r,
+        WriteBinOp::Percent => l % r,
+    })
+}
+
 fn insert_row(
     table: &str,
     fields: &[WriteField],
@@ -122,8 +187,8 @@ fn update_rows(
                 if assignment.field == pk_field {
                     return Err(write_error(format!("primary key field `{pk_field}` cannot be updated")));
                 }
-                let value = resolve_value(&assignment.value, bound_values)?;
-                row.insert(assignment.field.clone(), coerce::value_to_scalar(value.clone(), &slot.canonical_type)?);
+                let value = eval_write_expr(&assignment.value, &row, bound_values)?;
+                row.insert(assignment.field.clone(), coerce::value_to_scalar(value, &slot.canonical_type)?);
             }
             replacements.push((key, row));
         }

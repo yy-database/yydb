@@ -260,13 +260,40 @@ pub struct WriteField {
     pub value: BoundValue,
 }
 
+/// Arithmetic operators available inside `UPDATE … SET col = …` value expressions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteBinOp {
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+}
+
+/// Expression producing a single scalar value used as a write target.
+///
+/// Unlike [`BoundValue`] this can reference columns of the row being updated,
+/// which is how `UPDATE t SET score = score + 1` survives lowering into a
+/// backend-neutral plan. Literals and parameter slots still flow through
+/// [`BoundValue`] — [`WriteExpr::Bound`] wraps it so the arithmetic cases can
+/// reuse the existing bound-value resolution at execution time.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WriteExpr {
+    /// A plan-time literal or bind-time parameter.
+    Bound(BoundValue),
+    /// Read a column from the row being updated.
+    Column { path: Vec<String> },
+    /// Apply an arithmetic operator to two sub-expressions.
+    Binary { op: WriteBinOp, left: Box<WriteExpr>, right: Box<WriteExpr> },
+}
+
 /// One `SET column = value` pair of an update operator.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WriteAssignment {
     /// Column name being replaced.
     pub field: String,
-    /// New value (literal or parameter slot).
-    pub value: BoundValue,
+    /// New value expression — may read from the row being updated.
+    pub value: WriteExpr,
 }
 
 /// Closed physical op set for write programs.

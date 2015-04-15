@@ -14,7 +14,7 @@ use yydb_types::{Error, Result, Value};
 use super::{
     ops::{
         AggregateField, BoundValue, CmpOp, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, SortKey, WriteAssignment,
-        WriteField, WriteOp,
+        WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     params::{ParameterDescriptor, name_to_slot},
 };
@@ -319,9 +319,9 @@ fn lower_sort_key(item: &OrderByItem) -> Result<SortKey> {
 
 fn lower_limit(limit: &LimitClause, parameters: &[ParameterDescriptor], ops: &mut Vec<QueryOp>) -> Result<()> {
     if let Some(offset) = &limit.offset {
-        ops.push(QueryOp::Skip { count: lower_value(offset, parameters)? });
+        ops.push(QueryOp::Skip { count: lower_bound_value(offset, parameters)? });
     }
-    ops.push(QueryOp::Take { count: lower_value(&limit.limit, parameters)? });
+    ops.push(QueryOp::Take { count: lower_bound_value(&limit.limit, parameters)? });
     Ok(())
 }
 
@@ -388,7 +388,7 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Res
                     return Ok(Pred::FieldCmpField { left_path, op: cmp, right_path });
                 }
             }
-            let value = lower_value(right, parameters)?;
+            let value = lower_bound_value(right, parameters)?;
             Ok(Pred::FieldCmp { path: left_path, op: cmp, value })
         }
         Expression::Unary { op: UnaryOperator::Not, expr, .. } => Ok(Pred::Not(Box::new(lower_predicate(expr, parameters)?))),
@@ -406,7 +406,7 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Res
             let path = column_path(expr)?;
             let mut branches = Vec::with_capacity(list.len());
             for item in list {
-                branches.push(Pred::FieldCmp { path: path.clone(), op: CmpOp::Eq, value: lower_value(item, parameters)? });
+                branches.push(Pred::FieldCmp { path: path.clone(), op: CmpOp::Eq, value: lower_bound_value(item, parameters)? });
             }
             let mut predicate = branches
                 .into_iter()
@@ -420,8 +420,8 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Res
         Expression::Between { expr, low, high, negated, .. } => {
             let path = column_path(expr)?;
             let mut predicate = Pred::And(
-                Box::new(Pred::FieldCmp { path: path.clone(), op: CmpOp::Ge, value: lower_value(low, parameters)? }),
-                Box::new(Pred::FieldCmp { path, op: CmpOp::Le, value: lower_value(high, parameters)? }),
+                Box::new(Pred::FieldCmp { path: path.clone(), op: CmpOp::Ge, value: lower_bound_value(low, parameters)? }),
+                Box::new(Pred::FieldCmp { path, op: CmpOp::Le, value: lower_bound_value(high, parameters)? }),
             );
             if *negated {
                 predicate = Pred::Not(Box::new(predicate));
@@ -443,7 +443,7 @@ fn column_path(expr: &Expression) -> Result<Vec<String>> {
     Ok(vec![identifier.name.to_string()])
 }
 
-fn lower_value(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<BoundValue> {
+fn lower_bound_value(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<BoundValue> {
     match expr {
         Expression::Literal(Literal::Null(_)) => Ok(BoundValue::Literal(Value::Null)),
         Expression::Literal(Literal::Boolean(value, _)) => Ok(BoundValue::Literal(Value::Bool(*value))),
@@ -465,6 +465,46 @@ fn lower_value(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<
     }
 }
 
+/// Lower an SQL expression appearing on the right-hand side of an UPDATE
+/// assignment. Unlike [`lower_bound_value`] this permits column references and
+/// arithmetic — `UPDATE t SET score = score + 1` must keep the column lookup
+/// alive so the executor can read the current row and perform the add.
+///
+/// Aggregate functions, CASE/CAST, subqueries and other statement-shaped
+/// expressions are not supported in write-value context and will be rejected.
+fn lower_write_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<WriteExpr> {
+    match expr {
+        Expression::Identifier(identifier) => {
+            // Identifiers resolve to parameters first (the `__yydb_param_N`
+            // convention used by `name_to_slot`), then fall through to a
+            // column reference so `score + 1` lowers correctly.
+            match name_to_slot(&identifier.name, parameters) {
+                Ok(slot) => Ok(WriteExpr::Bound(slot)),
+                Err(_) => Ok(WriteExpr::Column { path: vec![identifier.name.to_string()] }),
+            }
+        }
+        Expression::Literal(_) | Expression::Unary { op: UnaryOperator::Minus, .. } => {
+            Ok(WriteExpr::Bound(lower_bound_value(expr, parameters)?))
+        }
+        Expression::Binary { left, op, right, .. } => {
+            let bin_op = match op {
+                BinaryOperator::Plus => WriteBinOp::Plus,
+                BinaryOperator::Minus => WriteBinOp::Minus,
+                BinaryOperator::Star => WriteBinOp::Star,
+                BinaryOperator::Slash => WriteBinOp::Slash,
+                BinaryOperator::Percent => WriteBinOp::Percent,
+                _ => return Err(sql_error(format!("arithmetic operator `{op:?}` is not allowed in write expressions"))),
+            };
+            Ok(WriteExpr::Binary {
+                op: bin_op,
+                left: Box::new(lower_write_expr(left, parameters)?),
+                right: Box::new(lower_write_expr(right, parameters)?),
+            })
+        }
+        _ => Err(sql_error("unsupported expression in UPDATE assignment")),
+    }
+}
+
 // ─── writes ──────────────────────────────────────────────────────────────
 
 fn lower_insert(insert: &InsertStatement, parameters: &[ParameterDescriptor]) -> Result<WriteOp> {
@@ -476,7 +516,7 @@ fn lower_insert(insert: &InsertStatement, parameters: &[ParameterDescriptor]) ->
     }
     let mut fields = Vec::with_capacity(insert.columns.len());
     for (column, value) in insert.columns.iter().zip(&insert.values) {
-        fields.push(WriteField { name: column.name.to_string(), value: lower_value(value, parameters)? });
+        fields.push(WriteField { name: column.name.to_string(), value: lower_bound_value(value, parameters)? });
     }
     Ok(WriteOp::Insert { table: table_name(&insert.table_name), fields })
 }
@@ -489,7 +529,7 @@ fn lower_update(update: &UpdateStatement, parameters: &[ParameterDescriptor]) ->
     for assignment in &update.assignments {
         assignments.push(WriteAssignment {
             field: assignment.column.name.to_string(),
-            value: lower_value(&assignment.value, parameters)?,
+            value: lower_write_expr(&assignment.value, parameters)?,
         });
     }
     let predicate = update.selection.as_ref().map(|expr| lower_predicate(expr, parameters)).transpose()?;
