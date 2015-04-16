@@ -181,12 +181,153 @@ fn ddl_and_joins_are_rejected_explicitly() {
         Err(e) => eprintln!("JOIN prepare error: {e}"),
     }
     assert!(result.is_ok());
+    // LEFT JOIN is also supported now.
+    assert!(prepare_sql("SELECT * FROM Account LEFT JOIN Other ON Account.id = Other.id").is_ok());
     // GROUP BY is now supported.
     assert!(prepare_sql("SELECT * FROM Account GROUP BY tenant").is_ok());
     // HAVING is still MVP-rejected.
     assert!(prepare_sql("SELECT COUNT(*) FROM Account HAVING COUNT(*) > 1").is_err());
-    // Non-INNER joins are still rejected.
-    assert!(prepare_sql("SELECT * FROM Account LEFT JOIN Other ON Account.id = Other.id").is_err());
+    // RIGHT / FULL joins are still rejected.
+    assert!(prepare_sql("SELECT * FROM Account RIGHT JOIN Other ON Account.id = Other.id").is_err());
+    assert!(prepare_sql("SELECT * FROM Account FULL JOIN Other ON Account.id = Other.id").is_err());
+}
+
+// ─── LEFT JOIN end-to-end ──────────────────────────────────────────────
+
+const LEFT_JOIN_SCHEMA: &str = r#"
+table Account {
+    @@account_id: i64,
+    email: utf8,
+    tenant: utf8,
+    score: i64,
+    active: bool,
+}
+table Project {
+    @@project_id: i64,
+    owner_id: i64,
+    name: utf8,
+}
+"#;
+
+fn left_join_contract() -> ResolvedContract {
+    resolved_contract_from_document(LEFT_JOIN_SCHEMA).expect("left join schema resolves")
+}
+
+fn seed_left_join(contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>) {
+    // Account 1 and 2 have projects, Account 3 has no project at all.
+    exec(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'ada@test', 't1', 10, true)",
+        &[],
+        contract,
+        records,
+    );
+    exec(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (2, 'linus@test', 't1', 30, false)",
+        &[],
+        contract,
+        records,
+    );
+    exec(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (3, 'grace@test', 't2', 20, true)",
+        &[],
+        contract,
+        records,
+    );
+    exec("INSERT INTO Project (project_id, owner_id, name) VALUES (10, 1, 'p1')", &[], contract, records);
+    exec("INSERT INTO Project (project_id, owner_id, name) VALUES (11, 1, 'p2')", &[], contract, records);
+    exec("INSERT INTO Project (project_id, owner_id, name) VALUES (20, 2, 'p3')", &[], contract, records);
+}
+
+#[test]
+fn left_join_keeps_all_left_rows_padding_unmatched_with_null() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // LEFT JOIN Account × Project — expect:
+    // account_id=1 matches twice (p1, p2)
+    // account_id=2 matches once (p3)
+    // account_id=3 has no match → padded row with Project.* = NULL
+    let outcome = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account LEFT JOIN Project ON Account.account_id = Project.owner_id ORDER BY account_id, pname",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("left join");
+
+    assert_eq!(outcome.rows.len(), 4);
+
+    // ada × p1
+    assert_eq!(outcome.rows[0].get("account_id"), Some(&Value::I64(1)));
+    assert_eq!(outcome.rows[0].get("pname"), Some(&Value::Text("p1".into())));
+    // ada × p2
+    assert_eq!(outcome.rows[1].get("account_id"), Some(&Value::I64(1)));
+    assert_eq!(outcome.rows[1].get("pname"), Some(&Value::Text("p2".into())));
+    // linus × p3
+    assert_eq!(outcome.rows[2].get("account_id"), Some(&Value::I64(2)));
+    assert_eq!(outcome.rows[2].get("pname"), Some(&Value::Text("p3".into())));
+    // grace unmatched → pname is NULL
+    assert_eq!(outcome.rows[3].get("account_id"), Some(&Value::I64(3)));
+    assert_eq!(outcome.rows[3].get("pname"), Some(&Value::Null));
+}
+
+#[test]
+fn left_join_with_where_filter_on_left_removes_padded_rows() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // SQL semantics: FROM/JOIN produce a virtual table first, then WHERE
+    // filters it. So grace's padded row is generated first (Project.* all
+    // NULL) and then WHERE tenant = 't1' drops it.
+    let outcome = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account LEFT JOIN Project ON Account.account_id = Project.owner_id WHERE Account.tenant = 't1' ORDER BY account_id, pname",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("left join with left filter");
+
+    // account 1 has two projects, account 2 has one = 3 rows.
+    assert_eq!(outcome.rows.len(), 3);
+    for row in &outcome.rows {
+        assert_ne!(row.get("account_id"), Some(&Value::I64(3)));
+    }
+}
+
+#[test]
+fn left_join_with_empty_right_table_yields_all_left_with_nulls() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    // Only seed Account, leave Project completely empty.
+    exec(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'a@t', 't', 0, true)",
+        &[],
+        &contract,
+        &mut records,
+    );
+    exec(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (2, 'b@t', 't', 0, false)",
+        &[],
+        &contract,
+        &mut records,
+    );
+
+    let outcome = execute_sql(
+        "SELECT account_id, Project.project_id AS pid FROM Account LEFT JOIN Project ON Account.account_id = Project.owner_id ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("left join empty right");
+
+    assert_eq!(outcome.rows.len(), 2);
+    assert_eq!(outcome.rows[0].get("pid"), Some(&Value::Null));
+    assert_eq!(outcome.rows[1].get("pid"), Some(&Value::Null));
 }
 
 #[test]

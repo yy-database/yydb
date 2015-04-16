@@ -159,12 +159,15 @@ pub struct SortKey {
     pub ascending: bool,
 }
 
-/// Kind of SQL join. MVP supports [`JoinKind::Inner`] only; other kinds
-/// return an explicit error at lowering time.
+/// Kind of SQL join. Right / Full join still reject at lowering time; the
+/// executor only implements [`JoinKind::Inner`] and [`JoinKind::Left`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinKind {
     /// `INNER JOIN` — rows with no match on either side are dropped.
     Inner,
+    /// `LEFT JOIN` — every left-hand row is kept; right-hand columns become
+    /// `NULL` when there is no matching row.
+    Left,
 }
 
 /// One aggregate function call.

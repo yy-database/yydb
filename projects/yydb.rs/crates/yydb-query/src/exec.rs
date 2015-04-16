@@ -67,6 +67,18 @@ pub fn execute_ops(
                             bound_values,
                         )?;
                     }
+                    JoinKind::Left => {
+                        rows = execute_left_join(
+                            &rows,
+                            table,
+                            right,
+                            right_alias.as_deref(),
+                            on,
+                            contract,
+                            records,
+                            bound_values,
+                        )?;
+                    }
                 }
             }
             QueryOp::Aggregate { group_keys, aggregates } => {
@@ -210,8 +222,24 @@ fn read_path(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
 ) -> Value {
+    // Single-element path — direct bare column lookup, the common case.
     if path.len() == 1 {
         return row.get(&path[0]).cloned().unwrap_or(Value::Null);
+    }
+    // Multi-element path from a qualified identifier split at the dot (e.g.
+    // `Project.owner_id` or `Account.account_id`). Try, in order:
+    //   a) the full dotted key — matches right-table columns prefixed by
+    //      `merge_rows` (e.g. `Project.owner_id`)
+    //   b) the trailing bare column — matches left-table columns that keep
+    //      their original name (e.g. `account_id` from `Account.account_id`)
+    //   c) nested VOS path resolution via the contract
+    let dotted: String = path.join(".");
+    if let Some(v) = row.get(&dotted) {
+        return v.clone();
+    }
+    let last = path.last().unwrap();
+    if let Some(v) = row.get(last) {
+        return v.clone();
     }
     if let Some(contract) = contract {
         return resolve::resolve_field_path(path, row, table, contract, records).unwrap_or(Value::Null);
@@ -286,6 +314,65 @@ fn execute_inner_join(
             }
         }
     }
+    Ok(out)
+}
+
+fn execute_left_join(
+    left_rows: &[QueryRow],
+    _left_table: &str,
+    right: &str,
+    right_alias: Option<&str>,
+    on: &Pred,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
+    let storage_right = match contract {
+        Some(contract) => table_row_key_name(contract, right)?,
+        None => right.to_string(),
+    };
+    let right_rows = store::load_table(records, &storage_right)?;
+
+    let prefix = match right_alias {
+        Some(a) => a.to_string(),
+        None => right.to_string(),
+    };
+
+    // Qualified column names that belong to the right table so we can pad
+    // unmatched left rows with NULL for each right column.
+    let right_col_names: Vec<String> = right_rows
+        .first()
+        .map(|r| r.keys().map(|k| format!("{prefix}.{k}")).collect())
+        .unwrap_or_default();
+
+    // Track which left rows had at least one right-side match.
+    let mut matched = vec![false; left_rows.len()];
+    let mut out: Vec<QueryRow> = Vec::with_capacity(left_rows.len());
+
+    // First pass: emit merged rows that satisfy the ON condition and mark
+    // the contributing left row as matched.
+    for (li, left_row) in left_rows.iter().enumerate() {
+        for right_row in &right_rows {
+            let merged = merge_rows(left_row, right_row, &prefix);
+            if eval_pred(on, &merged, "", contract, records, bound_values) {
+                matched[li] = true;
+                out.push(merged);
+            }
+        }
+    }
+
+    // Second pass: for every left row that never matched, emit a padded row
+    // carrying the left columns plus NULL for each right column.
+    for (li, left_row) in left_rows.iter().enumerate() {
+        if !matched[li] {
+            let mut padded = left_row.clone();
+            for col in &right_col_names {
+                padded.insert(col.clone(), Value::Null);
+            }
+            out.push(padded);
+        }
+    }
+
     Ok(out)
 }
 

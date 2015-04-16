@@ -178,9 +178,10 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
 fn lower_join_clause(join: &JoinClause, parameters: &[ParameterDescriptor]) -> Result<QueryOp> {
     let kind = match join.join_type {
         JoinType::Inner => JoinKind::Inner,
-        JoinType::Left | JoinType::Right | JoinType::Full => {
+        JoinType::Left => JoinKind::Left,
+        JoinType::Right | JoinType::Full => {
             return Err(sql_error(format!(
-                "join kind `{:?}` is not supported by the YYDB query executor (only INNER is MVP)",
+                "join kind `{:?}` is not supported by the YYDB query executor (RIGHT / FULL reserved for a future cut)",
                 join.join_type
             )));
         }
@@ -302,8 +303,11 @@ fn lower_aggregate_function(
 fn lower_project_expr(expr: &Expression, _parameters: &[ParameterDescriptor]) -> Result<ProjectExpr> {
     match expr {
         Expression::Identifier(identifier) => {
-            let name = identifier.name.to_string();
-            Ok(ProjectExpr::Scalar { path: vec![name] })
+            // Split qualified names (`table.col`) into path components so the
+            // executor can resolve both the full dotted key and the trailing
+            // bare column name.
+            let path: Vec<String> = identifier.name.split('.').map(|s| s.to_string()).collect();
+            Ok(ProjectExpr::Scalar { path })
         }
         _ => Err(sql_error("aggregate arguments support plain column references only")),
     }
@@ -440,7 +444,11 @@ fn column_path(expr: &Expression) -> Result<Vec<String>> {
     else {
         return Err(sql_error("predicates support plain column references only"));
     };
-    Ok(vec![identifier.name.to_string()])
+    // Oak-sql represents qualified names (`table.col`) as a single identifier
+    // whose name contains a dot. Split it so the executor can resolve both
+    // the full dotted key (right-table columns with prefix) and the trailing
+    // bare column (left-table columns without prefix).
+    Ok(identifier.name.split('.').map(|s| s.to_string()).collect())
 }
 
 fn lower_bound_value(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<BoundValue> {
