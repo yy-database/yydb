@@ -130,7 +130,11 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
     }
 
     // Aggregate: GROUP BY + aggregate functions from SELECT items.
-    let (group_keys, aggregates) = lower_aggregate(select, parameters)?;
+    // `SELECT DISTINCT` is captured here and, when paired with a COUNT(expr),
+    // promotes that COUNT to a distinct-count aggregate. MVP does not yet
+    // emit a top-level DISTINCT operator for non-aggregate queries.
+    let quantifier_is_distinct = matches!(select.quantifier, Some(oak_sql::ast::SelectQuantifier::Distinct { .. }));
+    let (group_keys, aggregates) = lower_aggregate(select, parameters, quantifier_is_distinct)?;
     let has_aggregate = !aggregates.is_empty() || !group_keys.is_empty();
     if has_aggregate {
         ops.push(QueryOp::Aggregate { group_keys, aggregates });
@@ -205,6 +209,7 @@ fn lower_join_clause(join: &JoinClause, parameters: &[ParameterDescriptor]) -> R
 fn lower_aggregate(
     select: &SelectStatement,
     parameters: &[ParameterDescriptor],
+    quantifier_is_distinct: bool,
 ) -> Result<(Vec<ProjectField>, Vec<AggregateField>)> {
     let group_keys = match &select.group_by {
         Some(GroupByClause { items, .. }) => {
@@ -222,7 +227,7 @@ fn lower_aggregate(
     for item in &select.items {
         if let SelectItem::Expression { expr, alias, .. } = item {
             if let Expression::FunctionCall { name, args, .. } = expr {
-                let agg = lower_aggregate_function(name, args, alias, parameters)?;
+                let agg = lower_aggregate_function(name, args, alias, parameters, quantifier_is_distinct)?;
                 aggregates.push(agg);
             }
         }
@@ -259,6 +264,7 @@ fn lower_aggregate_function(
     args: &[Expression],
     alias: &Option<Identifier>,
     parameters: &[ParameterDescriptor],
+    quantifier_is_distinct: bool,
 ) -> Result<AggregateField> {
     let fn_name = name.name.to_string().to_ascii_uppercase();
     let output_name = alias.as_ref().map(|a| a.name.to_string()).unwrap_or_else(|| fn_name.to_ascii_lowercase());
@@ -267,15 +273,27 @@ fn lower_aggregate_function(
             if args.is_empty() {
                 return Err(sql_error("COUNT() requires an argument (`*` or an expression)"));
             }
-            // COUNT(*) — parser may give us a single-star arg or none.
             let first = &args[0];
             match first {
                 Expression::Literal(_) | Expression::Identifier(_) | Expression::Binary { .. } => {
                     let expr = lower_project_expr(first, parameters)?;
-                    Ok(AggregateField::Count { name: output_name, expr: Some(expr) })
+                    // `SELECT DISTINCT COUNT(expr)` promotes this COUNT to a
+                    // distinct-count aggregate. MVP only handles this pairing
+                    // for COUNT; other aggregates ignore the quantifier.
+                    if quantifier_is_distinct {
+                        Ok(AggregateField::CountDistinct { name: output_name, expr })
+                    } else {
+                        Ok(AggregateField::Count { name: output_name, expr: Some(expr) })
+                    }
                 }
                 _ => {
                     // Fallback: treat anything else as COUNT(*).
+                    if quantifier_is_distinct {
+                        return Err(sql_error(
+                            "SELECT DISTINCT COUNT(*) is ambiguous (DISTINCT quantifier with COUNT(*)); \
+                            provide a column expression or drop DISTINCT",
+                        ));
+                    }
                     Ok(AggregateField::Count { name: output_name, expr: None })
                 }
             }

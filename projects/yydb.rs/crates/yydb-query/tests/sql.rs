@@ -1666,3 +1666,93 @@ fn aggregate_count_sum_avg_group_by() {
 //
 // #[test]
 // fn parameter_type_mismatch_rejected_at_bind_time() { ... }
+
+// ─── COUNT(DISTINCT col) via SELECT DISTINCT COUNT(col) ────────────────
+
+#[test]
+fn select_distinct_count_collapses_duplicate_values() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // scores = 10, 30, 20 — all distinct → COUNT(DISTINCT score) = 3
+    let distinct = execute_sql(
+        "SELECT DISTINCT COUNT(score) AS c FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("distinct count");
+    assert_eq!(distinct.rows[0].get("c"), Some(&Value::I64(3)));
+
+    // Now make two rows have the same score
+    exec("UPDATE Account SET score = 10 WHERE account_id = 2", &[], &contract, &mut records);
+    // scores = 10, 10, 20 — distinct = {10, 20} → 2
+    let distinct2 = execute_sql(
+        "SELECT DISTINCT COUNT(score) AS c FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("distinct count duplicates");
+    assert_eq!(distinct2.rows[0].get("c"), Some(&Value::I64(2)));
+
+    // Plain COUNT(score) still counts all non-null rows
+    let plain = execute_sql(
+        "SELECT COUNT(score) AS c FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("plain count");
+    assert_eq!(plain.rows[0].get("c"), Some(&Value::I64(3)));
+}
+
+#[test]
+fn select_distinct_count_skips_null_values() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    // Set score NULL on ada and linus (grace keeps 20)
+    exec("UPDATE Account SET score = NULL WHERE account_id IN (1, 2)", &[], &contract, &mut records);
+
+    let distinct = execute_sql(
+        "SELECT DISTINCT COUNT(score) AS c FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("distinct count nulls");
+    // Only grace has score=20 → one distinct non-null value
+    assert_eq!(distinct.rows[0].get("c"), Some(&Value::I64(1)));
+}
+
+#[test]
+fn select_distinct_count_star_is_rejected() {
+    // SELECT DISTINCT COUNT(*) is ambiguous at lowering time.
+    let err = prepare_sql("SELECT DISTINCT COUNT(*) AS c FROM Account")
+        .expect_err("DISTINCT COUNT(*) must reject");
+    assert!(format!("{err}").contains("ambiguous"));
+}
+
+#[test]
+fn select_distinct_does_not_change_plain_sum() {
+    // SELECT DISTINCT paired with non-COUNT aggregate is ignored (MVP).
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT DISTINCT SUM(score) AS s FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("distinct sum");
+    assert_eq!(outcome.rows[0].get("s"), Some(&Value::I64(60))); // 10 + 30 + 20
+}

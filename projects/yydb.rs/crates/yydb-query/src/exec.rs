@@ -1,6 +1,6 @@
 //! Execute Phase 1 query ops against stored table rows.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use vos::types::ResolvedContract;
 use yydb_types::{Error, Result, Value};
@@ -469,6 +469,21 @@ fn eval_aggregate(
                 .filter(|row| eval_project_expr(inner, row, contract, records, bound_values) != Value::Null)
                 .count();
             Ok((name.clone(), Value::I64(count as i64)))
+        }
+        AggregateField::CountDistinct { name, expr } => {
+            // COUNT(DISTINCT expr) — distinct non-null values of the expression.
+            // Value implements neither Hash nor Ord so we serialise each
+            // non-null value to its Debug form for set membership. MVP scalar
+            // values (Null, Bool, I64, Text, Uuid …) are all uniquely
+            // represented by their Debug output.
+            let mut seen: BTreeSet<String> = BTreeSet::new();
+            for row in group_rows {
+                let value = eval_project_expr(expr, row, contract, records, bound_values);
+                if !matches!(value, Value::Null) {
+                    seen.insert(format!("{value:?}"));
+                }
+            }
+            Ok((name.clone(), Value::I64(seen.len() as i64)))
         }
         AggregateField::Sum { name, expr } => {
             let mut sum: i64 = 0;

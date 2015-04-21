@@ -180,6 +180,15 @@ pub enum AggregateField {
         /// Optional expression to count non-null values of.
         expr: Option<ProjectExpr>,
     },
+    /// `COUNT(DISTINCT expr)` — distinct non-null values of the expression.
+    /// `SELECT * DISTINCT COUNT(DISTINCT *)` is semantically unclear and is
+    /// rejected at lowering time (expressions are required).
+    CountDistinct {
+        /// Output column name (from SELECT alias, or `count_distinct` if none).
+        name: String,
+        /// Expression whose distinct non-null values are counted.
+        expr: ProjectExpr,
+    },
     /// `SUM(expr)` — sums non-null numeric values.
     Sum {
         /// Output column name (from SELECT alias, or `sum` if none).
