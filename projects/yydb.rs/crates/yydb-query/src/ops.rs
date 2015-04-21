@@ -125,7 +125,7 @@ pub enum Pred {
 }
 
 /// One projected value expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ProjectExpr {
     /// Read a scalar field path from the current row context.
     Scalar {
@@ -139,10 +139,44 @@ pub enum ProjectExpr {
         /// Fields projected from that row.
         fields: Vec<ProjectField>,
     },
+    /// Compute an arbitrary scalar expression over the current row.
+    Computed(Box<Expr>),
+}
+
+/// Arbitrary scalar expression that can appear inside SELECT projection
+/// (`CASE WHEN ... THEN ... ELSE ... END`, `CAST(expr AS type)`, and the
+/// primitive terminals they recurse into). Unlike [`BoundValue`] this can
+/// reference columns so the executor resolves against each row.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Expr {
+    /// Read a column from the current row.
+    Column {
+        /// Field path (may be dotted for qualified names).
+        path: Vec<String>,
+    },
+    /// Plan-time literal or bind-time parameter slot.
+    Bound(BoundValue),
+    /// `CASE WHEN ... THEN ... [ELSE ...] END`.
+    Case {
+        /// WHEN/THEN pairs evaluated left to right. First `when` that is truthy
+        /// yields the corresponding `then`.
+        branches: Vec<(Box<Expr>, Box<Expr>)>,
+        /// Optional ELSE fallback. Evaluates to `NULL` when absent and every
+        /// branch's WHEN is falsy.
+        else_branch: Option<Box<Expr>>,
+    },
+    /// `CAST(expr AS <target_type>)`.
+    Cast {
+        /// Expression to convert.
+        expr: Box<Expr>,
+        /// Target type name, normalised to upper-case by the SQL lowering
+        /// (`INTEGER`, `REAL`, `TEXT`, `BLOB`).
+        target: String,
+    },
 }
 
 /// One projected output field.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProjectField {
     /// Output column name.
     pub name: String,
@@ -171,7 +205,7 @@ pub enum JoinKind {
 }
 
 /// One aggregate function call.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AggregateField {
     /// `COUNT(*)` or `COUNT(expr)`. `expr` is `None` for `COUNT(*)`.
     Count {

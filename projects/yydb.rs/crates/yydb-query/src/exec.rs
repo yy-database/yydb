@@ -8,7 +8,7 @@ use yydb_types::{Error, Result, Value};
 use super::{
     catalog::table_row_key_name,
     lower,
-    ops::{AggregateField, BoundValue, CmpOp, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow},
+    ops::{AggregateField, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow},
     resolve, store,
 };
 
@@ -88,7 +88,10 @@ pub fn execute_ops(
                 let table = current_table
                     .as_deref()
                     .ok_or_else(|| Error::Schema { message: "project without a preceding table scan".into() })?;
-                rows = rows.into_iter().map(|row| project_row(fields, &row, table, contract, records)).collect();
+                rows = rows
+                    .into_iter()
+                    .map(|row| project_row(fields, &row, table, contract, records, bound_values))
+                    .collect();
             }
             QueryOp::Sort { keys } => {
                 rows.sort_by(|left, right| {
@@ -141,12 +144,13 @@ fn resolve_bound_value(bv: &BoundValue, bound_values: &[Value]) -> Result<Value>
     }
 }
 
-fn project_row(
+pub fn project_row(
     fields: &[ProjectField],
     row: &QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
 ) -> QueryRow {
     let mut out = QueryRow::new();
     for field in fields {
@@ -159,12 +163,17 @@ fn project_row(
                 let nested_value = match contract {
                     Some(contract) => resolve::resolve_row_at_path(path, row, table, contract, records)
                         .map(|(nested_row, nested_table)| {
-                            Value::Row(project_row(nested, &nested_row, &nested_table, Some(contract), records))
+                            Value::Row(project_row(nested, &nested_row, &nested_table, Some(contract), records, bound_values))
                         })
                         .unwrap_or(Value::Null),
                     None => Value::Null,
                 };
                 out.insert(field.name.clone(), nested_value);
+            }
+            ProjectExpr::Computed(inner) => {
+                let value = eval_expr(inner, row, table, contract, records, bound_values)
+                    .unwrap_or(Value::Null);
+                out.insert(field.name.clone(), value);
             }
         }
     }
@@ -272,6 +281,168 @@ fn cmp_values(left: &Value, op: CmpOp, right: &Value) -> bool {
         CmpOp::Gt => ord == std::cmp::Ordering::Greater,
         CmpOp::Ge => ord != std::cmp::Ordering::Less,
     }
+}
+
+// ─── expression evaluation (CASE / CAST) ──────────────────────────────────
+
+/// Evaluate the backend-neutral [`Expr`] IR against a single row. Returns an
+/// `Err` for cast failures and other runtime errors; callers like
+/// [`project_row`] are currently catching and falling through to `NULL`.
+pub(crate) fn eval_expr(
+    expr: &Expr,
+    row: &QueryRow,
+    table: &str,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Value> {
+    match expr {
+        Expr::Column { path } => Ok(read_path(path, row, table, contract, records)),
+        Expr::Bound(bv) => resolve_bound_value(bv, bound_values),
+        Expr::Case { branches, else_branch } => {
+            eval_case(branches, else_branch, row, table, contract, records, bound_values)
+        }
+        Expr::Cast { expr: inner, target } => {
+            let value = eval_expr(inner, row, table, contract, records, bound_values)?;
+            eval_cast(&value, target)
+        }
+    }
+}
+
+/// `CASE WHEN w1 THEN t1 WHEN w2 THEN t2 ... [ELSE e] END`.
+///
+/// SQL semantics: evaluate each WHEN left-to-right; the first one that is
+/// truthy (non-NULL, non-false boolean) yields the corresponding THEN. If no
+/// WHEN matches, the ELSE branch is taken; absent ELSE yields NULL.
+fn eval_case(
+    branches: &[(Box<Expr>, Box<Expr>)],
+    else_branch: &Option<Box<Expr>>,
+    row: &QueryRow,
+    table: &str,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Value> {
+    for (when, then) in branches {
+        let when_val = eval_expr(when, row, table, contract, records, bound_values)?;
+        if is_truthy(&when_val) {
+            return eval_expr(then, row, table, contract, records, bound_values);
+        }
+    }
+    match else_branch {
+        Some(els) => eval_expr(els, row, table, contract, records, bound_values),
+        None => Ok(Value::Null),
+    }
+}
+
+/// SQL truthiness used for CASE WHEN predicates.
+///
+/// - `TRUE` / non-zero numeric → truthy
+/// - `FALSE` / zero numeric / empty text / NULL → falsy
+fn is_truthy(value: &Value) -> bool {
+    match value {
+        Value::Bool(b) => *b,
+        Value::Null => false,
+        Value::I64(n) => *n != 0,
+        Value::U64(n) => *n != 0,
+        Value::F64(n) => *n != 0.0,
+        Value::Text(s) => !s.is_empty(),
+        Value::Bytes(b) => !b.is_empty(),
+        _ => true,
+    }
+}
+
+/// `CAST(expr AS <target>)` supporting the four standard SQL target types.
+///
+/// Returns an `Err` when the conversion is not representable (e.g. text that
+/// does not parse as integer) so the caller can surface a diagnostic rather
+/// than silently producing an incorrect value. Casting `NULL` preserves NULL.
+fn eval_cast(value: &Value, target: &str) -> Result<Value> {
+    // NULL stays NULL regardless of target type.
+    if matches!(value, Value::Null) {
+        return Ok(Value::Null);
+    }
+    let target = target.trim().to_ascii_uppercase();
+    match target.as_str() {
+        "INTEGER" | "INT" | "BIGINT" => cast_to_integer(value),
+        "REAL" | "FLOAT" | "DOUBLE" => cast_to_real(value),
+        "TEXT" | "VARCHAR" | "CHAR" | "STRING" => cast_to_text(value),
+        "BLOB" | "BYTEA" | "BYTES" => cast_to_blob(value),
+        other => Err(query_runtime_error(format!("unsupported CAST target type `{other}`"))),
+    }
+}
+
+fn cast_to_integer(value: &Value) -> Result<Value> {
+    let n = match value {
+        Value::Bool(b) => if *b { 1 } else { 0 },
+        Value::I64(n) => return Ok(Value::I64(*n)),
+        Value::U64(n) => {
+            let clamped = (*n).min(i64::MAX as u64) as i64;
+            return Ok(Value::I64(clamped));
+        }
+        Value::F64(n) => {
+            if n.is_nan() {
+                return Err(query_runtime_error("CAST NaN to INTEGER is not representable"));
+            }
+            *n as i64
+        }
+        Value::Text(s) => s
+            .trim()
+            .parse::<i64>()
+            .map_err(|_| query_runtime_error(format!("CAST text `{s}` to INTEGER failed")))?,
+        _ => return Err(query_runtime_error(format!("CAST from `{:?}` to INTEGER is not supported", value))),
+    };
+    Ok(Value::I64(n))
+}
+
+fn cast_to_real(value: &Value) -> Result<Value> {
+    let n = match value {
+        Value::Bool(b) => if *b { 1.0 } else { 0.0 },
+        Value::I64(n) => *n as f64,
+        Value::U64(n) => *n as f64,
+        Value::F64(n) => return Ok(Value::F64(*n)),
+        Value::Text(s) => s
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| query_runtime_error(format!("CAST text `{s}` to REAL failed")))?,
+        _ => return Err(query_runtime_error(format!("CAST from `{:?}` to REAL is not supported", value))),
+    };
+    Ok(Value::F64(n))
+}
+
+fn cast_to_text(value: &Value) -> Result<Value> {
+    let text = match value {
+        Value::Null => return Ok(Value::Null),
+        Value::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
+        Value::I64(n) => n.to_string(),
+        Value::U64(n) => n.to_string(),
+        Value::F64(n) => {
+            // Use the canonical float representation, trimmed of trailing zeros.
+            // Format specifier `.15` matches SQLite-like display precision.
+            let s = format!("{n:.15}");
+            let trimmed = s.trim_end_matches('0').trim_end_matches('.').to_string();
+            if trimmed.contains('.') {
+                trimmed
+            }
+            else {
+                format!("{trimmed}.0")
+            }
+        }
+        Value::Text(s) => return Ok(Value::Text(s.clone())),
+        Value::Uuid(u) => u.to_string(),
+        _ => return Err(query_runtime_error(format!("CAST from `{:?}` to TEXT is not supported", value))),
+    };
+    Ok(Value::Text(text))
+}
+
+fn cast_to_blob(value: &Value) -> Result<Value> {
+    let bytes = match value {
+        Value::Null => return Ok(Value::Null),
+        Value::Bytes(b) => return Ok(Value::Bytes(b.clone())),
+        Value::Text(s) => s.as_bytes().to_vec(),
+        _ => return Err(query_runtime_error(format!("CAST from `{:?}` to BLOB is not supported", value))),
+    };
+    Ok(Value::Bytes(bytes))
 }
 
 // ─── join ────────────────────────────────────────────────────────────────
@@ -419,6 +590,7 @@ fn execute_aggregate(
             let value = match &gk.expr {
                 ProjectExpr::Scalar { path } => read_path(path, row, "", contract, records),
                 ProjectExpr::Nested { .. } => Value::Null, // nested in GROUP BY → unsupported
+                ProjectExpr::Computed(_) => Value::Null, // computed in GROUP BY → unsupported (lowering rejects)
             };
             key_values.push(value);
         }
@@ -435,6 +607,7 @@ fn execute_aggregate(
                 let value = match &gk.expr {
                     ProjectExpr::Scalar { path } => read_path(path, first_row, "", contract, records),
                     ProjectExpr::Nested { .. } => Value::Null,
+                    ProjectExpr::Computed(_) => Value::Null,
                 };
                 out.insert(gk.name.clone(), value);
             }
@@ -542,11 +715,12 @@ fn eval_project_expr(
     row: &QueryRow,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
-    _bound_values: &[Value],
+    bound_values: &[Value],
 ) -> Value {
     match expr {
         ProjectExpr::Scalar { path } => read_path(path, row, "", contract, records),
         ProjectExpr::Nested { path, .. } => read_path(path, row, "", contract, records),
+        ProjectExpr::Computed(inner) => eval_expr(inner, row, "", contract, records, bound_values).unwrap_or(Value::Null),
     }
 }
 

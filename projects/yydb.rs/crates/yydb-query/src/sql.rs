@@ -13,7 +13,7 @@ use yydb_types::{Error, Result, Value};
 
 use super::{
     ops::{
-        AggregateField, BoundValue, CmpOp, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, SortKey, WriteAssignment,
+        AggregateField, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, SortKey, WriteAssignment,
         WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     params::{ParameterDescriptor, name_to_slot},
@@ -166,7 +166,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
     // pushing Project with only the non-aggregate items would drop the
     // aggregate columns.
     if !has_aggregate {
-        let fields = lower_projection(&select.items)?;
+        let fields = lower_projection(&select.items, parameters)?;
         if let Some(fields) = fields
             && !fields.is_empty()
         {
@@ -351,7 +351,7 @@ fn lower_limit(limit: &LimitClause, parameters: &[ParameterDescriptor], ops: &mu
 /// stored column). Aggregate function items (`COUNT(...)`, `SUM(...)`) are
 /// consumed by the [`QueryOp::Aggregate`] lowering — this function skips them
 /// so they do not produce a duplicate Project entry.
-fn lower_projection(items: &[SelectItem]) -> Result<Option<Vec<ProjectField>>> {
+fn lower_projection(items: &[SelectItem], parameters: &[ParameterDescriptor]) -> Result<Option<Vec<ProjectField>>> {
     if items.len() == 1 {
         if matches!(items[0], SelectItem::Star { .. }) {
             return Ok(None);
@@ -367,12 +367,25 @@ fn lower_projection(items: &[SelectItem]) -> Result<Option<Vec<ProjectField>>> {
         if matches!(expr, Expression::FunctionCall { .. }) {
             continue;
         }
-        let Expression::Identifier(identifier) = expr
-        else {
-            return Err(sql_error("select items support plain column references only"));
+        let name = alias.as_ref().map_or_else(
+            || match expr {
+                Expression::Identifier(ident) => ident.name.to_string(),
+                Expression::Case { .. } => "case".to_string(),
+                Expression::Cast { .. } => "cast".to_string(),
+                _ => "expr".to_string(),
+            },
+            |alias| alias.name.to_string(),
+        );
+        // Plain identifier → scalar column path (existing happy path).
+        let field_expr = match expr {
+            Expression::Identifier(identifier) => {
+                ProjectExpr::Scalar { path: vec![identifier.name.to_string()] }
+            }
+            // Arbitrary lowerable expression (CASE, CAST, nested CASE inside CASE,
+            // etc.) → generic Computed wrapper around our Expr IR.
+            other => ProjectExpr::Computed(Box::new(lower_expr(other, parameters)?)),
         };
-        let name = alias.as_ref().map_or_else(|| identifier.name.to_string(), |alias| alias.name.to_string());
-        fields.push(ProjectField { name, expr: ProjectExpr::Scalar { path: vec![identifier.name.to_string()] } });
+        fields.push(ProjectField { name, expr: field_expr });
     }
     Ok(Some(fields))
 }
@@ -488,6 +501,74 @@ fn lower_bound_value(expr: &Expression, parameters: &[ParameterDescriptor]) -> R
         }
         Expression::Identifier(identifier) => name_to_slot(&identifier.name, parameters),
         _ => Err(sql_error("unsupported SQL value expression")),
+    }
+}
+
+/// Lower an arbitrary SQL expression into the backend-neutral [`Expr`] IR.
+///
+/// Primitive terminals (identifiers → columns, literals and parameter bindings
+/// → bound values) and the compound nodes [`Expression::Case`] /
+/// [`Expression::Cast`] are supported. Everything else (arithmetic, function
+/// calls, subqueries …) is rejected here; callers decide where this IR is
+/// allowed — today only SELECT projection uses it.
+fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<Expr> {
+    match expr {
+        Expression::Identifier(identifier) => Ok(Expr::Column {
+            path: identifier.name.split('.').map(|s| s.to_string()).collect(),
+        }),
+        Expression::Literal(_) | Expression::Unary { op: UnaryOperator::Minus, .. } => {
+            Ok(Expr::Bound(lower_bound_value(expr, parameters)?))
+        }
+        Expression::Case { branches, else_branch, .. } => {
+            let mut lowered_branches = Vec::with_capacity(branches.len());
+            for (when, then) in branches {
+                lowered_branches.push((
+                    Box::new(lower_expr(when, parameters)?),
+                    Box::new(lower_expr(then, parameters)?),
+                ));
+            }
+            let lowered_else = else_branch
+                .as_ref()
+                .map(|els| lower_expr(els, parameters))
+                .transpose()?
+                .map(Box::new);
+            Ok(Expr::Case { branches: lowered_branches, else_branch: lowered_else })
+        }
+        Expression::Cast { expr: inner, target, .. } => {
+            Ok(Expr::Cast {
+                expr: Box::new(lower_expr(inner, parameters)?),
+                target: target.to_ascii_uppercase(),
+            })
+        }
+        Expression::IsNull { .. }
+        | Expression::IsTruth { .. }
+        | Expression::InList { .. }
+        | Expression::Between { .. }
+        | Expression::InSubquery { .. }
+        | Expression::Subquery { .. }
+        | Expression::Binary { .. }
+        | Expression::Unary { op: _, expr: _, .. }
+        | Expression::FunctionCall { .. }
+        | Expression::Wildcard { .. }
+        | Expression::Vector { .. }
+        | Expression::Error { .. } => Err(sql_error(format!(
+            "SQL expression shape {:?} is not supported inside projection expressions",
+            match expr {
+                Expression::IsNull { .. } => "IS [NOT] NULL",
+                Expression::IsTruth { .. } => "IS [NOT] TRUE/FALSE",
+                Expression::InList { .. } => "IN (list)",
+                Expression::Between { .. } => "BETWEEN",
+                Expression::InSubquery { .. } => "IN (subquery)",
+                Expression::Subquery { .. } => "subquery",
+                Expression::Binary { .. } => "binary",
+                Expression::Unary { .. } => "unary",
+                Expression::FunctionCall { .. } => "function call",
+                Expression::Wildcard { .. } => "*",
+                Expression::Vector { .. } => "vector",
+                Expression::Error { .. } => "error node",
+                _ => "other",
+            }
+        ))),
     }
 }
 
