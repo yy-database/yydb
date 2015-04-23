@@ -685,7 +685,7 @@ fn select_rejects_arithmetic_in_projection() {
     let err = prepare_sql("SELECT account_id + 1 FROM Account").expect_err("arithmetic projection must be rejected");
     let msg = format!("{err}");
     assert!(
-        msg.contains("unsupported") || msg.contains("plain column"),
+        msg.contains("projection") || msg.contains("arithmetic") || msg.contains("binary") || msg.contains("unsupported"),
         "unexpected error: {msg}"
     );
 }
@@ -1755,4 +1755,196 @@ fn select_distinct_does_not_change_plain_sum() {
     )
     .expect("distinct sum");
     assert_eq!(outcome.rows[0].get("s"), Some(&Value::I64(60))); // 10 + 30 + 20
+}
+
+// ─── CASE WHEN ... THEN ... [ELSE ...] END ───────────────────────────────
+
+// These tests require oak-sql to have builder support for
+// `Expression::Case`. The lowering path and executor are already in place;
+// re-enable once the parser emits CASE AST nodes.
+
+#[test]
+#[ignore = "oak-sql builder does not yet construct Expression::Case from CASE WHEN syntax"]
+fn case_when_projection_first_matching_branch_wins() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id, CASE WHEN score > 20 THEN 'high' WHEN score > 10 THEN 'mid' ELSE 'low' END AS bucket FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("CASE WHEN bucket");
+    // ada(10) → 'low', linus(30) → 'high', grace(20) → 'mid'
+    assert_eq!(outcome.rows[0].get("bucket"), Some(&Value::Text("low".into())));
+    assert_eq!(outcome.rows[1].get("bucket"), Some(&Value::Text("high".into())));
+    assert_eq!(outcome.rows[2].get("bucket"), Some(&Value::Text("mid".into())));
+}
+
+#[test]
+#[ignore = "oak-sql builder does not yet construct Expression::Case from CASE WHEN syntax"]
+fn case_when_without_else_yields_null() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id, CASE WHEN score > 25 THEN 'top' END AS t FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("CASE WHEN no ELSE");
+    // linus(30) → 'top', others → NULL
+    assert_eq!(outcome.rows[0].get("t"), Some(&Value::Null));
+    assert_eq!(outcome.rows[1].get("t"), Some(&Value::Text("top".into())));
+    assert_eq!(outcome.rows[2].get("t"), Some(&Value::Null));
+}
+
+#[test]
+#[ignore = "oak-sql builder does not yet construct Expression::Case from CASE WHEN syntax"]
+fn case_when_nested_inside_then_branch() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // `CASE WHEN active THEN CASE WHEN score > 20 THEN 'active-high' ELSE 'active-low' END ELSE 'inactive' END`
+    let outcome = execute_sql(
+        "SELECT account_id, CASE WHEN active THEN CASE WHEN score > 20 THEN 'active-high' ELSE 'active-low' END ELSE 'inactive' END AS label FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("nested CASE");
+    // ada: active=true, score=10 → active-low
+    // linus: active=false → inactive
+    // grace: active=true, score=20 → active-low (score > 20 is false)
+    assert_eq!(outcome.rows[0].get("label"), Some(&Value::Text("active-low".into())));
+    assert_eq!(outcome.rows[1].get("label"), Some(&Value::Text("inactive".into())));
+    assert_eq!(outcome.rows[2].get("label"), Some(&Value::Text("active-low".into())));
+}
+
+// ─── CAST(expr AS type) ──────────────────────────────────────────────────
+
+// These tests require oak-sql builder support for `Expression::Cast`.
+// Executor handles INTEGER / REAL / TEXT / BLOB target types; NULL input
+// stays NULL regardless of target.
+
+#[test]
+#[ignore = "oak-sql builder does not yet construct Expression::Cast from CAST syntax"]
+fn cast_integer_to_text_and_back() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT CAST(account_id AS TEXT) AS id_text, CAST(score AS REAL) AS score_r FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("CAST int→text, int→real");
+    assert_eq!(outcome.rows[0].get("id_text"), Some(&Value::Text("1".into())));
+    assert_eq!(outcome.rows[0].get("score_r"), Some(&Value::F64(10.0)));
+}
+
+#[test]
+#[ignore = "oak-sql builder does not yet construct Expression::Cast from CAST syntax"]
+fn cast_text_to_integer_succeeds_for_valid_number() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+
+    // Insert a row where tenant is a numeric string via parameter (lowering
+    // does not accept real SQL integer literals, but CAST inside projection
+    // should lower).
+    execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, ?, ?)",
+        &[
+            Value::I64(5),
+            Value::Text("cast@test".into()),
+            Value::Text("42".into()),
+            Value::I64(0),
+            Value::Bool(true),
+        ],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert for cast");
+
+    let outcome = execute_sql(
+        "SELECT CAST(tenant AS INTEGER) AS tenant_int FROM Account WHERE account_id = 5",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("CAST text→int");
+    assert_eq!(outcome.rows[0].get("tenant_int"), Some(&Value::I64(42)));
+}
+
+#[test]
+#[ignore = "oak-sql builder does not yet construct Expression::Cast from CAST syntax"]
+fn cast_text_to_integer_non_numeric_is_error() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // tenant='t1' is not a valid integer; this should surface a diagnostic
+    // rather than silently producing NULL.
+    let err = execute_sql(
+        "SELECT CAST(tenant AS INTEGER) AS ti FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("CAST non-numeric text to INTEGER must error");
+    let msg = format!("{err}");
+    assert!(msg.contains("CAST") || msg.contains("INTEGER") || msg.contains("failed"), "unexpected error: {msg}");
+}
+
+#[test]
+#[ignore = "oak-sql builder does not yet construct Expression::Cast from CAST syntax"]
+fn cast_null_preserves_null() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 1", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT CAST(tenant AS TEXT) AS t FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("CAST null");
+    assert_eq!(outcome.rows[0].get("t"), Some(&Value::Null));
+}
+
+#[test]
+#[ignore = "oak-sql builder does not yet construct Expression::Cast from CAST syntax"]
+fn cast_bool_to_integer_and_back() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id, CAST(active AS INTEGER) AS a_int FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("CAST bool→int");
+    // ada active=true → 1, linus active=false → 0, grace active=true → 1
+    assert_eq!(outcome.rows[0].get("a_int"), Some(&Value::I64(1)));
+    assert_eq!(outcome.rows[1].get("a_int"), Some(&Value::I64(0)));
+    assert_eq!(outcome.rows[2].get("a_int"), Some(&Value::I64(1)));
 }
