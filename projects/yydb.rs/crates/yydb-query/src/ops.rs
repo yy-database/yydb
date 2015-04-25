@@ -173,6 +173,41 @@ pub enum Expr {
         /// (`INTEGER`, `REAL`, `TEXT`, `BLOB`).
         target: String,
     },
+    /// Binary operation used for CASE WHEN predicates (`score > 20`,
+    /// `active AND score > 10`, …). Both comparison and logical operators are
+    /// here so WHEN branches can nest arbitrarily.
+    Binary {
+        /// Operator kind — comparison or logical.
+        op: BinaryOp,
+        /// Left operand (may itself be a Compound).
+        left: Box<Expr>,
+        /// Right operand (may itself be a Compound).
+        right: Box<Expr>,
+    },
+    /// Logical NOT — wraps a predicate expression.
+    Not(Box<Expr>),
+}
+
+/// Operator for [`Expr::Binary`]. Covers the comparison and logical forms
+/// needed by CASE WHEN predicates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    /// Equality (`=`, `==`).
+    Eq,
+    /// Inequality (`<>`, `!=`).
+    Ne,
+    /// Less than (`<`).
+    Lt,
+    /// Less than or equal (`<=`).
+    Le,
+    /// Greater than (`>`).
+    Gt,
+    /// Greater than or equal (`>=`).
+    Ge,
+    /// Logical AND.
+    And,
+    /// Logical OR.
+    Or,
 }
 
 /// One projected output field.

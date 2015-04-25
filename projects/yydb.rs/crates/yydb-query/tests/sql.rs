@@ -1764,7 +1764,6 @@ fn select_distinct_does_not_change_plain_sum() {
 // re-enable once the parser emits CASE AST nodes.
 
 #[test]
-#[ignore = "oak-sql builder does not yet construct Expression::Case from CASE WHEN syntax"]
 fn case_when_projection_first_matching_branch_wins() {
     let contract = contract();
     let mut records = BTreeMap::new();
@@ -1785,7 +1784,6 @@ fn case_when_projection_first_matching_branch_wins() {
 }
 
 #[test]
-#[ignore = "oak-sql builder does not yet construct Expression::Case from CASE WHEN syntax"]
 fn case_when_without_else_yields_null() {
     let contract = contract();
     let mut records = BTreeMap::new();
@@ -1806,7 +1804,6 @@ fn case_when_without_else_yields_null() {
 }
 
 #[test]
-#[ignore = "oak-sql builder does not yet construct Expression::Case from CASE WHEN syntax"]
 fn case_when_nested_inside_then_branch() {
     let contract = contract();
     let mut records = BTreeMap::new();
@@ -1836,7 +1833,6 @@ fn case_when_nested_inside_then_branch() {
 // stays NULL regardless of target.
 
 #[test]
-#[ignore = "oak-sql builder does not yet construct Expression::Cast from CAST syntax"]
 fn cast_integer_to_text_and_back() {
     let contract = contract();
     let mut records = BTreeMap::new();
@@ -1855,7 +1851,6 @@ fn cast_integer_to_text_and_back() {
 }
 
 #[test]
-#[ignore = "oak-sql builder does not yet construct Expression::Cast from CAST syntax"]
 fn cast_text_to_integer_succeeds_for_valid_number() {
     let contract = contract();
     let mut records = BTreeMap::new();
@@ -1890,7 +1885,6 @@ fn cast_text_to_integer_succeeds_for_valid_number() {
 }
 
 #[test]
-#[ignore = "oak-sql builder does not yet construct Expression::Cast from CAST syntax"]
 fn cast_text_to_integer_non_numeric_is_error() {
     let contract = contract();
     let mut records = BTreeMap::new();
@@ -1911,10 +1905,10 @@ fn cast_text_to_integer_non_numeric_is_error() {
 }
 
 #[test]
-#[ignore = "oak-sql builder does not yet construct Expression::Cast from CAST syntax"]
 fn cast_null_preserves_null() {
     let contract = contract();
     let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
     exec("UPDATE Account SET tenant = NULL WHERE account_id = 1", &[], &contract, &mut records);
 
     let outcome = execute_sql(
@@ -1929,7 +1923,6 @@ fn cast_null_preserves_null() {
 }
 
 #[test]
-#[ignore = "oak-sql builder does not yet construct Expression::Cast from CAST syntax"]
 fn cast_bool_to_integer_and_back() {
     let contract = contract();
     let mut records = BTreeMap::new();

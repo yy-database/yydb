@@ -13,8 +13,8 @@ use yydb_types::{Error, Result, Value};
 
 use super::{
     ops::{
-        AggregateField, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, SortKey, WriteAssignment,
-        WriteBinOp, WriteExpr, WriteField, WriteOp,
+        AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, SortKey,
+        WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     params::{ParameterDescriptor, name_to_slot},
 };
@@ -540,13 +540,33 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<E
                 target: target.to_ascii_uppercase(),
             })
         }
+        Expression::Binary { left, op, right, .. } => {
+            let bin_op = match op {
+                BinaryOperator::Equal => BinaryOp::Eq,
+                BinaryOperator::NotEqual => BinaryOp::Ne,
+                BinaryOperator::Less => BinaryOp::Lt,
+                BinaryOperator::LessEqual => BinaryOp::Le,
+                BinaryOperator::Greater => BinaryOp::Gt,
+                BinaryOperator::GreaterEqual => BinaryOp::Ge,
+                BinaryOperator::And => BinaryOp::And,
+                BinaryOperator::Or => BinaryOp::Or,
+                other => return Err(sql_error(format!("binary operator `{other:?}` is not supported in projection expressions"))),
+            };
+            Ok(Expr::Binary {
+                op: bin_op,
+                left: Box::new(lower_expr(left, parameters)?),
+                right: Box::new(lower_expr(right, parameters)?),
+            })
+        }
+        Expression::Unary { op: UnaryOperator::Not, expr, .. } => {
+            Ok(Expr::Not(Box::new(lower_expr(expr, parameters)?)))
+        }
         Expression::IsNull { .. }
         | Expression::IsTruth { .. }
         | Expression::InList { .. }
         | Expression::Between { .. }
         | Expression::InSubquery { .. }
         | Expression::Subquery { .. }
-        | Expression::Binary { .. }
         | Expression::Unary { op: _, expr: _, .. }
         | Expression::FunctionCall { .. }
         | Expression::Wildcard { .. }
@@ -560,7 +580,6 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<E
                 Expression::Between { .. } => "BETWEEN",
                 Expression::InSubquery { .. } => "IN (subquery)",
                 Expression::Subquery { .. } => "subquery",
-                Expression::Binary { .. } => "binary",
                 Expression::Unary { .. } => "unary",
                 Expression::FunctionCall { .. } => "function call",
                 Expression::Wildcard { .. } => "*",

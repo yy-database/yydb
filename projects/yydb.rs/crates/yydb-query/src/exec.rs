@@ -8,7 +8,7 @@ use yydb_types::{Error, Result, Value};
 use super::{
     catalog::table_row_key_name,
     lower,
-    ops::{AggregateField, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow},
+    ops::{AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow},
     resolve, store,
 };
 
@@ -91,7 +91,7 @@ pub fn execute_ops(
                 rows = rows
                     .into_iter()
                     .map(|row| project_row(fields, &row, table, contract, records, bound_values))
-                    .collect();
+                    .collect::<Result<Vec<_>>>()?;
             }
             QueryOp::Sort { keys } => {
                 rows.sort_by(|left, right| {
@@ -151,7 +151,7 @@ pub fn project_row(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
-) -> QueryRow {
+) -> Result<QueryRow> {
     let mut out = QueryRow::new();
     for field in fields {
         match &field.expr {
@@ -161,23 +161,28 @@ pub fn project_row(
             }
             ProjectExpr::Nested { path, fields: nested } => {
                 let nested_value = match contract {
-                    Some(contract) => resolve::resolve_row_at_path(path, row, table, contract, records)
-                        .map(|(nested_row, nested_table)| {
-                            Value::Row(project_row(nested, &nested_row, &nested_table, Some(contract), records, bound_values))
-                        })
-                        .unwrap_or(Value::Null),
+                    Some(contract) => {
+                        let resolved = resolve::resolve_row_at_path(path, row, table, contract, records);
+                        match resolved {
+                            Ok((nested_row, nested_table)) => {
+                                let nested_projected =
+                                    project_row(nested, &nested_row, &nested_table, Some(contract), records, bound_values)?;
+                                Value::Row(nested_projected)
+                            }
+                            Err(_) => Value::Null,
+                        }
+                    }
                     None => Value::Null,
                 };
                 out.insert(field.name.clone(), nested_value);
             }
             ProjectExpr::Computed(inner) => {
-                let value = eval_expr(inner, row, table, contract, records, bound_values)
-                    .unwrap_or(Value::Null);
+                let value = eval_expr(inner, row, table, contract, records, bound_values)?;
                 out.insert(field.name.clone(), value);
             }
         }
     }
-    out
+    Ok(out)
 }
 
 pub(crate) fn eval_pred(
@@ -306,6 +311,15 @@ pub(crate) fn eval_expr(
             let value = eval_expr(inner, row, table, contract, records, bound_values)?;
             eval_cast(&value, target)
         }
+        Expr::Binary { op, left, right } => {
+            let l = eval_expr(left, row, table, contract, records, bound_values)?;
+            let r = eval_expr(right, row, table, contract, records, bound_values)?;
+            eval_binary(*op, &l, &r)
+        }
+        Expr::Not(inner) => {
+            let val = eval_expr(inner, row, table, contract, records, bound_values)?;
+            Ok(Value::Bool(!is_truthy(&val)))
+        }
     }
 }
 
@@ -349,6 +363,44 @@ fn is_truthy(value: &Value) -> bool {
         Value::Text(s) => !s.is_empty(),
         Value::Bytes(b) => !b.is_empty(),
         _ => true,
+    }
+}
+
+/// Evaluate a binary expression (comparison or logical) for CASE WHEN
+/// predicates and nested scalar comparisons. NULL propagation follows SQL 3VL
+/// semantics for comparisons (NULL when either operand is NULL) and treats
+/// NULL as falsy for AND/OR.
+fn eval_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value> {
+    use BinaryOp::*;
+    // AND / OR use SQL truth tables with NULL propagation.
+    match op {
+        And => Ok(match (left, right) {
+            (Value::Bool(false), _) | (_, Value::Bool(false)) => Value::Bool(false),
+            (Value::Null, _) | (_, Value::Null) => Value::Null,
+            _ => Value::Bool(is_truthy(left) && is_truthy(right)),
+        }),
+        Or => Ok(match (left, right) {
+            (Value::Bool(true), _) | (_, Value::Bool(true)) => Value::Bool(true),
+            (Value::Null, _) | (_, Value::Null) => Value::Null,
+            _ => Value::Bool(is_truthy(left) || is_truthy(right)),
+        }),
+        // Comparisons return NULL when either operand is NULL.
+        _ => {
+            if matches!(left, Value::Null) || matches!(right, Value::Null) {
+                return Ok(Value::Null);
+            }
+            let cmp = compare_values(left, right);
+            let result = match op {
+                Eq => cmp == std::cmp::Ordering::Equal,
+                Ne => cmp != std::cmp::Ordering::Equal,
+                Lt => cmp == std::cmp::Ordering::Less,
+                Le => cmp != std::cmp::Ordering::Greater,
+                Gt => cmp == std::cmp::Ordering::Greater,
+                Ge => cmp != std::cmp::Ordering::Less,
+                And | Or => unreachable!(),
+            };
+            Ok(Value::Bool(result))
+        }
     }
 }
 
