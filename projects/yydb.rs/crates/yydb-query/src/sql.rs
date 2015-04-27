@@ -117,10 +117,18 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
         .map(|from| from.name.name.to_string())
         .ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
 
-    let mut ops = vec![QueryOp::Scan { table }];
+    let mut ops = vec![QueryOp::Scan { table: table.clone() }];
 
-    // JOIN clauses.
+    // JOIN clauses. Self joins stay rejected: joined rows keep the base table's
+    // bare column names, so the two sides of one table would be
+    // indistinguishable in the ON condition and in the output.
     for join_clause in &select.joins {
+        let right = join_clause.table.name.name.to_string();
+        if right == table {
+            return Err(sql_error(format!(
+                "self join on `{right}` is not supported: table aliases cannot tell the two sides apart yet"
+            )));
+        }
         ops.push(lower_join_clause(join_clause, parameters)?);
     }
 
@@ -183,12 +191,8 @@ fn lower_join_clause(join: &JoinClause, parameters: &[ParameterDescriptor]) -> R
     let kind = match join.join_type {
         JoinType::Inner => JoinKind::Inner,
         JoinType::Left => JoinKind::Left,
-        JoinType::Right | JoinType::Full => {
-            return Err(sql_error(format!(
-                "join kind `{:?}` is not supported by the YYDB query executor (RIGHT / FULL reserved for a future cut)",
-                join.join_type
-            )));
-        }
+        JoinType::Right => JoinKind::Right,
+        JoinType::Full => JoinKind::Full,
     };
     let right = join.table.name.name.to_string();
     let on = join

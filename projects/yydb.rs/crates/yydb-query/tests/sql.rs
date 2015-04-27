@@ -172,24 +172,24 @@ fn update_rejects_primary_key_reassignment() {
 }
 
 #[test]
-fn ddl_and_joins_are_rejected_explicitly() {
+fn ddl_and_remaining_unsupported_clauses_are_rejected_explicitly() {
     assert!(prepare_sql("CREATE TABLE T (id INTEGER)").is_err());
-    // INNER JOIN is now supported.
-    let result = prepare_sql("SELECT * FROM Account JOIN Other ON Account.account_id = Other.id");
-    match &result {
-        Ok(_) => {}
-        Err(e) => eprintln!("JOIN prepare error: {e}"),
-    }
-    assert!(result.is_ok());
+    // INNER JOIN is supported.
+    assert!(prepare_sql("SELECT * FROM Account JOIN Other ON Account.account_id = Other.id").is_ok());
     // LEFT JOIN is also supported now.
     assert!(prepare_sql("SELECT * FROM Account LEFT JOIN Other ON Account.id = Other.id").is_ok());
+    // RIGHT / FULL joins lower into the shared join operator now.
+    assert!(prepare_sql("SELECT * FROM Account RIGHT JOIN Other ON Account.id = Other.id").is_ok());
+    assert!(prepare_sql("SELECT * FROM Account FULL JOIN Other ON Account.id = Other.id").is_ok());
+    // Self joins stay rejected: the joined row keeps the base table's bare
+    // column names, so one table cannot be distinguished from itself.
+    let err = prepare_sql("SELECT * FROM Account JOIN Account ON Account.account_id = Account.account_id")
+        .expect_err("self join must reject");
+    assert!(format!("{err}").contains("self join"), "unexpected self join error: {err}");
     // GROUP BY is now supported.
     assert!(prepare_sql("SELECT * FROM Account GROUP BY tenant").is_ok());
     // HAVING is still MVP-rejected.
     assert!(prepare_sql("SELECT COUNT(*) FROM Account HAVING COUNT(*) > 1").is_err());
-    // RIGHT / FULL joins are still rejected.
-    assert!(prepare_sql("SELECT * FROM Account RIGHT JOIN Other ON Account.id = Other.id").is_err());
-    assert!(prepare_sql("SELECT * FROM Account FULL JOIN Other ON Account.id = Other.id").is_err());
 }
 
 // ─── LEFT JOIN end-to-end ──────────────────────────────────────────────
@@ -328,6 +328,277 @@ fn left_join_with_empty_right_table_yields_all_left_with_nulls() {
     assert_eq!(outcome.rows.len(), 2);
     assert_eq!(outcome.rows[0].get("pid"), Some(&Value::Null));
     assert_eq!(outcome.rows[1].get("pid"), Some(&Value::Null));
+}
+
+// ─── RIGHT / FULL JOIN end-to-end ──────────────────────────────────────
+
+fn seed_orphan_projects(contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>) {
+    // owner_id 99 / 88 have no Account row at all.
+    exec("INSERT INTO Project (project_id, owner_id, name) VALUES (30, 99, 'p4')", &[], contract, records);
+    exec("INSERT INTO Project (project_id, owner_id, name) VALUES (40, 88, 'p5')", &[], contract, records);
+}
+
+fn seed_account(contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>, id: i64, active: bool) {
+    let sql = format!(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES ({id}, 'seed@test', 't', 0, {active})"
+    );
+    exec(&sql, &[], contract, records);
+}
+
+/// Read `account_id` and the projected `Project.name AS pname` from each row,
+/// sorted so assertions do not depend on join emission order. `None` means the
+/// column is `NULL` (missing or padded).
+fn join_pairs(rows: &[BTreeMap<String, Value>]) -> Vec<(Option<i64>, Option<String>)> {
+    let mut pairs: Vec<(Option<i64>, Option<String>)> = rows
+        .iter()
+        .map(|row| {
+            let account_id = match row.get("account_id") {
+                Some(Value::I64(id)) => Some(*id),
+                Some(Value::Null) | None => None,
+                other => panic!("unexpected account_id {other:?}"),
+            };
+            let name = match row.get("pname") {
+                Some(Value::Text(text)) => Some(text.clone()),
+                Some(Value::Null) | None => None,
+                other => panic!("unexpected pname {other:?}"),
+            };
+            (account_id, name)
+        })
+        .collect();
+    pairs.sort();
+    pairs
+}
+
+#[test]
+fn right_join_keeps_all_right_rows_padding_unmatched_with_null() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+    seed_orphan_projects(&contract, &mut records);
+
+    // RIGHT JOIN Account × Project — every Project row survives:
+    // p1/p2 → account 1, p3 → account 2, p4/p5 → no account (NULL left side).
+    let outcome = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account RIGHT JOIN Project ON Account.account_id = Project.owner_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("right join");
+
+    assert_eq!(
+        join_pairs(&outcome.rows),
+        vec![
+            (None, Some("p4".to_owned())),
+            (None, Some("p5".to_owned())),
+            (Some(1), Some("p1".to_owned())),
+            (Some(1), Some("p2".to_owned())),
+            (Some(2), Some("p3".to_owned())),
+        ]
+    );
+}
+
+#[test]
+fn right_join_with_empty_left_table_pads_every_right_row() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    // Only Project rows; Account stays empty.
+    exec("INSERT INTO Project (project_id, owner_id, name) VALUES (10, 1, 'p1')", &[], &contract, &mut records);
+    exec("INSERT INTO Project (project_id, owner_id, name) VALUES (20, 2, 'p2')", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account RIGHT JOIN Project ON Account.account_id = Project.owner_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("right join empty left");
+
+    assert_eq!(join_pairs(&outcome.rows), vec![(None, Some("p1".to_owned())), (None, Some("p2".to_owned()))]);
+}
+
+#[test]
+fn right_join_with_empty_right_table_yields_no_rows() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    // Only Account rows; Project stays empty.
+    seed_account(&contract, &mut records, 1, true);
+
+    let outcome = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account RIGHT JOIN Project ON Account.account_id = Project.owner_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("right join empty right");
+
+    // A right join keeps only right-hand rows, so an empty right table yields
+    // nothing regardless of the left side.
+    assert!(outcome.rows.is_empty());
+}
+
+#[test]
+fn right_join_without_matches_pads_every_right_row() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    // Accounts exist, but no project points at them.
+    seed_account(&contract, &mut records, 1, true);
+    seed_account(&contract, &mut records, 2, false);
+    exec("INSERT INTO Project (project_id, owner_id, name) VALUES (30, 99, 'p4')", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account RIGHT JOIN Project ON Account.account_id = Project.owner_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("right join without matches");
+
+    assert_eq!(join_pairs(&outcome.rows), vec![(None, Some("p4".to_owned()))]);
+}
+
+#[test]
+fn full_join_keeps_unmatched_rows_from_both_sides() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+    seed_orphan_projects(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account FULL JOIN Project ON Account.account_id = Project.owner_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("full join");
+
+    assert_eq!(
+        join_pairs(&outcome.rows),
+        vec![
+            // right rows with no account
+            (None, Some("p4".to_owned())),
+            (None, Some("p5".to_owned())),
+            // matched rows
+            (Some(1), Some("p1".to_owned())),
+            (Some(1), Some("p2".to_owned())),
+            (Some(2), Some("p3".to_owned())),
+            // account with no project
+            (Some(3), None),
+        ]
+    );
+}
+
+#[test]
+fn full_join_with_empty_right_table_pads_every_left_row() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_account(&contract, &mut records, 1, true);
+    seed_account(&contract, &mut records, 2, false);
+
+    let outcome = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account FULL JOIN Project ON Account.account_id = Project.owner_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("full join empty right");
+
+    assert_eq!(join_pairs(&outcome.rows), vec![(Some(1), None), (Some(2), None)]);
+}
+
+#[test]
+fn full_join_with_empty_tables_yields_no_rows() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+
+    let outcome = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account FULL JOIN Project ON Account.account_id = Project.owner_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("full join empty tables");
+
+    assert!(outcome.rows.is_empty());
+}
+
+#[test]
+fn join_on_keeps_outer_rows_that_where_then_removes() {
+    // `ON` decides which pairs match, so restricting it in a RIGHT JOIN turns
+    // the excluded right rows into NULL-padded rows. `WHERE` runs after the
+    // join and therefore filters those padded rows away again.
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+    seed_orphan_projects(&contract, &mut records);
+
+    let on_restricted = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account RIGHT JOIN Project ON Account.account_id = Project.owner_id AND Project.name = 'p1'",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("right join with restricted on");
+
+    assert_eq!(
+        join_pairs(&on_restricted.rows),
+        vec![
+            (None, Some("p2".to_owned())),
+            (None, Some("p3".to_owned())),
+            (None, Some("p4".to_owned())),
+            (None, Some("p5".to_owned())),
+            (Some(1), Some("p1".to_owned())),
+        ]
+    );
+
+    let where_filtered = execute_sql(
+        "SELECT account_id, Project.name AS pname FROM Account RIGHT JOIN Project ON Account.account_id = Project.owner_id WHERE Project.name = 'p1'",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("right join with where");
+
+    assert_eq!(join_pairs(&where_filtered.rows), vec![(Some(1), Some("p1".to_owned()))]);
+}
+
+#[test]
+fn every_join_kind_emits_the_same_merged_row_shape() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // Base table columns stay bare, joined table columns stay prefixed, so a
+    // padded row from either side has the same columns as a matched row.
+    let expected_keys = vec![
+        "Project.name",
+        "Project.owner_id",
+        "Project.project_id",
+        "account_id",
+        "active",
+        "email",
+        "score",
+        "tenant",
+    ];
+
+    for kind in ["JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN"] {
+        let sql = format!("SELECT * FROM Account {kind} Project ON Account.account_id = Project.owner_id");
+        let outcome = execute_sql(&sql, &[], &contract, &[], &mut records).expect("join kind executes");
+        assert!(!outcome.rows.is_empty(), "{kind} produced no rows");
+        for row in &outcome.rows {
+            let keys: Vec<&str> = row.keys().map(String::as_str).collect();
+            assert_eq!(keys, expected_keys, "{kind} changed the merged row shape");
+        }
+    }
 }
 
 #[test]

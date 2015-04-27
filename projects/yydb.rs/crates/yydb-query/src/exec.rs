@@ -79,6 +79,30 @@ pub fn execute_ops(
                             bound_values,
                         )?;
                     }
+                    JoinKind::Right => {
+                        rows = execute_right_join(
+                            &rows,
+                            table,
+                            right,
+                            right_alias.as_deref(),
+                            on,
+                            contract,
+                            records,
+                            bound_values,
+                        )?;
+                    }
+                    JoinKind::Full => {
+                        rows = execute_full_join(
+                            &rows,
+                            table,
+                            right,
+                            right_alias.as_deref(),
+                            on,
+                            contract,
+                            records,
+                            bound_values,
+                        )?;
+                    }
                 }
             }
             QueryOp::Aggregate { group_keys, aggregates } => {
@@ -591,6 +615,137 @@ fn execute_left_join(
             let mut padded = left_row.clone();
             for col in &right_col_names {
                 padded.insert(col.clone(), Value::Null);
+            }
+            out.push(padded);
+        }
+    }
+
+    Ok(out)
+}
+
+fn execute_right_join(
+    left_rows: &[QueryRow],
+    _left_table: &str,
+    right: &str,
+    right_alias: Option<&str>,
+    on: &Pred,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
+    let storage_right = match contract {
+        Some(contract) => table_row_key_name(contract, right)?,
+        None => right.to_string(),
+    };
+    let right_rows = store::load_table(records, &storage_right)?;
+
+    let prefix = match right_alias {
+        Some(a) => a.to_string(),
+        None => right.to_string(),
+    };
+
+    // Bare column names of the base (left) table, used to pad right rows that
+    // never matched. They are never prefixed, so the padded row has the same
+    // shape as a matched row.
+    let left_col_names: Vec<String> = left_rows.first().map(|r| r.keys().cloned().collect()).unwrap_or_default();
+
+    // Track which right rows had at least one left-side match.
+    let mut matched = vec![false; right_rows.len()];
+    let mut out: Vec<QueryRow> = Vec::with_capacity(right_rows.len());
+
+    // First pass: emit merged rows that satisfy the ON condition and mark
+    // the contributing right row as matched.
+    for left_row in left_rows {
+        for (ri, right_row) in right_rows.iter().enumerate() {
+            let merged = merge_rows(left_row, right_row, &prefix);
+            if eval_pred(on, &merged, "", contract, records, bound_values) {
+                matched[ri] = true;
+                out.push(merged);
+            }
+        }
+    }
+
+    // Second pass: for every right row that never matched, emit a padded row
+    // carrying the prefixed right columns plus NULL for each left column.
+    for (ri, right_row) in right_rows.iter().enumerate() {
+        if !matched[ri] {
+            let mut padded = QueryRow::new();
+            for col in &left_col_names {
+                padded.insert(col.clone(), Value::Null);
+            }
+            for (key, value) in right_row {
+                padded.insert(format!("{prefix}.{key}"), value.clone());
+            }
+            out.push(padded);
+        }
+    }
+
+    Ok(out)
+}
+
+fn execute_full_join(
+    left_rows: &[QueryRow],
+    _left_table: &str,
+    right: &str,
+    right_alias: Option<&str>,
+    on: &Pred,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
+    let storage_right = match contract {
+        Some(contract) => table_row_key_name(contract, right)?,
+        None => right.to_string(),
+    };
+    let right_rows = store::load_table(records, &storage_right)?;
+
+    let prefix = match right_alias {
+        Some(a) => a.to_string(),
+        None => right.to_string(),
+    };
+
+    // Column names of each side, used to pad rows that never matched.
+    let left_col_names: Vec<String> = left_rows.first().map(|r| r.keys().cloned().collect()).unwrap_or_default();
+    let right_col_names: Vec<String> =
+        right_rows.first().map(|r| r.keys().map(|k| format!("{prefix}.{k}")).collect()).unwrap_or_default();
+
+    // Track which rows on either side had at least one match.
+    let mut left_matched = vec![false; left_rows.len()];
+    let mut right_matched = vec![false; right_rows.len()];
+    let mut out: Vec<QueryRow> = Vec::with_capacity(left_rows.len() + right_rows.len());
+
+    // First pass: emit every merged row that satisfies the ON condition.
+    for (li, left_row) in left_rows.iter().enumerate() {
+        for (ri, right_row) in right_rows.iter().enumerate() {
+            let merged = merge_rows(left_row, right_row, &prefix);
+            if eval_pred(on, &merged, "", contract, records, bound_values) {
+                left_matched[li] = true;
+                right_matched[ri] = true;
+                out.push(merged);
+            }
+        }
+    }
+
+    // Second pass: unmatched left rows get NULL right columns.
+    for (li, left_row) in left_rows.iter().enumerate() {
+        if !left_matched[li] {
+            let mut padded = left_row.clone();
+            for col in &right_col_names {
+                padded.insert(col.clone(), Value::Null);
+            }
+            out.push(padded);
+        }
+    }
+
+    // Third pass: unmatched right rows get NULL left columns.
+    for (ri, right_row) in right_rows.iter().enumerate() {
+        if !right_matched[ri] {
+            let mut padded = QueryRow::new();
+            for col in &left_col_names {
+                padded.insert(col.clone(), Value::Null);
+            }
+            for (key, value) in right_row {
+                padded.insert(format!("{prefix}.{key}"), value.clone());
             }
             out.push(padded);
         }

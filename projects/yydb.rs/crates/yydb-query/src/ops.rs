@@ -228,8 +228,12 @@ pub struct SortKey {
     pub ascending: bool,
 }
 
-/// Kind of SQL join. Right / Full join still reject at lowering time; the
-/// executor only implements [`JoinKind::Inner`] and [`JoinKind::Left`].
+/// Kind of SQL join.
+///
+/// The joined row keeps the base (left) table columns bare and prefixes the
+/// joined (right) table columns with that table's name, so padding never
+/// renames anything: an unmatched row from either side simply carries `NULL`
+/// for the other side's columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinKind {
     /// `INNER JOIN` — rows with no match on either side are dropped.
@@ -237,6 +241,12 @@ pub enum JoinKind {
     /// `LEFT JOIN` — every left-hand row is kept; right-hand columns become
     /// `NULL` when there is no matching row.
     Left,
+    /// `RIGHT JOIN` — every right-hand row is kept; left-hand columns become
+    /// `NULL` when there is no matching row.
+    Right,
+    /// `FULL JOIN` — unmatched rows from both sides are kept, with `NULL` for
+    /// the columns of the side that has no matching row.
+    Full,
 }
 
 /// One aggregate function call.
@@ -290,7 +300,7 @@ pub enum QueryOp {
     },
     /// Merge the accumulating row stream with another table via a join.
     Join {
-        /// Join kind — currently only inner is supported.
+        /// Join kind.
         kind: JoinKind,
         /// Right-hand table name as written by the frontend.
         right: String,
