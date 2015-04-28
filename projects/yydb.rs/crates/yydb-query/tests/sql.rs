@@ -2212,3 +2212,33 @@ fn cast_bool_to_integer_and_back() {
     assert_eq!(outcome.rows[1].get("a_int"), Some(&Value::I64(0)));
     assert_eq!(outcome.rows[2].get("a_int"), Some(&Value::I64(1)));
 }
+
+#[test]
+fn unsupported_oak_sql_clauses_are_rejected_with_their_own_message() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+
+    let cases = [
+        (
+            "INSERT INTO Account (account_id, email, tenant, score, active) SELECT account_id, email, tenant, score, active FROM Account",
+            "INSERT ... SELECT",
+        ),
+        (
+            "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'a@b.test', 't1', 1, true) ON CONFLICT (account_id) DO NOTHING",
+            "ON CONFLICT",
+        ),
+        (
+            "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'a@b.test', 't1', 1, true) RETURNING account_id",
+            "RETURNING",
+        ),
+        ("SELECT account_id FROM Account UNION SELECT account_id FROM Account", "UNION"),
+        ("SELECT account_id FROM Account EXCEPT SELECT account_id FROM Account", "EXCEPT"),
+    ];
+
+    for (sql, needle) in cases {
+        let error = execute_sql(sql, &[], &contract, &[], &mut records).expect_err("clause is not supported yet");
+        let message = format!("{error}");
+        assert!(message.contains(needle), "expected `{needle}` in error, got `{message}`");
+    }
+    assert!(records.is_empty(), "rejected statements must not publish rows");
+}
