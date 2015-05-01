@@ -395,12 +395,13 @@ pub struct WriteAssignment {
 /// predicate evaluator.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WriteOp {
-    /// Insert one row. Missing primary key is rejected at execution time.
+    /// Insert every row of one statement. Missing primary key is rejected at
+    /// execution time, and the rows are published only when all of them pass.
     Insert {
         /// Target table as written by the frontend.
         table: String,
-        /// Column values of the new row.
-        fields: Vec<WriteField>,
+        /// Column values of each new row, one vector per `VALUES` row.
+        rows: Vec<Vec<WriteField>>,
     },
     /// Replace the assigned columns of every row matching `predicate`
     /// (`None` means every row). Primary-key reassignment is rejected.

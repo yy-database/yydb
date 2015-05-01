@@ -6,8 +6,8 @@
 
 use oak_sql::ast::{
     BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource, InsertStatement,
-    JoinClause, JoinType, LimitClause, Literal, OrderByItem, SelectItem, SelectStatement, SetOperator, SqlRoot,
-    SqlStatement, TableName, UnaryOperator, UpdateStatement,
+    JoinClause, JoinType, LimitClause, Literal, OrderByItem, SelectItem, SelectStatement, SetOperator, SqlRoot, SqlStatement,
+    TableName, UnaryOperator, UpdateStatement,
 };
 use yydb_types::{Error, Result, Value};
 
@@ -654,21 +654,26 @@ fn lower_insert(insert: &InsertStatement, parameters: &[ParameterDescriptor]) ->
     if insert.columns.is_empty() {
         return Err(sql_error("INSERT requires an explicit column list"));
     }
-    if insert.rows.len() != 1 {
-        return Err(sql_error(format!(
-            "INSERT with {} VALUES rows is not supported yet: one row per statement",
-            insert.rows.len()
-        )));
+    if insert.rows.is_empty() {
+        return Err(sql_error("INSERT requires at least one VALUES row"));
     }
-    let values = &insert.rows[0];
-    if values.len() != insert.columns.len() {
-        return Err(sql_error("INSERT column and value counts differ"));
+    let mut rows = Vec::with_capacity(insert.rows.len());
+    for (index, values) in insert.rows.iter().enumerate() {
+        if values.len() != insert.columns.len() {
+            return Err(sql_error(format!(
+                "INSERT column and value counts differ in VALUES row {}: {} columns, {} values",
+                index + 1,
+                insert.columns.len(),
+                values.len()
+            )));
+        }
+        let mut fields = Vec::with_capacity(insert.columns.len());
+        for (column, value) in insert.columns.iter().zip(values) {
+            fields.push(WriteField { name: column.name.to_string(), value: lower_bound_value(value, parameters)? });
+        }
+        rows.push(fields);
     }
-    let mut fields = Vec::with_capacity(insert.columns.len());
-    for (column, value) in insert.columns.iter().zip(values) {
-        fields.push(WriteField { name: column.name.to_string(), value: lower_bound_value(value, parameters)? });
-    }
-    Ok(WriteOp::Insert { table: table_name(&insert.table_name), fields })
+    Ok(WriteOp::Insert { table: table_name(&insert.table_name), rows })
 }
 
 fn set_operator_name(operator: SetOperator) -> &'static str {

@@ -1,7 +1,7 @@
 //! SQL frontend on the connection surface: the same rows VOS writes, addressed
 //! with SQL statements.
 
-use yydb::{Connection, Value};
+use yydb::{Connection, UniqueConstraint, Value};
 
 const ACCOUNT_SCHEMA: &str = r#"
 table Account {
@@ -95,6 +95,44 @@ fn sql_writes_participate_in_transactions() {
     seed(&conn);
     conn.commit().expect("commit");
     assert_eq!(account_ids(&conn, "SELECT account_id FROM Account"), vec![1, 2]);
+}
+
+#[test]
+fn sql_multi_row_insert_publishes_every_row_atomically() {
+    let conn = Connection::open_in_memory().expect("open");
+    conn.ensure_schema(ACCOUNT_SCHEMA).expect("schema");
+    conn.declare_unique_constraint(
+        "Account",
+        UniqueConstraint::new("account_email_key", vec!["email".to_owned()], true).expect("constraint shape"),
+    )
+    .expect("declare unique email");
+
+    let inserted = conn
+        .execute_sql_write(
+            "INSERT INTO Account (account_id, email, tenant, score) VALUES (1, 'ada@example.test', 't1', 10), (2, 'linus@example.test', 't1', 30), (3, 'grace@example.test', 't2', 20)",
+            &[],
+        )
+        .expect("multi-row insert");
+    assert_eq!(inserted, 3);
+    assert_eq!(account_ids(&conn, "SELECT account_id FROM Account"), vec![1, 2, 3]);
+
+    let conflict = conn
+        .execute_sql_write(
+            "INSERT INTO Account (account_id, email, tenant, score) VALUES (4, 'ken@example.test', 't1', 40), (5, 'ada@example.test', 't1', 50)",
+            &[],
+        )
+        .expect_err("second row repeats a stored email");
+    assert_eq!(conflict.code(), "yydb.unique.violation");
+    assert_eq!(account_ids(&conn, "SELECT account_id FROM Account"), vec![1, 2, 3]);
+
+    let repeated_pk = conn
+        .execute_sql_write(
+            "INSERT INTO Account (account_id, email, tenant, score) VALUES (4, 'ken@example.test', 't1', 40), (4, 'ken2@example.test', 't1', 50)",
+            &[],
+        )
+        .expect_err("two rows share a primary key");
+    assert_eq!(repeated_pk.code(), "yydb.unique.violation");
+    assert_eq!(account_ids(&conn, "SELECT account_id FROM Account"), vec![1, 2, 3]);
 }
 
 #[test]

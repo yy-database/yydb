@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use vos::types::ResolvedContract;
-use yydb_query::{Dialect, Pred, QueryKind, QueryOp, execute_sql, prepare_sql, resolved_contract_from_document};
-use yydb_types::Value;
+use yydb_query::{Dialect, Pred, QueryKind, QueryOp, WriteOp, execute_sql, prepare_sql, resolved_contract_from_document};
+use yydb_types::{Error, TableUniqueConstraint, UniqueConstraint, Value};
 
 const SCHEMA: &str = r#"
 table Account {
@@ -1224,19 +1224,19 @@ fn insert_rejects_column_value_count_mismatch() {
 }
 
 #[test]
-fn insert_rejects_multiple_value_groups() {
-    // lowering only handles a single VALUES clause. The parser may flatten
-    // multi-group values which then mismatches the column count, or the
-    // parser itself may reject the syntax — either way, an error must occur.
-    let err = prepare_sql(
+fn insert_lowers_every_values_row_into_one_insert_op() {
+    let stmt = prepare_sql(
         "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'a', 't', 0, true), (2, 'b', 't', 1, false)",
     )
-    .expect_err("multi-row insert must reject");
-    let msg = format!("{err}");
-    assert!(
-        !msg.is_empty(),
-        "expected an error for multi-row insert"
-    );
+    .expect("multi-row insert prepares");
+    match stmt.write_ops.as_slice() {
+        [WriteOp::Insert { rows, .. }] => {
+            assert_eq!(rows.len(), 2, "row boundaries come from the VALUES list");
+            assert_eq!(rows[0][0].name, "account_id");
+            assert_eq!(rows[1][0].name, "account_id");
+        }
+        other => panic!("expected exactly one insert op, got {other:?}"),
+    }
 }
 
 // ─── Parameterized DML ──────────────────────────────────────────────────
@@ -2241,4 +2241,126 @@ fn unsupported_oak_sql_clauses_are_rejected_with_their_own_message() {
         assert!(message.contains(needle), "expected `{needle}` in error, got `{message}`");
     }
     assert!(records.is_empty(), "rejected statements must not publish rows");
+}
+
+const MULTI_ROW_SCHEMA: &str = r#"
+table Account {
+    @@account_id: i64,
+    @email: utf8,
+    score: i64,
+}
+"#;
+
+fn multi_row_contract() -> ResolvedContract {
+    resolved_contract_from_document(MULTI_ROW_SCHEMA).expect("multi-row schema resolves")
+}
+
+fn email_unique() -> TableUniqueConstraint {
+    let constraint = UniqueConstraint::new("Account_email_key", vec!["email".to_owned()], true).expect("constraint shape");
+    TableUniqueConstraint::new("Account", constraint).expect("table binding")
+}
+
+#[test]
+fn insert_values_publishes_every_row_and_reports_the_row_count() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+
+    let inserted = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10), (2, 'linus@test', 30), (3, 'grace@test', 20)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("multi-row insert");
+    assert_eq!(inserted.affected, 3);
+    assert_eq!(inserted.rows.len(), 3);
+
+    let rows = execute_sql("SELECT account_id, score FROM Account ORDER BY account_id", &[], &contract, &[], &mut records)
+        .expect("read back")
+        .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+    assert_eq!(rows[1].get("score"), Some(&Value::I64(30)));
+
+    let single = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (4, 'ken@test', 40)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("single-row insert");
+    assert_eq!(single.affected, 1);
+    assert_eq!(records.len(), 4);
+}
+
+#[test]
+fn multi_row_insert_rejects_a_repeated_primary_key_without_publishing() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+
+    let error = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10), (1, 'linus@test', 30)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("repeated primary key");
+    match error {
+        Error::UniqueViolation { constraint, columns, .. } => {
+            assert_eq!(constraint, "Account_pkey");
+            assert_eq!(columns, vec!["account_id".to_owned()]);
+        }
+        other => panic!("expected a unique violation, got {other}"),
+    }
+    assert!(records.is_empty(), "the statement must not publish its first row");
+}
+
+#[test]
+fn multi_row_insert_rolls_back_when_a_row_conflicts_with_a_stored_row() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("seed row");
+
+    let error = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (2, 'linus@test', 30), (3, 'ada@test', 20)",
+        &[],
+        &contract,
+        &[email_unique()],
+        &mut records,
+    )
+    .expect_err("duplicate email");
+    match error {
+        Error::UniqueViolation { constraint, columns, .. } => {
+            assert_eq!(constraint, "Account_email_key");
+            assert_eq!(columns, vec!["email".to_owned()]);
+        }
+        other => panic!("expected a unique violation, got {other}"),
+    }
+    assert_eq!(records.len(), 1, "the stored row is untouched and row 2 was not published");
+}
+
+#[test]
+fn multi_row_insert_rejects_a_unique_conflict_inside_the_statement() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+
+    let error = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10), (2, 'ada@test', 30)",
+        &[],
+        &contract,
+        &[email_unique()],
+        &mut records,
+    )
+    .expect_err("duplicate email inside one statement");
+    assert!(matches!(error, Error::UniqueViolation { .. }), "expected a unique violation, got {error}");
+    assert!(records.is_empty(), "no row of the failed statement may be published");
 }

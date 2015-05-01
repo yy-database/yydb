@@ -49,6 +49,11 @@ pub fn merge(document: Vec<TableUniqueConstraint>, declared: &[TableUniqueConstr
     merged
 }
 
+/// Whether `table` carries any uniqueness rule at all.
+pub fn has_rules(constraints: &[TableUniqueConstraint], table: &str) -> bool {
+    constraints.iter().any(|candidate| candidate.table() == table)
+}
+
 /// Rejects `row` when it would duplicate an existing key of any constraint on `table`.
 ///
 /// `row` replaces the row with `pk_text`, so that row never conflicts with itself.
@@ -62,19 +67,37 @@ pub fn check(
     pk_text: &str,
     row: &QueryRow,
 ) -> Result<()> {
+    if !has_rules(constraints, table) {
+        return Ok(());
+    }
+    let existing_rows = store::load_table(records, table)?;
+    check_against_rows(&existing_rows, constraints, table, pk_field, pk_text, row)
+}
+
+/// Same rule as [`check`], evaluated against rows the caller already loaded.
+///
+/// Multi-row `INSERT` uses this to test a staged row against the stored rows
+/// once and against the earlier rows of the same statement without reloading.
+pub fn check_against_rows(
+    existing_rows: &[QueryRow],
+    constraints: &[TableUniqueConstraint],
+    table: &str,
+    pk_field: &str,
+    pk_text: &str,
+    row: &QueryRow,
+) -> Result<()> {
     let applicable: Vec<&UniqueConstraint> =
         constraints.iter().filter(|candidate| candidate.table() == table).map(TableUniqueConstraint::constraint).collect();
     if applicable.is_empty() {
         return Ok(());
     }
 
-    let existing_rows = store::load_table(records, table)?;
     for constraint in applicable {
         let (incoming, incoming_null) = constraint_key(row, constraint.columns());
         if incoming_null && constraint.nulls_distinct() {
             continue;
         }
-        for existing in &existing_rows {
+        for existing in existing_rows {
             let existing_pk = existing.get(pk_field).map(value_text).transpose()?.unwrap_or_default();
             if existing_pk == pk_text {
                 continue;

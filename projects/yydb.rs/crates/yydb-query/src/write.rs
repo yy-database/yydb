@@ -39,10 +39,10 @@ pub fn execute_ops(
     let mut outcome = WriteOutcome::default();
     for op in ops {
         match op {
-            WriteOp::Insert { table, fields } => {
-                let row = insert_row(table, fields, contract, declared, records, bound_values)?;
-                outcome.rows.push(row);
-                outcome.affected += 1;
+            WriteOp::Insert { table, rows } => {
+                let inserted = insert_rows(table, rows, contract, declared, records, bound_values)?;
+                outcome.affected += inserted.len();
+                outcome.rows.extend(inserted);
             }
             WriteOp::Update { table, assignments, predicate } => {
                 outcome.affected +=
@@ -136,29 +136,62 @@ fn eval_float_bin(op: WriteBinOp, l: f64, r: f64) -> Result<f64> {
     })
 }
 
-fn insert_row(
+/// Insert every row of one statement and publish them together.
+///
+/// Row boundaries come from the caller (`rows`), never from the column count.
+/// Staging gives the statement its own atomicity: coercion, primary-key
+/// presence and uniqueness are all checked before the first row reaches the
+/// record map, so a failing row leaves the table exactly as it was. A repeated
+/// primary key inside the same statement is rejected as well, because the
+/// record map would otherwise silently keep only the last row.
+fn insert_rows(
     table: &str,
-    fields: &[WriteField],
+    rows: &[Vec<WriteField>],
     contract: &ResolvedContract,
     declared: &[TableUniqueConstraint],
     records: &mut BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
-) -> Result<QueryRow> {
+) -> Result<Vec<QueryRow>> {
     let (entry, storage) = resolve_table(contract, table)?;
-    let mut row = QueryRow::new();
-    for field in fields {
-        let slot = catalog::field_on_table(entry, &field.name)?;
-        let value = resolve_value(&field.value, bound_values)?;
-        row.insert(field.name.clone(), coerce::value_to_scalar(value.clone(), &slot.canonical_type)?);
-    }
     let pk_field = catalog::primary_field_name(entry)?;
-    let pk = row
-        .get(pk_field)
-        .ok_or_else(|| write_error(format!("insert into `{table}` is missing primary key field `{pk_field}`")))?;
-    let pk_text = constraints::value_text(pk)?;
-    constraints::check(records, declared, &storage, pk_field, &pk_text, &row)?;
-    store::upsert_row(records, &storage, &pk_text, &row)?;
-    Ok(row)
+
+    let existing_rows =
+        if constraints::has_rules(declared, &storage) { store::load_table(records, &storage)? } else { Vec::new() };
+
+    let mut staged: Vec<QueryRow> = Vec::with_capacity(rows.len());
+    let mut staged_pks: Vec<String> = Vec::with_capacity(rows.len());
+    for fields in rows {
+        let mut row = QueryRow::new();
+        for field in fields {
+            let slot = catalog::field_on_table(entry, &field.name)?;
+            let value = resolve_value(&field.value, bound_values)?;
+            row.insert(field.name.clone(), coerce::value_to_scalar(value.clone(), &slot.canonical_type)?);
+        }
+        let pk = row
+            .get(pk_field)
+            .ok_or_else(|| write_error(format!("insert into `{table}` is missing primary key field `{pk_field}`")))?;
+        let pk_text = constraints::value_text(pk)?;
+        if staged_pks.contains(&pk_text) {
+            return Err(Error::UniqueViolation {
+                table: storage.clone(),
+                constraint: format!("{table}_pkey"),
+                columns: vec![pk_field.to_string()],
+            });
+        }
+        constraints::check_against_rows(&staged, declared, &storage, pk_field, &pk_text, &row)?;
+        constraints::check_against_rows(&existing_rows, declared, &storage, pk_field, &pk_text, &row)?;
+        staged_pks.push(pk_text);
+        staged.push(row);
+    }
+
+    // Encode into a pending map first so an encoding failure also aborts before
+    // any row is published.
+    let mut pending: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    for (pk_text, row) in staged_pks.iter().zip(&staged) {
+        store::upsert_row(&mut pending, &storage, pk_text, row)?;
+    }
+    records.extend(pending);
+    Ok(staged)
 }
 
 fn update_rows(
