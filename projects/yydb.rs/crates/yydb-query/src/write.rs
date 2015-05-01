@@ -11,7 +11,7 @@ use yydb_types::{Error, Result, TableUniqueConstraint, Value};
 
 use super::{
     catalog, coerce, constraints, exec,
-    ops::{BoundValue, Pred, QueryRow, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp},
+    ops::{BoundValue, Pred, QueryOp, QueryRow, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp},
     store,
 };
 
@@ -41,6 +41,20 @@ pub fn execute_ops(
         match op {
             WriteOp::Insert { table, rows } => {
                 let inserted = insert_rows(table, rows, contract, declared, records, bound_values)?;
+                outcome.affected += inserted.len();
+                outcome.rows.extend(inserted);
+            }
+            WriteOp::InsertFromQuery { table, columns, source, outputs } => {
+                let inserted = insert_from_query(
+                    table,
+                    columns,
+                    source,
+                    outputs.as_deref(),
+                    contract,
+                    declared,
+                    records,
+                    bound_values,
+                )?;
                 outcome.affected += inserted.len();
                 outcome.rows.extend(inserted);
             }
@@ -192,6 +206,83 @@ fn insert_rows(
     }
     records.extend(pending);
     Ok(staged)
+}
+
+/// Insert the rows a read pipeline produced (`INSERT INTO … SELECT …`).
+///
+/// The pipeline runs against the statement's starting snapshot before the first
+/// row is staged, so a self-referencing source (`INSERT INTO t SELECT … FROM t`)
+/// reads the pre-insert rows rather than its own output. Rows are then mapped to
+/// target columns by position and handed to [`insert_rows`], which is the same
+/// staging path `VALUES` uses: coercion, primary-key presence and uniqueness are
+/// all checked before anything is published.
+fn insert_from_query(
+    table: &str,
+    columns: &[String],
+    source: &[QueryOp],
+    outputs: Option<&[String]>,
+    contract: &ResolvedContract,
+    declared: &[TableUniqueConstraint],
+    records: &mut BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
+    let source_rows = exec::execute_ops(source, Some(contract), records, bound_values)?;
+
+    let (entry, _storage) = resolve_table(contract, table)?;
+    let target_columns: Vec<String> = if columns.is_empty() {
+        entry.fields.iter().map(|field| field.canonical_name.clone()).collect()
+    }
+    else {
+        columns.to_vec()
+    };
+    let output_fields: Vec<String> = match outputs {
+        Some(names) => names.to_vec(),
+        None => star_output_fields(contract, source)?,
+    };
+    if target_columns.len() != output_fields.len() {
+        return Err(write_error(format!(
+            "INSERT ... SELECT column count mismatch: {} target columns, {} source columns",
+            target_columns.len(),
+            output_fields.len()
+        )));
+    }
+
+    let rows: Vec<Vec<WriteField>> = source_rows
+        .iter()
+        .map(|row| {
+            target_columns
+                .iter()
+                .zip(&output_fields)
+                .map(|(target, output)| WriteField {
+                    name: target.clone(),
+                    value: BoundValue::Literal(row.get(output).cloned().unwrap_or(Value::Null)),
+                })
+                .collect()
+        })
+        .collect();
+    insert_rows(table, &rows, contract, declared, records, bound_values)
+}
+
+/// Columns a `SELECT *` source produces, in catalog declaration order.
+///
+/// The read pipeline keeps `*` as "whatever the scan loaded", so only a single
+/// scanned table has an unambiguous column order.
+fn star_output_fields(contract: &ResolvedContract, source: &[QueryOp]) -> Result<Vec<String>> {
+    let mut scanned = source.iter().filter_map(|op| match op {
+        QueryOp::Scan { table } => Some(table),
+        _ => None,
+    });
+    let Some(table) = scanned.next()
+    else {
+        return Err(write_error("INSERT ... SELECT `*` requires a source table scan"));
+    };
+    if scanned.next().is_some() {
+        return Err(write_error(format!(
+            "INSERT ... SELECT `*` requires a single source table: `{table}` is joined with another table, list the source columns instead"
+        )));
+    }
+    let entry = catalog::table_type_by_name(contract, table)?;
+    Ok(entry.fields.iter().map(|field| field.canonical_name.clone()).collect())
 }
 
 fn update_rows(

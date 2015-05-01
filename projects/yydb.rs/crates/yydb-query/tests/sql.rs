@@ -2220,8 +2220,8 @@ fn unsupported_oak_sql_clauses_are_rejected_with_their_own_message() {
 
     let cases = [
         (
-            "INSERT INTO Account (account_id, email, tenant, score, active) SELECT account_id, email, tenant, score, active FROM Account",
-            "INSERT ... SELECT",
+            "INSERT INTO Account (account_id, email, tenant, score, active) SELECT DISTINCT account_id, email, tenant, score, active FROM Account",
+            "DISTINCT",
         ),
         (
             "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'a@b.test', 't1', 1, true) ON CONFLICT (account_id) DO NOTHING",
@@ -2363,4 +2363,285 @@ fn multi_row_insert_rejects_a_unique_conflict_inside_the_statement() {
     .expect_err("duplicate email inside one statement");
     assert!(matches!(error, Error::UniqueViolation { .. }), "expected a unique violation, got {error}");
     assert!(records.is_empty(), "no row of the failed statement may be published");
+}
+
+const INSERT_SELECT_SCHEMA: &str = r#"
+table Source {
+    @@source_id: i64,
+    email: utf8,
+    score: i64,
+}
+
+table Target {
+    @@target_id: i64,
+    email: utf8,
+    score: i64,
+}
+
+table Mirror {
+    @@mirror_id: i64,
+    email: utf8,
+    score: i64,
+}
+
+table Event {
+    @@event_id: i64,
+    happened_on: date,
+}
+"#;
+
+fn insert_select_contract() -> ResolvedContract {
+    resolved_contract_from_document(INSERT_SELECT_SCHEMA).expect("insert-select schema resolves")
+}
+
+fn seed_sources(contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>) {
+    exec(
+        "INSERT INTO Source (source_id, email, score) VALUES (1, 'ada@test', 10), (2, 'linus@test', 30), (3, 'grace@test', 20)",
+        &[],
+        contract,
+        records,
+    );
+}
+
+fn target_email_unique() -> TableUniqueConstraint {
+    let constraint = UniqueConstraint::new("Target_email_key", vec!["email".to_owned()], true).expect("constraint shape");
+    TableUniqueConstraint::new("Target", constraint).expect("table binding")
+}
+
+fn column(rows: &[BTreeMap<String, Value>], name: &str) -> Vec<Value> {
+    rows.iter().map(|row| row.get(name).cloned().unwrap_or(Value::Null)).collect()
+}
+
+#[test]
+fn insert_select_lowers_into_a_write_op_carrying_its_read_pipeline() {
+    let stmt = prepare_sql(
+        "INSERT INTO Target (target_id, email, score) SELECT source_id, email, score FROM Source WHERE score > 10",
+    )
+    .expect("prepare");
+    assert_eq!(stmt.query_kind, QueryKind::Write);
+    assert!(stmt.ops.is_empty(), "a write statement carries no top-level read pipeline");
+    assert_eq!(stmt.read_set, vec!["Source".to_owned()]);
+    assert_eq!(stmt.write_set, vec!["Target".to_owned()]);
+
+    match stmt.write_ops.as_slice() {
+        [WriteOp::InsertFromQuery { table, columns, source, outputs }] => {
+            assert_eq!(table, "Target");
+            assert_eq!(columns, &vec!["target_id".to_owned(), "email".to_owned(), "score".to_owned()]);
+            assert_eq!(
+                outputs.as_deref(),
+                Some(&["source_id".to_owned(), "email".to_owned(), "score".to_owned()][..])
+            );
+            assert!(matches!(source.last(), Some(QueryOp::Collect)), "source must end in Collect");
+        }
+        other => panic!("unexpected write ops {other:?}"),
+    }
+}
+
+#[test]
+fn insert_select_publishes_the_rows_of_a_single_table_source() {
+    let contract = insert_select_contract();
+    let mut records = BTreeMap::new();
+    seed_sources(&contract, &mut records);
+
+    let inserted = execute_sql(
+        "INSERT INTO Target (target_id, email, score) SELECT source_id, email, score FROM Source WHERE score >= 20",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert select");
+    assert_eq!(inserted.affected, 2);
+    assert_eq!(inserted.rows.len(), 2);
+
+    let rows = execute_sql("SELECT target_id, score FROM Target ORDER BY target_id", &[], &contract, &[], &mut records)
+        .expect("read back")
+        .rows;
+    assert_eq!(column(&rows, "target_id"), vec![Value::I64(2), Value::I64(3)]);
+    assert_eq!(column(&rows, "score"), vec![Value::I64(30), Value::I64(20)]);
+}
+
+#[test]
+fn insert_select_projects_constant_columns_into_the_target() {
+    let contract = insert_select_contract();
+    let mut records = BTreeMap::new();
+    seed_sources(&contract, &mut records);
+
+    // Constant columns need distinct aliases: unnamed expressions share one
+    // placeholder name in the read pipeline. Aliases deliberately differ from
+    // the target column names so the mapping is proven to be positional.
+    let inserted = execute_sql(
+        "INSERT INTO Target (target_id, email, score) SELECT 900 AS id_col, 'copy@test' AS mail_col, 7 AS score_col FROM Source WHERE source_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("constant select");
+    assert_eq!(inserted.affected, 1);
+
+    let rows = execute_sql("SELECT target_id, email, score FROM Target", &[], &contract, &[], &mut records)
+        .expect("read back")
+        .rows;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("target_id"), Some(&Value::I64(900)));
+    assert_eq!(rows[0].get("email"), Some(&Value::Text("copy@test".into())));
+    assert_eq!(rows[0].get("score"), Some(&Value::I64(7)));
+}
+
+#[test]
+fn insert_select_star_uses_the_catalog_column_order() {
+    let contract = insert_select_contract();
+    let mut records = BTreeMap::new();
+    seed_sources(&contract, &mut records);
+    exec(
+        "INSERT INTO Target (target_id, email, score) SELECT source_id, email, score FROM Source WHERE source_id = 2",
+        &[],
+        &contract,
+        &mut records,
+    );
+
+    // `SELECT *` with an omitted target column list maps the source fields to
+    // the target fields in catalog declaration order.
+    let inserted =
+        execute_sql("INSERT INTO Mirror SELECT * FROM Target", &[], &contract, &[], &mut records).expect("insert select star");
+    assert_eq!(inserted.affected, 1);
+
+    let rows = execute_sql("SELECT mirror_id, email, score FROM Mirror", &[], &contract, &[], &mut records)
+        .expect("read back")
+        .rows;
+    assert_eq!(rows[0].get("mirror_id"), Some(&Value::I64(2)));
+    assert_eq!(rows[0].get("email"), Some(&Value::Text("linus@test".into())));
+    assert_eq!(rows[0].get("score"), Some(&Value::I64(30)));
+}
+
+#[test]
+fn insert_select_rejects_a_source_column_count_mismatch() {
+    let contract = insert_select_contract();
+    let mut records = BTreeMap::new();
+    seed_sources(&contract, &mut records);
+
+    let error = execute_sql(
+        "INSERT INTO Target (target_id, score) SELECT source_id, email, score FROM Source",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("three source columns for two target columns");
+    let message = format!("{error}");
+    assert!(message.contains("column count mismatch"), "unexpected error `{message}`");
+    assert!(!records.is_empty(), "the source rows must stay untouched");
+    assert!(execute_sql("SELECT target_id FROM Target", &[], &contract, &[], &mut records).unwrap().rows.is_empty());
+}
+
+#[test]
+fn insert_select_rejects_a_value_the_target_column_cannot_hold() {
+    let contract = insert_select_contract();
+    let mut records = BTreeMap::new();
+    seed_sources(&contract, &mut records);
+
+    // `Event.happened_on` is a date column and the source value is text that is
+    // not an ISO date, so the shared scalar coercion rejects the row.
+    let error = execute_sql(
+        "INSERT INTO Event (event_id, happened_on) SELECT source_id, email FROM Source",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("text is not a date");
+    assert!(matches!(error, Error::Scalar { .. }), "expected a scalar error, got {error}");
+    assert!(
+        execute_sql("SELECT event_id FROM Event", &[], &contract, &[], &mut records).unwrap().rows.is_empty(),
+        "no row of the failed statement may be published"
+    );
+}
+
+#[test]
+fn insert_select_publishes_nothing_when_a_row_violates_a_unique_constraint() {
+    let contract = insert_select_contract();
+    let mut records = BTreeMap::new();
+    exec(
+        "INSERT INTO Source (source_id, email, score) VALUES (1, 'shared@test', 10), (2, 'shared@test', 30), (3, 'other@test', 20)",
+        &[],
+        &contract,
+        &mut records,
+    );
+
+    let error = execute_sql(
+        "INSERT INTO Target (target_id, email, score) SELECT source_id, email, score FROM Source",
+        &[],
+        &contract,
+        &[target_email_unique()],
+        &mut records,
+    )
+    .expect_err("the second source row repeats the first email");
+    match error {
+        Error::UniqueViolation { table, constraint, columns } => {
+            assert_eq!(table, "Target");
+            assert_eq!(constraint, "Target_email_key");
+            assert_eq!(columns, vec!["email".to_owned()]);
+        }
+        other => panic!("expected a unique violation, got {other}"),
+    }
+    assert!(
+        execute_sql("SELECT target_id FROM Target", &[], &contract, &[], &mut records).unwrap().rows.is_empty(),
+        "the statement must not publish its first row"
+    );
+}
+
+#[test]
+fn insert_select_from_the_target_table_reads_the_pre_statement_snapshot() {
+    let contract = insert_select_contract();
+    let mut records = BTreeMap::new();
+    seed_sources(&contract, &mut records);
+
+    let inserted = execute_sql(
+        "INSERT INTO Source (source_id, email, score) SELECT source_id, email, score FROM Source",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("self-referencing insert select");
+    assert_eq!(inserted.affected, 3);
+
+    let rows = execute_sql("SELECT source_id, score FROM Source ORDER BY source_id", &[], &contract, &[], &mut records)
+        .expect("read back")
+        .rows;
+    assert_eq!(column(&rows, "source_id"), vec![Value::I64(1), Value::I64(2), Value::I64(3)]);
+    assert_eq!(column(&rows, "score"), vec![Value::I64(10), Value::I64(30), Value::I64(20)]);
+}
+
+#[test]
+fn insert_select_rejects_sources_the_read_pipeline_cannot_shape() {
+    let contract = insert_select_contract();
+    let mut records = BTreeMap::new();
+    seed_sources(&contract, &mut records);
+
+    let cases = [
+        (
+            "INSERT INTO Target (target_id, email, score) SELECT COUNT(*) AS n, 'x@test', 0 FROM Source",
+            "aggregate functions",
+        ),
+        (
+            "INSERT INTO Target (target_id, email, score) SELECT score, email, source_id FROM Source GROUP BY score",
+            "GROUP BY",
+        ),
+        (
+            "INSERT INTO Target (target_id, email, score) SELECT source_id, email, email FROM Source",
+            "appears more than once",
+        ),
+    ];
+
+    for (sql, needle) in cases {
+        let error = execute_sql(sql, &[], &contract, &[], &mut records).expect_err("source shape is rejected");
+        let message = format!("{error}");
+        assert!(message.contains(needle), "expected `{needle}` in error, got `{message}`");
+    }
+    assert!(
+        execute_sql("SELECT target_id FROM Target", &[], &contract, &[], &mut records).unwrap().rows.is_empty(),
+        "rejected statements must not publish rows"
+    );
 }

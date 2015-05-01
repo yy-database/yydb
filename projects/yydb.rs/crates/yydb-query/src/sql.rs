@@ -71,8 +71,8 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
             let op = lower_insert(insert, parameters)?;
             Ok(SqlPlan {
                 read_ops: Vec::new(),
+                read_set: read_tables_of_write(&op),
                 write_ops: vec![op],
-                read_set: Vec::new(),
                 write_set: vec![insert.table_name.name.name.to_string()],
             })
         }
@@ -375,15 +375,7 @@ fn lower_projection(items: &[SelectItem], parameters: &[ParameterDescriptor]) ->
         if matches!(expr, Expression::FunctionCall { .. }) {
             continue;
         }
-        let name = alias.as_ref().map_or_else(
-            || match expr {
-                Expression::Identifier(ident) => ident.name.to_string(),
-                Expression::Case { .. } => "case".to_string(),
-                Expression::Cast { .. } => "cast".to_string(),
-                _ => "expr".to_string(),
-            },
-            |alias| alias.name.to_string(),
-        );
+        let name = output_name(expr, alias);
         // Plain identifier → scalar column path (existing happy path).
         let field_expr = match expr {
             Expression::Identifier(identifier) => {
@@ -642,15 +634,19 @@ fn lower_write_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Re
 // ─── writes ──────────────────────────────────────────────────────────────
 
 fn lower_insert(insert: &InsertStatement, parameters: &[ParameterDescriptor]) -> Result<WriteOp> {
-    if matches!(insert.source, InsertSource::Select(_)) {
-        return Err(sql_error("INSERT ... SELECT is not supported yet: rows must come from a VALUES list"));
-    }
     if insert.on_conflict.is_some() {
         return Err(sql_error("INSERT ... ON CONFLICT is not supported yet"));
     }
     if insert.returning.is_some() {
         return Err(sql_error("INSERT ... RETURNING is not supported yet"));
     }
+    match &insert.source {
+        InsertSource::Select(select) => lower_insert_select(insert, select, parameters),
+        InsertSource::Values => lower_insert_values(insert, parameters),
+    }
+}
+
+fn lower_insert_values(insert: &InsertStatement, parameters: &[ParameterDescriptor]) -> Result<WriteOp> {
     if insert.columns.is_empty() {
         return Err(sql_error("INSERT requires an explicit column list"));
     }
@@ -674,6 +670,105 @@ fn lower_insert(insert: &InsertStatement, parameters: &[ParameterDescriptor]) ->
         rows.push(fields);
     }
     Ok(WriteOp::Insert { table: table_name(&insert.table_name), rows })
+}
+
+/// `INSERT INTO … SELECT …`: lower the source into the shared read pipeline and
+/// hand execution the target columns plus the source output order.
+///
+/// Rows are mapped to target columns by position, so the source must be a plain
+/// row projection whose output names are unique. Aggregates, `GROUP BY` and
+/// `DISTINCT` change how the pipeline shapes its output row and stay rejected
+/// instead of being approximated.
+fn lower_insert_select(
+    insert: &InsertStatement,
+    select: &SelectStatement,
+    parameters: &[ParameterDescriptor],
+) -> Result<WriteOp> {
+    if select.group_by.is_some() {
+        return Err(sql_error("INSERT ... SELECT source must be a plain row projection: GROUP BY is not supported yet"));
+    }
+    if matches!(select.quantifier, Some(oak_sql::ast::SelectQuantifier::Distinct { .. })) {
+        return Err(sql_error("INSERT ... SELECT source must be a plain row projection: DISTINCT is not supported yet"));
+    }
+    if select.items.iter().any(|item| matches!(item, SelectItem::Expression { expr: Expression::FunctionCall { .. }, .. })) {
+        return Err(sql_error("INSERT ... SELECT source must be a plain row projection: aggregate functions are not supported yet"));
+    }
+
+    let outputs = select_output_names(&select.items)?;
+    let source = lower_select(select, parameters)?;
+    let columns: Vec<String> = insert.columns.iter().map(|column| column.name.to_string()).collect();
+    if let Some(outputs) = &outputs
+        && !columns.is_empty()
+        && columns.len() != outputs.len()
+    {
+        return Err(insert_select_column_mismatch(columns.len(), outputs.len()));
+    }
+    Ok(WriteOp::InsertFromQuery { table: table_name(&insert.table_name), columns, source, outputs })
+}
+
+/// Projection name of one SELECT item: the alias when written, otherwise the
+/// column name, the shape keyword, or a generic `expr` placeholder.
+fn output_name(expr: &Expression, alias: &Option<Identifier>) -> String {
+    alias.as_ref().map_or_else(
+        || match expr {
+            Expression::Identifier(ident) => ident.name.to_string(),
+            Expression::Case { .. } => "case".to_string(),
+            Expression::Cast { .. } => "cast".to_string(),
+            _ => "expr".to_string(),
+        },
+        |alias| alias.name.to_string(),
+    )
+}
+
+/// Output column names of a SELECT list, in projection order.
+///
+/// Returns `None` for `SELECT *`, whose columns are only known once the scanned
+/// table is resolved against the catalog.
+fn select_output_names(items: &[SelectItem]) -> Result<Option<Vec<String>>> {
+    if items.len() == 1
+        && matches!(items[0], SelectItem::Star { .. })
+    {
+        return Ok(None);
+    }
+    let mut names = Vec::with_capacity(items.len());
+    for item in items {
+        let SelectItem::Expression { expr, alias, .. } = item
+        else {
+            return Err(sql_error("`*` cannot be combined with other select items"));
+        };
+        let name = output_name(expr, alias);
+        if names.contains(&name) {
+            return Err(sql_error(format!(
+                "INSERT ... SELECT output column `{name}` appears more than once: give the source columns distinct aliases so they map to target columns by position"
+            )));
+        }
+        names.push(name);
+    }
+    Ok(Some(names))
+}
+
+fn insert_select_column_mismatch(target: usize, source: usize) -> Error {
+    sql_error(format!("INSERT ... SELECT column count mismatch: {target} target columns, {source} source columns"))
+}
+
+/// Tables a write operator reads, used to populate [`SqlPlan::read_set`].
+fn read_tables_of_write(op: &WriteOp) -> Vec<String> {
+    let WriteOp::InsertFromQuery { source, .. } = op
+    else {
+        return Vec::new();
+    };
+    let mut tables: Vec<String> = Vec::new();
+    for candidate in source {
+        let table = match candidate {
+            QueryOp::Scan { table } => table,
+            QueryOp::Join { right, .. } => right,
+            _ => continue,
+        };
+        if !tables.contains(table) {
+            tables.push(table.clone());
+        }
+    }
+    tables
 }
 
 fn set_operator_name(operator: SetOperator) -> &'static str {

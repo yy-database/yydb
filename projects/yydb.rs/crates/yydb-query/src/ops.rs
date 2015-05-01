@@ -403,6 +403,25 @@ pub enum WriteOp {
         /// Column values of each new row, one vector per `VALUES` row.
         rows: Vec<Vec<WriteField>>,
     },
+    /// Insert the rows a read pipeline produces (`INSERT INTO … SELECT …`).
+    ///
+    /// The source pipeline is materialized before the first row is staged, so
+    /// it reads the statement's starting snapshot even when it scans the target
+    /// table. Its rows then follow the same staged publication as [`WriteOp::Insert`],
+    /// which keeps the statement atomic.
+    InsertFromQuery {
+        /// Target table as written by the frontend.
+        table: String,
+        /// Explicit target columns in statement order. Empty means every
+        /// catalog field of the target, in declaration order.
+        columns: Vec<String>,
+        /// Source row pipeline, ending in [`QueryOp::Collect`].
+        source: Vec<QueryOp>,
+        /// Output column names of `source` in SELECT order. `None` means the
+        /// projection is `*`, whose columns are resolved from the scanned
+        /// table at execution time.
+        outputs: Option<Vec<String>>,
+    },
     /// Replace the assigned columns of every row matching `predicate`
     /// (`None` means every row). Primary-key reassignment is rejected.
     Update {

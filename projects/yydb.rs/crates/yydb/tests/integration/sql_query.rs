@@ -148,3 +148,47 @@ fn sql_and_vos_address_the_same_rows() {
         .expect("vos insert");
     assert_eq!(account_ids(&conn, "SELECT account_id FROM Account"), vec![1, 2, 3]);
 }
+
+const ARCHIVE_SCHEMA: &str = r#"
+table Account {
+    @@account_id: i64,
+    email: utf8,
+    tenant: utf8,
+    score: i64,
+}
+
+table Archive {
+    @@archive_id: i64,
+    email: utf8,
+    score: i64,
+}
+"#;
+
+#[test]
+fn sql_insert_select_copies_rows_through_the_connection() {
+    let conn = Connection::open_in_memory().expect("open");
+    conn.ensure_schema(ARCHIVE_SCHEMA).expect("schema");
+    seed(&conn);
+
+    let copied = conn
+        .execute_sql_write(
+            "INSERT INTO Archive (archive_id, email, score) SELECT account_id, email, score FROM Account WHERE score > 10",
+            &[],
+        )
+        .expect("insert select");
+    assert_eq!(copied, 1);
+
+    let rows = conn.query_sql("SELECT archive_id, email, score FROM Archive").expect("read archive");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("archive_id"), Some(&Value::I64(2)));
+    assert_eq!(rows[0].get("email"), Some(&Value::Text("linus@example.test".into())));
+    assert_eq!(rows[0].get("score"), Some(&Value::I64(30)));
+
+    // A source whose column count does not match the target list is rejected
+    // before anything is published.
+    let mismatch =
+        conn.execute_sql_write("INSERT INTO Archive (archive_id, email) SELECT account_id, email, score FROM Account", &[])
+            .expect_err("two target columns for three source columns");
+    assert_eq!(mismatch.code(), "yydb.schema.invalid");
+    assert_eq!(conn.query_sql("SELECT archive_id FROM Archive").expect("read archive").len(), 1);
+}
