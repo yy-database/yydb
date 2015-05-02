@@ -5,9 +5,9 @@
 //! once and executed against any schema that declares the referenced tables.
 
 use oak_sql::ast::{
-    BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource, InsertStatement,
-    JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem, SelectStatement, SetOperator,
-    SqlRoot, SqlStatement, TableName, UnaryOperator, UpdateStatement,
+    Assignment, BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource,
+    InsertStatement, JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem,
+    SelectStatement, SetOperator, SqlRoot, SqlStatement, TableName, UnaryOperator, UpdateStatement,
 };
 use yydb_types::{Error, Result, Value};
 
@@ -592,15 +592,21 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<E
 }
 
 /// Lower an SQL expression appearing on the right-hand side of an UPDATE
-/// assignment. Unlike [`lower_bound_value`] this permits column references and
-/// arithmetic — `UPDATE t SET score = score + 1` must keep the column lookup
-/// alive so the executor can read the current row and perform the add.
+/// assignment (or of `ON CONFLICT … DO UPDATE SET …`). Unlike
+/// [`lower_bound_value`] this permits column references and arithmetic —
+/// `UPDATE t SET score = score + 1` must keep the column lookup alive so the
+/// executor can read the current row and perform the add.
 ///
-/// Aggregate functions, CASE/CAST, subqueries and other statement-shaped
-/// expressions are not supported in write-value context and will be rejected.
+/// The accepted surface is literals, parameter slots, plain column references
+/// and `+ - * / %` over them. Everything else is rejected rather than
+/// approximated: CASE/CAST, function calls, subqueries and comparisons do not
+/// lower here, and `excluded.<column>` fails because YYDB does not model the
+/// `excluded` pseudo-table (an unmodelled reference would silently read the
+/// conflicting row's column instead).
 fn lower_write_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<WriteExpr> {
     match expr {
         Expression::Identifier(identifier) => {
+            reject_excluded(&identifier.name)?;
             // Identifiers resolve to parameters first (the `__yydb_param_N`
             // convention used by `name_to_slot`), then fall through to a
             // column reference so `score + 1` lowers correctly.
@@ -631,13 +637,24 @@ fn lower_write_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Re
     }
 }
 
+/// Reject a reference to the `excluded` pseudo-table in a write expression.
+fn reject_excluded(name: &str) -> Result<()> {
+    let root = name.split('.').next().unwrap_or(name);
+    if root.eq_ignore_ascii_case("excluded") {
+        return Err(sql_error(format!(
+            "`{name}` references `excluded`, which YYDB does not model: write the inserted value as a literal or parameter"
+        )));
+    }
+    Ok(())
+}
+
 // ─── writes ──────────────────────────────────────────────────────────────
 
 fn lower_insert(insert: &InsertStatement, parameters: &[ParameterDescriptor]) -> Result<WriteOp> {
     if insert.returning.is_some() {
         return Err(sql_error("INSERT ... RETURNING is not supported yet"));
     }
-    let conflict = lower_conflict(insert)?;
+    let conflict = lower_conflict(insert, parameters)?;
     match &insert.source {
         InsertSource::Select(select) => lower_insert_select(insert, select, conflict, parameters),
         InsertSource::Values => lower_insert_values(insert, conflict, parameters),
@@ -648,7 +665,7 @@ fn lower_insert(insert: &InsertStatement, parameters: &[ParameterDescriptor]) ->
 ///
 /// The target columns stay as written; resolving them against the primary key
 /// or a uniqueness rule is execution's job, because lowering has no catalog.
-fn lower_conflict(insert: &InsertStatement) -> Result<Option<ConflictClause>> {
+fn lower_conflict(insert: &InsertStatement, parameters: &[ParameterDescriptor]) -> Result<Option<ConflictClause>> {
     let Some(clause) = &insert.on_conflict
     else {
         return Ok(None);
@@ -663,11 +680,73 @@ fn lower_conflict(insert: &InsertStatement) -> Result<Option<ConflictClause>> {
     }
     let action = match &clause.action {
         OnConflictAction::DoNothing => ConflictAction::DoNothing,
-        OnConflictAction::DoUpdate { .. } => {
-            return Err(sql_error("INSERT ... ON CONFLICT DO UPDATE is not supported yet"));
-        }
+        OnConflictAction::DoUpdate { assignments, selection } => ConflictAction::DoUpdate {
+            assignments: lower_conflict_assignments(assignments, parameters)?,
+            predicate: selection
+                .as_ref()
+                .map(|expr| lower_conflict_predicate(expr, parameters))
+                .transpose()?,
+        },
     };
     Ok(Some(ConflictClause { columns, action }))
+}
+
+/// Lower the `SET` list of `ON CONFLICT … DO UPDATE`.
+///
+/// The assignments reuse the update write-expression surface, so an expression
+/// the executor cannot evaluate is rejected instead of being approximated.
+fn lower_conflict_assignments(
+    assignments: &[Assignment],
+    parameters: &[ParameterDescriptor],
+) -> Result<Vec<WriteAssignment>> {
+    if assignments.is_empty() {
+        return Err(sql_error("ON CONFLICT DO UPDATE requires at least one assignment"));
+    }
+    let mut lowered = Vec::with_capacity(assignments.len());
+    for assignment in assignments {
+        lowered.push(WriteAssignment {
+            field: assignment.column.name.to_string(),
+            value: lower_write_expr(&assignment.value, parameters)?,
+        });
+    }
+    Ok(lowered)
+}
+
+/// Lower the optional `WHERE` of `ON CONFLICT … DO UPDATE`.
+///
+/// The predicate is evaluated against the conflicting row, so a reference to
+/// the `excluded` pseudo-table is rejected: YYDB does not model it, and the
+/// qualified identifier would otherwise silently fall through to the row's own
+/// column of the same name.
+fn lower_conflict_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<Pred> {
+    let predicate = lower_predicate(expr, parameters)?;
+    reject_excluded_paths(&predicate)?;
+    Ok(predicate)
+}
+
+fn reject_excluded_paths(predicate: &Pred) -> Result<()> {
+    fn check(path: &[String]) -> Result<()> {
+        match path.first() {
+            Some(first) if first.eq_ignore_ascii_case("excluded") => Err(sql_error(
+                "`excluded` is not modeled by YYDB: name the conflicting row's own columns instead of the pseudo-table",
+            )),
+            _ => Ok(()),
+        }
+    }
+    match predicate {
+        Pred::True | Pred::False => Ok(()),
+        Pred::FieldBool { path, .. } => check(path),
+        Pred::FieldCmp { path, .. } => check(path),
+        Pred::FieldCmpField { left_path, right_path, .. } => {
+            check(left_path)?;
+            check(right_path)
+        }
+        Pred::And(left, right) | Pred::Or(left, right) => {
+            reject_excluded_paths(left)?;
+            reject_excluded_paths(right)
+        }
+        Pred::Not(inner) => reject_excluded_paths(inner),
+    }
 }
 
 /// Normalise one written conflict target: the bare column, or a table-qualified

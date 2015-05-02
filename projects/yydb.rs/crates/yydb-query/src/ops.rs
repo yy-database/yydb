@@ -392,6 +392,16 @@ pub struct WriteAssignment {
 pub enum ConflictAction {
     /// `DO NOTHING`: the conflicting row is skipped and nothing is written.
     DoNothing,
+    /// `DO UPDATE SET … [WHERE …]`: the conflicting stored row is updated with
+    /// the assignments, and the predicate can drop the update.
+    DoUpdate {
+        /// Assignments applied to the conflicting row. They may read the
+        /// conflicting row's own columns (`SET score = score + 1`).
+        assignments: Vec<WriteAssignment>,
+        /// Optional predicate over the conflicting row; when it evaluates
+        /// false the row is left untouched and the incoming row is dropped.
+        predicate: Option<Pred>,
+    },
 }
 
 /// `INSERT … ON CONFLICT (columns) …` clause.

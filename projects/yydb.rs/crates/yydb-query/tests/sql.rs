@@ -2520,13 +2520,273 @@ fn on_conflict_rejects_an_unknown_target_column() {
     assert!(records.is_empty());
 }
 
+// ─── INSERT … ON CONFLICT … DO UPDATE ──────────────────────────────────
+
 #[test]
-fn on_conflict_do_update_is_still_rejected() {
-    let error = prepare_sql(
-        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) ON CONFLICT (account_id) DO UPDATE SET score = 20",
+fn on_conflict_do_update_replaces_the_conflicting_row() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
     )
-    .expect_err("DO UPDATE is not implemented yet");
-    assert!(format!("{error}").contains("DO UPDATE"), "unexpected error: {error}");
+    .expect("seed row");
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO UPDATE SET score = 42",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("the conflicting row is updated");
+
+    assert_eq!(outcome.affected, 1);
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(42)));
+    assert_eq!(records.len(), 1, "no second row is published");
+    let rows = execute_sql("SELECT email, score FROM Account", &[], &contract, &[], &mut records).expect("read back").rows;
+    assert_eq!(rows[0].get("email"), Some(&Value::Text("ada@test".into())));
+    assert_eq!(rows[0].get("score"), Some(&Value::I64(42)));
+}
+
+#[test]
+fn on_conflict_do_update_inserts_a_row_that_does_not_conflict() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("seed row");
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (2, 'linus@test', 30) ON CONFLICT (account_id) DO UPDATE SET score = 42",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("no conflict");
+
+    assert_eq!(outcome.affected, 1);
+    assert_eq!(records.len(), 2);
+    let rows = execute_sql("SELECT score FROM Account WHERE account_id = 2", &[], &contract, &[], &mut records)
+        .expect("read back")
+        .rows;
+    assert_eq!(rows[0].get("score"), Some(&Value::I64(30)), "the inserted row keeps its own values");
+}
+
+#[test]
+fn on_conflict_do_update_mixes_updated_and_inserted_rows() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    exec(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10), (2, 'linus@test', 30)",
+        &[],
+        &contract,
+        &mut records,
+    );
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (2, 'linus2@test', 31), (3, 'grace@test', 20) ON CONFLICT (account_id) DO UPDATE SET score = 99",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("one update and one insert");
+
+    assert_eq!(outcome.affected, 2);
+    assert_eq!(ids(&outcome.rows), vec![2, 3]);
+    assert_eq!(records.len(), 3);
+    let rows = execute_sql("SELECT account_id, score FROM Account ORDER BY account_id", &[], &contract, &[], &mut records)
+        .expect("read back")
+        .rows;
+    assert_eq!(rows[1].get("score"), Some(&Value::I64(99)), "row 2 was updated");
+    assert_eq!(rows[2].get("score"), Some(&Value::I64(20)), "row 3 was inserted");
+}
+
+#[test]
+fn on_conflict_do_update_where_selects_whether_the_row_is_updated() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    exec("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &mut records);
+
+    // Predicate is read on the conflicting row (score 10), so the update runs.
+    let applied = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO UPDATE SET score = 20 WHERE score = 10",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("the predicate holds");
+    assert_eq!(applied.affected, 1);
+
+    // The conflicting row now has score 20, so the same predicate drops the update.
+    let dropped = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO UPDATE SET score = 30 WHERE score = 10",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("the predicate drops the update");
+    assert_eq!(dropped.affected, 0);
+    assert!(dropped.rows.is_empty());
+
+    let rows = execute_sql("SELECT score FROM Account", &[], &contract, &[], &mut records).expect("read back").rows;
+    assert_eq!(rows[0].get("score"), Some(&Value::I64(20)), "the rejected update left the row untouched");
+}
+
+#[test]
+fn on_conflict_do_update_reads_the_conflicting_rows_own_columns() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    exec("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &mut records);
+
+    execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO UPDATE SET score = score + 5",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("self-referencing assignment");
+
+    let rows = execute_sql("SELECT score FROM Account", &[], &contract, &[], &mut records).expect("read back").rows;
+    assert_eq!(rows[0].get("score"), Some(&Value::I64(15)), "the assignment reads the stored row, not the incoming one");
+}
+
+#[test]
+fn on_conflict_do_update_targets_a_unique_column_and_keeps_the_stored_key() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    exec("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (2, 'ada@test', 99) ON CONFLICT (email) DO UPDATE SET score = 30",
+        &[],
+        &contract,
+        &[email_unique()],
+        &mut records,
+    )
+    .expect("the email collision updates the stored row");
+
+    assert_eq!(outcome.affected, 1);
+    assert_eq!(ids(&outcome.rows), vec![1], "the returned row is the stored one, not the incoming primary key");
+    assert_eq!(records.len(), 1, "the incoming primary key is not stored as a new row");
+    let rows = execute_sql("SELECT account_id, score FROM Account", &[], &contract, &[], &mut records).expect("read back").rows;
+    assert_eq!(rows[0].get("account_id"), Some(&Value::I64(1)));
+    assert_eq!(rows[0].get("score"), Some(&Value::I64(30)));
+}
+
+#[test]
+fn on_conflict_do_update_rolls_back_when_the_updated_row_breaks_a_unique_rule() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    exec(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10), (2, 'linus@test', 30)",
+        &[],
+        &contract,
+        &mut records,
+    );
+
+    let error = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO UPDATE SET email = 'linus@test'",
+        &[],
+        &contract,
+        &[email_unique()],
+        &mut records,
+    )
+    .expect_err("the updated row would duplicate the other row's email");
+    assert!(matches!(error, Error::UniqueViolation { .. }), "expected a unique violation, got {error}");
+    assert_eq!(records.len(), 2);
+    let rows = execute_sql("SELECT email FROM Account WHERE account_id = 1", &[], &contract, &[], &mut records)
+        .expect("read back")
+        .rows;
+    assert_eq!(rows[0].get("email"), Some(&Value::Text("ada@test".into())), "the stored row is untouched");
+}
+
+#[test]
+fn on_conflict_do_update_rejects_an_excluded_reference_in_assignments() {
+    let error = prepare_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) ON CONFLICT (account_id) DO UPDATE SET score = excluded.score",
+    )
+    .expect_err("`excluded` is not modeled");
+    let message = format!("{error}");
+    assert!(message.contains("excluded"), "unexpected error: {message}");
+    assert!(message.contains("does not model"), "the rejection must say why: {message}");
+}
+
+#[test]
+fn on_conflict_do_update_rejects_an_excluded_reference_in_where() {
+    let error = prepare_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) ON CONFLICT (account_id) DO UPDATE SET score = 20 WHERE excluded.score > 5",
+    )
+    .expect_err("`excluded` is not modeled");
+    let message = format!("{error}");
+    assert!(message.contains("excluded"), "unexpected error: {message}");
+}
+
+#[test]
+fn on_conflict_do_update_rejects_a_primary_key_assignment() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    exec("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &mut records);
+
+    let error = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO UPDATE SET account_id = 7",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("primary key cannot be reassigned");
+    assert!(format!("{error}").contains("primary key"), "unexpected error: {error}");
+    assert_eq!(records.len(), 1);
+}
+
+#[test]
+fn on_conflict_do_update_rejects_an_unknown_assignment_column() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    exec("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &mut records);
+
+    let error = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO UPDATE SET missing = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("unknown assignment column");
+    assert!(format!("{error}").contains("unknown field `missing`"), "unexpected error: {error}");
+    assert_eq!(records.len(), 1);
+}
+
+#[test]
+fn on_conflict_do_update_rejects_a_target_no_unique_constraint_covers() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+
+    let error = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) ON CONFLICT (score) DO UPDATE SET score = 20",
+        &[],
+        &contract,
+        &[email_unique()],
+        &mut records,
+    )
+    .expect_err("`score` is not unique");
+    assert!(format!("{error}").contains("not backed by a unique constraint"), "unexpected error: {error}");
+    assert!(records.is_empty());
 }
 
 const INSERT_SELECT_SCHEMA: &str = r#"

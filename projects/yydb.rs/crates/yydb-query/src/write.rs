@@ -292,10 +292,39 @@ fn insert_rows(
         let pk_text = constraints::value_text(pk)?;
 
         if let (Some(target), Some(clause)) = (&target, conflict)
-            && conflicting_row(&working, target, &pk_field, &pk_text, &row)?.is_some()
+            && let Some(index) = conflicting_row(&working, target, &pk_field, &pk_text, &row)?
         {
             match &clause.action {
                 ConflictAction::DoNothing => continue,
+                ConflictAction::DoUpdate { assignments, predicate } => {
+                    let Some(updated) = conflict_update_row(
+                        table,
+                        entry,
+                        &pk_field,
+                        &working[index].row,
+                        assignments,
+                        predicate.as_ref(),
+                        &working,
+                        declared,
+                        &storage,
+                        records,
+                        bound_values,
+                    )?
+                    else {
+                        continue;
+                    };
+                    // The updated row keeps the conflicting row's primary key,
+                    // which is not the incoming row's key when the target is a
+                    // unique column rather than the primary key.
+                    let matched_pk = updated
+                        .get(&pk_field)
+                        .ok_or_else(|| write_error(format!("updated `{table}` row lost primary key field `{pk_field}`")))?;
+                    let matched_pk_text = constraints::value_text(matched_pk)?;
+                    store::upsert_row(&mut pending, &storage, &matched_pk_text, &updated)?;
+                    working[index].row = updated.clone();
+                    written.push(updated);
+                    continue;
+                }
             }
         }
 
@@ -323,6 +352,52 @@ fn insert_rows(
     // before any row is published.
     records.extend(pending);
     Ok(written)
+}
+
+/// Apply the `DO UPDATE` assignments to the conflicting stored row.
+///
+/// Both the optional predicate and the assignment expressions read the
+/// *conflicting* row — the row the uniqueness rule matched, which is not the
+/// incoming row when the target is a unique column rather than the primary key.
+/// `None` means the predicate rejected the update: the incoming row is dropped
+/// and the conflicting row stays as it was. The updated row still has to pass
+/// the table's uniqueness rules before the caller publishes it.
+fn conflict_update_row(
+    table: &str,
+    entry: &ResolvedTypeContract,
+    pk_field: &str,
+    matched: &QueryRow,
+    assignments: &[WriteAssignment],
+    predicate: Option<&Pred>,
+    working: &[WorkingRow],
+    declared: &[TableUniqueConstraint],
+    storage: &str,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Option<QueryRow>> {
+    if let Some(predicate) = predicate
+        && !exec::eval_pred(predicate, matched, table, None, records, bound_values)
+    {
+        return Ok(None);
+    }
+
+    let mut row = matched.clone();
+    for assignment in assignments {
+        let slot = catalog::field_on_table(entry, &assignment.field)?;
+        if assignment.field == pk_field {
+            return Err(write_error(format!("primary key field `{pk_field}` cannot be updated")));
+        }
+        let value = eval_write_expr(&assignment.value, matched, bound_values)?;
+        row.insert(assignment.field.clone(), coerce::value_to_scalar(value, &slot.canonical_type)?);
+    }
+
+    let matched_pk = matched
+        .get(pk_field)
+        .ok_or_else(|| write_error(format!("conflicting `{table}` row has no primary key field `{pk_field}`")))?;
+    let matched_pk_text = constraints::value_text(matched_pk)?;
+    let known: Vec<QueryRow> = working.iter().map(|candidate| candidate.row.clone()).collect();
+    constraints::check_against_rows(&known, declared, storage, pk_field, &matched_pk_text, &row)?;
+    Ok(Some(row))
 }
 
 /// Insert the rows a read pipeline produced (`INSERT INTO … SELECT …`).
