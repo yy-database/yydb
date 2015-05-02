@@ -118,6 +118,23 @@ pub fn check_against_rows(
     Ok(())
 }
 
+/// Whether `incoming` would collide with `existing` under `constraint`.
+///
+/// Both key halves are compared, and a key that contains `NULL` never collides
+/// when the constraint declares NULLs as distinct — the same rule [`check`]
+/// applies, exposed so an `ON CONFLICT` clause can detect the row it targets.
+pub(crate) fn keys_conflict(constraint: &UniqueConstraint, existing: &QueryRow, incoming: &QueryRow) -> bool {
+    let (candidate, candidate_null) = constraint_key(existing, constraint.columns());
+    if candidate_null && constraint.nulls_distinct() {
+        return false;
+    }
+    let (key, incoming_null) = constraint_key(incoming, constraint.columns());
+    if incoming_null && constraint.nulls_distinct() {
+        return false;
+    }
+    candidate == key
+}
+
 fn constraint_key(row: &QueryRow, columns: &[String]) -> (String, bool) {
     let mut parts = Vec::with_capacity(columns.len());
     let mut has_null = false;

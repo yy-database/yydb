@@ -7,11 +7,14 @@
 use std::collections::BTreeMap;
 
 use vos::types::{ResolvedContract, ResolvedTypeContract};
-use yydb_types::{Error, Result, TableUniqueConstraint, Value};
+use yydb_types::{Error, Result, TableUniqueConstraint, UniqueConstraint, Value};
 
 use super::{
     catalog, coerce, constraints, exec,
-    ops::{BoundValue, Pred, QueryOp, QueryRow, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp},
+    ops::{
+        BoundValue, ConflictClause, ConflictAction, Pred, QueryOp, QueryRow, WriteAssignment, WriteBinOp, WriteExpr,
+        WriteField, WriteOp,
+    },
     store,
 };
 
@@ -39,17 +42,18 @@ pub fn execute_ops(
     let mut outcome = WriteOutcome::default();
     for op in ops {
         match op {
-            WriteOp::Insert { table, rows } => {
-                let inserted = insert_rows(table, rows, contract, declared, records, bound_values)?;
+            WriteOp::Insert { table, rows, conflict } => {
+                let inserted = insert_rows(table, rows, conflict.as_ref(), contract, declared, records, bound_values)?;
                 outcome.affected += inserted.len();
                 outcome.rows.extend(inserted);
             }
-            WriteOp::InsertFromQuery { table, columns, source, outputs } => {
+            WriteOp::InsertFromQuery { table, columns, source, outputs, conflict } => {
                 let inserted = insert_from_query(
                     table,
                     columns,
                     source,
                     outputs.as_deref(),
+                    conflict.as_ref(),
                     contract,
                     declared,
                     records,
@@ -150,6 +154,87 @@ fn eval_float_bin(op: WriteBinOp, l: f64, r: f64) -> Result<f64> {
     })
 }
 
+/// A row the statement can see: either already stored or staged by an earlier
+/// row of the same statement.
+struct WorkingRow {
+    /// Record-map key the row is (or will be) published under.
+    key: String,
+    /// Column values of the row.
+    row: QueryRow,
+}
+
+/// A resolved `ON CONFLICT` target: the uniqueness rule backing the named
+/// columns, or `None` when the target is the primary key.
+struct ConflictTarget<'a> {
+    constraint: Option<&'a UniqueConstraint>,
+}
+
+/// Resolve the conflict target columns against the catalog and the rules this
+/// write path enforces.
+///
+/// A target that neither covers the primary key nor matches a declared unique
+/// constraint is rejected, because the statement would otherwise react to
+/// conflicts on columns it never named.
+fn conflict_target<'a>(
+    entry: &ResolvedTypeContract,
+    declared: &'a [TableUniqueConstraint],
+    storage: &str,
+    pk_field: &str,
+    columns: &[String],
+    table: &str,
+) -> Result<ConflictTarget<'a>> {
+    if columns.is_empty() {
+        return Err(write_error(format!(
+            "ON CONFLICT on `{table}` needs an explicit target column list naming the primary key or unique columns it reacts to"
+        )));
+    }
+    let mut resolved: Vec<String> = Vec::with_capacity(columns.len());
+    for column in columns {
+        let slot = catalog::field_on_table(entry, column)?;
+        if resolved.contains(&slot.canonical_name) {
+            return Err(write_error(format!("ON CONFLICT target column `{column}` appears more than once")));
+        }
+        resolved.push(slot.canonical_name.clone());
+    }
+    if resolved.len() == 1 && resolved[0] == pk_field {
+        return Ok(ConflictTarget { constraint: None });
+    }
+    let mut wanted = resolved.clone();
+    wanted.sort();
+    for candidate in declared.iter().filter(|candidate| candidate.table() == storage) {
+        let constraint = candidate.constraint();
+        let mut covered = constraint.columns().to_vec();
+        covered.sort();
+        if covered == wanted {
+            return Ok(ConflictTarget { constraint: Some(constraint) });
+        }
+    }
+    Err(write_error(format!(
+        "ON CONFLICT target ({}) on `{table}` is not backed by a unique constraint: name the primary key or the exact columns of a unique constraint",
+        resolved.join(", ")
+    )))
+}
+
+/// Index of the first visible row `row` conflicts with on `target`.
+fn conflicting_row(
+    working: &[WorkingRow],
+    target: &ConflictTarget<'_>,
+    pk_field: &str,
+    pk_text: &str,
+    row: &QueryRow,
+) -> Result<Option<usize>> {
+    for (index, candidate) in working.iter().enumerate() {
+        let collides = match target.constraint {
+            Some(constraint) => constraints::keys_conflict(constraint, &candidate.row, row),
+            None => constraints::value_text(candidate.row.get(pk_field).unwrap_or(&Value::Null))? == pk_text,
+        };
+        if collides {
+            return Ok(Some(index));
+        }
+    }
+    Ok(None)
+}
+
 /// Insert every row of one statement and publish them together.
 ///
 /// Row boundaries come from the caller (`rows`), never from the column count.
@@ -158,22 +243,42 @@ fn eval_float_bin(op: WriteBinOp, l: f64, r: f64) -> Result<f64> {
 /// record map, so a failing row leaves the table exactly as it was. A repeated
 /// primary key inside the same statement is rejected as well, because the
 /// record map would otherwise silently keep only the last row.
+///
+/// A row that conflicts on the `ON CONFLICT` target follows the clause's
+/// action instead of failing. Rows already stored and rows staged by earlier
+/// rows of the same statement both count as visible for that check, so the
+/// clause sees the same table state a later statement would.
 fn insert_rows(
     table: &str,
     rows: &[Vec<WriteField>],
+    conflict: Option<&ConflictClause>,
     contract: &ResolvedContract,
     declared: &[TableUniqueConstraint],
     records: &mut BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> Result<Vec<QueryRow>> {
     let (entry, storage) = resolve_table(contract, table)?;
-    let pk_field = catalog::primary_field_name(entry)?;
+    let pk_field = catalog::primary_field_name(entry)?.to_string();
+    let target = conflict
+        .map(|clause| conflict_target(entry, declared, &storage, &pk_field, &clause.columns, table))
+        .transpose()?;
 
-    let existing_rows =
-        if constraints::has_rules(declared, &storage) { store::load_table(records, &storage)? } else { Vec::new() };
+    // Uniqueness checks and conflict detection both compare against the current
+    // table contents, so the rows are loaded whenever either is in play.
+    let mut working: Vec<WorkingRow> = if target.is_some() || constraints::has_rules(declared, &storage) {
+        store::load_table_entries(records, &storage)?
+            .into_iter()
+            .map(|(key, row)| WorkingRow { key, row })
+            .collect()
+    }
+    else {
+        Vec::new()
+    };
 
-    let mut staged: Vec<QueryRow> = Vec::with_capacity(rows.len());
+    let mut pending: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut staged_pks: Vec<String> = Vec::with_capacity(rows.len());
+    let mut written: Vec<QueryRow> = Vec::with_capacity(rows.len());
+
     for fields in rows {
         let mut row = QueryRow::new();
         for field in fields {
@@ -182,30 +287,42 @@ fn insert_rows(
             row.insert(field.name.clone(), coerce::value_to_scalar(value.clone(), &slot.canonical_type)?);
         }
         let pk = row
-            .get(pk_field)
+            .get(&pk_field)
             .ok_or_else(|| write_error(format!("insert into `{table}` is missing primary key field `{pk_field}`")))?;
         let pk_text = constraints::value_text(pk)?;
+
+        if let (Some(target), Some(clause)) = (&target, conflict)
+            && conflicting_row(&working, target, &pk_field, &pk_text, &row)?.is_some()
+        {
+            match &clause.action {
+                ConflictAction::DoNothing => continue,
+            }
+        }
+
         if staged_pks.contains(&pk_text) {
             return Err(Error::UniqueViolation {
                 table: storage.clone(),
                 constraint: format!("{table}_pkey"),
-                columns: vec![pk_field.to_string()],
+                columns: vec![pk_field.clone()],
             });
         }
-        constraints::check_against_rows(&staged, declared, &storage, pk_field, &pk_text, &row)?;
-        constraints::check_against_rows(&existing_rows, declared, &storage, pk_field, &pk_text, &row)?;
+        let known: Vec<QueryRow> = working.iter().map(|candidate| candidate.row.clone()).collect();
+        constraints::check_against_rows(&known, declared, &storage, &pk_field, &pk_text, &row)?;
+
+        let key = store::row_key(&storage, &pk_text);
+        store::upsert_row(&mut pending, &storage, &pk_text, &row)?;
+        match working.iter_mut().find(|candidate| candidate.key == key) {
+            Some(existing) => existing.row = row.clone(),
+            None => working.push(WorkingRow { key, row: row.clone() }),
+        }
         staged_pks.push(pk_text);
-        staged.push(row);
+        written.push(row);
     }
 
-    // Encode into a pending map first so an encoding failure also aborts before
-    // any row is published.
-    let mut pending: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    for (pk_text, row) in staged_pks.iter().zip(&staged) {
-        store::upsert_row(&mut pending, &storage, pk_text, row)?;
-    }
+    // The staged map is applied in one move so an encoding failure aborts
+    // before any row is published.
     records.extend(pending);
-    Ok(staged)
+    Ok(written)
 }
 
 /// Insert the rows a read pipeline produced (`INSERT INTO … SELECT …`).
@@ -221,6 +338,7 @@ fn insert_from_query(
     columns: &[String],
     source: &[QueryOp],
     outputs: Option<&[String]>,
+    conflict: Option<&ConflictClause>,
     contract: &ResolvedContract,
     declared: &[TableUniqueConstraint],
     records: &mut BTreeMap<String, Vec<u8>>,
@@ -260,7 +378,7 @@ fn insert_from_query(
                 .collect()
         })
         .collect();
-    insert_rows(table, &rows, contract, declared, records, bound_values)
+    insert_rows(table, &rows, conflict, contract, declared, records, bound_values)
 }
 
 /// Columns a `SELECT *` source produces, in catalog declaration order.

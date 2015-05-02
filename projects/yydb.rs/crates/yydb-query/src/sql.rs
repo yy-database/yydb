@@ -6,15 +6,15 @@
 
 use oak_sql::ast::{
     BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource, InsertStatement,
-    JoinClause, JoinType, LimitClause, Literal, OrderByItem, SelectItem, SelectStatement, SetOperator, SqlRoot, SqlStatement,
-    TableName, UnaryOperator, UpdateStatement,
+    JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem, SelectStatement, SetOperator,
+    SqlRoot, SqlStatement, TableName, UnaryOperator, UpdateStatement,
 };
 use yydb_types::{Error, Result, Value};
 
 use super::{
     ops::{
-        AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, SortKey,
-        WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
+        AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, Expr, JoinKind, Pred, ProjectExpr,
+        ProjectField, QueryOp, SortKey, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     params::{ParameterDescriptor, name_to_slot},
 };
@@ -634,19 +634,60 @@ fn lower_write_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Re
 // ─── writes ──────────────────────────────────────────────────────────────
 
 fn lower_insert(insert: &InsertStatement, parameters: &[ParameterDescriptor]) -> Result<WriteOp> {
-    if insert.on_conflict.is_some() {
-        return Err(sql_error("INSERT ... ON CONFLICT is not supported yet"));
-    }
     if insert.returning.is_some() {
         return Err(sql_error("INSERT ... RETURNING is not supported yet"));
     }
+    let conflict = lower_conflict(insert)?;
     match &insert.source {
-        InsertSource::Select(select) => lower_insert_select(insert, select, parameters),
-        InsertSource::Values => lower_insert_values(insert, parameters),
+        InsertSource::Select(select) => lower_insert_select(insert, select, conflict, parameters),
+        InsertSource::Values => lower_insert_values(insert, conflict, parameters),
     }
 }
 
-fn lower_insert_values(insert: &InsertStatement, parameters: &[ParameterDescriptor]) -> Result<WriteOp> {
+/// Lower an `ON CONFLICT` clause into the shared conflict operator.
+///
+/// The target columns stay as written; resolving them against the primary key
+/// or a uniqueness rule is execution's job, because lowering has no catalog.
+fn lower_conflict(insert: &InsertStatement) -> Result<Option<ConflictClause>> {
+    let Some(clause) = &insert.on_conflict
+    else {
+        return Ok(None);
+    };
+    let mut columns: Vec<String> = Vec::with_capacity(clause.columns.len());
+    for identifier in &clause.columns {
+        let column = conflict_target_column(&identifier.name, &table_name(&insert.table_name))?;
+        if columns.contains(&column) {
+            return Err(sql_error(format!("ON CONFLICT target column `{column}` appears more than once")));
+        }
+        columns.push(column);
+    }
+    let action = match &clause.action {
+        OnConflictAction::DoNothing => ConflictAction::DoNothing,
+        OnConflictAction::DoUpdate { .. } => {
+            return Err(sql_error("INSERT ... ON CONFLICT DO UPDATE is not supported yet"));
+        }
+    };
+    Ok(Some(ConflictClause { columns, action }))
+}
+
+/// Normalise one written conflict target: the bare column, or a table-qualified
+/// reference that must name the statement's own target table.
+fn conflict_target_column(written: &str, table: &str) -> Result<String> {
+    let parts: Vec<&str> = written.split('.').collect();
+    match parts.as_slice() {
+        [column] => Ok((*column).to_string()),
+        [prefix, column] if *prefix == table => Ok((*column).to_string()),
+        _ => Err(sql_error(format!(
+            "ON CONFLICT target `{written}` must be a column of the insert target `{table}`"
+        ))),
+    }
+}
+
+fn lower_insert_values(
+    insert: &InsertStatement,
+    conflict: Option<ConflictClause>,
+    parameters: &[ParameterDescriptor],
+) -> Result<WriteOp> {
     if insert.columns.is_empty() {
         return Err(sql_error("INSERT requires an explicit column list"));
     }
@@ -669,7 +710,7 @@ fn lower_insert_values(insert: &InsertStatement, parameters: &[ParameterDescript
         }
         rows.push(fields);
     }
-    Ok(WriteOp::Insert { table: table_name(&insert.table_name), rows })
+    Ok(WriteOp::Insert { table: table_name(&insert.table_name), rows, conflict })
 }
 
 /// `INSERT INTO … SELECT …`: lower the source into the shared read pipeline and
@@ -682,6 +723,7 @@ fn lower_insert_values(insert: &InsertStatement, parameters: &[ParameterDescript
 fn lower_insert_select(
     insert: &InsertStatement,
     select: &SelectStatement,
+    conflict: Option<ConflictClause>,
     parameters: &[ParameterDescriptor],
 ) -> Result<WriteOp> {
     if select.group_by.is_some() {
@@ -703,7 +745,7 @@ fn lower_insert_select(
     {
         return Err(insert_select_column_mismatch(columns.len(), outputs.len()));
     }
-    Ok(WriteOp::InsertFromQuery { table: table_name(&insert.table_name), columns, source, outputs })
+    Ok(WriteOp::InsertFromQuery { table: table_name(&insert.table_name), columns, source, outputs, conflict })
 }
 
 /// Projection name of one SELECT item: the alias when written, otherwise the

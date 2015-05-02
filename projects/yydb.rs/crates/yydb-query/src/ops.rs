@@ -387,6 +387,26 @@ pub struct WriteAssignment {
     pub value: WriteExpr,
 }
 
+/// Action an `INSERT … ON CONFLICT` clause applies to a conflicting row.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConflictAction {
+    /// `DO NOTHING`: the conflicting row is skipped and nothing is written.
+    DoNothing,
+}
+
+/// `INSERT … ON CONFLICT (columns) …` clause.
+///
+/// The columns are the conflict target as written by the frontend. Execution
+/// rejects a target that no primary key or uniqueness rule covers, so a clause
+/// never silently changes which conflict it reacts to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConflictClause {
+    /// Conflict target columns, in statement order.
+    pub columns: Vec<String>,
+    /// Action taken when an incoming row conflicts on the target.
+    pub action: ConflictAction,
+}
+
 /// Closed physical op set for write programs.
 ///
 /// The `table` is the name written by the frontend; execution resolves it to a
@@ -402,6 +422,8 @@ pub enum WriteOp {
         table: String,
         /// Column values of each new row, one vector per `VALUES` row.
         rows: Vec<Vec<WriteField>>,
+        /// Optional `ON CONFLICT` clause applied per row.
+        conflict: Option<ConflictClause>,
     },
     /// Insert the rows a read pipeline produces (`INSERT INTO … SELECT …`).
     ///
@@ -421,6 +443,8 @@ pub enum WriteOp {
         /// projection is `*`, whose columns are resolved from the scanned
         /// table at execution time.
         outputs: Option<Vec<String>>,
+        /// Optional `ON CONFLICT` clause applied per produced row.
+        conflict: Option<ConflictClause>,
     },
     /// Replace the assigned columns of every row matching `predicate`
     /// (`None` means every row). Primary-key reassignment is rejected.
