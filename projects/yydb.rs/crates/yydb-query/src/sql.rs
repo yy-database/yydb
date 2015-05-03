@@ -7,7 +7,7 @@
 use oak_sql::ast::{
     Assignment, BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource,
     InsertStatement, JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem,
-    SelectStatement, SetOperator, SqlRoot, SqlStatement, TableName, UnaryOperator, UpdateStatement,
+    SelectStatement, SetOperator, SqlRoot, SqlStatement, TableName, TableSource, UnaryOperator, UpdateStatement,
 };
 use yydb_types::{Error, Result, Value};
 
@@ -63,7 +63,8 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
             let table = select
                 .from
                 .as_ref()
-                .map(|from| from.name.name.to_string())
+                .map(table_source_name)
+                .transpose()?
                 .ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
             Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), read_set: vec![table], write_set: Vec::new() })
         }
@@ -118,7 +119,8 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
     let table = select
         .from
         .as_ref()
-        .map(|from| from.name.name.to_string())
+        .map(table_source_name)
+        .transpose()?
         .ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
 
     let mut ops = vec![QueryOp::Scan { table: table.clone() }];
@@ -127,7 +129,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
     // bare column names, so the two sides of one table would be
     // indistinguishable in the ON condition and in the output.
     for join_clause in &select.joins {
-        let right = join_clause.table.name.name.to_string();
+        let right = table_source_name(&join_clause.table)?;
         if right == table {
             return Err(sql_error(format!(
                 "self join on `{right}` is not supported: table aliases cannot tell the two sides apart yet"
@@ -198,7 +200,7 @@ fn lower_join_clause(join: &JoinClause, parameters: &[ParameterDescriptor]) -> R
         JoinType::Right => JoinKind::Right,
         JoinType::Full => JoinKind::Full,
     };
-    let right = join.table.name.name.to_string();
+    let right = table_source_name(&join.table)?;
     let on = join
         .on
         .as_ref()
@@ -566,6 +568,7 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<E
         | Expression::InList { .. }
         | Expression::Between { .. }
         | Expression::InSubquery { .. }
+        | Expression::Exists { .. }
         | Expression::Subquery { .. }
         | Expression::Unary { op: _, expr: _, .. }
         | Expression::FunctionCall { .. }
@@ -579,6 +582,7 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<E
                 Expression::InList { .. } => "IN (list)",
                 Expression::Between { .. } => "BETWEEN",
                 Expression::InSubquery { .. } => "IN (subquery)",
+                Expression::Exists { .. } => "EXISTS (subquery)",
                 Expression::Subquery { .. } => "subquery",
                 Expression::Unary { .. } => "unary",
                 Expression::FunctionCall { .. } => "function call",
@@ -951,4 +955,23 @@ fn lower_delete(delete: &DeleteStatement, parameters: &[ParameterDescriptor]) ->
 
 fn table_name(table: &TableName) -> String {
     table.name.name.to_string()
+}
+
+/// Resolve one `FROM`/`JOIN` row source to the table the read pipeline scans.
+///
+/// A derived table carries a whole query, which the pipeline cannot yet
+/// express, so it is rejected instead of being flattened into a table name.
+fn table_source_name(source: &TableSource) -> Result<String> {
+    match source {
+        TableSource::Table(table) => {
+            if let Some(alias) = &table.alias {
+                return Err(sql_error(format!(
+                    "table alias `{}` on `{}` is not supported yet",
+                    alias.name, table.name.name
+                )));
+            }
+            Ok(table.name.name.to_string())
+        }
+        TableSource::Derived { .. } => Err(sql_error("derived tables (`FROM (SELECT ...)`) are not supported yet")),
+    }
 }
