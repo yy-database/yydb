@@ -2223,10 +2223,6 @@ fn unsupported_oak_sql_clauses_are_rejected_with_their_own_message() {
             "INSERT INTO Account (account_id, email, tenant, score, active) SELECT DISTINCT account_id, email, tenant, score, active FROM Account",
             "DISTINCT",
         ),
-        (
-            "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'a@b.test', 't1', 1, true) RETURNING account_id",
-            "RETURNING",
-        ),
         ("SELECT account_id FROM Account UNION SELECT account_id FROM Account", "UNION"),
         ("SELECT account_id FROM Account EXCEPT SELECT account_id FROM Account", "EXCEPT"),
     ];
@@ -2787,6 +2783,197 @@ fn on_conflict_do_update_rejects_a_target_no_unique_constraint_covers() {
     .expect_err("`score` is not unique");
     assert!(format!("{error}").contains("not backed by a unique constraint"), "unexpected error: {error}");
     assert!(records.is_empty());
+}
+
+// ─── INSERT … RETURNING ────────────────────────────────────────────────
+
+#[test]
+fn insert_returning_hands_back_the_inserted_row() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) RETURNING account_id, email, score",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert with returning");
+
+    assert_eq!(outcome.affected, 1);
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].len(), 3, "only the named columns are returned");
+    assert_eq!(outcome.rows[0].get("account_id"), Some(&Value::I64(1)));
+    assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("ada@test".into())));
+    assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(10)));
+}
+
+#[test]
+fn insert_returning_hands_back_every_row_in_statement_order() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10), (2, 'linus@test', 30) RETURNING account_id, score",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("multi-row insert with returning");
+
+    assert_eq!(outcome.affected, 2);
+    assert_eq!(ids(&outcome.rows), vec![1, 2]);
+    assert_eq!(outcome.rows[1].get("score"), Some(&Value::I64(30)));
+}
+
+#[test]
+fn insert_returning_projects_aliases_and_expressions() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) RETURNING email AS who, CAST(score AS TEXT) AS label, CASE WHEN score >= 20 THEN 'high' ELSE 'low' END AS band",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("returning aliases and expressions");
+
+    let row = &outcome.rows[0];
+    assert_eq!(row.get("who"), Some(&Value::Text("ada@test".into())));
+    assert_eq!(row.get("label"), Some(&Value::Text("10".into())));
+    assert_eq!(row.get("band"), Some(&Value::Text("low".into())));
+}
+
+#[test]
+fn insert_returning_star_returns_the_written_row() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) RETURNING *",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("returning star");
+
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].len(), 3);
+    assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("ada@test".into())));
+}
+
+#[test]
+fn insert_returning_returns_the_row_updated_by_on_conflict() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    exec("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO UPDATE SET score = 42 RETURNING account_id, score",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("returning an updated row");
+
+    assert_eq!(outcome.affected, 1);
+    assert_eq!(ids(&outcome.rows), vec![1]);
+    assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(42)));
+}
+
+#[test]
+fn insert_returning_omits_rows_the_conflict_clause_skipped() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+    exec("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO NOTHING RETURNING account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("the skipped row is not returned");
+
+    assert_eq!(outcome.affected, 0);
+    assert!(outcome.rows.is_empty());
+}
+
+#[test]
+fn insert_select_returning_hands_back_the_produced_rows() {
+    let contract = insert_select_contract();
+    let mut records = BTreeMap::new();
+    seed_sources(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "INSERT INTO Target (target_id, email, score) SELECT source_id, email, score FROM Source ORDER BY source_id RETURNING target_id, score",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("insert select with returning");
+
+    assert_eq!(outcome.affected, 3);
+    let ids: Vec<i64> = outcome
+        .rows
+        .iter()
+        .map(|row| match row.get("target_id") {
+            Some(Value::I64(id)) => *id,
+            other => panic!("unexpected target_id {other:?}"),
+        })
+        .collect();
+    assert_eq!(ids, vec![1, 2, 3]);
+}
+
+#[test]
+fn insert_returning_rejects_an_unknown_column_without_publishing() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+
+    let error = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) RETURNING missing",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("unknown returning column");
+    assert!(format!("{error}").contains("unknown field `missing`"), "unexpected error: {error}");
+    assert!(records.is_empty(), "a rejected clause must not publish rows");
+}
+
+#[test]
+fn insert_returning_rejects_an_unknown_column_inside_an_expression() {
+    let contract = multi_row_contract();
+    let mut records = BTreeMap::new();
+
+    let error = execute_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) RETURNING CASE WHEN missing > 1 THEN 'x' ELSE 'y' END AS band",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("unknown column inside a returning expression");
+    assert!(format!("{error}").contains("unknown field `missing`"), "unexpected error: {error}");
+    assert!(records.is_empty());
+}
+
+#[test]
+fn insert_returning_rejects_an_aggregate_function() {
+    let error = prepare_sql(
+        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) RETURNING COUNT(*)",
+    )
+    .expect_err("aggregates have no per-row meaning in RETURNING");
+    assert!(format!("{error}").contains("aggregate"), "unexpected error: {error}");
 }
 
 const INSERT_SELECT_SCHEMA: &str = r#"

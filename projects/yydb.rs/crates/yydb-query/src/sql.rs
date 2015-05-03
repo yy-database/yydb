@@ -14,7 +14,7 @@ use yydb_types::{Error, Result, Value};
 use super::{
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, Expr, JoinKind, Pred, ProjectExpr,
-        ProjectField, QueryOp, SortKey, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
+        ProjectField, QueryOp, ReturningProjection, SortKey, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     params::{ParameterDescriptor, name_to_slot},
 };
@@ -651,14 +651,40 @@ fn reject_excluded(name: &str) -> Result<()> {
 // ─── writes ──────────────────────────────────────────────────────────────
 
 fn lower_insert(insert: &InsertStatement, parameters: &[ParameterDescriptor]) -> Result<WriteOp> {
-    if insert.returning.is_some() {
-        return Err(sql_error("INSERT ... RETURNING is not supported yet"));
-    }
     let conflict = lower_conflict(insert, parameters)?;
+    let returning = lower_returning(insert, parameters)?;
     match &insert.source {
-        InsertSource::Select(select) => lower_insert_select(insert, select, conflict, parameters),
-        InsertSource::Values => lower_insert_values(insert, conflict, parameters),
+        InsertSource::Select(select) => lower_insert_select(insert, select, conflict, returning, parameters),
+        InsertSource::Values => lower_insert_values(insert, conflict, returning, parameters),
     }
+}
+
+/// Lower an `RETURNING` clause into the shared projection.
+///
+/// The items reuse the SELECT projection lowering, so `*`, aliases and the
+/// scalar expression shapes it accepts stay identical for reads and writes.
+/// Aggregate functions are rejected instead of being skipped, because a
+/// `RETURNING COUNT(*)` would otherwise hand back an empty row.
+fn lower_returning(
+    insert: &InsertStatement,
+    parameters: &[ParameterDescriptor],
+) -> Result<Option<ReturningProjection>> {
+    let Some(clause) = &insert.returning
+    else {
+        return Ok(None);
+    };
+    if clause.items.is_empty() {
+        return Err(sql_error("RETURNING requires at least one item"));
+    }
+    if clause.items.iter().any(|item| matches!(item, SelectItem::Expression { expr: Expression::FunctionCall { .. }, .. })) {
+        return Err(sql_error(
+            "RETURNING supports columns and scalar expressions: aggregate functions are not supported",
+        ));
+    }
+    Ok(match lower_projection(&clause.items, parameters)? {
+        Some(fields) => Some(ReturningProjection::Fields(fields)),
+        None => Some(ReturningProjection::Star),
+    })
 }
 
 /// Lower an `ON CONFLICT` clause into the shared conflict operator.
@@ -765,6 +791,7 @@ fn conflict_target_column(written: &str, table: &str) -> Result<String> {
 fn lower_insert_values(
     insert: &InsertStatement,
     conflict: Option<ConflictClause>,
+    returning: Option<ReturningProjection>,
     parameters: &[ParameterDescriptor],
 ) -> Result<WriteOp> {
     if insert.columns.is_empty() {
@@ -789,7 +816,7 @@ fn lower_insert_values(
         }
         rows.push(fields);
     }
-    Ok(WriteOp::Insert { table: table_name(&insert.table_name), rows, conflict })
+    Ok(WriteOp::Insert { table: table_name(&insert.table_name), rows, conflict, returning })
 }
 
 /// `INSERT INTO … SELECT …`: lower the source into the shared read pipeline and
@@ -803,6 +830,7 @@ fn lower_insert_select(
     insert: &InsertStatement,
     select: &SelectStatement,
     conflict: Option<ConflictClause>,
+    returning: Option<ReturningProjection>,
     parameters: &[ParameterDescriptor],
 ) -> Result<WriteOp> {
     if select.group_by.is_some() {
@@ -824,7 +852,7 @@ fn lower_insert_select(
     {
         return Err(insert_select_column_mismatch(columns.len(), outputs.len()));
     }
-    Ok(WriteOp::InsertFromQuery { table: table_name(&insert.table_name), columns, source, outputs, conflict })
+    Ok(WriteOp::InsertFromQuery { table: table_name(&insert.table_name), columns, source, outputs, conflict, returning })
 }
 
 /// Projection name of one SELECT item: the alias when written, otherwise the

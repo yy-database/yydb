@@ -417,6 +417,15 @@ pub struct ConflictClause {
     pub action: ConflictAction,
 }
 
+/// Rows an `INSERT … RETURNING` statement hands back.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReturningProjection {
+    /// `RETURNING *`: every stored column of the written row.
+    Star,
+    /// `RETURNING <expression> [AS alias], …`, in statement order.
+    Fields(Vec<ProjectField>),
+}
+
 /// Closed physical op set for write programs.
 ///
 /// The `table` is the name written by the frontend; execution resolves it to a
@@ -434,6 +443,8 @@ pub enum WriteOp {
         rows: Vec<Vec<WriteField>>,
         /// Optional `ON CONFLICT` clause applied per row.
         conflict: Option<ConflictClause>,
+        /// Optional `RETURNING` projection of the written rows.
+        returning: Option<ReturningProjection>,
     },
     /// Insert the rows a read pipeline produces (`INSERT INTO … SELECT …`).
     ///
@@ -455,6 +466,8 @@ pub enum WriteOp {
         outputs: Option<Vec<String>>,
         /// Optional `ON CONFLICT` clause applied per produced row.
         conflict: Option<ConflictClause>,
+        /// Optional `RETURNING` projection of the written rows.
+        returning: Option<ReturningProjection>,
     },
     /// Replace the assigned columns of every row matching `predicate`
     /// (`None` means every row). Primary-key reassignment is rejected.

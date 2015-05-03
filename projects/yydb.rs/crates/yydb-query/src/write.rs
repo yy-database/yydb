@@ -12,8 +12,8 @@ use yydb_types::{Error, Result, TableUniqueConstraint, UniqueConstraint, Value};
 use super::{
     catalog, coerce, constraints, exec,
     ops::{
-        BoundValue, ConflictClause, ConflictAction, Pred, QueryOp, QueryRow, WriteAssignment, WriteBinOp, WriteExpr,
-        WriteField, WriteOp,
+        BoundValue, ConflictAction, ConflictClause, Expr, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow,
+        ReturningProjection, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     store,
 };
@@ -27,7 +27,8 @@ fn write_error(message: impl Into<String>) -> Error {
 pub struct WriteOutcome {
     /// Number of rows inserted, updated or deleted.
     pub affected: usize,
-    /// Rows inserted or replaced, in statement order.
+    /// Rows handed back by the write statement: the projection of its
+    /// `RETURNING` clause when present, otherwise the written rows themselves.
     pub rows: Vec<QueryRow>,
 }
 
@@ -42,18 +43,28 @@ pub fn execute_ops(
     let mut outcome = WriteOutcome::default();
     for op in ops {
         match op {
-            WriteOp::Insert { table, rows, conflict } => {
-                let inserted = insert_rows(table, rows, conflict.as_ref(), contract, declared, records, bound_values)?;
+            WriteOp::Insert { table, rows, conflict, returning } => {
+                let inserted = insert_rows(
+                    table,
+                    rows,
+                    conflict.as_ref(),
+                    returning.as_ref(),
+                    contract,
+                    declared,
+                    records,
+                    bound_values,
+                )?;
                 outcome.affected += inserted.len();
                 outcome.rows.extend(inserted);
             }
-            WriteOp::InsertFromQuery { table, columns, source, outputs, conflict } => {
+            WriteOp::InsertFromQuery { table, columns, source, outputs, conflict, returning } => {
                 let inserted = insert_from_query(
                     table,
                     columns,
                     source,
                     outputs.as_deref(),
                     conflict.as_ref(),
+                    returning.as_ref(),
                     contract,
                     declared,
                     records,
@@ -248,10 +259,16 @@ fn conflicting_row(
 /// action instead of failing. Rows already stored and rows staged by earlier
 /// rows of the same statement both count as visible for that check, so the
 /// clause sees the same table state a later statement would.
+///
+/// The returned rows are the `RETURNING` projection of every row this statement
+/// wrote (inserted, or updated by `DO UPDATE`), or the written rows themselves
+/// when the statement has no `RETURNING`. Projection happens before publication,
+/// so an unknown column in the clause fails without publishing anything.
 fn insert_rows(
     table: &str,
     rows: &[Vec<WriteField>],
     conflict: Option<&ConflictClause>,
+    returning: Option<&ReturningProjection>,
     contract: &ResolvedContract,
     declared: &[TableUniqueConstraint],
     records: &mut BTreeMap<String, Vec<u8>>,
@@ -262,6 +279,15 @@ fn insert_rows(
     let target = conflict
         .map(|clause| conflict_target(entry, declared, &storage, &pk_field, &clause.columns, table))
         .transpose()?;
+    let returning = match returning {
+        None | Some(ReturningProjection::Star) => None,
+        Some(ReturningProjection::Fields(fields)) => {
+            for field in fields {
+                validate_returning(entry, table, &field.expr)?;
+            }
+            Some(fields.as_slice())
+        }
+    };
 
     // Uniqueness checks and conflict detection both compare against the current
     // table contents, so the rows are loaded whenever either is in play.
@@ -322,7 +348,7 @@ fn insert_rows(
                     let matched_pk_text = constraints::value_text(matched_pk)?;
                     store::upsert_row(&mut pending, &storage, &matched_pk_text, &updated)?;
                     working[index].row = updated.clone();
-                    written.push(updated);
+                    written.push(project_returned(returning, &updated, table, contract, records, bound_values)?);
                     continue;
                 }
             }
@@ -345,13 +371,84 @@ fn insert_rows(
             None => working.push(WorkingRow { key, row: row.clone() }),
         }
         staged_pks.push(pk_text);
-        written.push(row);
+        written.push(project_returned(returning, &row, table, contract, records, bound_values)?);
     }
 
     // The staged map is applied in one move so an encoding failure aborts
     // before any row is published.
     records.extend(pending);
     Ok(written)
+}
+
+/// Project one written row through the statement's `RETURNING` fields.
+///
+/// `None` means the statement either has no clause or wrote `RETURNING *`, both
+/// of which hand back the written row unchanged.
+fn project_returned(
+    fields: Option<&[ProjectField]>,
+    row: &QueryRow,
+    table: &str,
+    contract: &ResolvedContract,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<QueryRow> {
+    match fields {
+        Some(fields) => exec::project_row(fields, row, table, Some(contract), records, bound_values),
+        None => Ok(row.clone()),
+    }
+}
+
+/// Reject a `RETURNING` item that names a column the target table does not have.
+///
+/// Reads resolve unknown columns to `NULL`, but a write clause that silently
+/// returns `NULL` would look like the column exists, so every referenced column
+/// is resolved against the catalog before the statement publishes anything.
+fn validate_returning(entry: &ResolvedTypeContract, table: &str, expr: &ProjectExpr) -> Result<()> {
+    match expr {
+        ProjectExpr::Scalar { path } => validate_returning_column(entry, table, path),
+        ProjectExpr::Computed(inner) => validate_returning_expr(entry, table, inner),
+        ProjectExpr::Nested { .. } => {
+            Err(write_error(format!("RETURNING on `{table}` does not support nested projections")))
+        }
+    }
+}
+
+fn validate_returning_expr(entry: &ResolvedTypeContract, table: &str, expr: &Expr) -> Result<()> {
+    match expr {
+        Expr::Column { path } => validate_returning_column(entry, table, path),
+        Expr::Bound(_) => Ok(()),
+        Expr::Case { branches, else_branch } => {
+            for (when, then) in branches {
+                validate_returning_expr(entry, table, when)?;
+                validate_returning_expr(entry, table, then)?;
+            }
+            match else_branch {
+                Some(else_branch) => validate_returning_expr(entry, table, else_branch),
+                None => Ok(()),
+            }
+        }
+        Expr::Cast { expr, .. } => validate_returning_expr(entry, table, expr),
+        Expr::Binary { left, right, .. } => {
+            validate_returning_expr(entry, table, left)?;
+            validate_returning_expr(entry, table, right)
+        }
+        Expr::Not(inner) => validate_returning_expr(entry, table, inner),
+    }
+}
+
+fn validate_returning_column(entry: &ResolvedTypeContract, table: &str, path: &[String]) -> Result<()> {
+    let Some(first) = path.first()
+    else {
+        return Err(write_error(format!("RETURNING on `{table}` has an empty column path")));
+    };
+    catalog::field_on_table(entry, first)?;
+    if path.len() > 1 {
+        return Err(write_error(format!(
+            "RETURNING column `{}` must name a column of `{table}` without a table qualifier",
+            path.join(".")
+        )));
+    }
+    Ok(())
 }
 
 /// Apply the `DO UPDATE` assignments to the conflicting stored row.
@@ -414,6 +511,7 @@ fn insert_from_query(
     source: &[QueryOp],
     outputs: Option<&[String]>,
     conflict: Option<&ConflictClause>,
+    returning: Option<&ReturningProjection>,
     contract: &ResolvedContract,
     declared: &[TableUniqueConstraint],
     records: &mut BTreeMap<String, Vec<u8>>,
@@ -453,7 +551,7 @@ fn insert_from_query(
                 .collect()
         })
         .collect();
-    insert_rows(table, &rows, conflict, contract, declared, records, bound_values)
+    insert_rows(table, &rows, conflict, returning, contract, declared, records, bound_values)
 }
 
 /// Columns a `SELECT *` source produces, in catalog declaration order.
