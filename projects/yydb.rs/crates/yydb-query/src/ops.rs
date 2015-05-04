@@ -122,6 +122,17 @@ pub enum Pred {
     Or(Box<Pred>, Box<Pred>),
     /// Logical negation, used by frontends that expose `NOT`.
     Not(Box<Pred>),
+    /// `[NOT] EXISTS (subquery)`.
+    ///
+    /// The subquery keeps its own pipeline. It is resolved once before any row
+    /// is tested, so it must not reference the surrounding statement's row
+    /// sources.
+    Exists {
+        /// Lowered subquery pipeline.
+        ops: Vec<QueryOp>,
+        /// Whether the test is negated (`NOT EXISTS`).
+        negated: bool,
+    },
 }
 
 /// One projected value expression.

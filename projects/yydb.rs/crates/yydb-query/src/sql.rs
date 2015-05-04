@@ -163,10 +163,9 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
 
     // Aliases are the only disambiguator, so an aliased statement must reach its
     // columns through them: a bare `id` would silently bind to whichever
-    // occurrence happens to carry it.
-    if aliased {
-        require_qualified_columns(select, &references)?;
-    }
+    // occurrence happens to carry it. Statements without aliases still reject
+    // qualifiers that name no row source of their own scope.
+    check_select_references(select, &references, aliased)?;
 
     // WHERE clause.
     if let Some(predicate) = &select.expr {
@@ -500,6 +499,9 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Res
         Expression::Identifier(identifier) => {
             Ok(Pred::FieldBool { path: vec![identifier.name.to_string()], value: BoundValue::Literal(Value::Bool(true)) })
         }
+        Expression::Exists { query, negated, .. } => {
+            Ok(Pred::Exists { ops: lower_select(query, parameters)?, negated: *negated })
+        }
         _ => Err(sql_error("unsupported SQL predicate shape")),
     }
 }
@@ -808,6 +810,8 @@ fn reject_excluded_paths(predicate: &Pred) -> Result<()> {
             reject_excluded_paths(right)
         }
         Pred::Not(inner) => reject_excluded_paths(inner),
+        // The subquery has its own scope, checked when it is lowered.
+        Pred::Exists { .. } => Ok(()),
     }
 }
 
@@ -1051,41 +1055,46 @@ fn push_table(tables: &mut Vec<String>, table: &str) {
     }
 }
 
-/// Reject column references that do not name a row source through its alias.
+/// Reject column references that do not name a row source of this statement.
 ///
-/// An aliased statement keeps every side of a join addressable only by its
-/// alias, so a bare `id` has no single owner and would silently read whichever
-/// occurrence happens to carry it. Naming a source that the statement does not
-/// scan is rejected too, instead of resolving to `NULL`.
-fn require_qualified_columns(select: &SelectStatement, references: &[String]) -> Result<()> {
+/// A reference qualified with a source the statement does not scan is always
+/// rejected instead of resolving to `NULL`. That is also what catches a
+/// correlated subquery reference: inside `WHERE EXISTS (SELECT …)`, naming an
+/// outer source is not supported, because the subquery is resolved once rather
+/// than per row.
+///
+/// When the statement aliases a source, every reference must additionally be
+/// qualified: a bare `id` has no single owner and would silently read whichever
+/// occurrence happens to carry it.
+fn check_select_references(select: &SelectStatement, references: &[String], require_qualification: bool) -> Result<()> {
     for item in &select.items {
         if let SelectItem::Expression { expr, .. } = item {
-            check_reference(expr, references)?;
+            check_reference(expr, references, require_qualification)?;
         }
     }
     for join in &select.joins {
         if let Some(on) = &join.on {
-            check_reference(on, references)?;
+            check_reference(on, references, require_qualification)?;
         }
     }
     if let Some(expr) = &select.expr {
-        check_reference(expr, references)?;
+        check_reference(expr, references, require_qualification)?;
     }
     if let Some(group_by) = &select.group_by {
         for item in &group_by.items {
             match item {
-                GroupByItem::Column(identifier) => check_identifier(identifier, references)?,
-                GroupByItem::Expression(expr) => check_reference(expr, references)?,
+                GroupByItem::Column(identifier) => check_identifier(identifier, references, require_qualification)?,
+                GroupByItem::Expression(expr) => check_reference(expr, references, require_qualification)?,
                 GroupByItem::Position { .. } => {}
             }
         }
     }
     if let Some(having) = &select.having {
-        check_reference(&having.condition, references)?;
+        check_reference(&having.condition, references, require_qualification)?;
     }
     if let Some(order_by) = &select.order_by {
         for item in &order_by.items {
-            check_reference(&item.expr, references)?;
+            check_reference(&item.expr, references, require_qualification)?;
         }
     }
     Ok(())
@@ -1095,42 +1104,42 @@ fn require_qualified_columns(select: &SelectStatement, references: &[String]) ->
 ///
 /// Subqueries carry their own `FROM` scope, so their columns are checked when
 /// the subquery itself is lowered.
-fn check_reference(expr: &Expression, references: &[String]) -> Result<()> {
+fn check_reference(expr: &Expression, references: &[String], require_qualification: bool) -> Result<()> {
     match expr {
-        Expression::Identifier(identifier) => check_identifier(identifier, references),
+        Expression::Identifier(identifier) => check_identifier(identifier, references, require_qualification),
         Expression::Binary { left, right, .. } => {
-            check_reference(left, references)?;
-            check_reference(right, references)
+            check_reference(left, references, require_qualification)?;
+            check_reference(right, references, require_qualification)
         }
         Expression::Unary { expr, .. } | Expression::IsNull { expr, .. } | Expression::IsTruth { expr, .. } => {
-            check_reference(expr, references)
+            check_reference(expr, references, require_qualification)
         }
-        Expression::Cast { expr, .. } => check_reference(expr, references),
+        Expression::Cast { expr, .. } => check_reference(expr, references, require_qualification),
         Expression::FunctionCall { args, .. } | Expression::Vector { elements: args, .. } => {
             for arg in args {
-                check_reference(arg, references)?;
+                check_reference(arg, references, require_qualification)?;
             }
             Ok(())
         }
         Expression::Between { expr, low, high, .. } => {
-            check_reference(expr, references)?;
-            check_reference(low, references)?;
-            check_reference(high, references)
+            check_reference(expr, references, require_qualification)?;
+            check_reference(low, references, require_qualification)?;
+            check_reference(high, references, require_qualification)
         }
         Expression::InList { expr, list, .. } => {
-            check_reference(expr, references)?;
+            check_reference(expr, references, require_qualification)?;
             for item in list {
-                check_reference(item, references)?;
+                check_reference(item, references, require_qualification)?;
             }
             Ok(())
         }
         Expression::Case { branches, else_branch, .. } => {
             for (when, then) in branches {
-                check_reference(when, references)?;
-                check_reference(then, references)?;
+                check_reference(when, references, require_qualification)?;
+                check_reference(then, references, require_qualification)?;
             }
             if let Some(els) = else_branch {
-                check_reference(els, references)?;
+                check_reference(els, references, require_qualification)?;
             }
             Ok(())
         }
@@ -1143,7 +1152,7 @@ fn check_reference(expr: &Expression, references: &[String]) -> Result<()> {
     }
 }
 
-fn check_identifier(identifier: &Identifier, references: &[String]) -> Result<()> {
+fn check_identifier(identifier: &Identifier, references: &[String], require_qualification: bool) -> Result<()> {
     let name = identifier.name.as_ref();
     if name.starts_with(PARAM_PREFIX) {
         return Ok(());
@@ -1154,8 +1163,9 @@ fn check_identifier(identifier: &Identifier, references: &[String]) -> Result<()
         Some((qualifier, _)) => Err(sql_error(format!(
             "`{name}` names `{qualifier}`, which is not a row source of this statement (available sources: {sources})"
         ))),
-        None => Err(sql_error(format!(
+        None if require_qualification => Err(sql_error(format!(
             "column reference `{name}` must be qualified with a row-source alias (available sources: {sources})"
         ))),
+        None => Ok(()),
     }
 }

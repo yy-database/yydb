@@ -3409,3 +3409,83 @@ fn derived_tables_require_an_alias_and_qualified_columns() {
         .expect_err("an unknown derived alias must not resolve");
     assert!(format!("{unknown}").contains("not a row source"), "unexpected error: {unknown}");
 }
+
+// ─── EXISTS subqueries ─────────────────────────────────────────────────
+
+#[test]
+fn exists_predicate_reads_the_subquery_result() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // Project 10 exists, so the subquery is non-empty and every row passes.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE EXISTS (SELECT project_id FROM Project WHERE project_id = 10) \
+         ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("non-empty EXISTS")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+
+    // No project 999: the subquery is empty and no row passes.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE EXISTS (SELECT project_id FROM Project WHERE project_id = 999) \
+         ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("empty EXISTS")
+    .rows;
+    assert!(rows.is_empty(), "an empty subquery must filter every row out");
+}
+
+#[test]
+fn not_exists_predicate_inverts_the_subquery_result() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // The subquery is empty, so `NOT EXISTS` keeps every row.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE NOT EXISTS (SELECT project_id FROM Project WHERE project_id = 999) \
+         ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("NOT EXISTS over an empty subquery")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+
+    // The subquery is non-empty, so `NOT EXISTS` filters every row out.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE NOT EXISTS (SELECT project_id FROM Project WHERE project_id = 10)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("NOT EXISTS over a non-empty subquery")
+    .rows;
+    assert!(rows.is_empty(), "NOT EXISTS must reject every row when the subquery is non-empty");
+}
+
+#[test]
+fn exists_rejects_a_reference_to_the_enclosing_statement() {
+    // The subquery is resolved once instead of per row, so it has no enclosing
+    // row to bind to and a correlated reference is rejected while preparing.
+    let error = prepare_sql(
+        "SELECT account_id FROM Account \
+         WHERE EXISTS (SELECT project_id FROM Project WHERE Project.owner_id = Account.account_id)",
+    )
+    .expect_err("a correlated EXISTS reference is not supported");
+    let message = format!("{error}");
+    assert!(message.contains("not a row source"), "unexpected error: {message}");
+}

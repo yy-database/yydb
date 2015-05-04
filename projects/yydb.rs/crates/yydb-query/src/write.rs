@@ -472,10 +472,11 @@ fn conflict_update_row(
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> Result<Option<QueryRow>> {
-    if let Some(predicate) = predicate
-        && !exec::eval_pred(predicate, matched, table, None, records, bound_values)
-    {
-        return Ok(None);
+    if let Some(predicate) = predicate {
+        let predicate = exec::resolve_subquery_predicates(predicate, None, records, bound_values)?;
+        if !exec::eval_pred(&predicate, matched, table, None, records, bound_values) {
+            return Ok(None);
+        }
     }
 
     let mut row = matched.clone();
@@ -587,6 +588,10 @@ fn update_rows(
 ) -> Result<usize> {
     let (entry, storage) = resolve_table(contract, table)?;
     let pk_field = catalog::primary_field_name(entry)?.to_string();
+    let predicate = predicate
+        .map(|predicate| exec::resolve_subquery_predicates(predicate, None, records, bound_values))
+        .transpose()?;
+    let predicate = predicate.as_ref();
 
     let mut replacements: Vec<(String, QueryRow)> = Vec::new();
     {
@@ -629,6 +634,10 @@ fn delete_rows(
     bound_values: &[Value],
 ) -> Result<usize> {
     let (_, storage) = resolve_table(contract, table)?;
+    let predicate = predicate
+        .map(|predicate| exec::resolve_subquery_predicates(predicate, None, records, bound_values))
+        .transpose()?;
+    let predicate = predicate.as_ref();
     let mut doomed: Vec<String> = Vec::new();
     {
         let entries = store::load_table_entries(records, &storage)?;

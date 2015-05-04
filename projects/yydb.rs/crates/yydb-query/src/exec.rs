@@ -54,7 +54,8 @@ pub fn execute_ops(
                 let table = current_table
                     .as_deref()
                     .ok_or_else(|| Error::Schema { message: "filter without a preceding table scan".into() })?;
-                rows.retain(|row| eval_pred(predicate, row, table, contract, records, bound_values));
+                let predicate = resolve_subquery_predicates(predicate, contract, records, bound_values)?;
+                rows.retain(|row| eval_pred(&predicate, row, table, contract, records, bound_values));
             }
             QueryOp::Join { kind, right, right_alias, on } => {
                 if current_table.is_none() {
@@ -179,6 +180,31 @@ pub fn project_row(
     Ok(out)
 }
 
+/// Resolve every `[NOT] EXISTS (subquery)` node of a predicate to a constant.
+///
+/// The subquery keeps its own pipeline and cannot read the row under test, so
+/// its outcome is the same for every row. Running it once per filter or join
+/// keeps evaluation cheap and surfaces subquery errors, which a per-row
+/// evaluation would have to swallow.
+pub(crate) fn resolve_subquery_predicates(
+    predicate: &Pred,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Pred> {
+    let resolve = |inner: &Pred| resolve_subquery_predicates(inner, contract, records, bound_values);
+    Ok(match predicate {
+        Pred::Exists { ops, negated } => {
+            let found = !execute_ops(ops, contract, records, bound_values)?.is_empty();
+            if found == *negated { Pred::False } else { Pred::True }
+        }
+        Pred::And(left, right) => Pred::And(Box::new(resolve(left)?), Box::new(resolve(right)?)),
+        Pred::Or(left, right) => Pred::Or(Box::new(resolve(left)?), Box::new(resolve(right)?)),
+        Pred::Not(inner) => Pred::Not(Box::new(resolve(inner)?)),
+        other => other.clone(),
+    })
+}
+
 pub(crate) fn eval_pred(
     pred: &Pred,
     row: &QueryRow,
@@ -220,6 +246,9 @@ pub(crate) fn eval_pred(
                 || eval_pred(right, row, table, contract, records, bound_values)
         }
         Pred::Not(inner) => !eval_pred(inner, row, table, contract, records, bound_values),
+        // Subqueries are resolved before any row is tested. Reaching one here
+        // means the caller skipped that step, so no row may pass.
+        Pred::Exists { .. } => false,
     }
 }
 
@@ -507,6 +536,10 @@ fn execute_join(
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> Result<Vec<QueryRow>> {
+    // A subquery in `ON` is independent of both rows, so it is resolved once for
+    // the whole join instead of once per pair.
+    let on = resolve_subquery_predicates(on, contract, records, bound_values)?;
+    let on = &on;
     match kind {
         JoinKind::Inner => execute_inner_join(left_rows, right_rows, prefix, on, contract, records, bound_values),
         JoinKind::Left => execute_left_join(left_rows, right_rows, prefix, on, contract, records, bound_values),
