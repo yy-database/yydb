@@ -3336,3 +3336,76 @@ fn aliased_statements_reject_unqualified_and_unknown_references() {
         assert!(message.contains(needle), "expected `{needle}` in error, got `{message}`");
     }
 }
+
+// ─── derived tables ────────────────────────────────────────────────────
+
+#[test]
+fn derived_table_scans_its_sub_pipeline_and_exposes_the_alias() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let stmt = prepare_sql("SELECT s.account_id FROM (SELECT account_id, email FROM Account WHERE score >= 20) AS s")
+        .expect("prepare derived table");
+    assert_eq!(stmt.read_set, vec!["Account".to_owned()], "a derived table still reads its base table");
+
+    // The inner pipeline runs first (Scan / Filter / Project), then the outer
+    // statement sees the derived rows as `s.*`.
+    let rows = execute_sql(
+        "SELECT s.account_id AS id, s.email AS mail \
+         FROM (SELECT account_id, email FROM Account WHERE score >= 20) AS s ORDER BY s.account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("derived table select")
+    .rows;
+    assert_eq!(column(&rows, "id"), vec![Value::I64(2), Value::I64(3)]);
+    assert_eq!(
+        column(&rows, "mail"),
+        vec![Value::Text("linus@example.test".into()), Value::Text("grace@example.test".into())]
+    );
+}
+
+#[test]
+fn derived_table_joins_as_a_nested_pipeline() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // Project 10 is filtered out, so Account 1 only matches `p2`.
+    let rows = execute_sql(
+        "SELECT a.account_id AS id, p.name AS project \
+         FROM Account AS a LEFT JOIN (SELECT owner_id, name FROM Project WHERE project_id > 10) AS p \
+         ON a.account_id = p.owner_id ORDER BY a.account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("derived left join")
+    .rows;
+
+    assert_eq!(column(&rows, "id"), vec![Value::I64(1), Value::I64(2), Value::I64(3)]);
+    assert_eq!(
+        column(&rows, "project"),
+        vec![Value::Text("p2".into()), Value::Text("p3".into()), Value::Null],
+        "Account 3 has no project and must be padded with NULL"
+    );
+}
+
+#[test]
+fn derived_tables_require_an_alias_and_qualified_columns() {
+    let unaliased = prepare_sql("SELECT account_id FROM (SELECT account_id FROM Account)")
+        .expect_err("a derived table without an alias has no referenceable name");
+    assert!(format!("{unaliased}").contains("requires an alias"), "unexpected error: {unaliased}");
+
+    let unqualified = prepare_sql("SELECT account_id FROM (SELECT account_id FROM Account) AS s")
+        .expect_err("an aliased derived table only exposes its alias");
+    assert!(format!("{unqualified}").contains("must be qualified"), "unexpected error: {unqualified}");
+
+    let unknown = prepare_sql("SELECT t.account_id FROM (SELECT account_id FROM Account) AS s")
+        .expect_err("an unknown derived alias must not resolve");
+    assert!(format!("{unknown}").contains("not a row source"), "unexpected error: {unknown}");
+}

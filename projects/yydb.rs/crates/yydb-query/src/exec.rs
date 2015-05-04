@@ -57,59 +57,23 @@ pub fn execute_ops(
                 rows.retain(|row| eval_pred(predicate, row, table, contract, records, bound_values));
             }
             QueryOp::Join { kind, right, right_alias, on } => {
-                let table = current_table
-                    .as_deref()
-                    .ok_or_else(|| Error::Schema { message: "join without a preceding table scan".into() })?;
-                match kind {
-                    JoinKind::Inner => {
-                        rows = execute_inner_join(
-                            &rows,
-                            table,
-                            right,
-                            right_alias.as_deref(),
-                            on,
-                            contract,
-                            records,
-                            bound_values,
-                        )?;
-                    }
-                    JoinKind::Left => {
-                        rows = execute_left_join(
-                            &rows,
-                            table,
-                            right,
-                            right_alias.as_deref(),
-                            on,
-                            contract,
-                            records,
-                            bound_values,
-                        )?;
-                    }
-                    JoinKind::Right => {
-                        rows = execute_right_join(
-                            &rows,
-                            table,
-                            right,
-                            right_alias.as_deref(),
-                            on,
-                            contract,
-                            records,
-                            bound_values,
-                        )?;
-                    }
-                    JoinKind::Full => {
-                        rows = execute_full_join(
-                            &rows,
-                            table,
-                            right,
-                            right_alias.as_deref(),
-                            on,
-                            contract,
-                            records,
-                            bound_values,
-                        )?;
-                    }
+                if current_table.is_none() {
+                    return Err(Error::Schema { message: "join without a preceding table scan".into() });
                 }
+                let storage_right = match contract {
+                    Some(contract) => table_row_key_name(contract, right)?,
+                    None => right.clone(),
+                };
+                let right_rows = store::load_table(records, &storage_right)?;
+                let prefix = right_alias.clone().unwrap_or_else(|| right.clone());
+                rows = execute_join(*kind, &rows, &right_rows, &prefix, on, contract, records, bound_values)?;
+            }
+            QueryOp::JoinSubquery { kind, right, right_alias, on } => {
+                if current_table.is_none() {
+                    return Err(Error::Schema { message: "join without a preceding table scan".into() });
+                }
+                let right_rows = execute_ops(right, contract, records, bound_values)?;
+                rows = execute_join(*kind, &rows, &right_rows, right_alias, on, contract, records, bound_values)?;
             }
             QueryOp::Aggregate { group_keys, aggregates } => {
                 rows = execute_aggregate(&rows, group_keys, aggregates, contract, records, bound_values)?;
@@ -529,36 +493,44 @@ fn cast_to_blob(value: &Value) -> Result<Value> {
 
 // ─── join ────────────────────────────────────────────────────────────────
 
-fn execute_inner_join(
+/// Merge the left row stream with the rows the right source already produced.
+///
+/// Both sides arrive as plain rows, so a stored table and a derived table share
+/// one join implementation and one prefix rule.
+fn execute_join(
+    kind: JoinKind,
     left_rows: &[QueryRow],
-    _left_table: &str,
-    right: &str,
-    right_alias: Option<&str>,
+    right_rows: &[QueryRow],
+    prefix: &str,
     on: &Pred,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> Result<Vec<QueryRow>> {
-    // Load right table rows.
-    let storage_right = match contract {
-        Some(contract) => table_row_key_name(contract, right)?,
-        None => right.to_string(),
-    };
-    let right_rows = store::load_table(records, &storage_right)?;
+    match kind {
+        JoinKind::Inner => execute_inner_join(left_rows, right_rows, prefix, on, contract, records, bound_values),
+        JoinKind::Left => execute_left_join(left_rows, right_rows, prefix, on, contract, records, bound_values),
+        JoinKind::Right => execute_right_join(left_rows, right_rows, prefix, on, contract, records, bound_values),
+        JoinKind::Full => execute_full_join(left_rows, right_rows, prefix, on, contract, records, bound_values),
+    }
+}
 
-    // Column prefix for the right table in the joined row.
-    let prefix = match right_alias {
-        Some(a) => a.to_string(),
-        None => right.to_string(),
-    };
-
+fn execute_inner_join(
+    left_rows: &[QueryRow],
+    right_rows: &[QueryRow],
+    prefix: &str,
+    on: &Pred,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
     // Nested loop: for each left row, for each right row, check ON condition.
     // The ON predicate operates on a merged row where both sides are
     // addressable via their table-qualified column names (prefix.column).
     let mut out: Vec<QueryRow> = Vec::with_capacity(left_rows.len().min(right_rows.len()));
     for left_row in left_rows {
-        for right_row in &right_rows {
-            let merged = merge_rows(left_row, right_row, &prefix);
+        for right_row in right_rows {
+            let merged = merge_rows(left_row, right_row, prefix);
             // JOIN ON condition — eval_pred reads directly from the merged
             // row by table-qualified column name, so `table` is irrelevant
             // for single-element paths.
@@ -572,31 +544,17 @@ fn execute_inner_join(
 
 fn execute_left_join(
     left_rows: &[QueryRow],
-    _left_table: &str,
-    right: &str,
-    right_alias: Option<&str>,
+    right_rows: &[QueryRow],
+    prefix: &str,
     on: &Pred,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> Result<Vec<QueryRow>> {
-    let storage_right = match contract {
-        Some(contract) => table_row_key_name(contract, right)?,
-        None => right.to_string(),
-    };
-    let right_rows = store::load_table(records, &storage_right)?;
-
-    let prefix = match right_alias {
-        Some(a) => a.to_string(),
-        None => right.to_string(),
-    };
-
-    // Qualified column names that belong to the right table so we can pad
+    // Qualified column names that belong to the right side so we can pad
     // unmatched left rows with NULL for each right column.
-    let right_col_names: Vec<String> = right_rows
-        .first()
-        .map(|r| r.keys().map(|k| format!("{prefix}.{k}")).collect())
-        .unwrap_or_default();
+    let right_col_names: Vec<String> =
+        right_rows.first().map(|r| r.keys().map(|k| format!("{prefix}.{k}")).collect()).unwrap_or_default();
 
     // Track which left rows had at least one right-side match.
     let mut matched = vec![false; left_rows.len()];
@@ -605,8 +563,8 @@ fn execute_left_join(
     // First pass: emit merged rows that satisfy the ON condition and mark
     // the contributing left row as matched.
     for (li, left_row) in left_rows.iter().enumerate() {
-        for right_row in &right_rows {
-            let merged = merge_rows(left_row, right_row, &prefix);
+        for right_row in right_rows {
+            let merged = merge_rows(left_row, right_row, prefix);
             if eval_pred(on, &merged, "", contract, records, bound_values) {
                 matched[li] = true;
                 out.push(merged);
@@ -631,25 +589,13 @@ fn execute_left_join(
 
 fn execute_right_join(
     left_rows: &[QueryRow],
-    _left_table: &str,
-    right: &str,
-    right_alias: Option<&str>,
+    right_rows: &[QueryRow],
+    prefix: &str,
     on: &Pred,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> Result<Vec<QueryRow>> {
-    let storage_right = match contract {
-        Some(contract) => table_row_key_name(contract, right)?,
-        None => right.to_string(),
-    };
-    let right_rows = store::load_table(records, &storage_right)?;
-
-    let prefix = match right_alias {
-        Some(a) => a.to_string(),
-        None => right.to_string(),
-    };
-
     // Bare column names of the base (left) table, used to pad right rows that
     // never matched. They are never prefixed, so the padded row has the same
     // shape as a matched row.
@@ -663,7 +609,7 @@ fn execute_right_join(
     // the contributing right row as matched.
     for left_row in left_rows {
         for (ri, right_row) in right_rows.iter().enumerate() {
-            let merged = merge_rows(left_row, right_row, &prefix);
+            let merged = merge_rows(left_row, right_row, prefix);
             if eval_pred(on, &merged, "", contract, records, bound_values) {
                 matched[ri] = true;
                 out.push(merged);
@@ -691,25 +637,13 @@ fn execute_right_join(
 
 fn execute_full_join(
     left_rows: &[QueryRow],
-    _left_table: &str,
-    right: &str,
-    right_alias: Option<&str>,
+    right_rows: &[QueryRow],
+    prefix: &str,
     on: &Pred,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> Result<Vec<QueryRow>> {
-    let storage_right = match contract {
-        Some(contract) => table_row_key_name(contract, right)?,
-        None => right.to_string(),
-    };
-    let right_rows = store::load_table(records, &storage_right)?;
-
-    let prefix = match right_alias {
-        Some(a) => a.to_string(),
-        None => right.to_string(),
-    };
-
     // Column names of each side, used to pad rows that never matched.
     let left_col_names: Vec<String> = left_rows.first().map(|r| r.keys().cloned().collect()).unwrap_or_default();
     let right_col_names: Vec<String> =
@@ -723,7 +657,7 @@ fn execute_full_join(
     // First pass: emit every merged row that satisfies the ON condition.
     for (li, left_row) in left_rows.iter().enumerate() {
         for (ri, right_row) in right_rows.iter().enumerate() {
-            let merged = merge_rows(left_row, right_row, &prefix);
+            let merged = merge_rows(left_row, right_row, prefix);
             if eval_pred(on, &merged, "", contract, records, bound_values) {
                 left_matched[li] = true;
                 right_matched[ri] = true;

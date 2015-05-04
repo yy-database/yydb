@@ -319,6 +319,21 @@ pub enum QueryOp {
         /// Join condition evaluated against each left/right row pair.
         on: Pred,
     },
+    /// Merge the accumulating row stream with the rows a nested pipeline
+    /// produces (`JOIN (SELECT ...) x ON ...`).
+    ///
+    /// The nested pipeline is materialized before the first row pair is
+    /// matched, so a derived table never reads the left side of its own join.
+    JoinSubquery {
+        /// Join kind.
+        kind: JoinKind,
+        /// Right-hand row pipeline, ending in [`QueryOp::Collect`].
+        right: Vec<QueryOp>,
+        /// Reference the right-hand columns are prefixed with.
+        right_alias: String,
+        /// Join condition evaluated against each left/right row pair.
+        on: Pred,
+    },
     /// Group rows by zero or more keys and compute aggregate values.
     Aggregate {
         /// GROUP BY columns (empty means a single aggregate over all rows).

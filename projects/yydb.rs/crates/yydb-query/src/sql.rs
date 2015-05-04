@@ -60,13 +60,9 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
     match statement {
         SqlStatement::Select(select) => {
             let ops = lower_select(select, parameters)?;
-            let table = select
-                .from
-                .as_ref()
-                .map(|from| row_source(from).map(|source| source.table))
-                .transpose()?
-                .ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
-            Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), read_set: vec![table], write_set: Vec::new() })
+            let mut read_set = Vec::new();
+            collect_read_tables(&ops, &mut read_set);
+            Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), read_set, write_set: Vec::new() })
         }
         SqlStatement::Insert(insert) => {
             let op = lower_insert(insert, parameters)?;
@@ -117,32 +113,52 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
 
 fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) -> Result<Vec<QueryOp>> {
     let from = select.from.as_ref().ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
-    let base = row_source(from)?;
+    let base = row_source(from, parameters)?;
 
-    let mut ops = vec![QueryOp::Scan { table: base.table.clone() }];
-    if base.alias.is_some() {
-        ops.push(QueryOp::Qualify { prefix: base.reference() });
-    }
+    // A derived table contributes its sub-pipeline verbatim, followed by a
+    // `Qualify` that renames its columns to the alias the outer statement uses.
+    // A plain table contributes a `Scan`, qualified only when aliased.
+    let mut ops = match &base {
+        RowSource::Table { table, alias } => {
+            let mut ops = vec![QueryOp::Scan { table: table.clone() }];
+            if alias.is_some() {
+                ops.push(QueryOp::Qualify { prefix: base.reference() });
+            }
+            ops
+        }
+        RowSource::Derived { alias, ops: inner } => {
+            let mut ops = inner.clone();
+            if matches!(ops.last(), Some(QueryOp::Collect)) {
+                ops.pop();
+            }
+            ops.push(QueryOp::Qualify { prefix: alias.clone() });
+            ops
+        }
+    };
 
     // JOIN clauses. Every row source is referenced by its alias when it has one,
     // so a table may join itself as long as both occurrences are aliased
     // differently. Two sources sharing one reference stay rejected: nothing in
     // the statement could tell their columns apart.
     let mut references = vec![base.reference()];
-    let mut aliased = base.alias.is_some();
+    let mut aliased = match &base {
+        RowSource::Table { alias, .. } => alias.is_some(),
+        RowSource::Derived { .. } => true,
+    };
     for join_clause in &select.joins {
-        let right = row_source(&join_clause.table)?;
-        if references.contains(&right.reference()) {
+        let right = row_source(&join_clause.table, parameters)?;
+        let reference = right.reference();
+        if references.contains(&reference) {
             return Err(sql_error(format!(
-                "`{}` is referenced more than once: give each occurrence a distinct alias (`FROM {} AS a JOIN {} AS b …`)",
-                right.reference(),
-                right.table,
-                right.table
+                "`{reference}` is referenced more than once: give each occurrence a distinct alias (`FROM a AS x JOIN b AS y …`)"
             )));
         }
-        aliased |= right.alias.is_some();
-        references.push(right.reference());
-        ops.push(lower_join_clause(join_clause, &right, parameters)?);
+        aliased |= match &right {
+            RowSource::Table { alias, .. } => alias.is_some(),
+            RowSource::Derived { .. } => true,
+        };
+        references.push(reference);
+        ops.push(lower_join_clause(join_clause, right, parameters)?);
     }
 
     // Aliases are the only disambiguator, so an aliased statement must reach its
@@ -207,7 +223,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
 
 // ─── join lowering ───────────────────────────────────────────────────────
 
-fn lower_join_clause(join: &JoinClause, right: &RowSource, parameters: &[ParameterDescriptor]) -> Result<QueryOp> {
+fn lower_join_clause(join: &JoinClause, right: RowSource, parameters: &[ParameterDescriptor]) -> Result<QueryOp> {
     let kind = match join.join_type {
         JoinType::Inner => JoinKind::Inner,
         JoinType::Left => JoinKind::Left,
@@ -220,7 +236,10 @@ fn lower_join_clause(join: &JoinClause, right: &RowSource, parameters: &[Paramet
         .map(|expr| lower_predicate(expr, parameters))
         .transpose()?
         .unwrap_or(Pred::True);
-    Ok(QueryOp::Join { kind, right: right.table.clone(), right_alias: right.alias.clone(), on })
+    Ok(match right {
+        RowSource::Table { table, alias } => QueryOp::Join { kind, right: table, right_alias: alias, on },
+        RowSource::Derived { alias, ops } => QueryOp::JoinSubquery { kind, right: ops, right_alias: alias, on },
+    })
 }
 
 // ─── aggregate lowering ──────────────────────────────────────────────────
@@ -924,16 +943,7 @@ fn read_tables_of_write(op: &WriteOp) -> Vec<String> {
         return Vec::new();
     };
     let mut tables: Vec<String> = Vec::new();
-    for candidate in source {
-        let table = match candidate {
-            QueryOp::Scan { table } => table,
-            QueryOp::Join { right, .. } => right,
-            _ => continue,
-        };
-        if !tables.contains(table) {
-            tables.push(table.clone());
-        }
-    }
+    collect_read_tables(source, &mut tables);
     tables
 }
 
@@ -973,32 +983,71 @@ fn table_name(table: &TableName) -> String {
 /// One row source of a `FROM`/`JOIN` clause together with the name its columns
 /// are referenced through.
 #[derive(Debug, Clone)]
-struct RowSource {
-    /// Storage table the source scans.
-    table: String,
-    /// Alias written after the table, if any.
-    alias: Option<String>,
+enum RowSource {
+    /// A stored table.
+    Table {
+        /// Storage table the source scans.
+        table: String,
+        /// Alias written after the table, if any.
+        alias: Option<String>,
+    },
+    /// A derived table: an already lowered sub-pipeline plus its alias.
+    Derived {
+        /// Alias the statement references the derived columns through.
+        alias: String,
+        /// Inner pipeline producing the derived rows.
+        ops: Vec<QueryOp>,
+    },
 }
 
 impl RowSource {
     /// Name the statement references this source's columns with: the alias when
     /// one was written, otherwise the table name.
     fn reference(&self) -> String {
-        self.alias.clone().unwrap_or_else(|| self.table.clone())
+        match self {
+            RowSource::Table { table, alias } => alias.clone().unwrap_or_else(|| table.clone()),
+            RowSource::Derived { alias, .. } => alias.clone(),
+        }
     }
 }
 
 /// Resolve one `FROM`/`JOIN` row source.
 ///
-/// A derived table carries a whole query, which the pipeline cannot yet
-/// express, so it is rejected instead of being flattened into a table name.
-fn row_source(source: &TableSource) -> Result<RowSource> {
+/// A derived table keeps its own `SELECT` scope, so its sub-pipeline is lowered
+/// here and joins the outer pipeline as a nested operator list. It needs an
+/// alias because that alias is the only name the outer statement can reference
+/// its columns with.
+fn row_source(source: &TableSource, parameters: &[ParameterDescriptor]) -> Result<RowSource> {
     match source {
-        TableSource::Table(table) => Ok(RowSource {
+        TableSource::Table(table) => Ok(RowSource::Table {
             table: table.name.name.to_string(),
             alias: table.alias.as_ref().map(|alias| alias.name.to_string()),
         }),
-        TableSource::Derived { .. } => Err(sql_error("derived tables (`FROM (SELECT ...)`) are not supported yet")),
+        TableSource::Derived { query, alias, .. } => {
+            let alias = alias
+                .as_ref()
+                .map(|alias| alias.name.to_string())
+                .ok_or_else(|| sql_error("a derived table (`FROM (SELECT ...)`) requires an alias"))?;
+            Ok(RowSource::Derived { alias, ops: lower_select(query, parameters)? })
+        }
+    }
+}
+
+/// Append every table a read pipeline scans, descending into derived tables.
+fn collect_read_tables(ops: &[QueryOp], tables: &mut Vec<String>) {
+    for op in ops {
+        match op {
+            QueryOp::Scan { table } => push_table(tables, table),
+            QueryOp::Join { right, .. } => push_table(tables, right),
+            QueryOp::JoinSubquery { right, .. } => collect_read_tables(right, tables),
+            _ => {}
+        }
+    }
+}
+
+fn push_table(tables: &mut Vec<String>, table: &str) {
+    if !tables.iter().any(|existing| existing == table) {
+        tables.push(table.to_string());
     }
 }
 
