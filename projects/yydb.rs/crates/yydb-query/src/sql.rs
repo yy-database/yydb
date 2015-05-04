@@ -16,7 +16,7 @@ use super::{
         AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, Expr, JoinKind, Pred, ProjectExpr,
         ProjectField, QueryOp, ReturningProjection, SortKey, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
-    params::{ParameterDescriptor, name_to_slot},
+    params::{ParameterDescriptor, PARAM_PREFIX, name_to_slot},
 };
 
 fn sql_error(message: impl Into<String>) -> Error {
@@ -63,7 +63,7 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
             let table = select
                 .from
                 .as_ref()
-                .map(table_source_name)
+                .map(|from| row_source(from).map(|source| source.table))
                 .transpose()?
                 .ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
             Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), read_set: vec![table], write_set: Vec::new() })
@@ -116,26 +116,40 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
 // ─── read pipeline ───────────────────────────────────────────────────────
 
 fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) -> Result<Vec<QueryOp>> {
-    let table = select
-        .from
-        .as_ref()
-        .map(table_source_name)
-        .transpose()?
-        .ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
+    let from = select.from.as_ref().ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
+    let base = row_source(from)?;
 
-    let mut ops = vec![QueryOp::Scan { table: table.clone() }];
+    let mut ops = vec![QueryOp::Scan { table: base.table.clone() }];
+    if base.alias.is_some() {
+        ops.push(QueryOp::Qualify { prefix: base.reference() });
+    }
 
-    // JOIN clauses. Self joins stay rejected: joined rows keep the base table's
-    // bare column names, so the two sides of one table would be
-    // indistinguishable in the ON condition and in the output.
+    // JOIN clauses. Every row source is referenced by its alias when it has one,
+    // so a table may join itself as long as both occurrences are aliased
+    // differently. Two sources sharing one reference stay rejected: nothing in
+    // the statement could tell their columns apart.
+    let mut references = vec![base.reference()];
+    let mut aliased = base.alias.is_some();
     for join_clause in &select.joins {
-        let right = table_source_name(&join_clause.table)?;
-        if right == table {
+        let right = row_source(&join_clause.table)?;
+        if references.contains(&right.reference()) {
             return Err(sql_error(format!(
-                "self join on `{right}` is not supported: table aliases cannot tell the two sides apart yet"
+                "`{}` is referenced more than once: give each occurrence a distinct alias (`FROM {} AS a JOIN {} AS b …`)",
+                right.reference(),
+                right.table,
+                right.table
             )));
         }
-        ops.push(lower_join_clause(join_clause, parameters)?);
+        aliased |= right.alias.is_some();
+        references.push(right.reference());
+        ops.push(lower_join_clause(join_clause, &right, parameters)?);
+    }
+
+    // Aliases are the only disambiguator, so an aliased statement must reach its
+    // columns through them: a bare `id` would silently bind to whichever
+    // occurrence happens to carry it.
+    if aliased {
+        require_qualified_columns(select, &references)?;
     }
 
     // WHERE clause.
@@ -193,21 +207,20 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
 
 // ─── join lowering ───────────────────────────────────────────────────────
 
-fn lower_join_clause(join: &JoinClause, parameters: &[ParameterDescriptor]) -> Result<QueryOp> {
+fn lower_join_clause(join: &JoinClause, right: &RowSource, parameters: &[ParameterDescriptor]) -> Result<QueryOp> {
     let kind = match join.join_type {
         JoinType::Inner => JoinKind::Inner,
         JoinType::Left => JoinKind::Left,
         JoinType::Right => JoinKind::Right,
         JoinType::Full => JoinKind::Full,
     };
-    let right = table_source_name(&join.table)?;
     let on = join
         .on
         .as_ref()
         .map(|expr| lower_predicate(expr, parameters))
         .transpose()?
         .unwrap_or(Pred::True);
-    Ok(QueryOp::Join { kind, right, right_alias: None, on })
+    Ok(QueryOp::Join { kind, right: right.table.clone(), right_alias: right.alias.clone(), on })
 }
 
 // ─── aggregate lowering ──────────────────────────────────────────────────
@@ -957,21 +970,143 @@ fn table_name(table: &TableName) -> String {
     table.name.name.to_string()
 }
 
-/// Resolve one `FROM`/`JOIN` row source to the table the read pipeline scans.
+/// One row source of a `FROM`/`JOIN` clause together with the name its columns
+/// are referenced through.
+#[derive(Debug, Clone)]
+struct RowSource {
+    /// Storage table the source scans.
+    table: String,
+    /// Alias written after the table, if any.
+    alias: Option<String>,
+}
+
+impl RowSource {
+    /// Name the statement references this source's columns with: the alias when
+    /// one was written, otherwise the table name.
+    fn reference(&self) -> String {
+        self.alias.clone().unwrap_or_else(|| self.table.clone())
+    }
+}
+
+/// Resolve one `FROM`/`JOIN` row source.
 ///
 /// A derived table carries a whole query, which the pipeline cannot yet
 /// express, so it is rejected instead of being flattened into a table name.
-fn table_source_name(source: &TableSource) -> Result<String> {
+fn row_source(source: &TableSource) -> Result<RowSource> {
     match source {
-        TableSource::Table(table) => {
-            if let Some(alias) = &table.alias {
-                return Err(sql_error(format!(
-                    "table alias `{}` on `{}` is not supported yet",
-                    alias.name, table.name.name
-                )));
-            }
-            Ok(table.name.name.to_string())
-        }
+        TableSource::Table(table) => Ok(RowSource {
+            table: table.name.name.to_string(),
+            alias: table.alias.as_ref().map(|alias| alias.name.to_string()),
+        }),
         TableSource::Derived { .. } => Err(sql_error("derived tables (`FROM (SELECT ...)`) are not supported yet")),
+    }
+}
+
+/// Reject column references that do not name a row source through its alias.
+///
+/// An aliased statement keeps every side of a join addressable only by its
+/// alias, so a bare `id` has no single owner and would silently read whichever
+/// occurrence happens to carry it. Naming a source that the statement does not
+/// scan is rejected too, instead of resolving to `NULL`.
+fn require_qualified_columns(select: &SelectStatement, references: &[String]) -> Result<()> {
+    for item in &select.items {
+        if let SelectItem::Expression { expr, .. } = item {
+            check_reference(expr, references)?;
+        }
+    }
+    for join in &select.joins {
+        if let Some(on) = &join.on {
+            check_reference(on, references)?;
+        }
+    }
+    if let Some(expr) = &select.expr {
+        check_reference(expr, references)?;
+    }
+    if let Some(group_by) = &select.group_by {
+        for item in &group_by.items {
+            match item {
+                GroupByItem::Column(identifier) => check_identifier(identifier, references)?,
+                GroupByItem::Expression(expr) => check_reference(expr, references)?,
+                GroupByItem::Position { .. } => {}
+            }
+        }
+    }
+    if let Some(having) = &select.having {
+        check_reference(&having.condition, references)?;
+    }
+    if let Some(order_by) = &select.order_by {
+        for item in &order_by.items {
+            check_reference(&item.expr, references)?;
+        }
+    }
+    Ok(())
+}
+
+/// Walk one expression, checking every column reference it contains.
+///
+/// Subqueries carry their own `FROM` scope, so their columns are checked when
+/// the subquery itself is lowered.
+fn check_reference(expr: &Expression, references: &[String]) -> Result<()> {
+    match expr {
+        Expression::Identifier(identifier) => check_identifier(identifier, references),
+        Expression::Binary { left, right, .. } => {
+            check_reference(left, references)?;
+            check_reference(right, references)
+        }
+        Expression::Unary { expr, .. } | Expression::IsNull { expr, .. } | Expression::IsTruth { expr, .. } => {
+            check_reference(expr, references)
+        }
+        Expression::Cast { expr, .. } => check_reference(expr, references),
+        Expression::FunctionCall { args, .. } | Expression::Vector { elements: args, .. } => {
+            for arg in args {
+                check_reference(arg, references)?;
+            }
+            Ok(())
+        }
+        Expression::Between { expr, low, high, .. } => {
+            check_reference(expr, references)?;
+            check_reference(low, references)?;
+            check_reference(high, references)
+        }
+        Expression::InList { expr, list, .. } => {
+            check_reference(expr, references)?;
+            for item in list {
+                check_reference(item, references)?;
+            }
+            Ok(())
+        }
+        Expression::Case { branches, else_branch, .. } => {
+            for (when, then) in branches {
+                check_reference(when, references)?;
+                check_reference(then, references)?;
+            }
+            if let Some(els) = else_branch {
+                check_reference(els, references)?;
+            }
+            Ok(())
+        }
+        Expression::Literal(_)
+        | Expression::Wildcard { .. }
+        | Expression::Subquery { .. }
+        | Expression::InSubquery { .. }
+        | Expression::Exists { .. }
+        | Expression::Error { .. } => Ok(()),
+    }
+}
+
+fn check_identifier(identifier: &Identifier, references: &[String]) -> Result<()> {
+    let name = identifier.name.as_ref();
+    if name.starts_with(PARAM_PREFIX) {
+        return Ok(());
+    }
+    let sources = references.join(", ");
+    match name.split_once('.') {
+        Some((qualifier, _)) if references.iter().any(|reference| reference == qualifier) => Ok(()),
+        Some((qualifier, _)) => Err(sql_error(format!(
+            "`{name}` names `{qualifier}`, which is not a row source of this statement (available sources: {sources})"
+        ))),
+        None => Err(sql_error(format!(
+            "column reference `{name}` must be qualified with a row-source alias (available sources: {sources})"
+        ))),
     }
 }

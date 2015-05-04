@@ -44,6 +44,12 @@ pub fn execute_ops(
                 current_table = Some(table.clone());
                 rows = store::load_table(records, &storage_table)?;
             }
+            QueryOp::Qualify { prefix } => {
+                rows = rows
+                    .into_iter()
+                    .map(|row| row.into_iter().map(|(key, value)| (format!("{prefix}.{key}"), value)).collect())
+                    .collect();
+            }
             QueryOp::Filter { predicate } => {
                 let table = current_table
                     .as_deref()

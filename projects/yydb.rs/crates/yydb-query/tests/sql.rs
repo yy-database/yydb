@@ -181,11 +181,12 @@ fn ddl_and_remaining_unsupported_clauses_are_rejected_explicitly() {
     // RIGHT / FULL joins lower into the shared join operator now.
     assert!(prepare_sql("SELECT * FROM Account RIGHT JOIN Other ON Account.id = Other.id").is_ok());
     assert!(prepare_sql("SELECT * FROM Account FULL JOIN Other ON Account.id = Other.id").is_ok());
-    // Self joins stay rejected: the joined row keeps the base table's bare
-    // column names, so one table cannot be distinguished from itself.
+    // Self joins lower when both occurrences are aliased, and stay rejected
+    // without aliases because one reference cannot tell them apart.
+    assert!(prepare_sql("SELECT * FROM Account AS a JOIN Account AS b ON a.account_id = b.account_id").is_ok());
     let err = prepare_sql("SELECT * FROM Account JOIN Account ON Account.account_id = Account.account_id")
-        .expect_err("self join must reject");
-    assert!(format!("{err}").contains("self join"), "unexpected self join error: {err}");
+        .expect_err("unaliased self join must reject");
+    assert!(format!("{err}").contains("referenced more than once"), "unexpected self join error: {err}");
     // GROUP BY is now supported.
     assert!(prepare_sql("SELECT * FROM Account GROUP BY tenant").is_ok());
     // HAVING is still MVP-rejected.
@@ -3255,4 +3256,83 @@ fn insert_select_rejects_sources_the_read_pipeline_cannot_shape() {
         execute_sql("SELECT target_id FROM Target", &[], &contract, &[], &mut records).unwrap().rows.is_empty(),
         "rejected statements must not publish rows"
     );
+}
+
+// ─── table aliases and self joins ──────────────────────────────────────
+
+#[test]
+fn aliased_from_qualifies_every_output_column() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let rows = execute_sql("SELECT * FROM Account AS a WHERE a.account_id = 1", &[], &contract, &[], &mut records)
+        .expect("aliased scan")
+        .rows;
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row.get("a.email"), Some(&Value::Text("ada@example.test".into())));
+    assert_eq!(row.get("a.score"), Some(&Value::I64(10)));
+    assert!(row.get("email").is_none(), "an aliased source must not leak bare column names");
+}
+
+#[test]
+fn aliased_self_join_reads_both_occurrences() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // Accounts 1 and 2 share tenant t1, so `a.account_id < b.account_id` keeps
+    // exactly the (1, 2) pair. Both sides are the same table, told apart only
+    // by their aliases.
+    let rows = execute_sql(
+        "SELECT a.account_id AS left_id, b.account_id AS right_id FROM Account AS a \
+         JOIN Account AS b ON a.tenant = b.tenant WHERE a.account_id < b.account_id ORDER BY a.account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("self join")
+    .rows;
+    assert_eq!(column(&rows, "left_id"), vec![Value::I64(1)]);
+    assert_eq!(column(&rows, "right_id"), vec![Value::I64(2)]);
+}
+
+#[test]
+fn aliased_join_prefixes_each_side_with_its_own_alias() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT * FROM Account AS a LEFT JOIN Project AS p ON a.account_id = p.owner_id ORDER BY a.account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("aliased left join")
+    .rows;
+    assert_eq!(rows.len(), 4);
+    // Account 3 has no project: its right-hand columns are padded with NULL.
+    let padded = rows.iter().find(|row| row.get("a.account_id") == Some(&Value::I64(3))).expect("padded row");
+    assert_eq!(padded.get("p.name"), Some(&Value::Null));
+    assert_eq!(padded.get("a.email"), Some(&Value::Text("grace@test".into())));
+}
+
+#[test]
+fn aliased_statements_reject_unqualified_and_unknown_references() {
+    let cases = [
+        ("SELECT account_id FROM Account AS a", "must be qualified"),
+        ("SELECT c.account_id FROM Account AS a", "not a row source"),
+        ("SELECT * FROM Account AS a JOIN Account AS a ON a.account_id = a.account_id", "referenced more than once"),
+        ("SELECT * FROM Account JOIN Account ON Account.account_id = Account.account_id", "referenced more than once"),
+    ];
+
+    for (sql, needle) in cases {
+        let error = prepare_sql(sql).expect_err("the reference is ambiguous or unknown");
+        let message = format!("{error}");
+        assert!(message.contains(needle), "expected `{needle}` in error, got `{message}`");
+    }
 }

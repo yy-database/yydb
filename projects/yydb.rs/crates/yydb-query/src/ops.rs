@@ -293,6 +293,15 @@ pub enum QueryOp {
         /// Table name as written by the frontend.
         table: String,
     },
+    /// Rename every column of the current rows to `<prefix>.<column>`.
+    ///
+    /// A row source that carries an alias contributes only alias-qualified
+    /// columns, so two occurrences of one table remain distinguishable and the
+    /// join keeps a single prefix rule for every side.
+    Qualify {
+        /// Prefix every column of the current rows is renamed with.
+        prefix: String,
+    },
     /// Drop rows that do not satisfy the predicate.
     Filter {
         /// Row predicate.
