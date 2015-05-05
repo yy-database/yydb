@@ -9,14 +9,16 @@ use std::collections::BTreeMap;
 use oak_sql::ast::{
     Assignment, BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource,
     InsertStatement, JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem,
-    SelectStatement, SetOperator, SqlRoot, SqlStatement, TableName, TableSource, UnaryOperator, UpdateStatement,
+    SelectStatement, SetOperationStatement, SetOperator, SqlRoot, SqlStatement, TableName, TableSource, UnaryOperator,
+    UpdateStatement, WithClause,
 };
 use yydb_types::{Error, Result, Value};
 
 use super::{
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, Expr, JoinKind, Pred, ProjectExpr,
-        ProjectField, QueryOp, ReturningProjection, SortKey, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
+        ProjectField, QueryOp, ReturningProjection, SetOpKind, SortKey, WriteAssignment, WriteBinOp, WriteExpr,
+        WriteField, WriteOp,
     },
     params::{ParameterDescriptor, PARAM_PREFIX, name_to_slot},
 };
@@ -93,10 +95,12 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
                 write_set: vec![delete.table_name.name.name.to_string()],
             })
         }
-        SqlStatement::SetOperation(set_operation) => Err(sql_error(format!(
-            "{} is not supported by the YYDB query surface: set operations are not lowered yet",
-            set_operator_name(set_operation.operator)
-        ))),
+        SqlStatement::SetOperation(set_operation) => {
+            let ops = lower_set_operation(set_operation, parameters, &CteScope::new())?;
+            let mut read_set = Vec::new();
+            collect_read_tables(&ops, &mut read_set);
+            Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), read_set, write_set: Vec::new() })
+        }
         SqlStatement::Error { message, .. } => Err(sql_error(format!("SQL statement error: {message}"))),
         SqlStatement::Create(_) | SqlStatement::Drop(_) | SqlStatement::Alter(_) => {
             Err(sql_error("DDL is owned by the schema document, not by SQL statements"))
@@ -122,21 +126,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
     // reference the ones written before it, and the statement body sees all of
     // them.
     let mut scope = ctes.clone();
-    if let Some(with_clause) = &select.with {
-        for cte in &with_clause.ctes {
-            let name = cte.name.name.to_string();
-            if scope.contains_key(&name) {
-                return Err(sql_error(format!("`{name}` is defined more than once in the same `WITH` scope")));
-            }
-            if !cte.columns.is_empty() {
-                return Err(sql_error(format!(
-                    "renaming the output columns of CTE `{name}` (`WITH {name}(a, b) AS …`) is not supported yet"
-                )));
-            }
-            let ops = lower_select(&cte.query, parameters, &scope)?;
-            scope.insert(name, ops);
-        }
-    }
+    extend_cte_scope(&mut scope, select.with.as_ref(), parameters)?;
 
     let from = select.from.as_ref().ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
     let base = row_source(from, parameters, &scope)?;
@@ -242,6 +232,147 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
     }
     ops.push(QueryOp::Collect);
     Ok(ops)
+}
+
+/// Extend one statement's `WITH` scope with the clause's definitions.
+///
+/// The definitions are lowered in written order, so each one may reference the
+/// CTEs above it. Renaming a CTE's output columns is not modelled yet.
+fn extend_cte_scope(
+    scope: &mut CteScope,
+    with_clause: Option<&WithClause>,
+    parameters: &[ParameterDescriptor],
+) -> Result<()> {
+    let Some(with_clause) = with_clause
+    else {
+        return Ok(());
+    };
+    for cte in &with_clause.ctes {
+        let name = cte.name.name.to_string();
+        if scope.contains_key(&name) {
+            return Err(sql_error(format!("`{name}` is defined more than once in the same `WITH` scope")));
+        }
+        if !cte.columns.is_empty() {
+            return Err(sql_error(format!(
+                "renaming the output columns of CTE `{name}` (`WITH {name}(a, b) AS …`) is not supported yet"
+            )));
+        }
+        let ops = lower_select(&cte.query, parameters, scope)?;
+        scope.insert(name, ops);
+    }
+    Ok(())
+}
+
+// ─── set operations ──────────────────────────────────────────────────────
+
+/// Lower one `UNION` / `INTERSECT` / `EXCEPT` statement.
+///
+/// The AST keeps the two operands as plain `SELECT` statements, which
+/// guarantees a single binary operator per statement. `ORDER BY` and `LIMIT`
+/// sit on the set operation node because they apply to the combined result, so
+/// they are pushed after the [`QueryOp::SetOperation`] that merges both
+/// branches.
+///
+/// Oak-sql attaches a written `WITH` clause to the left operand only. The clause
+/// is lowered once here and handed to both branches, so a CTE stays visible to
+/// the right operand of the same statement.
+fn lower_set_operation(
+    statement: &SetOperationStatement,
+    parameters: &[ParameterDescriptor],
+    ctes: &CteScope,
+) -> Result<Vec<QueryOp>> {
+    let mut scope = ctes.clone();
+    let mut left = (*statement.left).clone();
+    extend_cte_scope(&mut scope, left.with.take().as_ref(), parameters)?;
+
+    let left_ops = lower_select(&left, parameters, &scope)?;
+    let right_ops = lower_select(&statement.right, parameters, &scope)?;
+    let columns = pipeline_output_columns(&left_ops);
+    let right_columns = pipeline_output_columns(&right_ops);
+
+    if let (Some(columns), Some(right_columns)) = (&columns, &right_columns)
+        && columns.len() != right_columns.len()
+    {
+        return Err(set_operation_column_mismatch(statement.operator, columns.len(), right_columns.len()));
+    }
+
+    // The combined rows carry the left operand's column names, so an `ORDER BY`
+    // may only name one of them. Sorting on an unknown name would silently read
+    // `NULL` instead of failing.
+    if let (Some(columns), Some(order_by)) = (&columns, &statement.order_by) {
+        for item in &order_by.items {
+            let key = lower_sort_key(item)?;
+            if !columns.contains(&key.field) {
+                return Err(sql_error(format!(
+                    "ORDER BY column `{}` is not an output column of this {} (output columns: {})",
+                    key.field,
+                    set_operator_name(statement.operator),
+                    columns.join(", ")
+                )));
+            }
+        }
+    }
+
+    let mut ops = vec![QueryOp::SetOperation {
+        kind: set_operation_kind(statement.operator),
+        left: left_ops,
+        right: right_ops,
+        columns,
+        right_columns,
+    }];
+    if let Some(order_by) = &statement.order_by {
+        let mut keys = Vec::with_capacity(order_by.items.len());
+        for item in &order_by.items {
+            keys.push(lower_sort_key(item)?);
+        }
+        ops.push(QueryOp::Sort { keys });
+    }
+    if let Some(limit) = &statement.limit {
+        lower_limit(limit, parameters, &mut ops)?;
+    }
+    ops.push(QueryOp::Collect);
+    Ok(ops)
+}
+
+fn set_operation_column_mismatch(operator: SetOperator, left: usize, right: usize) -> Error {
+    sql_error(format!(
+        "{} operands must produce the same number of columns: {left} on the left, {right} on the right",
+        set_operator_name(operator)
+    ))
+}
+
+fn set_operation_kind(operator: SetOperator) -> SetOpKind {
+    match operator {
+        SetOperator::Union => SetOpKind::Union,
+        SetOperator::UnionAll => SetOpKind::UnionAll,
+        SetOperator::Intersect => SetOpKind::Intersect,
+        SetOperator::Except => SetOpKind::Except,
+    }
+}
+
+/// Output columns of one lowered read pipeline, in projection order.
+///
+/// A `Project` names them; an `Aggregate` names them as its group keys followed
+/// by its aggregate outputs, because projection is skipped in that case. `None`
+/// means the pipeline projects `*` and keeps whatever the scan loaded.
+fn pipeline_output_columns(ops: &[QueryOp]) -> Option<Vec<String>> {
+    for op in ops.iter().rev() {
+        match op {
+            QueryOp::Project { fields } => return Some(fields.iter().map(|field| field.name.clone()).collect()),
+            QueryOp::Aggregate { group_keys, aggregates } => {
+                let mut names: Vec<String> = group_keys.iter().map(|key| key.name.clone()).collect();
+                names.extend(aggregates.iter().map(|agg| agg.name().to_string()));
+                return Some(names);
+            }
+            QueryOp::Filter { .. }
+            | QueryOp::Sort { .. }
+            | QueryOp::Skip { .. }
+            | QueryOp::Take { .. }
+            | QueryOp::Collect => continue,
+            _ => return None,
+        }
+    }
+    None
 }
 
 // ─── join lowering ───────────────────────────────────────────────────────
@@ -1122,6 +1253,10 @@ fn collect_read_tables(ops: &[QueryOp], tables: &mut Vec<String>) {
             QueryOp::Scan { table } => push_table(tables, table),
             QueryOp::Join { right, .. } => push_table(tables, right),
             QueryOp::JoinSubquery { right, .. } => collect_read_tables(right, tables),
+            QueryOp::SetOperation { left, right, .. } => {
+                collect_read_tables(left, tables);
+                collect_read_tables(right, tables);
+            }
             _ => {}
         }
     }

@@ -8,7 +8,10 @@ use yydb_types::{Error, Result, Value};
 use super::{
     catalog::table_row_key_name,
     lower,
-    ops::{AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow},
+    ops::{
+        AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow,
+        SetOpKind,
+    },
     resolve, store,
 };
 
@@ -75,6 +78,18 @@ pub fn execute_ops(
                 }
                 let right_rows = execute_ops(right, contract, records, bound_values)?;
                 rows = execute_join(*kind, &rows, &right_rows, right_alias, on, contract, records, bound_values)?;
+            }
+            QueryOp::SetOperation { kind, left, right, columns, right_columns } => {
+                rows = execute_set_operation(
+                    *kind,
+                    left,
+                    right,
+                    columns.as_deref(),
+                    right_columns.as_deref(),
+                    contract,
+                    records,
+                    bound_values,
+                )?;
             }
             QueryOp::Aggregate { group_keys, aggregates } => {
                 rows = execute_aggregate(&rows, group_keys, aggregates, contract, records, bound_values)?;
@@ -739,6 +754,161 @@ fn merge_rows(left: &QueryRow, right: &QueryRow, prefix: &str) -> QueryRow {
         merged.insert(qualified, value.clone());
     }
     merged
+}
+
+// ─── set operations ──────────────────────────────────────────────────────
+
+/// Combine both operands of a set operation.
+///
+/// Both pipelines are materialized first, so neither operand can observe the
+/// other's rows. The result keeps the left operand's column names: the right
+/// rows are aligned positionally onto them, which is why both operands must
+/// produce the same number of columns and compatible column types.
+///
+/// `UNION`, `INTERSECT` and `EXCEPT` treat two `NULL`s as duplicates of each
+/// other (SQL set semantics), so de-duplication compares the aligned values of
+/// each row rather than using `=` on individual columns.
+fn execute_set_operation(
+    kind: SetOpKind,
+    left_ops: &[QueryOp],
+    right_ops: &[QueryOp],
+    columns: Option<&[String]>,
+    right_columns: Option<&[String]>,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
+    let left_rows = execute_ops(left_ops, contract, records, bound_values)?;
+    let right_rows = execute_ops(right_ops, contract, records, bound_values)?;
+
+    let mut left_columns = match columns {
+        Some(columns) => columns.to_vec(),
+        None => first_row_columns(&left_rows),
+    };
+    let right_columns = match right_columns {
+        Some(columns) => columns.to_vec(),
+        None => first_row_columns(&right_rows),
+    };
+    // A `*` operand with no rows carries no column names of its own. Nothing is
+    // aligned in that case — the other operand's names are the only ones left.
+    if left_columns.is_empty() {
+        left_columns = right_columns.clone();
+    }
+    if left_columns.len() != right_columns.len() {
+        return Err(query_runtime_error(format!(
+            "{} operands must produce the same number of columns: {} on the left, {} on the right",
+            kind.as_str(),
+            left_columns.len(),
+            right_columns.len()
+        )));
+    }
+    check_set_operation_types(kind, &left_rows, &right_rows, &left_columns, &right_columns)?;
+
+    let aligned_right: Vec<QueryRow> =
+        right_rows.iter().map(|row| align_row(row, &right_columns, &left_columns)).collect();
+    Ok(match kind {
+        SetOpKind::UnionAll => left_rows.into_iter().chain(aligned_right).collect(),
+        SetOpKind::Union => {
+            let mut out: Vec<QueryRow> = Vec::with_capacity(left_rows.len() + aligned_right.len());
+            let mut seen: BTreeSet<String> = BTreeSet::new();
+            for row in left_rows.into_iter().chain(aligned_right) {
+                if seen.insert(set_row_key(&row, &left_columns)) {
+                    out.push(row);
+                }
+            }
+            out
+        }
+        SetOpKind::Intersect | SetOpKind::Except => {
+            let right_keys: BTreeSet<String> =
+                aligned_right.iter().map(|row| set_row_key(row, &left_columns)).collect();
+            let mut out: Vec<QueryRow> = Vec::new();
+            let mut seen: BTreeSet<String> = BTreeSet::new();
+            for row in left_rows {
+                let key = set_row_key(&row, &left_columns);
+                let keep = if matches!(kind, SetOpKind::Intersect) {
+                    right_keys.contains(&key)
+                }
+                else {
+                    !right_keys.contains(&key)
+                };
+                if keep && seen.insert(key) {
+                    out.push(row);
+                }
+            }
+            out
+        }
+    })
+}
+
+/// Column names of the first row, i.e. the `*` shape of an executed operand.
+fn first_row_columns(rows: &[QueryRow]) -> Vec<String> {
+    rows.first().map(|row| row.keys().cloned().collect()).unwrap_or_default()
+}
+
+/// Map one row of the right operand onto the left operand's column names by
+/// position, filling a missing value with `NULL`.
+fn align_row(row: &QueryRow, from: &[String], to: &[String]) -> QueryRow {
+    let mut out = QueryRow::new();
+    for (index, column) in to.iter().enumerate() {
+        let value = from.get(index).and_then(|source| row.get(source)).cloned().unwrap_or(Value::Null);
+        out.insert(column.clone(), value);
+    }
+    out
+}
+
+/// Canonical text key of a row's values in the given column order. `NULL`
+/// compares equal to `NULL` here because a set operation removes duplicate rows
+/// rather than evaluating `=` per column.
+fn set_row_key(row: &QueryRow, columns: &[String]) -> String {
+    let values: Vec<Value> = columns.iter().map(|column| row.get(column).cloned().unwrap_or(Value::Null)).collect();
+    group_key_to_string(&values)
+}
+
+/// Reject a set operation whose operands disagree on one column's type.
+///
+/// Lowering has no catalog, so the types are read from the executed values.
+/// `NULL` is compatible with every type; `I64` and `U64` are one integer type.
+fn check_set_operation_types(
+    kind: SetOpKind,
+    left_rows: &[QueryRow],
+    right_rows: &[QueryRow],
+    left_columns: &[String],
+    right_columns: &[String],
+) -> Result<()> {
+    let mut kinds: Vec<Option<&'static str>> = vec![None; left_columns.len()];
+    for (rows, columns) in [(left_rows, left_columns), (right_rows, right_columns)] {
+        for row in rows {
+            for (index, column) in columns.iter().enumerate() {
+                let Some(label) = row.get(column).and_then(value_type_label)
+                else {
+                    continue;
+                };
+                match kinds[index] {
+                    None => kinds[index] = Some(label),
+                    Some(existing) if existing == label => {}
+                    Some(existing) => {
+                        return Err(query_runtime_error(format!(
+                            "{} column {} (`{}`) mixes `{existing}` and `{label}` values: both operands must produce the same type",
+                            kind.as_str(),
+                            index + 1,
+                            left_columns[index]
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Scalar type label of one value, or `None` for `NULL` (compatible with any).
+fn value_type_label(value: &Value) -> Option<&'static str> {
+    match value {
+        Value::Null => None,
+        Value::I64(_) | Value::U64(_) => Some("integer"),
+        Value::F64(_) => Some("real"),
+        other => Some(other.kind()),
+    }
 }
 
 // ─── aggregate ───────────────────────────────────────────────────────────

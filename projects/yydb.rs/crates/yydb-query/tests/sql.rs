@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use vos::types::ResolvedContract;
-use yydb_query::{Dialect, Pred, QueryKind, QueryOp, WriteOp, execute_sql, prepare_sql, resolved_contract_from_document};
+use yydb_query::{
+    Dialect, Pred, QueryKind, QueryOp, SetOpKind, WriteOp, execute_sql, prepare_sql, resolved_contract_from_document,
+};
 use yydb_types::{Error, TableUniqueConstraint, UniqueConstraint, Value};
 
 const SCHEMA: &str = r#"
@@ -2219,14 +2221,10 @@ fn unsupported_oak_sql_clauses_are_rejected_with_their_own_message() {
     let contract = contract();
     let mut records = BTreeMap::new();
 
-    let cases = [
-        (
-            "INSERT INTO Account (account_id, email, tenant, score, active) SELECT DISTINCT account_id, email, tenant, score, active FROM Account",
-            "DISTINCT",
-        ),
-        ("SELECT account_id FROM Account UNION SELECT account_id FROM Account", "UNION"),
-        ("SELECT account_id FROM Account EXCEPT SELECT account_id FROM Account", "EXCEPT"),
-    ];
+    let cases = [(
+        "INSERT INTO Account (account_id, email, tenant, score, active) SELECT DISTINCT account_id, email, tenant, score, active FROM Account",
+        "DISTINCT",
+    )];
 
     for (sql, needle) in cases {
         let error = execute_sql(sql, &[], &contract, &[], &mut records).expect_err("clause is not supported yet");
@@ -3593,4 +3591,236 @@ fn ctes_reject_duplicate_names_forward_references_and_column_renaming() {
         .is_err(),
         "a forward reference must not silently resolve"
     );
+}
+
+// ─── set operations ────────────────────────────────────────────────────
+
+#[test]
+fn set_operation_lowers_into_one_merging_op() {
+    let stmt =
+        prepare_sql("SELECT account_id FROM Account UNION SELECT score FROM Account ORDER BY account_id LIMIT 2").expect("prepare");
+    assert!(matches!(stmt.ops.first(), Some(QueryOp::SetOperation { kind: SetOpKind::Union, .. })));
+    // SetOperation -> Sort -> Take -> Collect
+    assert_eq!(stmt.ops.len(), 4);
+    assert_eq!(stmt.read_set, vec!["Account".to_owned()], "both operands read the same table");
+}
+
+#[test]
+fn union_all_keeps_duplicates() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE account_id <= 2 \
+         UNION ALL SELECT account_id FROM Account WHERE account_id >= 2",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("union all")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 2, 3], "UNION ALL must keep the repeated account 2");
+}
+
+#[test]
+fn union_removes_duplicate_rows() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE account_id <= 2 \
+         UNION SELECT account_id FROM Account WHERE account_id >= 2 ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("union")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+}
+
+#[test]
+fn union_treats_nulls_as_duplicates() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 3", &[], &contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT tenant FROM Account WHERE account_id = 3 UNION SELECT tenant FROM Account WHERE account_id = 3",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("union with nulls")
+    .rows;
+    assert_eq!(rows.len(), 1, "two NULL rows are duplicates of each other");
+    assert_eq!(rows[0].get("tenant"), Some(&Value::Null));
+
+    let rows = execute_sql(
+        "SELECT tenant FROM Account WHERE account_id = 3 \
+         UNION ALL SELECT tenant FROM Account WHERE account_id = 3",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("union all with nulls")
+    .rows;
+    assert_eq!(rows.len(), 2, "UNION ALL keeps both NULL rows");
+}
+
+#[test]
+fn intersect_and_except_select_from_the_left_operand() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT score FROM Account INTERSECT SELECT score FROM Account WHERE score >= 20 ORDER BY score",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("intersect")
+    .rows;
+    assert_eq!(column(&rows, "score"), vec![Value::I64(20), Value::I64(30)]);
+
+    let rows = execute_sql(
+        "SELECT score FROM Account EXCEPT SELECT score FROM Account WHERE score >= 20",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("except")
+    .rows;
+    assert_eq!(column(&rows, "score"), vec![Value::I64(10)]);
+}
+
+#[test]
+fn set_operations_drop_duplicates_of_both_operands() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // Both operands yield two rows; INTERSECT keeps one, EXCEPT keeps none.
+    let rows = execute_sql(
+        "SELECT tenant FROM Account WHERE tenant = 't1' \
+         INTERSECT SELECT tenant FROM Account WHERE tenant = 't1'",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("intersect duplicates")
+    .rows;
+    assert_eq!(rows.len(), 1, "INTERSECT must return distinct rows only");
+
+    let rows = execute_sql(
+        "SELECT tenant FROM Account WHERE tenant = 't1' EXCEPT SELECT tenant FROM Account WHERE tenant = 't1'",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("except duplicates")
+    .rows;
+    assert!(rows.is_empty(), "EXCEPT of a set with itself is empty");
+}
+
+#[test]
+fn set_operations_return_an_empty_result_when_both_operands_are_empty() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    for operator in ["UNION", "UNION ALL", "INTERSECT", "EXCEPT"] {
+        let rows = execute_sql(
+            &format!(
+                "SELECT account_id FROM Account WHERE account_id = 99 \
+                 {operator} SELECT account_id FROM Account WHERE account_id = 98"
+            ),
+            &[],
+            &contract,
+            &[],
+            &mut records,
+        )
+        .expect("empty set operation")
+        .rows;
+        assert!(rows.is_empty(), "{operator} over two empty operands must return no rows");
+    }
+}
+
+#[test]
+fn set_operation_orders_and_limits_the_merged_result() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // The right operand's `account_id` values land in the left operand's `score`
+    // column, and the trailing ORDER BY / LIMIT apply to the merged rows.
+    let rows = execute_sql(
+        "SELECT score FROM Account UNION ALL SELECT account_id FROM Account ORDER BY score DESC LIMIT 2 OFFSET 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("ordered union")
+    .rows;
+    assert_eq!(column(&rows, "score"), vec![Value::I64(20), Value::I64(10)]);
+}
+
+#[test]
+fn with_clause_is_visible_to_both_operands() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let rows = execute_sql(
+        "WITH scored AS (SELECT account_id FROM Account WHERE score >= 20) \
+         SELECT account_id FROM scored UNION ALL SELECT account_id FROM scored ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("CTE over a set operation")
+    .rows;
+    assert_eq!(ids(&rows), vec![2, 2, 3, 3], "both operands read the same CTE");
+}
+
+#[test]
+fn set_operations_reject_mismatched_columns() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let count = prepare_sql("SELECT account_id, score FROM Account UNION SELECT account_id FROM Account")
+        .expect_err("operands produce a different number of columns");
+    let message = format!("{count}");
+    assert!(message.contains("same number of columns"), "unexpected error: {message}");
+
+    let types = execute_sql(
+        "SELECT account_id FROM Account UNION ALL SELECT tenant FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("operands produce different column types");
+    let message = format!("{types}");
+    assert!(message.contains("mixes `integer` and `text`"), "unexpected error: {message}");
+
+    let order = prepare_sql("SELECT account_id FROM Account UNION SELECT score FROM Account ORDER BY email")
+        .expect_err("ORDER BY must name an output column");
+    let message = format!("{order}");
+    assert!(message.contains("not an output column"), "unexpected error: {message}");
 }

@@ -221,6 +221,32 @@ pub enum BinaryOp {
     Or,
 }
 
+/// Set operator combining two row pipelines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetOpKind {
+    /// `UNION`: every row of both operands, duplicates removed.
+    Union,
+    /// `UNION ALL`: every row of both operands, duplicates kept.
+    UnionAll,
+    /// `INTERSECT`: rows present in both operands, duplicates removed.
+    Intersect,
+    /// `EXCEPT`: rows of the left operand that the right operand lacks,
+    /// duplicates removed.
+    Except,
+}
+
+impl SetOpKind {
+    /// Stable upper-case spelling used in diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Union => "UNION",
+            Self::UnionAll => "UNION ALL",
+            Self::Intersect => "INTERSECT",
+            Self::Except => "EXCEPT",
+        }
+    }
+}
+
 /// One projected output field.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectField {
@@ -296,6 +322,18 @@ pub enum AggregateField {
     },
 }
 
+impl AggregateField {
+    /// Output column name this aggregate produces.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Count { name, .. }
+            | Self::CountDistinct { name, .. }
+            | Self::Sum { name, .. }
+            | Self::Avg { name, .. } => name,
+        }
+    }
+}
+
 /// Closed physical op set for read pipelines.
 #[derive(Debug, Clone, PartialEq)]
 pub enum QueryOp {
@@ -303,6 +341,28 @@ pub enum QueryOp {
     Scan {
         /// Table name as written by the frontend.
         table: String,
+    },
+    /// Combine the rows of two nested pipelines with a set operator
+    /// (`UNION [ALL]` / `INTERSECT` / `EXCEPT`).
+    ///
+    /// Both operands are materialized before they are combined, and the output
+    /// keeps the left operand's column names: the combined rows are positionally
+    /// aligned, so the two operands must produce the same number of columns of
+    /// compatible types. A type disagreement is rejected rather than coerced.
+    SetOperation {
+        /// Set operator applied to both operands.
+        kind: SetOpKind,
+        /// Left-hand row pipeline, ending in [`QueryOp::Collect`].
+        left: Vec<QueryOp>,
+        /// Right-hand row pipeline, ending in [`QueryOp::Collect`].
+        right: Vec<QueryOp>,
+        /// Output column names of the left operand in projection order. `None`
+        /// means the left operand projects `*`, whose columns are only known
+        /// from the executed rows.
+        columns: Option<Vec<String>>,
+        /// Output column names of the right operand in its own projection
+        /// order, used for the positional alignment. `None` means `*`.
+        right_columns: Option<Vec<String>>,
     },
     /// Rename every column of the current rows to `<prefix>.<column>`.
     ///
