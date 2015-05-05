@@ -4,6 +4,8 @@
 //! catalog information and touches no storage, so the same plan can be prepared
 //! once and executed against any schema that declares the referenced tables.
 
+use std::collections::BTreeMap;
+
 use oak_sql::ast::{
     Assignment, BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource,
     InsertStatement, JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem,
@@ -59,7 +61,7 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
     }
     match statement {
         SqlStatement::Select(select) => {
-            let ops = lower_select(select, parameters)?;
+            let ops = lower_select(select, parameters, &CteScope::new())?;
             let mut read_set = Vec::new();
             collect_read_tables(&ops, &mut read_set);
             Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), read_set, write_set: Vec::new() })
@@ -111,13 +113,37 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
 
 // ─── read pipeline ───────────────────────────────────────────────────────
 
-fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) -> Result<Vec<QueryOp>> {
-    let from = select.from.as_ref().ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
-    let base = row_source(from, parameters)?;
+/// Already lowered `WITH` pipelines visible to one statement, keyed by the name
+/// the clause gives them.
+type CteScope = BTreeMap<String, Vec<QueryOp>>;
 
-    // A derived table contributes its sub-pipeline verbatim, followed by a
-    // `Qualify` that renames its columns to the alias the outer statement uses.
-    // A plain table contributes a `Scan`, qualified only when aliased.
+fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<Vec<QueryOp>> {
+    // A `WITH` clause extends the visible scope in written order: each CTE may
+    // reference the ones written before it, and the statement body sees all of
+    // them.
+    let mut scope = ctes.clone();
+    if let Some(with_clause) = &select.with {
+        for cte in &with_clause.ctes {
+            let name = cte.name.name.to_string();
+            if scope.contains_key(&name) {
+                return Err(sql_error(format!("`{name}` is defined more than once in the same `WITH` scope")));
+            }
+            if !cte.columns.is_empty() {
+                return Err(sql_error(format!(
+                    "renaming the output columns of CTE `{name}` (`WITH {name}(a, b) AS …`) is not supported yet"
+                )));
+            }
+            let ops = lower_select(&cte.query, parameters, &scope)?;
+            scope.insert(name, ops);
+        }
+    }
+
+    let from = select.from.as_ref().ok_or_else(|| sql_error("SELECT requires a FROM clause"))?;
+    let base = row_source(from, parameters, &scope)?;
+
+    // A derived table or a `WITH` name contributes its sub-pipeline verbatim,
+    // followed by a `Qualify` when the statement references it through an alias.
+    // A plain table contributes a `Scan`, qualified under the same rule.
     let mut ops = match &base {
         RowSource::Table { table, alias } => {
             let mut ops = vec![QueryOp::Scan { table: table.clone() }];
@@ -127,11 +153,15 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
             ops
         }
         RowSource::Derived { alias, ops: inner } => {
-            let mut ops = inner.clone();
-            if matches!(ops.last(), Some(QueryOp::Collect)) {
-                ops.pop();
-            }
+            let mut ops = nested_ops(inner);
             ops.push(QueryOp::Qualify { prefix: alias.clone() });
+            ops
+        }
+        RowSource::Cte { alias, ops: inner, .. } => {
+            let mut ops = nested_ops(inner);
+            if alias.is_some() {
+                ops.push(QueryOp::Qualify { prefix: base.reference() });
+            }
             ops
         }
     };
@@ -141,24 +171,18 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
     // differently. Two sources sharing one reference stay rejected: nothing in
     // the statement could tell their columns apart.
     let mut references = vec![base.reference()];
-    let mut aliased = match &base {
-        RowSource::Table { alias, .. } => alias.is_some(),
-        RowSource::Derived { .. } => true,
-    };
+    let mut aliased = base.is_aliased();
     for join_clause in &select.joins {
-        let right = row_source(&join_clause.table, parameters)?;
+        let right = row_source(&join_clause.table, parameters, &scope)?;
         let reference = right.reference();
         if references.contains(&reference) {
             return Err(sql_error(format!(
                 "`{reference}` is referenced more than once: give each occurrence a distinct alias (`FROM a AS x JOIN b AS y …`)"
             )));
         }
-        aliased |= match &right {
-            RowSource::Table { alias, .. } => alias.is_some(),
-            RowSource::Derived { .. } => true,
-        };
+        aliased |= right.is_aliased();
         references.push(reference);
-        ops.push(lower_join_clause(join_clause, right, parameters)?);
+        ops.push(lower_join_clause(join_clause, right, parameters, &scope)?);
     }
 
     // Aliases are the only disambiguator, so an aliased statement must reach its
@@ -169,7 +193,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
 
     // WHERE clause.
     if let Some(predicate) = &select.expr {
-        ops.push(QueryOp::Filter { predicate: lower_predicate(predicate, parameters)? });
+        ops.push(QueryOp::Filter { predicate: lower_predicate(predicate, parameters, &scope)? });
     }
 
     // Aggregate: GROUP BY + aggregate functions from SELECT items.
@@ -222,7 +246,12 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor]) ->
 
 // ─── join lowering ───────────────────────────────────────────────────────
 
-fn lower_join_clause(join: &JoinClause, right: RowSource, parameters: &[ParameterDescriptor]) -> Result<QueryOp> {
+fn lower_join_clause(
+    join: &JoinClause,
+    right: RowSource,
+    parameters: &[ParameterDescriptor],
+    ctes: &CteScope,
+) -> Result<QueryOp> {
     let kind = match join.join_type {
         JoinType::Inner => JoinKind::Inner,
         JoinType::Left => JoinKind::Left,
@@ -232,12 +261,15 @@ fn lower_join_clause(join: &JoinClause, right: RowSource, parameters: &[Paramete
     let on = join
         .on
         .as_ref()
-        .map(|expr| lower_predicate(expr, parameters))
+        .map(|expr| lower_predicate(expr, parameters, ctes))
         .transpose()?
         .unwrap_or(Pred::True);
     Ok(match right {
         RowSource::Table { table, alias } => QueryOp::Join { kind, right: table, right_alias: alias, on },
         RowSource::Derived { alias, ops } => QueryOp::JoinSubquery { kind, right: ops, right_alias: alias, on },
+        RowSource::Cte { name, alias, ops } => {
+            QueryOp::JoinSubquery { kind, right: ops, right_alias: alias.unwrap_or(name), on }
+        }
     })
 }
 
@@ -409,11 +441,14 @@ fn lower_projection(items: &[SelectItem], parameters: &[ParameterDescriptor]) ->
             continue;
         }
         let name = output_name(expr, alias);
-        // Plain identifier → scalar column path (existing happy path).
+        // Plain identifier → scalar column path. A qualified name arrives as one
+        // identifier containing a dot, so it is split like a predicate path:
+        // the executor then resolves the qualified key first and falls back to
+        // the bare trailing column of an unqualified row source.
         let field_expr = match expr {
-            Expression::Identifier(identifier) => {
-                ProjectExpr::Scalar { path: vec![identifier.name.to_string()] }
-            }
+            Expression::Identifier(identifier) => ProjectExpr::Scalar {
+                path: identifier.name.split('.').map(str::to_string).collect(),
+            },
             // Arbitrary lowerable expression (CASE, CAST, nested CASE inside CASE,
             // etc.) → generic Computed wrapper around our Expr IR.
             other => ProjectExpr::Computed(Box::new(lower_expr(other, parameters)?)),
@@ -425,15 +460,17 @@ fn lower_projection(items: &[SelectItem], parameters: &[ParameterDescriptor]) ->
 
 // ─── predicates ──────────────────────────────────────────────────────────
 
-fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<Pred> {
+fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<Pred> {
     match expr {
         Expression::Literal(Literal::Boolean(value, _)) => Ok(if *value { Pred::True } else { Pred::False }),
-        Expression::Binary { left, op: BinaryOperator::And, right, .. } => {
-            Ok(Pred::And(Box::new(lower_predicate(left, parameters)?), Box::new(lower_predicate(right, parameters)?)))
-        }
-        Expression::Binary { left, op: BinaryOperator::Or, right, .. } => {
-            Ok(Pred::Or(Box::new(lower_predicate(left, parameters)?), Box::new(lower_predicate(right, parameters)?)))
-        }
+        Expression::Binary { left, op: BinaryOperator::And, right, .. } => Ok(Pred::And(
+            Box::new(lower_predicate(left, parameters, ctes)?),
+            Box::new(lower_predicate(right, parameters, ctes)?),
+        )),
+        Expression::Binary { left, op: BinaryOperator::Or, right, .. } => Ok(Pred::Or(
+            Box::new(lower_predicate(left, parameters, ctes)?),
+            Box::new(lower_predicate(right, parameters, ctes)?),
+        )),
         Expression::Binary { left, op, right, .. } => {
             let cmp = match op {
                 BinaryOperator::Equal => CmpOp::Eq,
@@ -459,7 +496,9 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Res
             let value = lower_bound_value(right, parameters)?;
             Ok(Pred::FieldCmp { path: left_path, op: cmp, value })
         }
-        Expression::Unary { op: UnaryOperator::Not, expr, .. } => Ok(Pred::Not(Box::new(lower_predicate(expr, parameters)?))),
+        Expression::Unary { op: UnaryOperator::Not, expr, .. } => {
+            Ok(Pred::Not(Box::new(lower_predicate(expr, parameters, ctes)?)))
+        }
         Expression::IsNull { expr, negated, .. } => Ok(Pred::FieldCmp {
             path: column_path(expr)?,
             op: if *negated { CmpOp::Ne } else { CmpOp::Eq },
@@ -500,7 +539,7 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Res
             Ok(Pred::FieldBool { path: vec![identifier.name.to_string()], value: BoundValue::Literal(Value::Bool(true)) })
         }
         Expression::Exists { query, negated, .. } => {
-            Ok(Pred::Exists { ops: lower_select(query, parameters)?, negated: *negated })
+            Ok(Pred::Exists { ops: lower_select(query, parameters, ctes)?, negated: *negated })
         }
         _ => Err(sql_error("unsupported SQL predicate shape")),
     }
@@ -783,7 +822,7 @@ fn lower_conflict_assignments(
 /// qualified identifier would otherwise silently fall through to the row's own
 /// column of the same name.
 fn lower_conflict_predicate(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<Pred> {
-    let predicate = lower_predicate(expr, parameters)?;
+    let predicate = lower_predicate(expr, parameters, &CteScope::new())?;
     reject_excluded_paths(&predicate)?;
     Ok(predicate)
 }
@@ -884,7 +923,7 @@ fn lower_insert_select(
     }
 
     let outputs = select_output_names(&select.items)?;
-    let source = lower_select(select, parameters)?;
+    let source = lower_select(select, parameters, &CteScope::new())?;
     let columns: Vec<String> = insert.columns.iter().map(|column| column.name.to_string()).collect();
     if let Some(outputs) = &outputs
         && !columns.is_empty()
@@ -971,12 +1010,14 @@ fn lower_update(update: &UpdateStatement, parameters: &[ParameterDescriptor]) ->
             value: lower_write_expr(&assignment.value, parameters)?,
         });
     }
-    let predicate = update.selection.as_ref().map(|expr| lower_predicate(expr, parameters)).transpose()?;
+    let predicate =
+        update.selection.as_ref().map(|expr| lower_predicate(expr, parameters, &CteScope::new())).transpose()?;
     Ok(WriteOp::Update { table: table_name(&update.table_name), assignments, predicate })
 }
 
 fn lower_delete(delete: &DeleteStatement, parameters: &[ParameterDescriptor]) -> Result<WriteOp> {
-    let predicate = delete.selection.as_ref().map(|expr| lower_predicate(expr, parameters)).transpose()?;
+    let predicate =
+        delete.selection.as_ref().map(|expr| lower_predicate(expr, parameters, &CteScope::new())).transpose()?;
     Ok(WriteOp::Delete { table: table_name(&delete.table_name), predicate })
 }
 
@@ -995,24 +1036,56 @@ enum RowSource {
         /// Alias written after the table, if any.
         alias: Option<String>,
     },
-    /// A derived table: an already lowered sub-pipeline plus its alias.
+    /// A derived table: an already lowered sub-pipeline. It always carries an
+    /// alias, so its columns are always qualified.
     Derived {
         /// Alias the statement references the derived columns through.
         alias: String,
         /// Inner pipeline producing the derived rows.
         ops: Vec<QueryOp>,
     },
+    /// A `WITH` name: an already lowered pipeline referenced like a table, so it
+    /// is qualified only when the statement writes an alias after it.
+    Cte {
+        /// Name the clause gave the pipeline.
+        name: String,
+        /// Alias written after the name, if any.
+        alias: Option<String>,
+        /// Pipeline the clause lowered.
+        ops: Vec<QueryOp>,
+    },
 }
 
 impl RowSource {
     /// Name the statement references this source's columns with: the alias when
-    /// one was written, otherwise the table name.
+    /// one was written, otherwise the table or `WITH` name.
     fn reference(&self) -> String {
         match self {
             RowSource::Table { table, alias } => alias.clone().unwrap_or_else(|| table.clone()),
             RowSource::Derived { alias, .. } => alias.clone(),
+            RowSource::Cte { name, alias, .. } => alias.clone().unwrap_or_else(|| name.clone()),
         }
     }
+
+    /// Whether this source is addressed through an alias, which makes bare
+    /// column references ambiguous.
+    fn is_aliased(&self) -> bool {
+        match self {
+            RowSource::Table { alias, .. } => alias.is_some(),
+            RowSource::Derived { .. } => true,
+            RowSource::Cte { alias, .. } => alias.is_some(),
+        }
+    }
+}
+
+/// The ops a nested source contributes inline: its pipeline without the
+/// `Collect` that only marks the end of its own statement.
+fn nested_ops(ops: &[QueryOp]) -> Vec<QueryOp> {
+    let mut ops = ops.to_vec();
+    if matches!(ops.last(), Some(QueryOp::Collect)) {
+        ops.pop();
+    }
+    ops
 }
 
 /// Resolve one `FROM`/`JOIN` row source.
@@ -1020,19 +1093,24 @@ impl RowSource {
 /// A derived table keeps its own `SELECT` scope, so its sub-pipeline is lowered
 /// here and joins the outer pipeline as a nested operator list. It needs an
 /// alias because that alias is the only name the outer statement can reference
-/// its columns with.
-fn row_source(source: &TableSource, parameters: &[ParameterDescriptor]) -> Result<RowSource> {
+/// its columns with. A `WITH` name resolves to the pipeline its clause already
+/// lowered and is referenced like a table.
+fn row_source(source: &TableSource, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<RowSource> {
     match source {
-        TableSource::Table(table) => Ok(RowSource::Table {
-            table: table.name.name.to_string(),
-            alias: table.alias.as_ref().map(|alias| alias.name.to_string()),
-        }),
+        TableSource::Table(table) => {
+            let name = table.name.name.to_string();
+            let alias = table.alias.as_ref().map(|alias| alias.name.to_string());
+            if let Some(ops) = ctes.get(&name) {
+                return Ok(RowSource::Cte { name, alias, ops: ops.clone() });
+            }
+            Ok(RowSource::Table { table: name, alias })
+        }
         TableSource::Derived { query, alias, .. } => {
             let alias = alias
                 .as_ref()
                 .map(|alias| alias.name.to_string())
                 .ok_or_else(|| sql_error("a derived table (`FROM (SELECT ...)`) requires an alias"))?;
-            Ok(RowSource::Derived { alias, ops: lower_select(query, parameters)? })
+            Ok(RowSource::Derived { alias, ops: lower_select(query, parameters, ctes)? })
         }
     }
 }

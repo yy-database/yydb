@@ -3489,3 +3489,108 @@ fn exists_rejects_a_reference_to_the_enclosing_statement() {
     let message = format!("{error}");
     assert!(message.contains("not a row source"), "unexpected error: {message}");
 }
+
+// ─── non-recursive CTEs ────────────────────────────────────────────────
+
+#[test]
+fn cte_feeds_the_main_statement() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let rows = execute_sql(
+        "WITH scored AS (SELECT account_id, score FROM Account WHERE score >= 20) \
+         SELECT account_id FROM scored ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("CTE source")
+    .rows;
+    assert_eq!(ids(&rows), vec![2, 3]);
+
+    // The clause name is a row source of the statement body, so it can also be
+    // written as a qualifier.
+    let rows = execute_sql(
+        "WITH scored AS (SELECT account_id, score FROM Account WHERE score >= 20) \
+         SELECT scored.account_id AS account_id FROM scored ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("qualified CTE source")
+    .rows;
+    assert_eq!(ids(&rows), vec![2, 3]);
+}
+
+#[test]
+fn cte_joins_like_a_table_and_a_later_cte_reads_an_earlier_one() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // Project 10 is filtered out of the CTE, so Account 1 only matches `p2`.
+    let rows = execute_sql(
+        "WITH projects AS (SELECT owner_id, name FROM Project WHERE project_id > 10) \
+         SELECT a.account_id AS id, projects.name AS project FROM Account AS a \
+         LEFT JOIN projects ON a.account_id = projects.owner_id ORDER BY a.account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("CTE left join")
+    .rows;
+    assert_eq!(column(&rows, "id"), vec![Value::I64(1), Value::I64(2), Value::I64(3)]);
+    assert_eq!(
+        column(&rows, "project"),
+        vec![Value::Text("p2".into()), Value::Text("p3".into()), Value::Null]
+    );
+
+    // `scored` reads `base`: a CTE sees the names written before it.
+    let rows = execute_sql(
+        "WITH base AS (SELECT account_id, score FROM Account WHERE score >= 20), \
+         scored AS (SELECT account_id FROM base WHERE score > 20) \
+         SELECT account_id FROM scored ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("chained CTEs")
+    .rows;
+    assert_eq!(ids(&rows), vec![2]);
+}
+
+#[test]
+fn ctes_reject_duplicate_names_forward_references_and_column_renaming() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let duplicate = prepare_sql(
+        "WITH x AS (SELECT account_id FROM Account), x AS (SELECT account_id FROM Account) SELECT * FROM x",
+    )
+    .expect_err("a name may be defined once per scope");
+    assert!(format!("{duplicate}").contains("more than once"), "unexpected error: {duplicate}");
+
+    let renamed = prepare_sql("WITH x(account_id) AS (SELECT account_id FROM Account) SELECT * FROM x")
+        .expect_err("column renaming is not lowered");
+    assert!(format!("{renamed}").contains("not supported yet"), "unexpected error: {renamed}");
+
+    // `b` is written after `a`, so it is not a visible name: the non-recursive
+    // clause must not resolve it, and reading it as a stored table fails.
+    assert!(
+        execute_sql(
+            "WITH a AS (SELECT account_id FROM b), b AS (SELECT account_id FROM Account) SELECT * FROM a",
+            &[],
+            &contract,
+            &[],
+            &mut records,
+        )
+        .is_err(),
+        "a forward reference must not silently resolve"
+    );
+}
