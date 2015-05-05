@@ -133,6 +133,34 @@ pub enum Pred {
         /// Whether the test is negated (`NOT EXISTS`).
         negated: bool,
     },
+    /// `expr [NOT] IN (subquery)`.
+    ///
+    /// Like [`Pred::Exists`] the subquery is resolved once, before any row is
+    /// tested, into the set of values it produces, and it must not reference the
+    /// surrounding statement's row sources.
+    InSubquery {
+        /// Field path tested against the subquery output.
+        path: Vec<String>,
+        /// Lowered subquery pipeline, ending in [`QueryOp::Collect`].
+        ops: Vec<QueryOp>,
+        /// Whether the test is negated (`NOT IN`).
+        negated: bool,
+    },
+    /// `expr [NOT] IN (<materialized values>)`, produced by resolving
+    /// [`Pred::InSubquery`]. Never appears in a freshly lowered plan.
+    ///
+    /// The test follows SQL three-valued logic: it is unknown when the tested
+    /// value is `NULL` or when no value matches while the set contains `NULL`,
+    /// and it is always decided for an empty set. A `WHERE` clause keeps a row
+    /// only on `TRUE`, so an unknown test drops it.
+    InSet {
+        /// Field path tested against the materialized values.
+        path: Vec<String>,
+        /// Values the subquery produced, in row order.
+        values: Vec<Value>,
+        /// Whether the test is negated (`NOT IN`).
+        negated: bool,
+    },
 }
 
 /// One projected value expression.

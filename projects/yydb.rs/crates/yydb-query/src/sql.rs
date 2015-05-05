@@ -672,6 +672,20 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
         Expression::Exists { query, negated, .. } => {
             Ok(Pred::Exists { ops: lower_select(query, parameters, ctes)?, negated: *negated })
         }
+        Expression::InSubquery { expr, query, negated, .. } => {
+            let path = column_path(expr)?;
+            // The test compares one value with one subquery column, so a wider
+            // projection is rejected instead of comparing only its first column.
+            if let Some(columns) = select_output_names(&query.items)?
+                && columns.len() != 1
+            {
+                return Err(sql_error(format!(
+                    "`IN (SELECT ...)` requires a single-column subquery, but this one produces {} columns",
+                    columns.len()
+                )));
+            }
+            Ok(Pred::InSubquery { path, ops: lower_select(query, parameters, ctes)?, negated: *negated })
+        }
         _ => Err(sql_error("unsupported SQL predicate shape")),
     }
 }
@@ -980,8 +994,10 @@ fn reject_excluded_paths(predicate: &Pred) -> Result<()> {
             reject_excluded_paths(right)
         }
         Pred::Not(inner) => reject_excluded_paths(inner),
-        // The subquery has its own scope, checked when it is lowered.
+        // The subquery has its own scope, checked when it is lowered. The tested
+        // expression still belongs to this statement, so its path is checked.
         Pred::Exists { .. } => Ok(()),
+        Pred::InSubquery { path, .. } | Pred::InSet { path, .. } => check(path),
     }
 }
 

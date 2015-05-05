@@ -3824,3 +3824,135 @@ fn set_operations_reject_mismatched_columns() {
     let message = format!("{order}");
     assert!(message.contains("not an output column"), "unexpected error: {message}");
 }
+
+// ─── IN (subquery) ─────────────────────────────────────────────────────
+
+#[test]
+fn in_subquery_keeps_rows_whose_value_the_subquery_produces() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE account_id IN (SELECT owner_id FROM Project) ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("in subquery")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2], "project owners are accounts 1 and 2");
+
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE account_id NOT IN (SELECT owner_id FROM Project) ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("not in subquery")
+    .rows;
+    assert_eq!(ids(&rows), vec![3]);
+}
+
+#[test]
+fn in_subquery_over_an_empty_result_is_always_decided() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 3", &[], &contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE account_id IN \
+         (SELECT account_id FROM Account WHERE account_id = 99)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("in over an empty subquery")
+    .rows;
+    assert!(rows.is_empty(), "`IN` over an empty set is FALSE for every row");
+
+    // `NOT IN` over an empty set is TRUE, so even the row whose tenant is NULL
+    // survives: the set is decided without ever comparing against its value.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE tenant NOT IN \
+         (SELECT tenant FROM Account WHERE account_id = 99) ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("not in over an empty subquery")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+}
+
+#[test]
+fn in_subquery_follows_three_valued_logic() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 3", &[], &contract, &mut records);
+
+    // t1 is shared by accounts 1 and 2.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE tenant IN (SELECT tenant FROM Account WHERE account_id = 1) \
+         ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("in subquery on text")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2]);
+
+    // The set now holds t1, t1, t2 and NULL. Account 3 tests NULL, which is
+    // unknown against any non-empty set, so neither `IN` nor `NOT IN` keeps it,
+    // and `NOT IN` also drops accounts 1 and 2 because their values match.
+    let positive = execute_sql(
+        "SELECT account_id FROM Account WHERE tenant IN (SELECT tenant FROM Account) ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("in over a set containing null")
+    .rows;
+    assert_eq!(ids(&positive), vec![1, 2]);
+
+    let negative = execute_sql(
+        "SELECT account_id FROM Account WHERE tenant NOT IN (SELECT tenant FROM Account) ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("not in over a set containing null")
+    .rows;
+    assert!(negative.is_empty(), "a NULL in the set makes every non-match unknown");
+}
+
+#[test]
+fn in_subquery_rejects_multi_column_and_correlated_subqueries() {
+    let multi = prepare_sql("SELECT account_id FROM Account WHERE account_id IN (SELECT account_id, score FROM Account)")
+        .expect_err("the subquery projects two columns");
+    let message = format!("{multi}");
+    assert!(message.contains("single-column"), "unexpected error: {message}");
+
+    let correlated = prepare_sql(
+        "SELECT account_id FROM Account \
+         WHERE account_id IN (SELECT owner_id FROM Project WHERE Project.owner_id = Account.account_id)",
+    )
+    .expect_err("a correlated IN reference is not supported");
+    let message = format!("{correlated}");
+    assert!(message.contains("not a row source"), "unexpected error: {message}");
+
+    let expression = prepare_sql("SELECT account_id FROM Account WHERE score + 1 IN (SELECT score FROM Account)")
+        .expect_err("the tested value must be a plain column");
+    let message = format!("{expression}");
+    assert!(message.contains("plain column references only"), "unexpected error: {message}");
+}

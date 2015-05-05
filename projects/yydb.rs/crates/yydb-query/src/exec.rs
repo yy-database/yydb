@@ -195,12 +195,14 @@ pub fn project_row(
     Ok(out)
 }
 
-/// Resolve every `[NOT] EXISTS (subquery)` node of a predicate to a constant.
+/// Resolve every `[NOT] EXISTS (subquery)` and `[NOT] IN (subquery)` node of a
+/// predicate.
 ///
-/// The subquery keeps its own pipeline and cannot read the row under test, so
-/// its outcome is the same for every row. Running it once per filter or join
-/// keeps evaluation cheap and surfaces subquery errors, which a per-row
-/// evaluation would have to swallow.
+/// An `EXISTS` subquery collapses to a constant. An `IN` subquery collapses to
+/// the set of values it produced, which the row under test is then compared
+/// against. Neither subquery can read the row under test, so running each one
+/// once per filter or join keeps evaluation cheap and surfaces subquery errors,
+/// which a per-row evaluation would have to swallow.
 pub(crate) fn resolve_subquery_predicates(
     predicate: &Pred,
     contract: Option<&ResolvedContract>,
@@ -212,6 +214,20 @@ pub(crate) fn resolve_subquery_predicates(
         Pred::Exists { ops, negated } => {
             let found = !execute_ops(ops, contract, records, bound_values)?.is_empty();
             if found == *negated { Pred::False } else { Pred::True }
+        }
+        Pred::InSubquery { path, ops, negated } => {
+            let rows = execute_ops(ops, contract, records, bound_values)?;
+            let mut values = Vec::with_capacity(rows.len());
+            for row in &rows {
+                if row.len() != 1 {
+                    return Err(query_runtime_error(format!(
+                        "`IN (SELECT ...)` requires a single-column subquery, but its rows carry {} columns",
+                        row.len()
+                    )));
+                }
+                values.push(row.values().next().cloned().unwrap_or(Value::Null));
+            }
+            Pred::InSet { path: path.clone(), values, negated: *negated }
         }
         Pred::And(left, right) => Pred::And(Box::new(resolve(left)?), Box::new(resolve(right)?)),
         Pred::Or(left, right) => Pred::Or(Box::new(resolve(left)?), Box::new(resolve(right)?)),
@@ -261,10 +277,48 @@ pub(crate) fn eval_pred(
                 || eval_pred(right, row, table, contract, records, bound_values)
         }
         Pred::Not(inner) => !eval_pred(inner, row, table, contract, records, bound_values),
+        Pred::InSet { path, values, negated } => {
+            let left = read_path(path, row, table, contract, records);
+            // `WHERE` keeps a row only on TRUE, so an unknown test drops it —
+            // which is also what `NOT IN` does over a set that contains NULL.
+            match in_set_truth(&left, values) {
+                Some(true) => !*negated,
+                Some(false) => *negated,
+                None => false,
+            }
+        }
         // Subqueries are resolved before any row is tested. Reaching one here
         // means the caller skipped that step, so no row may pass.
-        Pred::Exists { .. } => false,
+        Pred::Exists { .. } | Pred::InSubquery { .. } => false,
     }
+}
+
+/// Three-valued result of `value [NOT] IN (<values>)`.
+///
+/// - An empty set is always decided: `IN` is the disjunction of no comparison,
+///   which is `FALSE`, so `NOT IN` over an empty set is `TRUE` even when the
+///   tested value is `NULL`.
+/// - A `NULL` tested value is unknown unless the set is empty.
+/// - A match is `TRUE`. Without a match, a `NULL` in the set makes the result
+///   unknown, because that comparison could have matched.
+fn in_set_truth(value: &Value, values: &[Value]) -> Option<bool> {
+    if values.is_empty() {
+        return Some(false);
+    }
+    if matches!(value, Value::Null) {
+        return None;
+    }
+    let mut has_null = false;
+    for candidate in values {
+        if matches!(candidate, Value::Null) {
+            has_null = true;
+            continue;
+        }
+        if cmp_values(value, CmpOp::Eq, candidate) {
+            return Some(true);
+        }
+    }
+    if has_null { None } else { Some(false) }
 }
 
 fn read_path(
