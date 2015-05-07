@@ -12,7 +12,7 @@ repository = "https://github.com/yy-database/yydb"
 [workspace.dependencies]
 vos = { git = "https://github.com/voml/vos-language.git", rev = "1423d656d61ac27cca9ebc2016ffc9ded4b0f5c8" }
 # SQL frontend parser (Oak). The SQL AST feeds `yydb-query`'s lowering pass.
-oak-sql = { git = "https://github.com/yggdrasil-language/oaks.git", rev = "3274ba62", package = "oak-sql" }
+oak-sql = { git = "https://github.com/yggdrasil-language/oaks.git", rev = "7f3e5262", package = "oak-sql" }
 # Engine (bottom → mid; depend on yydb facade in apps)
 yydb-types = { version = "0.0.18", path = "crates/yydb-types" }
 yydb-formats = { version = "0.0.18", path = "crates/yydb-formats" }
