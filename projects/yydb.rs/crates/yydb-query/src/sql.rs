@@ -223,7 +223,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
     // pushing Project with only the non-aggregate items would drop the
     // aggregate columns.
     if !has_aggregate {
-        let fields = lower_projection(&select.items, parameters)?;
+        let fields = lower_projection(&select.items, parameters, &scope)?;
         if let Some(fields) = fields
             && !fields.is_empty()
         {
@@ -555,7 +555,11 @@ fn lower_limit(limit: &LimitClause, parameters: &[ParameterDescriptor], ops: &mu
 /// stored column). Aggregate function items (`COUNT(...)`, `SUM(...)`) are
 /// consumed by the [`QueryOp::Aggregate`] lowering — this function skips them
 /// so they do not produce a duplicate Project entry.
-fn lower_projection(items: &[SelectItem], parameters: &[ParameterDescriptor]) -> Result<Option<Vec<ProjectField>>> {
+fn lower_projection(
+    items: &[SelectItem],
+    parameters: &[ParameterDescriptor],
+    ctes: &CteScope,
+) -> Result<Option<Vec<ProjectField>>> {
     if items.len() == 1 {
         if matches!(items[0], SelectItem::Star { .. }) {
             return Ok(None);
@@ -582,7 +586,7 @@ fn lower_projection(items: &[SelectItem], parameters: &[ParameterDescriptor]) ->
             },
             // Arbitrary lowerable expression (CASE, CAST, nested CASE inside CASE,
             // etc.) → generic Computed wrapper around our Expr IR.
-            other => ProjectExpr::Computed(Box::new(lower_expr(other, parameters)?)),
+            other => ProjectExpr::Computed(Box::new(lower_expr(other, parameters, ctes)?)),
         };
         fields.push(ProjectField { name, expr: field_expr });
     }
@@ -613,7 +617,23 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
                 BinaryOperator::Like => return Err(sql_error("LIKE is not supported by the YYDB predicate set")),
                 _ => return Err(sql_error("arithmetic expressions cannot be used as predicates")),
             };
+            // A scalar subquery on the left of the comparison is mirrored so the
+            // field stays on the left-hand side, flipping the operator to match.
+            if let Expression::Subquery { query, .. } = left.as_ref() {
+                return Ok(Pred::FieldCmpSubquery {
+                    path: column_path(right)?,
+                    op: flip_cmp(cmp),
+                    ops: lower_scalar_subquery(query, parameters, ctes)?,
+                });
+            }
             let left_path = column_path(left)?;
+            if let Expression::Subquery { query, .. } = right.as_ref() {
+                return Ok(Pred::FieldCmpSubquery {
+                    path: left_path,
+                    op: cmp,
+                    ops: lower_scalar_subquery(query, parameters, ctes)?,
+                });
+            }
             // Detect column-vs-column comparisons (JOIN ON). If the right side
             // is a plain identifier that does NOT look like a rewritten param,
             // treat it as a column path instead of a bound value.
@@ -690,6 +710,19 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
     }
 }
 
+/// Mirror a comparison operator, used when a scalar subquery is rewritten from
+/// the left-hand side of a comparison onto the right-hand side.
+fn flip_cmp(op: CmpOp) -> CmpOp {
+    match op {
+        CmpOp::Eq => CmpOp::Eq,
+        CmpOp::Ne => CmpOp::Ne,
+        CmpOp::Lt => CmpOp::Gt,
+        CmpOp::Le => CmpOp::Ge,
+        CmpOp::Gt => CmpOp::Lt,
+        CmpOp::Ge => CmpOp::Le,
+    }
+}
+
 fn column_path(expr: &Expression) -> Result<Vec<String>> {
     let Expression::Identifier(identifier) = expr
     else {
@@ -728,10 +761,11 @@ fn lower_bound_value(expr: &Expression, parameters: &[ParameterDescriptor]) -> R
 ///
 /// Primitive terminals (identifiers → columns, literals and parameter bindings
 /// → bound values) and the compound nodes [`Expression::Case`] /
-/// [`Expression::Cast`] are supported. Everything else (arithmetic, function
-/// calls, subqueries …) is rejected here; callers decide where this IR is
-/// allowed — today only SELECT projection uses it.
-fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<Expr> {
+/// [`Expression::Cast`] are supported. A scalar subquery stays a nested
+/// pipeline in [`Expr::Subquery`] and is resolved at execution time. Everything
+/// else (arithmetic, function calls, `EXISTS`, `IN` …) is rejected here; callers
+/// decide where this IR is allowed — today only SELECT projection uses it.
+fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<Expr> {
     match expr {
         Expression::Identifier(identifier) => Ok(Expr::Column {
             path: identifier.name.split('.').map(|s| s.to_string()).collect(),
@@ -743,20 +777,17 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<E
             let mut lowered_branches = Vec::with_capacity(branches.len());
             for (when, then) in branches {
                 lowered_branches.push((
-                    Box::new(lower_expr(when, parameters)?),
-                    Box::new(lower_expr(then, parameters)?),
+                    Box::new(lower_expr(when, parameters, ctes)?),
+                    Box::new(lower_expr(then, parameters, ctes)?),
                 ));
             }
-            let lowered_else = else_branch
-                .as_ref()
-                .map(|els| lower_expr(els, parameters))
-                .transpose()?
-                .map(Box::new);
+            let lowered_else =
+                else_branch.as_ref().map(|els| lower_expr(els, parameters, ctes)).transpose()?.map(Box::new);
             Ok(Expr::Case { branches: lowered_branches, else_branch: lowered_else })
         }
         Expression::Cast { expr: inner, target, .. } => {
             Ok(Expr::Cast {
-                expr: Box::new(lower_expr(inner, parameters)?),
+                expr: Box::new(lower_expr(inner, parameters, ctes)?),
                 target: target.to_ascii_uppercase(),
             })
         }
@@ -774,20 +805,20 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<E
             };
             Ok(Expr::Binary {
                 op: bin_op,
-                left: Box::new(lower_expr(left, parameters)?),
-                right: Box::new(lower_expr(right, parameters)?),
+                left: Box::new(lower_expr(left, parameters, ctes)?),
+                right: Box::new(lower_expr(right, parameters, ctes)?),
             })
         }
         Expression::Unary { op: UnaryOperator::Not, expr, .. } => {
-            Ok(Expr::Not(Box::new(lower_expr(expr, parameters)?)))
+            Ok(Expr::Not(Box::new(lower_expr(expr, parameters, ctes)?)))
         }
+        Expression::Subquery { query, .. } => Ok(Expr::Subquery { ops: lower_scalar_subquery(query, parameters, ctes)? }),
         Expression::IsNull { .. }
         | Expression::IsTruth { .. }
         | Expression::InList { .. }
         | Expression::Between { .. }
         | Expression::InSubquery { .. }
         | Expression::Exists { .. }
-        | Expression::Subquery { .. }
         | Expression::Unary { op: _, expr: _, .. }
         | Expression::FunctionCall { .. }
         | Expression::Wildcard { .. }
@@ -801,7 +832,6 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<E
                 Expression::Between { .. } => "BETWEEN",
                 Expression::InSubquery { .. } => "IN (subquery)",
                 Expression::Exists { .. } => "EXISTS (subquery)",
-                Expression::Subquery { .. } => "subquery",
                 Expression::Unary { .. } => "unary",
                 Expression::FunctionCall { .. } => "function call",
                 Expression::Wildcard { .. } => "*",
@@ -811,6 +841,31 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<E
             }
         ))),
     }
+}
+
+/// Lower a `(SELECT ...)` used as a value.
+///
+/// The subquery must project exactly one column: a wider projection is rejected
+/// here instead of silently yielding only its first column. `SELECT *` inside
+/// the subquery has no known width until execution, which re-checks the
+/// executed row shape.
+fn lower_scalar_subquery(
+    query: &SelectStatement,
+    parameters: &[ParameterDescriptor],
+    ctes: &CteScope,
+) -> Result<Vec<QueryOp>> {
+    let width = match query.items.as_slice() {
+        [SelectItem::Star { .. }] => None,
+        items => Some(items.len()),
+    };
+    if let Some(width) = width
+        && width != 1
+    {
+        return Err(sql_error(format!(
+            "a scalar subquery must produce a single column, but this one produces {width} columns"
+        )));
+    }
+    lower_select(query, parameters, ctes)
 }
 
 /// Lower an SQL expression appearing on the right-hand side of an UPDATE
@@ -903,7 +958,7 @@ fn lower_returning(
             "RETURNING supports columns and scalar expressions: aggregate functions are not supported",
         ));
     }
-    Ok(match lower_projection(&clause.items, parameters)? {
+    Ok(match lower_projection(&clause.items, parameters, &CteScope::new())? {
         Some(fields) => Some(ReturningProjection::Fields(fields)),
         None => Some(ReturningProjection::Star),
     })
@@ -998,6 +1053,9 @@ fn reject_excluded_paths(predicate: &Pred) -> Result<()> {
         // expression still belongs to this statement, so its path is checked.
         Pred::Exists { .. } => Ok(()),
         Pred::InSubquery { path, .. } | Pred::InSet { path, .. } => check(path),
+        // The subquery has its own scope, checked when it is lowered. The
+        // compared field still belongs to this statement.
+        Pred::FieldCmpSubquery { path, .. } | Pred::FieldCmpScalar { path, .. } => check(path),
     }
 }
 

@@ -161,6 +161,35 @@ pub enum Pred {
         /// Whether the test is negated (`NOT IN`).
         negated: bool,
     },
+    /// `field <op> (subquery)`.
+    ///
+    /// Like [`Pred::Exists`] the subquery is resolved once before any row is
+    /// tested, so it must not reference the surrounding statement's row
+    /// sources. It must project exactly one column and produce at most one row:
+    /// zero rows yield `NULL`, more than one row is an error rather than a
+    /// silent first-row pick.
+    FieldCmpSubquery {
+        /// Field path on the left-hand side.
+        path: Vec<String>,
+        /// Comparison operator.
+        op: CmpOp,
+        /// Lowered subquery pipeline, ending in [`QueryOp::Collect`].
+        ops: Vec<QueryOp>,
+    },
+    /// `field <op> <scalar>`, produced by resolving
+    /// [`Pred::FieldCmpSubquery`]. Never appears in a freshly lowered plan.
+    ///
+    /// Unlike [`Pred::FieldCmp`] this follows SQL three-valued logic: a `NULL`
+    /// on either side makes the comparison unknown, so a `WHERE` clause drops
+    /// the row. `FieldCmp` cannot express that because `IS NULL` lowers onto it.
+    FieldCmpScalar {
+        /// Field path on the left-hand side.
+        path: Vec<String>,
+        /// Comparison operator.
+        op: CmpOp,
+        /// Value the subquery produced.
+        value: Value,
+    },
 }
 
 /// One projected value expression.
@@ -225,6 +254,16 @@ pub enum Expr {
     },
     /// Logical NOT — wraps a predicate expression.
     Not(Box<Expr>),
+    /// Scalar subquery `(SELECT ...)` used as a value.
+    ///
+    /// The subquery is uncorrelated, so execution resolves it once per
+    /// projection rather than once per row. It must project exactly one column
+    /// and produce at most one row: zero rows yield `NULL`, more than one row is
+    /// an error rather than a silent first-row pick.
+    Subquery {
+        /// Lowered subquery pipeline, ending in [`QueryOp::Collect`].
+        ops: Vec<QueryOp>,
+    },
 }
 
 /// Operator for [`Expr::Binary`]. Covers the comparison and logical forms

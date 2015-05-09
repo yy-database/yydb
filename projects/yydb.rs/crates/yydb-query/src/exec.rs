@@ -98,9 +98,12 @@ pub fn execute_ops(
                 let table = current_table
                     .as_deref()
                     .ok_or_else(|| Error::Schema { message: "project without a preceding table scan".into() })?;
+                // A scalar subquery does not read the row being projected, so it
+                // is resolved once for the whole pipeline instead of once per row.
+                let fields = resolve_projection_subqueries(fields, contract, records, bound_values)?;
                 rows = rows
                     .into_iter()
-                    .map(|row| project_row(fields, &row, table, contract, records, bound_values))
+                    .map(|row| project_row(&fields, &row, table, contract, records, bound_values))
                     .collect::<Result<Vec<_>>>()?;
             }
             QueryOp::Sort { keys } => {
@@ -229,6 +232,11 @@ pub(crate) fn resolve_subquery_predicates(
             }
             Pred::InSet { path: path.clone(), values, negated: *negated }
         }
+        Pred::FieldCmpSubquery { path, op, ops } => Pred::FieldCmpScalar {
+            path: path.clone(),
+            op: *op,
+            value: scalar_subquery_value(ops, contract, records, bound_values)?,
+        },
         Pred::And(left, right) => Pred::And(Box::new(resolve(left)?), Box::new(resolve(right)?)),
         Pred::Or(left, right) => Pred::Or(Box::new(resolve(left)?), Box::new(resolve(right)?)),
         Pred::Not(inner) => Pred::Not(Box::new(resolve(inner)?)),
@@ -287,10 +295,49 @@ pub(crate) fn eval_pred(
                 None => false,
             }
         }
+        // A scalar subquery is resolved before any row is tested. A NULL on
+        // either side makes the comparison unknown, so no row may pass.
+        Pred::FieldCmpScalar { path, op, value } => {
+            let left = read_path(path, row, table, contract, records);
+            if matches!(left, Value::Null) || matches!(value, Value::Null) {
+                return false;
+            }
+            cmp_values(&left, *op, value)
+        }
         // Subqueries are resolved before any row is tested. Reaching one here
         // means the caller skipped that step, so no row may pass.
-        Pred::Exists { .. } | Pred::InSubquery { .. } => false,
+        Pred::Exists { .. } | Pred::InSubquery { .. } | Pred::FieldCmpSubquery { .. } => false,
     }
+}
+
+/// Scalar value a `(SELECT ...)` value subquery yields.
+///
+/// Zero rows yield `NULL`. Exactly one row must carry exactly one column.
+/// More than one row is an error: silently keeping the first row would hide a
+/// subquery that is not actually scalar, and a wider row is rejected rather
+/// than comparing only its first column.
+fn scalar_subquery_value(
+    ops: &[QueryOp],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Value> {
+    let rows = execute_ops(ops, contract, records, bound_values)?;
+    let mut rows = rows.into_iter();
+    let Some(row) = rows.next()
+    else {
+        return Ok(Value::Null);
+    };
+    if rows.next().is_some() {
+        return Err(query_runtime_error("a scalar subquery must return at most one row: use an aggregate or add a filter"));
+    }
+    if row.len() != 1 {
+        return Err(query_runtime_error(format!(
+            "a scalar subquery must produce a single column, but its row carries {} columns",
+            row.len()
+        )));
+    }
+    Ok(row.into_values().next().unwrap_or(Value::Null))
 }
 
 /// Three-valued result of `value [NOT] IN (<values>)`.
@@ -412,7 +459,63 @@ pub(crate) fn eval_expr(
             let val = eval_expr(inner, row, table, contract, records, bound_values)?;
             Ok(Value::Bool(!is_truthy(&val)))
         }
+        Expr::Subquery { ops } => scalar_subquery_value(ops, contract, records, bound_values),
     }
+}
+
+/// Resolve every scalar subquery of a projection before any row is projected.
+///
+/// The subqueries are uncorrelated, so running them once per pipeline keeps the
+/// per-row evaluation free of storage access and surfaces their errors before
+/// the first row is emitted.
+fn resolve_projection_subqueries(
+    fields: &[ProjectField],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<ProjectField>> {
+    fields
+        .iter()
+        .map(|field| {
+            let expr = match &field.expr {
+                ProjectExpr::Computed(inner) => {
+                    ProjectExpr::Computed(Box::new(resolve_scalar_subqueries(inner, contract, records, bound_values)?))
+                }
+                other => other.clone(),
+            };
+            Ok(ProjectField { name: field.name.clone(), expr })
+        })
+        .collect()
+}
+
+/// Replace every [`Expr::Subquery`] of an expression with the literal value it
+/// produced.
+fn resolve_scalar_subqueries(
+    expr: &Expr,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Expr> {
+    let resolve = |inner: &Expr| resolve_scalar_subqueries(inner, contract, records, bound_values);
+    Ok(match expr {
+        Expr::Subquery { ops } => {
+            Expr::Bound(BoundValue::Literal(scalar_subquery_value(ops, contract, records, bound_values)?))
+        }
+        Expr::Case { branches, else_branch } => {
+            let mut resolved = Vec::with_capacity(branches.len());
+            for (when, then) in branches {
+                resolved.push((Box::new(resolve(when)?), Box::new(resolve(then)?)));
+            }
+            let else_branch = else_branch.as_ref().map(|els| resolve(els)).transpose()?.map(Box::new);
+            Expr::Case { branches: resolved, else_branch }
+        }
+        Expr::Cast { expr: inner, target } => Expr::Cast { expr: Box::new(resolve(inner)?), target: target.clone() },
+        Expr::Binary { op, left, right } => {
+            Expr::Binary { op: *op, left: Box::new(resolve(left)?), right: Box::new(resolve(right)?) }
+        }
+        Expr::Not(inner) => Expr::Not(Box::new(resolve(inner)?)),
+        other => other.clone(),
+    })
 }
 
 /// `CASE WHEN w1 THEN t1 WHEN w2 THEN t2 ... [ELSE e] END`.

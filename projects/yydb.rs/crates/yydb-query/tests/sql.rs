@@ -3956,3 +3956,162 @@ fn in_subquery_rejects_multi_column_and_correlated_subqueries() {
     let message = format!("{expression}");
     assert!(message.contains("plain column references only"), "unexpected error: {message}");
 }
+
+// ─── scalar subquery ───────────────────────────────────────────────────
+
+#[test]
+fn scalar_subquery_projects_a_single_value() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT account_id, (SELECT score FROM Account WHERE account_id = 2) AS peer FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("scalar subquery in projection")
+    .rows;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("account_id"), Some(&Value::I64(1)));
+    assert_eq!(rows[0].get("peer"), Some(&Value::I64(30)));
+}
+
+#[test]
+fn scalar_subquery_with_no_rows_yields_null() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT account_id, (SELECT score FROM Account WHERE account_id = 99) AS missing FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("an empty scalar subquery")
+    .rows;
+    assert_eq!(rows[0].get("missing"), Some(&Value::Null));
+
+    // Comparing against that `NULL` is unknown, so the comparison never keeps
+    // a row — `>` over `NULL` must not match everything.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE score > (SELECT score FROM Account WHERE account_id = 99)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("comparison against an empty scalar subquery")
+    .rows;
+    assert!(rows.is_empty(), "a NULL scalar makes the comparison unknown");
+}
+
+#[test]
+fn scalar_subquery_compares_in_where_on_either_side() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // `(SELECT ...)` on the right of the comparison.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE score > (SELECT score FROM Account WHERE account_id = 1) \
+         ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("scalar subquery on the right")
+    .rows;
+    assert_eq!(ids(&rows), vec![2, 3], "scores above 10 are 30 and 20");
+
+    // `(SELECT ...)` on the left of the comparison.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE (SELECT score FROM Account WHERE account_id = 2) > score \
+         ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("scalar subquery on the left")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 3], "scores below 30 are 10 and 20");
+}
+
+#[test]
+fn scalar_subquery_compares_inside_a_projection_case() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT account_id, CASE WHEN score >= (SELECT score FROM Account WHERE account_id = 3) \
+         THEN 'big' ELSE 'small' END AS band FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("scalar subquery inside CASE")
+    .rows;
+    let bands: Vec<&Value> = rows.iter().map(|row| row.get("band").expect("band")).collect();
+    assert_eq!(bands, vec![&Value::Text("small".into()), &Value::Text("big".into()), &Value::Text("big".into())]);
+}
+
+#[test]
+fn scalar_subquery_rejects_multiple_rows_and_columns() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let error =
+        execute_sql("SELECT account_id, (SELECT score FROM Account) AS bad FROM Account", &[], &contract, &[], &mut records)
+            .expect_err("a multi-row scalar subquery is not silently truncated");
+    let message = format!("{error}");
+    assert!(message.contains("at most one row"), "unexpected error: {message}");
+
+    let error = execute_sql(
+        "SELECT account_id FROM Account WHERE score > (SELECT score FROM Account)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("a multi-row scalar subquery in a predicate is rejected too");
+    let message = format!("{error}");
+    assert!(message.contains("at most one row"), "unexpected error: {message}");
+
+    // A known projection width is rejected while lowering.
+    let error = prepare_sql("SELECT (SELECT account_id, score FROM Account) AS bad FROM Account")
+        .expect_err("a two-column scalar subquery is not a value");
+    let message = format!("{error}");
+    assert!(message.contains("single column"), "unexpected error: {message}");
+
+    // `SELECT *` has no known width until execution, which re-checks the row.
+    let error = execute_sql(
+        "SELECT (SELECT * FROM Account WHERE account_id = 1) AS bad FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("a star scalar subquery carries every column");
+    let message = format!("{error}");
+    assert!(message.contains("single column"), "unexpected error: {message}");
+}
+
+#[test]
+fn scalar_subquery_cannot_reference_the_enclosing_statement() {
+    let error = prepare_sql(
+        "SELECT a.account_id FROM Account AS a \
+         WHERE a.score = (SELECT score FROM Account WHERE Account.account_id = a.account_id)",
+    )
+    .expect_err("a correlated scalar subquery is not supported");
+    let message = format!("{error}");
+    assert!(message.contains("not a row source"), "unexpected error: {message}");
+}
