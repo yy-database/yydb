@@ -1637,31 +1637,101 @@ fn update_can_set_null_on_nullable_column() {
     assert_eq!(ids(&nulls.rows), vec![1]);
 }
 
-// ─── REAL / float literal rejection ─────────────────────────────────────
+// ─── REAL literals ─────────────────────────────────────────────────────
+//
+// A literal with a fractional part or an exponent lowers to `Value::F64`.
+// REAL is a transient expression type: comparisons promote the integer side to
+// `f64`, and storing a REAL into any column is rejected because YYDB has no
+// persisted real column.
 
 #[test]
-fn select_rejects_real_number_literal_in_predicate() {
-    // lowering only supports i64 integer literals. A decimal number like
-    // `3.14` should fail in `lower_value` because i64::parse("3.14") fails.
-    let err = prepare_sql("SELECT * FROM Account WHERE score = 3.14")
-        .expect_err("real literal must be rejected");
-    assert!(
-        format!("{err}").contains("integer") || format!("{err}").contains("Number")
-            || format!("{err}").contains("unsupported"),
-        "unexpected: {err}"
-    );
+fn real_literal_matches_integer_column_through_numeric_promotion() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // 20.0 promotes `score` (i64) to f64 and matches grace's row.
+    let outcome =
+        execute_sql("SELECT account_id FROM Account WHERE score = 20.0", &[], &contract, &[], &mut records)
+            .expect("real literal comparison");
+    assert_eq!(ids(&outcome.rows), vec![3]);
+}
+
+#[test]
+fn real_literal_orders_against_integer_column() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome =
+        execute_sql("SELECT account_id FROM Account WHERE score > 10.5", &[], &contract, &[], &mut records)
+            .expect("real literal range");
+    assert_eq!(ids(&outcome.rows), vec![2, 3]);
+}
+
+#[test]
+fn real_literal_never_matches_a_text_column() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // No implicit numeric-to-text conversion: a REAL and a TEXT value have no
+    // common comparison domain, so the predicate never matches.
+    let outcome =
+        execute_sql("SELECT account_id FROM Account WHERE tenant = 1.5", &[], &contract, &[], &mut records)
+            .expect("real vs text comparison");
+    assert!(outcome.rows.is_empty(), "REAL must not be compared as text");
+}
+
+#[test]
+fn negative_real_literal_keeps_its_sign_and_f64_precision() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT CAST(-3.14 AS TEXT) AS text_value, CAST(3.14 AS REAL) AS real_value FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("negative real literal");
+    assert_eq!(outcome.rows[0].get("text_value"), Some(&Value::Text("-3.14".into())));
+    assert_eq!(outcome.rows[0].get("real_value"), Some(&Value::F64(3.14)));
+}
+
+#[test]
+fn integer_literal_outside_i64_range_is_rejected() {
+    let err = prepare_sql("SELECT * FROM Account WHERE score = 9223372036854775808")
+        .expect_err("an out-of-range integer literal must be rejected");
+    let msg = format!("{err}");
+    assert!(msg.contains("64-bit") || msg.contains("range"), "unexpected: {msg}");
+}
+
+#[test]
+fn real_literal_outside_finite_f64_range_is_rejected() {
+    let err = prepare_sql("SELECT * FROM Account WHERE score = 1e400")
+        .expect_err("an overflowing REAL literal must be rejected instead of becoming infinity");
+    let msg = format!("{err}");
+    assert!(msg.contains("REAL") || msg.contains("finite"), "unexpected: {msg}");
 }
 
 #[test]
 fn insert_rejects_real_number_in_integer_column() {
-    let err = prepare_sql(
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    let err = execute_sql(
         "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'x', 't', 3.14, true)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
     )
     .expect_err("real in integer column must reject");
-    assert!(
-        format!("{err}").contains("integer") || format!("{err}").contains("Number"),
-        "unexpected: {err}"
-    );
+    let msg = format!("{err}");
+    assert!(msg.contains("REAL") && msg.contains("integer"), "unexpected: {msg}");
+    assert!(records.is_empty(), "a rejected REAL write must not publish rows");
 }
 
 // ─── UUID type column round-trip via parameter binding ──────────────────

@@ -400,6 +400,15 @@ fn read_path(
     Value::Null
 }
 
+/// Total order used by comparisons and sorting.
+///
+/// Number kinds compare with each other: an exact integer pair (`i64`/`u64`)
+/// compares as an integer, and any pair that involves a REAL promotes both
+/// sides to `f64`. Distinct kind families never compare equal: they order by
+/// kind rank (`null` < `bool` < number < text/uuid < everything else), so a
+/// comparison such as `text_column = 1.5` never matches instead of pretending
+/// the two sides are equal. Two values of the same unmodelled kind also compare
+/// equal rather than falling back to an arbitrary order.
 fn compare_values(left: &Value, right: &Value) -> std::cmp::Ordering {
     match (left, right) {
         (Value::Null, Value::Null) => std::cmp::Ordering::Equal,
@@ -407,11 +416,32 @@ fn compare_values(left: &Value, right: &Value) -> std::cmp::Ordering {
         (_, Value::Null) => std::cmp::Ordering::Greater,
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         (Value::I64(a), Value::I64(b)) => a.cmp(b),
+        (Value::U64(a), Value::U64(b)) => a.cmp(b),
+        (Value::I64(a), Value::U64(b)) => (*a as i128).cmp(&(*b as i128)),
+        (Value::U64(a), Value::I64(b)) => (*a as i128).cmp(&(*b as i128)),
+        (Value::I64(a), Value::F64(b)) => (*a as f64).total_cmp(b),
+        (Value::U64(a), Value::F64(b)) => (*a as f64).total_cmp(b),
+        (Value::F64(a), Value::I64(b)) => a.total_cmp(&(*b as f64)),
+        (Value::F64(a), Value::U64(b)) => a.total_cmp(&(*b as f64)),
+        (Value::F64(a), Value::F64(b)) => a.total_cmp(b),
         (Value::Text(a), Value::Text(b)) => a.cmp(b),
         (Value::Uuid(a), Value::Uuid(b)) => a.cmp(b),
         (Value::Text(a), Value::Uuid(b)) => a.as_str().cmp(&b.to_string()),
         (Value::Uuid(a), Value::Text(b)) => a.to_string().cmp(b),
-        _ => std::cmp::Ordering::Equal,
+        (Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
+        _ => value_kind_rank(left).cmp(&value_kind_rank(right)),
+    }
+}
+
+/// Kind family used to order values that have no common comparison domain.
+fn value_kind_rank(value: &Value) -> u8 {
+    match value {
+        Value::Null => 0,
+        Value::Bool(_) => 1,
+        Value::I64(_) | Value::U64(_) | Value::F64(_) => 2,
+        Value::Text(_) | Value::Uuid(_) => 3,
+        Value::Bytes(_) => 4,
+        _ => 5,
     }
 }
 

@@ -66,6 +66,16 @@ pub(crate) fn scalar_target(ty: &ResolvedCanonicalType) -> Option<ScalarTarget> 
 /// target (records and user types) accept the value unchanged.
 pub(crate) fn value_to_scalar(value: Value, ty: &ResolvedCanonicalType) -> Result<Value> {
     use vos::types::CanonicalScalar;
+    // A REAL literal (or a REAL-typed parameter) is a transient expression
+    // value: YYDB persists integer, bool, text, uuid, date, time, timestamp and
+    // decimal columns only. Storing one would otherwise reach the row encoder
+    // and fail after the write had been staged in this statement.
+    if let Value::F64(number) = &value {
+        return Err(coerce_error(format!(
+            "REAL value `{number}` cannot be stored: YYDB persists integer, bool, text, uuid, date, time, timestamp \
+             and decimal columns only"
+        )));
+    }
     match ty {
         ResolvedCanonicalType::Scalar(
             CanonicalScalar::I64

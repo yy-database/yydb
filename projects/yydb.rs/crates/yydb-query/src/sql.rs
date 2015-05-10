@@ -740,20 +740,54 @@ fn lower_bound_value(expr: &Expression, parameters: &[ParameterDescriptor]) -> R
         Expression::Literal(Literal::Null(_)) => Ok(BoundValue::Literal(Value::Null)),
         Expression::Literal(Literal::Boolean(value, _)) => Ok(BoundValue::Literal(Value::Bool(*value))),
         Expression::Literal(Literal::String(text, _)) => Ok(BoundValue::Literal(Value::Text(text.to_string()))),
-        Expression::Literal(Literal::Number(text, _)) => Ok(BoundValue::Literal(Value::I64(
-            text.parse().map_err(|_| sql_error(format!("only integer literals are supported, got `{text}`")))?,
-        ))),
+        Expression::Literal(Literal::Number(text, _)) => Ok(BoundValue::Literal(numeric_literal(text)?)),
         Expression::Unary { op: UnaryOperator::Minus, expr, .. } => {
             let Expression::Literal(Literal::Number(text, _)) = expr.as_ref()
             else {
                 return Err(sql_error("unary minus supports numeric literals only"));
             };
-            let number: i64 =
-                text.parse().map_err(|_| sql_error(format!("only integer literals are supported, got `{text}`")))?;
-            Ok(BoundValue::Literal(Value::I64(-number)))
+            Ok(BoundValue::Literal(negate_number(numeric_literal(text)?)))
         }
         Expression::Identifier(identifier) => name_to_slot(&identifier.name, parameters),
         _ => Err(sql_error("unsupported SQL value expression")),
+    }
+}
+
+/// Parse one SQL numeric literal into the exact scalar it denotes.
+///
+/// A literal that writes a fractional part or an exponent (`3.14`, `1e3`) is
+/// REAL and becomes [`Value::F64`]. A plain run of digits is an integer and
+/// becomes [`Value::I64`]. Both are parsed exactly as written: an integer
+/// literal outside the signed 64-bit range is rejected instead of being rounded
+/// into REAL, and a REAL literal that overflows the finite `f64` range is
+/// rejected instead of becoming an infinity.
+///
+/// A REAL value is a transient expression type: YYDB persists integer, bool,
+/// text, uuid, date, time, timestamp and decimal columns only, so storing a
+/// REAL literal is rejected by the catalog-directed coercion.
+fn numeric_literal(text: &str) -> Result<Value> {
+    if text.contains('.') || text.contains('e') || text.contains('E') {
+        let value: f64 =
+            text.parse().map_err(|_| sql_error(format!("`{text}` is not a valid REAL literal")))?;
+        if !value.is_finite() {
+            return Err(sql_error(format!("REAL literal `{text}` is outside the finite `f64` range")));
+        }
+        Ok(Value::F64(value))
+    }
+    else {
+        let value: i64 = text
+            .parse()
+            .map_err(|_| sql_error(format!("integer literal `{text}` is outside the signed 64-bit range")))?;
+        Ok(Value::I64(value))
+    }
+}
+
+/// Apply unary minus to a literal already typed by [`numeric_literal`].
+fn negate_number(value: Value) -> Value {
+    match value {
+        Value::I64(number) => Value::I64(-number),
+        Value::F64(number) => Value::F64(-number),
+        other => other,
     }
 }
 
