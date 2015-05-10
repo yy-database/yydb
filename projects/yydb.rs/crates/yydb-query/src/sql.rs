@@ -191,7 +191,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
     // promotes that COUNT to a distinct-count aggregate. MVP does not yet
     // emit a top-level DISTINCT operator for non-aggregate queries.
     let quantifier_is_distinct = matches!(select.quantifier, Some(oak_sql::ast::SelectQuantifier::Distinct { .. }));
-    let (group_keys, aggregates) = lower_aggregate(select, parameters, quantifier_is_distinct)?;
+    let (group_keys, aggregates) = lower_aggregate(select, parameters, quantifier_is_distinct, &scope)?;
     let has_aggregate = !aggregates.is_empty() || !group_keys.is_empty();
     if has_aggregate {
         ops.push(QueryOp::Aggregate { group_keys, aggregates });
@@ -414,6 +414,7 @@ fn lower_aggregate(
     select: &SelectStatement,
     parameters: &[ParameterDescriptor],
     quantifier_is_distinct: bool,
+    ctes: &CteScope,
 ) -> Result<(Vec<ProjectField>, Vec<AggregateField>)> {
     let group_keys = match &select.group_by {
         Some(GroupByClause { items, .. }) => {
@@ -431,7 +432,7 @@ fn lower_aggregate(
     for item in &select.items {
         if let SelectItem::Expression { expr, alias, .. } = item {
             if let Expression::FunctionCall { name, args, .. } = expr {
-                let agg = lower_aggregate_function(name, args, alias, parameters, quantifier_is_distinct)?;
+                let agg = lower_aggregate_function(name, args, alias, parameters, quantifier_is_distinct, ctes)?;
                 aggregates.push(agg);
             }
         }
@@ -469,6 +470,7 @@ fn lower_aggregate_function(
     alias: &Option<Identifier>,
     parameters: &[ParameterDescriptor],
     quantifier_is_distinct: bool,
+    ctes: &CteScope,
 ) -> Result<AggregateField> {
     let fn_name = name.name.to_string().to_ascii_uppercase();
     let output_name = alias.as_ref().map(|a| a.name.to_string()).unwrap_or_else(|| fn_name.to_ascii_lowercase());
@@ -479,19 +481,7 @@ fn lower_aggregate_function(
             }
             let first = &args[0];
             match first {
-                Expression::Literal(_) | Expression::Identifier(_) | Expression::Binary { .. } => {
-                    let expr = lower_project_expr(first, parameters)?;
-                    // `SELECT DISTINCT COUNT(expr)` promotes this COUNT to a
-                    // distinct-count aggregate. MVP only handles this pairing
-                    // for COUNT; other aggregates ignore the quantifier.
-                    if quantifier_is_distinct {
-                        Ok(AggregateField::CountDistinct { name: output_name, expr })
-                    } else {
-                        Ok(AggregateField::Count { name: output_name, expr: Some(expr) })
-                    }
-                }
-                _ => {
-                    // Fallback: treat anything else as COUNT(*).
+                Expression::Wildcard { .. } => {
                     if quantifier_is_distinct {
                         return Err(sql_error(
                             "SELECT DISTINCT COUNT(*) is ambiguous (DISTINCT quantifier with COUNT(*)); \
@@ -500,29 +490,49 @@ fn lower_aggregate_function(
                     }
                     Ok(AggregateField::Count { name: output_name, expr: None })
                 }
+                other => {
+                    let expr = lower_project_expr(other, parameters, ctes)?;
+                    // `SELECT DISTINCT COUNT(expr)` promotes this COUNT to a
+                    // distinct-count aggregate. MVP only handles this pairing
+                    // for COUNT; other aggregates ignore the quantifier.
+                    if quantifier_is_distinct {
+                        Ok(AggregateField::CountDistinct { name: output_name, expr })
+                    }
+                    else {
+                        Ok(AggregateField::Count { name: output_name, expr: Some(expr) })
+                    }
+                }
             }
         }
         "SUM" => {
             if args.len() != 1 {
                 return Err(sql_error("SUM() requires exactly one argument"));
             }
-            let expr = lower_project_expr(&args[0], parameters)?;
+            let expr = lower_project_expr(&args[0], parameters, ctes)?;
             Ok(AggregateField::Sum { name: output_name, expr })
         }
         "AVG" => {
             if args.len() != 1 {
                 return Err(sql_error("AVG() requires exactly one argument"));
             }
-            let expr = lower_project_expr(&args[0], parameters)?;
+            let expr = lower_project_expr(&args[0], parameters, ctes)?;
             Ok(AggregateField::Avg { name: output_name, expr })
         }
         other => Err(sql_error(format!("aggregate function `{other}` is not supported by YYDB MVP"))),
     }
 }
 
-/// Lower an expression inside SELECT/GROUP BY/aggregate arguments into a
-/// [`ProjectExpr`]. Currently supports plain column references only.
-fn lower_project_expr(expr: &Expression, _parameters: &[ParameterDescriptor]) -> Result<ProjectExpr> {
+/// Lower one aggregate argument into a [`ProjectExpr`].
+///
+/// A plain column reference becomes [`ProjectExpr::Scalar`] so the executor can
+/// read it straight from the row. Anything else goes through [`lower_expr`], so
+/// `SUM(score + 1)` is computed per row instead of being rejected or
+/// approximated.
+fn lower_project_expr(
+    expr: &Expression,
+    parameters: &[ParameterDescriptor],
+    ctes: &CteScope,
+) -> Result<ProjectExpr> {
     match expr {
         Expression::Identifier(identifier) => {
             // Split qualified names (`table.col`) into path components so the
@@ -531,7 +541,7 @@ fn lower_project_expr(expr: &Expression, _parameters: &[ParameterDescriptor]) ->
             let path: Vec<String> = identifier.name.split('.').map(|s| s.to_string()).collect();
             Ok(ProjectExpr::Scalar { path })
         }
-        _ => Err(sql_error("aggregate arguments support plain column references only")),
+        other => Ok(ProjectExpr::Computed(Box::new(lower_expr(other, parameters, ctes)?))),
     }
 }
 
@@ -794,11 +804,12 @@ fn negate_number(value: Value) -> Value {
 /// Lower an arbitrary SQL expression into the backend-neutral [`Expr`] IR.
 ///
 /// Primitive terminals (identifiers → columns, literals and parameter bindings
-/// → bound values) and the compound nodes [`Expression::Case`] /
-/// [`Expression::Cast`] are supported. A scalar subquery stays a nested
-/// pipeline in [`Expr::Subquery`] and is resolved at execution time. Everything
-/// else (arithmetic, function calls, `EXISTS`, `IN` …) is rejected here; callers
-/// decide where this IR is allowed — today only SELECT projection uses it.
+/// → bound values), arithmetic and comparison/logical [`Expression::Binary`]
+/// nodes, and the compound nodes [`Expression::Case`] / [`Expression::Cast`] are
+/// supported. A scalar subquery stays a nested pipeline in [`Expr::Subquery`]
+/// and is resolved at execution time. Everything else (function calls,
+/// `EXISTS`, `IN` …) is rejected here; callers decide where this IR is allowed —
+/// today SELECT projection, aggregate arguments and `RETURNING` use it.
 fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<Expr> {
     match expr {
         Expression::Identifier(identifier) => Ok(Expr::Column {
@@ -827,6 +838,11 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
         }
         Expression::Binary { left, op, right, .. } => {
             let bin_op = match op {
+                BinaryOperator::Plus => BinaryOp::Add,
+                BinaryOperator::Minus => BinaryOp::Sub,
+                BinaryOperator::Star => BinaryOp::Mul,
+                BinaryOperator::Slash => BinaryOp::Div,
+                BinaryOperator::Percent => BinaryOp::Rem,
                 BinaryOperator::Equal => BinaryOp::Eq,
                 BinaryOperator::NotEqual => BinaryOp::Ne,
                 BinaryOperator::Less => BinaryOp::Lt,

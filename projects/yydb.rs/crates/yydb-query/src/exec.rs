@@ -591,14 +591,15 @@ fn is_truthy(value: &Value) -> bool {
     }
 }
 
-/// Evaluate a binary expression (comparison or logical) for CASE WHEN
-/// predicates and nested scalar comparisons. NULL propagation follows SQL 3VL
-/// semantics for comparisons (NULL when either operand is NULL) and treats
-/// NULL as falsy for AND/OR.
+/// Evaluate a binary expression (arithmetic, comparison or logical) for CASE
+/// WHEN predicates, arithmetic projections and nested scalar comparisons.
+///
+/// NULL propagation follows SQL 3VL semantics: arithmetic and comparisons yield
+/// `NULL` when either operand is `NULL`, and AND/OR treat `NULL` as unknown.
 fn eval_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value> {
     use BinaryOp::*;
-    // AND / OR use SQL truth tables with NULL propagation.
     match op {
+        // AND / OR use SQL truth tables with NULL propagation.
         And => Ok(match (left, right) {
             (Value::Bool(false), _) | (_, Value::Bool(false)) => Value::Bool(false),
             (Value::Null, _) | (_, Value::Null) => Value::Null,
@@ -609,6 +610,7 @@ fn eval_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value> {
             (Value::Null, _) | (_, Value::Null) => Value::Null,
             _ => Value::Bool(is_truthy(left) || is_truthy(right)),
         }),
+        Add | Sub | Mul | Div | Rem => eval_arithmetic(op, left, right),
         // Comparisons return NULL when either operand is NULL.
         _ => {
             if matches!(left, Value::Null) || matches!(right, Value::Null) {
@@ -622,10 +624,117 @@ fn eval_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value> {
                 Le => cmp != std::cmp::Ordering::Greater,
                 Gt => cmp == std::cmp::Ordering::Greater,
                 Ge => cmp != std::cmp::Ordering::Less,
-                And | Or => unreachable!(),
+                And | Or | Add | Sub | Mul | Div | Rem => unreachable!(),
             };
             Ok(Value::Bool(result))
         }
+    }
+}
+
+/// Arithmetic type rule for projections and aggregate arguments.
+///
+/// * A `NULL` operand yields `NULL`, so the result never invents a number.
+/// * Two integer operands (`i64`/`u64`) stay integers: the result is
+///   [`Value::I64`] and an overflow is an error instead of a silent wrap. A
+///   `u64` operand outside the signed range is rejected for the same reason.
+/// * Any REAL operand (`f64`) promotes both sides to `f64` and the result is
+///   [`Value::F64`]. A non-finite result is an error, matching the literal rule.
+/// * Division or remainder by zero yields `NULL` for both numeric families.
+/// * Any other operand kind is an error: YYDB never coerces text or bytes into
+///   a number here.
+fn eval_arithmetic(op: BinaryOp, left: &Value, right: &Value) -> Result<Value> {
+    if matches!(left, Value::Null) || matches!(right, Value::Null) {
+        return Ok(Value::Null);
+    }
+    match (left, right) {
+        (Value::I64(a), Value::I64(b)) => integer_arithmetic(op, *a, *b),
+        (Value::I64(a), Value::U64(b)) => integer_arithmetic(op, *a, signed_u64(*b)?),
+        (Value::U64(a), Value::I64(b)) => integer_arithmetic(op, signed_u64(*a)?, *b),
+        (Value::U64(a), Value::U64(b)) => integer_arithmetic(op, signed_u64(*a)?, signed_u64(*b)?),
+        (Value::I64(a), Value::F64(b)) => real_arithmetic(op, *a as f64, *b),
+        (Value::U64(a), Value::F64(b)) => real_arithmetic(op, *a as f64, *b),
+        (Value::F64(a), Value::I64(b)) => real_arithmetic(op, *a, *b as f64),
+        (Value::F64(a), Value::U64(b)) => real_arithmetic(op, *a, *b as f64),
+        (Value::F64(a), Value::F64(b)) => real_arithmetic(op, *a, *b),
+        _ => Err(query_runtime_error(format!(
+            "arithmetic operator `{}` requires numeric operands, got `{}` and `{}`",
+            arithmetic_symbol(op),
+            left.kind(),
+            right.kind()
+        ))),
+    }
+}
+
+/// Narrow a `u64` operand into the signed range the result type uses.
+fn signed_u64(value: u64) -> Result<i64> {
+    i64::try_from(value).map_err(|_| {
+        query_runtime_error(format!("integer operand `{value}` is outside the signed 64-bit range"))
+    })
+}
+
+fn integer_arithmetic(op: BinaryOp, left: i64, right: i64) -> Result<Value> {
+    let checked = match op {
+        BinaryOp::Add => left.checked_add(right),
+        BinaryOp::Sub => left.checked_sub(right),
+        BinaryOp::Mul => left.checked_mul(right),
+        BinaryOp::Div => {
+            if right == 0 {
+                return Ok(Value::Null);
+            }
+            left.checked_div(right)
+        }
+        BinaryOp::Rem => {
+            if right == 0 {
+                return Ok(Value::Null);
+            }
+            left.checked_rem(right)
+        }
+        _ => unreachable!("integer_arithmetic only receives arithmetic operators"),
+    };
+    checked.map(Value::I64).ok_or_else(|| {
+        query_runtime_error(format!(
+            "integer arithmetic `{}` overflowed the signed 64-bit range",
+            arithmetic_symbol(op)
+        ))
+    })
+}
+
+fn real_arithmetic(op: BinaryOp, left: f64, right: f64) -> Result<Value> {
+    let result = match op {
+        BinaryOp::Add => left + right,
+        BinaryOp::Sub => left - right,
+        BinaryOp::Mul => left * right,
+        BinaryOp::Div => {
+            if right == 0.0 {
+                return Ok(Value::Null);
+            }
+            left / right
+        }
+        BinaryOp::Rem => {
+            if right == 0.0 {
+                return Ok(Value::Null);
+            }
+            left % right
+        }
+        _ => unreachable!("real_arithmetic only receives arithmetic operators"),
+    };
+    if !result.is_finite() {
+        return Err(query_runtime_error(format!(
+            "REAL arithmetic `{}` produced a non-finite result",
+            arithmetic_symbol(op)
+        )));
+    }
+    Ok(Value::F64(result))
+}
+
+fn arithmetic_symbol(op: BinaryOp) -> &'static str {
+    match op {
+        BinaryOp::Add => "+",
+        BinaryOp::Sub => "-",
+        BinaryOp::Mul => "*",
+        BinaryOp::Div => "/",
+        BinaryOp::Rem => "%",
+        _ => unreachable!("arithmetic_symbol only receives arithmetic operators"),
     }
 }
 
@@ -1174,11 +1283,13 @@ fn eval_aggregate(
         }
         AggregateField::Count { name, expr: Some(inner) } => {
             // COUNT(expr) — non-null values of the expression.
-            let count = group_rows
-                .iter()
-                .filter(|row| eval_project_expr(inner, row, contract, records, bound_values) != Value::Null)
-                .count();
-            Ok((name.clone(), Value::I64(count as i64)))
+            let mut count = 0_i64;
+            for row in group_rows {
+                if !matches!(eval_project_expr(inner, row, contract, records, bound_values)?, Value::Null) {
+                    count += 1;
+                }
+            }
+            Ok((name.clone(), Value::I64(count)))
         }
         AggregateField::CountDistinct { name, expr } => {
             // COUNT(DISTINCT expr) — distinct non-null values of the expression.
@@ -1188,7 +1299,7 @@ fn eval_aggregate(
             // represented by their Debug output.
             let mut seen: BTreeSet<String> = BTreeSet::new();
             for row in group_rows {
-                let value = eval_project_expr(expr, row, contract, records, bound_values);
+                let value = eval_project_expr(expr, row, contract, records, bound_values)?;
                 if !matches!(value, Value::Null) {
                     seen.insert(format!("{value:?}"));
                 }
@@ -1196,33 +1307,62 @@ fn eval_aggregate(
             Ok((name.clone(), Value::I64(seen.len() as i64)))
         }
         AggregateField::Sum { name, expr } => {
-            let mut sum: i64 = 0;
+            // SUM keeps the numeric family it was given: integer values
+            // accumulate exactly and yield `I64`, and the first REAL value
+            // promotes the whole sum to `F64`. A group with no numeric value is
+            // `NULL`, and a non-numeric value is an error rather than being
+            // skipped.
+            let mut integer_sum: i128 = 0;
+            let mut real_sum: f64 = 0.0;
+            let mut is_real = false;
             let mut saw_any = false;
             for row in group_rows {
-                let value = eval_project_expr(expr, row, contract, records, bound_values);
-                match value {
+                match eval_project_expr(expr, row, contract, records, bound_values)? {
                     Value::Null => {}
                     Value::I64(n) => {
-                        sum = sum.wrapping_add(n);
+                        integer_sum += i128::from(n);
+                        real_sum += n as f64;
                         saw_any = true;
                     }
                     Value::U64(n) => {
-                        // Clamp to i64 range conservatively.
-                        sum = sum.wrapping_add(n.min(i64::MAX as u64) as i64);
+                        integer_sum += i128::from(n);
+                        real_sum += n as f64;
                         saw_any = true;
                     }
-                    _ => {}
+                    Value::F64(n) => {
+                        is_real = true;
+                        real_sum += n;
+                        saw_any = true;
+                    }
+                    other => {
+                        return Err(query_runtime_error(format!(
+                            "SUM() requires numeric values, got `{}`",
+                            other.kind()
+                        )));
+                    }
                 }
             }
-            let result = if saw_any { Value::I64(sum) } else { Value::Null };
+            let result = if !saw_any {
+                Value::Null
+            }
+            else if is_real {
+                finite_real(real_sum, "SUM()")?
+            }
+            else {
+                let sum = i64::try_from(integer_sum).map_err(|_| {
+                    query_runtime_error("SUM() overflowed the signed 64-bit range")
+                })?;
+                Value::I64(sum)
+            };
             Ok((name.clone(), result))
         }
         AggregateField::Avg { name, expr } => {
+            // AVG always yields a finite `F64` (or `NULL` for an empty group)
+            // because an average is not representable as an exact integer.
             let mut sum: f64 = 0.0;
             let mut count: u64 = 0;
             for row in group_rows {
-                let value = eval_project_expr(expr, row, contract, records, bound_values);
-                match value {
+                match eval_project_expr(expr, row, contract, records, bound_values)? {
                     Value::Null => {}
                     Value::I64(n) => {
                         sum += n as f64;
@@ -1236,28 +1376,45 @@ fn eval_aggregate(
                         sum += n;
                         count += 1;
                     }
-                    _ => {}
+                    other => {
+                        return Err(query_runtime_error(format!(
+                            "AVG() requires numeric values, got `{}`",
+                            other.kind()
+                        )));
+                    }
                 }
             }
-            let result = if count > 0 { Value::F64(sum / count as f64) } else { Value::Null };
+            let result = if count > 0 { finite_real(sum / count as f64, "AVG()")? } else { Value::Null };
             Ok((name.clone(), result))
         }
     }
 }
 
+/// Reject a non-finite REAL aggregate such as an overflowing `SUM`.
+fn finite_real(value: f64, aggregate: &str) -> Result<Value> {
+    if !value.is_finite() {
+        return Err(query_runtime_error(format!("{aggregate} produced a non-finite REAL result")));
+    }
+    Ok(Value::F64(value))
+}
+
 /// Evaluate a `ProjectExpr` against a single row (used inside aggregate
 /// evaluation where we have no table context).
+///
+/// Errors are propagated instead of falling back to `NULL`: an aggregate
+/// argument that cannot be evaluated must fail the statement rather than
+/// silently drop the row from the aggregate.
 fn eval_project_expr(
     expr: &ProjectExpr,
     row: &QueryRow,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
-) -> Value {
+) -> Result<Value> {
     match expr {
-        ProjectExpr::Scalar { path } => read_path(path, row, "", contract, records),
-        ProjectExpr::Nested { path, .. } => read_path(path, row, "", contract, records),
-        ProjectExpr::Computed(inner) => eval_expr(inner, row, "", contract, records, bound_values).unwrap_or(Value::Null),
+        ProjectExpr::Scalar { path } => Ok(read_path(path, row, "", contract, records)),
+        ProjectExpr::Nested { path, .. } => Ok(read_path(path, row, "", contract, records)),
+        ProjectExpr::Computed(inner) => eval_expr(inner, row, "", contract, records, bound_values),
     }
 }
 

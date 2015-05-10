@@ -951,17 +951,236 @@ fn select_with_order_by_multiple_columns() {
     assert_eq!(ids(&outcome.rows), vec![2, 1, 3]);
 }
 
-// ─── Arithmetic expressions and expression projection ──────────────────
-// These are expected to be REJECTED by lowering and the tests confirm that.
+// ─── Arithmetic expressions in the SELECT projection ─────────────────────
+//
+// A projection may compute `+ - * / %` over columns, literals and nested
+// parentheses. Two integer operands stay integers and any REAL operand promotes
+// both sides to `f64`, mirroring the REAL comparison rule. `NULL` operands and
+// division by zero yield `NULL`, and values that a result type cannot hold are
+// errors instead of being silently wrapped or dropped.
 
 #[test]
-fn select_rejects_arithmetic_in_projection() {
-    let err = prepare_sql("SELECT account_id + 1 FROM Account").expect_err("arithmetic projection must be rejected");
+fn select_projects_column_arithmetic() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id + score AS total FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("column arithmetic");
+    assert_eq!(outcome.rows[0].get("total"), Some(&Value::I64(11)));
+    assert_eq!(outcome.rows[1].get("total"), Some(&Value::I64(32)));
+    assert_eq!(outcome.rows[2].get("total"), Some(&Value::I64(23)));
+}
+
+#[test]
+fn select_projects_arithmetic_with_operator_precedence() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT score * 2 - 1 AS bumped FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("precedence");
+    assert_eq!(outcome.rows[0].get("bumped"), Some(&Value::I64(19)));
+    assert_eq!(outcome.rows[1].get("bumped"), Some(&Value::I64(59)));
+    assert_eq!(outcome.rows[2].get("bumped"), Some(&Value::I64(39)));
+}
+
+#[test]
+fn select_projects_parenthesised_arithmetic() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT ((score + 10) * (2 + 0)) AS doubled FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("parenthesised arithmetic");
+    assert_eq!(outcome.rows[0].get("doubled"), Some(&Value::I64(40)));
+    assert_eq!(outcome.rows[1].get("doubled"), Some(&Value::I64(80)));
+    assert_eq!(outcome.rows[2].get("doubled"), Some(&Value::I64(60)));
+}
+
+#[test]
+fn select_arithmetic_promotes_to_real_when_any_operand_is_real() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // score / 4 stays integer, score / 4.0 is REAL division.
+    let outcome = execute_sql(
+        "SELECT score / 4 AS int_quotient, score / 4.0 AS real_quotient, score + 0.5 AS shifted \
+         FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("numeric promotion");
+    assert_eq!(outcome.rows[0].get("int_quotient"), Some(&Value::I64(2)));
+    assert_eq!(outcome.rows[0].get("real_quotient"), Some(&Value::F64(2.5)));
+    assert_eq!(outcome.rows[0].get("shifted"), Some(&Value::F64(10.5)));
+    assert_eq!(outcome.rows[1].get("int_quotient"), Some(&Value::I64(7)));
+    assert_eq!(outcome.rows[1].get("real_quotient"), Some(&Value::F64(7.5)));
+}
+
+#[test]
+fn select_projects_arithmetic_over_literals() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT 10 / 4 AS integer_value, 10 / 4.0 AS real_value FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("literal arithmetic");
+    assert_eq!(outcome.rows[0].get("integer_value"), Some(&Value::I64(2)));
+    assert_eq!(outcome.rows[0].get("real_value"), Some(&Value::F64(2.5)));
+}
+
+#[test]
+fn select_arithmetic_combines_with_where_and_order_by() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id, score + 1 AS bumped FROM Account WHERE active = true ORDER BY score DESC",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("arithmetic with where and order by");
+    assert_eq!(ids(&outcome.rows), vec![3, 1]);
+    assert_eq!(outcome.rows[0].get("bumped"), Some(&Value::I64(21)));
+    assert_eq!(outcome.rows[1].get("bumped"), Some(&Value::I64(11)));
+}
+
+#[test]
+fn select_aggregates_an_arithmetic_argument() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // (10 + 1) + (30 + 1) + (20 + 1) = 63.
+    let outcome = execute_sql("SELECT SUM(score + 1) AS total FROM Account", &[], &contract, &[], &mut records)
+        .expect("sum over an expression");
+    assert_eq!(outcome.rows[0].get("total"), Some(&Value::I64(63)));
+
+    let grouped = execute_sql(
+        "SELECT tenant, SUM(score * 2) AS total FROM Account GROUP BY tenant ORDER BY tenant",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("grouped sum over an expression");
+    assert_eq!(grouped.rows[0].get("total"), Some(&Value::I64(80)));
+    assert_eq!(grouped.rows[1].get("total"), Some(&Value::I64(40)));
+}
+
+#[test]
+fn select_arithmetic_propagates_a_null_operand() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET score = NULL WHERE account_id = 1", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id, score + 1 AS bumped FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("null propagation");
+    assert_eq!(outcome.rows[0].get("bumped"), Some(&Value::Null));
+    assert_eq!(outcome.rows[1].get("bumped"), Some(&Value::I64(31)));
+}
+
+#[test]
+fn select_division_by_zero_yields_null() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT score / 0 AS quotient, score % 0 AS remainder FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("division by zero");
+    for row in &outcome.rows {
+        assert_eq!(row.get("quotient"), Some(&Value::Null));
+        assert_eq!(row.get("remainder"), Some(&Value::Null));
+    }
+}
+
+#[test]
+fn select_rejects_arithmetic_over_text() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let err = execute_sql("SELECT tenant + 1 AS bumped FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("text arithmetic must reject");
     let msg = format!("{err}");
-    assert!(
-        msg.contains("projection") || msg.contains("arithmetic") || msg.contains("binary") || msg.contains("unsupported"),
-        "unexpected error: {msg}"
-    );
+    assert!(msg.contains("numeric operands"), "unexpected: {msg}");
+}
+
+#[test]
+fn select_rejects_integer_arithmetic_overflow() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let err = execute_sql(
+        "SELECT score * 9223372036854775807 AS blown FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("integer overflow must reject instead of wrapping");
+    let msg = format!("{err}");
+    assert!(msg.contains("overflowed"), "unexpected: {msg}");
+}
+
+#[test]
+fn aggregate_rejects_a_non_numeric_argument() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let err = execute_sql("SELECT SUM(email) AS total FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("SUM over text must reject");
+    assert!(format!("{err}").contains("numeric"), "unexpected: {err}");
+
+    let err = execute_sql("SELECT AVG(email) AS average FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("AVG over text must reject");
+    assert!(format!("{err}").contains("numeric"), "unexpected: {err}");
 }
 
 #[test]

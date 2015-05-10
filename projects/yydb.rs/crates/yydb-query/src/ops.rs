@@ -241,11 +241,12 @@ pub enum Expr {
         /// (`INTEGER`, `REAL`, `TEXT`, `BLOB`).
         target: String,
     },
-    /// Binary operation used for CASE WHEN predicates (`score > 20`,
-    /// `active AND score > 10`, …). Both comparison and logical operators are
-    /// here so WHEN branches can nest arbitrarily.
+    /// Binary operation used by CASE WHEN predicates (`score > 20`,
+    /// `active AND score > 10`, …) and by arithmetic projections
+    /// (`SELECT score + 1`). Comparison, logical and arithmetic operators all
+    /// live here so expressions nest arbitrarily.
     Binary {
-        /// Operator kind — comparison or logical.
+        /// Operator kind — arithmetic, comparison or logical.
         op: BinaryOp,
         /// Left operand (may itself be a Compound).
         left: Box<Expr>,
@@ -266,10 +267,21 @@ pub enum Expr {
     },
 }
 
-/// Operator for [`Expr::Binary`]. Covers the comparison and logical forms
-/// needed by CASE WHEN predicates.
+/// Operator for [`Expr::Binary`]. Covers the arithmetic forms a projection may
+/// compute, the comparison forms CASE WHEN predicates need, and the logical
+/// connectives that join those predicates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
+    /// Addition (`+`).
+    Add,
+    /// Subtraction (`-`).
+    Sub,
+    /// Multiplication (`*`).
+    Mul,
+    /// Division (`/`).
+    Div,
+    /// Remainder (`%`).
+    Rem,
     /// Equality (`=`, `==`).
     Eq,
     /// Inequality (`<>`, `!=`).
