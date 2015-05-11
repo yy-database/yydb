@@ -433,6 +433,12 @@ fn validate_returning_expr(entry: &ResolvedTypeContract, table: &str, expr: &Exp
             validate_returning_expr(entry, table, right)
         }
         Expr::Not(inner) => validate_returning_expr(entry, table, inner),
+        Expr::Function { args, .. } => {
+            for arg in args {
+                validate_returning_expr(entry, table, arg)?;
+            }
+            Ok(())
+        }
         // The subquery carries its own row sources, which lowering already
         // resolved against their own scope.
         Expr::Subquery { .. } => Ok(()),

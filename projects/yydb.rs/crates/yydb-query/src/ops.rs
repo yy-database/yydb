@@ -255,6 +255,13 @@ pub enum Expr {
     },
     /// Logical NOT — wraps a predicate expression.
     Not(Box<Expr>),
+    /// Scalar function call over the current row (`LOWER(email)`).
+    Function {
+        /// Function to apply.
+        function: ScalarFunction,
+        /// Argument expressions, in call order. Arity is checked at lowering.
+        args: Vec<Expr>,
+    },
     /// Scalar subquery `(SELECT ...)` used as a value.
     ///
     /// The subquery is uncorrelated, so execution resolves it once per
@@ -298,6 +305,28 @@ pub enum BinaryOp {
     And,
     /// Logical OR.
     Or,
+}
+
+/// Scalar functions the query executor evaluates row by row.
+///
+/// Every function propagates `NULL` and accepts text arguments only, so a
+/// non-text argument is an error rather than an implicit conversion. Both rules
+/// are enforced by the executor because lowering has no column types to check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScalarFunction {
+    /// `LOWER(text)`: lower-case the whole string.
+    Lower,
+    /// `UPPER(text)`: upper-case the whole string.
+    Upper,
+    /// `LENGTH(text)`: number of Unicode characters, as [`Value::I64`].
+    Length,
+    /// `SUBSTR(text, start[, length])`: 1-based character slice, where a
+    /// negative `start` counts from the end of the string.
+    Substr,
+    /// `TRIM(text)`: strip leading and trailing whitespace.
+    Trim,
+    /// `CONCAT(a, b, …)`: concatenate two or more strings.
+    Concat,
 }
 
 /// Set operator combining two row pipelines.

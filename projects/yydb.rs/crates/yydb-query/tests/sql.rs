@@ -1183,6 +1183,239 @@ fn aggregate_rejects_a_non_numeric_argument() {
     assert!(format!("{err}").contains("numeric"), "unexpected: {err}");
 }
 
+// ─── Scalar string functions ─────────────────────────────────────────────
+//
+// `LOWER`, `UPPER`, `LENGTH`, `SUBSTR`, `TRIM` and `CONCAT` evaluate per row.
+// Every one propagates `NULL`, accepts text arguments only (integer positions
+// for `SUBSTR`), and counts Unicode characters rather than bytes. Wrong
+// argument counts are rejected at prepare time, wrong argument types at
+// execution time.
+
+#[test]
+fn select_projects_lower_and_upper() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT LOWER('Straße') AS lower_value, UPPER('straße') AS upper_value FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("case functions");
+    assert_eq!(outcome.rows[0].get("lower_value"), Some(&Value::Text("straße".into())));
+    assert_eq!(outcome.rows[0].get("upper_value"), Some(&Value::Text("STRASSE".into())));
+}
+
+#[test]
+fn select_length_counts_unicode_characters() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT LENGTH('héllo') AS accented, LENGTH(email) AS email_length FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("length");
+    assert_eq!(outcome.rows[0].get("accented"), Some(&Value::I64(5)));
+    assert_eq!(outcome.rows[0].get("email_length"), Some(&Value::I64(16)));
+}
+
+#[test]
+fn select_substr_uses_one_based_character_positions() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT SUBSTR('abcdef', 2) AS tail, SUBSTR('abcdef', 2, 3) AS middle, \
+         SUBSTR('abcdef', -2) AS last_two, SUBSTR('abcdef', -2, 1) AS last_one \
+         FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("substr");
+    assert_eq!(outcome.rows[0].get("tail"), Some(&Value::Text("bcdef".into())));
+    assert_eq!(outcome.rows[0].get("middle"), Some(&Value::Text("bcd".into())));
+    assert_eq!(outcome.rows[0].get("last_two"), Some(&Value::Text("ef".into())));
+    assert_eq!(outcome.rows[0].get("last_one"), Some(&Value::Text("e".into())));
+}
+
+#[test]
+fn substr_outside_the_string_yields_empty_text() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome =
+        execute_sql("SELECT SUBSTR('abc', 5) AS past_end FROM Account WHERE account_id = 1", &[], &contract, &[], &mut records)
+            .expect("substr past the end");
+    assert_eq!(outcome.rows[0].get("past_end"), Some(&Value::Text(String::new())));
+}
+
+#[test]
+fn select_projects_trim_and_concat() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT TRIM('  padded  ') AS trimmed, CONCAT(tenant, ':', email) AS joined \
+         FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("trim and concat");
+    assert_eq!(outcome.rows[0].get("trimmed"), Some(&Value::Text("padded".into())));
+    assert_eq!(outcome.rows[0].get("joined"), Some(&Value::Text("t1:ada@example.test".into())));
+}
+
+#[test]
+fn scalar_functions_compose_with_aggregates_and_ordering() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // 16 + 18 + 18 characters across the seeded email addresses. The length is
+    // materialised by the derived table because `oak-sql` drops a nested
+    // `FunctionCall` from the argument list of an outer call, so
+    // `SUM(LENGTH(email))` cannot reach the lowering as two calls.
+    let outcome = execute_sql(
+        "SELECT SUM(lengths.n) AS total FROM (SELECT LENGTH(email) AS n FROM Account) AS lengths",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("sum of lengths");
+    assert_eq!(outcome.rows[0].get("total"), Some(&Value::I64(52)));
+
+    let rows = execute_sql(
+        "SELECT UPPER(tenant) AS tenant_upper FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("function projection with ordering");
+    assert_eq!(rows.rows[0].get("tenant_upper"), Some(&Value::Text("T1".into())));
+    assert_eq!(rows.rows[2].get("tenant_upper"), Some(&Value::Text("T2".into())));
+}
+
+#[test]
+fn returning_supports_scalar_functions() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) \
+         VALUES (4, 'mixed@Example.Test', 't3', 5, true) RETURNING UPPER(email) AS uppercased",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("returning a function");
+    assert_eq!(outcome.rows[0].get("uppercased"), Some(&Value::Text("MIXED@EXAMPLE.TEST".into())));
+}
+
+#[test]
+fn scalar_functions_propagate_null_arguments() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 1", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT LOWER(NULL) AS l, UPPER(NULL) AS u, LENGTH(NULL) AS n, SUBSTR(NULL, 1) AS s, \
+         TRIM(NULL) AS t, CONCAT('a', NULL) AS c, CONCAT(tenant, '!') AS d FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("null propagation");
+    for column in ["l", "u", "n", "s", "t", "c", "d"] {
+        assert_eq!(outcome.rows[0].get(column), Some(&Value::Null), "`{column}` must be NULL");
+    }
+}
+
+#[test]
+fn scalar_functions_reject_non_text_arguments() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let err = execute_sql("SELECT LOWER(account_id) AS v FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("LOWER over an integer must reject");
+    assert!(format!("{err}").contains("text arguments"), "unexpected: {err}");
+
+    let err = execute_sql("SELECT CONCAT(tenant, account_id) AS v FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("CONCAT over an integer must reject");
+    assert!(format!("{err}").contains("text arguments"), "unexpected: {err}");
+
+    let err = execute_sql("SELECT SUBSTR(tenant, tenant) AS v FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("SUBSTR position must be an integer");
+    assert!(format!("{err}").contains("integer position"), "unexpected: {err}");
+}
+
+#[test]
+fn scalar_functions_reject_wrong_argument_counts_at_prepare_time() {
+    for (sql, expected) in [
+        ("SELECT LOWER() AS v FROM Account", "exactly one argument"),
+        ("SELECT LOWER(email, email) AS v FROM Account", "exactly one argument"),
+        ("SELECT SUBSTR(email) AS v FROM Account", "two or three arguments"),
+        ("SELECT CONCAT(email) AS v FROM Account", "two or more arguments"),
+    ] {
+        let err = prepare_sql(sql).expect_err("wrong arity must reject");
+        let msg = format!("{err}");
+        assert!(msg.contains(expected), "`{sql}` expected `{expected}`, got: {msg}");
+    }
+}
+
+#[test]
+fn substr_rejects_ambiguous_positions() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let err = execute_sql("SELECT SUBSTR('abc', 0) AS v FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("start 0 must reject");
+    assert!(format!("{err}").contains("must not be 0"), "unexpected: {err}");
+
+    let err = execute_sql("SELECT SUBSTR('abc', 1, -1) AS v FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("negative length must reject");
+    assert!(format!("{err}").contains("must not be negative"), "unexpected: {err}");
+}
+
+#[test]
+fn unknown_scalar_function_is_rejected() {
+    let err = prepare_sql("SELECT REVERSE(email) AS v FROM Account").expect_err("unknown function must reject");
+    assert!(format!("{err}").contains("`REVERSE`"), "unexpected: {err}");
+}
+
+#[test]
+fn nested_function_calls_inside_an_aggregate_are_rejected() {
+    // `oak-sql` only keeps `Identifier` and `Expression` children of a call, so a
+    // nested `FunctionCall` never reaches the lowering and `SUM(LENGTH(email))`
+    // looks like `SUM()`. Rejecting the empty argument list keeps the statement
+    // from executing as if the inner call were absent.
+    let err = prepare_sql("SELECT SUM(LENGTH(email)) AS total FROM Account").expect_err("nested call must reject");
+    let msg = format!("{err}");
+    assert!(msg.contains("one argument"), "unexpected: {msg}");
+}
+
 #[test]
 fn select_rejects_star_mixed_with_projected_columns() {
     let err = prepare_sql("SELECT *, email FROM Account").expect_err("* cannot mix with other columns");

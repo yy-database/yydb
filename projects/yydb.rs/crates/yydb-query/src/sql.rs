@@ -17,8 +17,8 @@ use yydb_types::{Error, Result, Value};
 use super::{
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, Expr, JoinKind, Pred, ProjectExpr,
-        ProjectField, QueryOp, ReturningProjection, SetOpKind, SortKey, WriteAssignment, WriteBinOp, WriteExpr,
-        WriteField, WriteOp,
+        ProjectField, QueryOp, ReturningProjection, ScalarFunction, SetOpKind, SortKey, WriteAssignment, WriteBinOp,
+        WriteExpr, WriteField, WriteOp,
     },
     params::{ParameterDescriptor, PARAM_PREFIX, name_to_slot},
 };
@@ -430,11 +430,12 @@ fn lower_aggregate(
     // Walk SELECT items for aggregate function calls — also capture alias.
     let mut aggregates: Vec<AggregateField> = Vec::new();
     for item in &select.items {
-        if let SelectItem::Expression { expr, alias, .. } = item {
-            if let Expression::FunctionCall { name, args, .. } = expr {
-                let agg = lower_aggregate_function(name, args, alias, parameters, quantifier_is_distinct, ctes)?;
-                aggregates.push(agg);
-            }
+        if let SelectItem::Expression { expr, alias, .. } = item
+            && let Expression::FunctionCall { name, args, .. } = expr
+            && is_aggregate_function(name)
+        {
+            let agg = lower_aggregate_function(name, args, alias, parameters, quantifier_is_distinct, ctes)?;
+            aggregates.push(agg);
         }
     }
 
@@ -581,8 +582,12 @@ fn lower_projection(
         else {
             return Err(sql_error("`*` cannot be combined with other select items"));
         };
-        // Skip aggregate functions — they are consumed by the Aggregate op.
-        if matches!(expr, Expression::FunctionCall { .. }) {
+        // Skip aggregate functions — they are consumed by the Aggregate op. A
+        // scalar function (`LOWER(email)`, `LENGTH(email)` …) is projected like
+        // any other computed expression.
+        if let Expression::FunctionCall { name, .. } = expr
+            && is_aggregate_function(name)
+        {
             continue;
         }
         let name = output_name(expr, alias);
@@ -863,6 +868,7 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
             Ok(Expr::Not(Box::new(lower_expr(expr, parameters, ctes)?)))
         }
         Expression::Subquery { query, .. } => Ok(Expr::Subquery { ops: lower_scalar_subquery(query, parameters, ctes)? }),
+        Expression::FunctionCall { name, args, .. } => lower_scalar_function(name, args, parameters, ctes),
         Expression::IsNull { .. }
         | Expression::IsTruth { .. }
         | Expression::InList { .. }
@@ -870,7 +876,6 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
         | Expression::InSubquery { .. }
         | Expression::Exists { .. }
         | Expression::Unary { op: _, expr: _, .. }
-        | Expression::FunctionCall { .. }
         | Expression::Wildcard { .. }
         | Expression::Vector { .. }
         | Expression::Error { .. } => Err(sql_error(format!(
@@ -883,7 +888,6 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
                 Expression::InSubquery { .. } => "IN (subquery)",
                 Expression::Exists { .. } => "EXISTS (subquery)",
                 Expression::Unary { .. } => "unary",
-                Expression::FunctionCall { .. } => "function call",
                 Expression::Wildcard { .. } => "*",
                 Expression::Vector { .. } => "vector",
                 Expression::Error { .. } => "error node",
@@ -891,6 +895,38 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
             }
         ))),
     }
+}
+
+/// Lower one scalar function call into [`Expr::Function`].
+///
+/// Argument counts are checked here, at plan time, so a malformed call is
+/// rejected while preparing instead of failing on the first row. `NULL`
+/// propagation and argument types are execution concerns because lowering has
+/// no column types.
+fn lower_scalar_function(
+    name: &Identifier,
+    args: &[Expression],
+    parameters: &[ParameterDescriptor],
+    ctes: &CteScope,
+) -> Result<Expr> {
+    let fn_name = name.name.to_ascii_uppercase();
+    let (function, arity_ok, expected) = match fn_name.as_str() {
+        "LOWER" => (ScalarFunction::Lower, args.len() == 1, "exactly one argument"),
+        "UPPER" => (ScalarFunction::Upper, args.len() == 1, "exactly one argument"),
+        "LENGTH" => (ScalarFunction::Length, args.len() == 1, "exactly one argument"),
+        "TRIM" => (ScalarFunction::Trim, args.len() == 1, "exactly one argument"),
+        "SUBSTR" => (ScalarFunction::Substr, args.len() == 2 || args.len() == 3, "two or three arguments"),
+        "CONCAT" => (ScalarFunction::Concat, args.len() >= 2, "two or more arguments"),
+        other => return Err(sql_error(format!("scalar function `{other}` is not supported by YYDB"))),
+    };
+    if !arity_ok {
+        return Err(sql_error(format!("`{fn_name}` requires {expected}, got {}", args.len())));
+    }
+    let mut lowered = Vec::with_capacity(args.len());
+    for arg in args {
+        lowered.push(lower_expr(arg, parameters, ctes)?);
+    }
+    Ok(Expr::Function { function, args: lowered })
 }
 
 /// Lower a `(SELECT ...)` used as a value.
@@ -1003,7 +1039,9 @@ fn lower_returning(
     if clause.items.is_empty() {
         return Err(sql_error("RETURNING requires at least one item"));
     }
-    if clause.items.iter().any(|item| matches!(item, SelectItem::Expression { expr: Expression::FunctionCall { .. }, .. })) {
+    if clause.items.iter().any(|item| {
+        matches!(item, SelectItem::Expression { expr: Expression::FunctionCall { name, .. }, .. } if is_aggregate_function(name))
+    }) {
         return Err(sql_error(
             "RETURNING supports columns and scalar expressions: aggregate functions are not supported",
         ));
@@ -1173,7 +1211,11 @@ fn lower_insert_select(
     if matches!(select.quantifier, Some(oak_sql::ast::SelectQuantifier::Distinct { .. })) {
         return Err(sql_error("INSERT ... SELECT source must be a plain row projection: DISTINCT is not supported yet"));
     }
-    if select.items.iter().any(|item| matches!(item, SelectItem::Expression { expr: Expression::FunctionCall { .. }, .. })) {
+    if select
+        .items
+        .iter()
+        .any(|item| matches!(item, SelectItem::Expression { expr: Expression::FunctionCall { name, .. }, .. } if is_aggregate_function(name)))
+    {
         return Err(sql_error("INSERT ... SELECT source must be a plain row projection: aggregate functions are not supported yet"));
     }
 
@@ -1197,10 +1239,20 @@ fn output_name(expr: &Expression, alias: &Option<Identifier>) -> String {
             Expression::Identifier(ident) => ident.name.to_string(),
             Expression::Case { .. } => "case".to_string(),
             Expression::Cast { .. } => "cast".to_string(),
+            Expression::FunctionCall { name, .. } => name.name.to_ascii_lowercase(),
             _ => "expr".to_string(),
         },
         |alias| alias.name.to_string(),
     )
+}
+
+/// Whether a function call is one of the aggregates the [`QueryOp::Aggregate`]
+/// lowering consumes.
+///
+/// Every other call is a scalar function, which flows through [`lower_expr`]
+/// into the projection or aggregate argument instead.
+fn is_aggregate_function(name: &Identifier) -> bool {
+    matches!(name.name.to_ascii_uppercase().as_str(), "COUNT" | "SUM" | "AVG")
 }
 
 /// Output column names of a SELECT list, in projection order.

@@ -10,7 +10,7 @@ use super::{
     lower,
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow,
-        SetOpKind,
+        ScalarFunction, SetOpKind,
     },
     resolve, store,
 };
@@ -489,6 +489,9 @@ pub(crate) fn eval_expr(
             let val = eval_expr(inner, row, table, contract, records, bound_values)?;
             Ok(Value::Bool(!is_truthy(&val)))
         }
+        Expr::Function { function, args } => {
+            eval_function(*function, args, row, table, contract, records, bound_values)
+        }
         Expr::Subquery { ops } => scalar_subquery_value(ops, contract, records, bound_values),
     }
 }
@@ -544,6 +547,13 @@ fn resolve_scalar_subqueries(
             Expr::Binary { op: *op, left: Box::new(resolve(left)?), right: Box::new(resolve(right)?) }
         }
         Expr::Not(inner) => Expr::Not(Box::new(resolve(inner)?)),
+        Expr::Function { function, args } => {
+            let mut resolved = Vec::with_capacity(args.len());
+            for arg in args {
+                resolved.push(resolve(arg)?);
+            }
+            Expr::Function { function: *function, args: resolved }
+        }
         other => other.clone(),
     })
 }
@@ -735,6 +745,107 @@ fn arithmetic_symbol(op: BinaryOp) -> &'static str {
         BinaryOp::Div => "/",
         BinaryOp::Rem => "%",
         _ => unreachable!("arithmetic_symbol only receives arithmetic operators"),
+    }
+}
+
+/// Evaluate one scalar function call.
+///
+/// Every function propagates `NULL`: a `NULL` argument, including a `NULL`
+/// inside `CONCAT`, makes the whole result `NULL`. Arguments must be text (or
+/// integer positions for `SUBSTR`) — any other kind is an error rather than an
+/// implicit conversion.
+fn eval_function(
+    function: ScalarFunction,
+    args: &[Expr],
+    row: &QueryRow,
+    table: &str,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Value> {
+    let mut values = Vec::with_capacity(args.len());
+    for arg in args {
+        values.push(eval_expr(arg, row, table, contract, records, bound_values)?);
+    }
+    if values.iter().any(|value| matches!(value, Value::Null)) {
+        return Ok(Value::Null);
+    }
+    Ok(match function {
+        ScalarFunction::Lower => Value::Text(text_argument(function, &values[0])?.to_lowercase()),
+        ScalarFunction::Upper => Value::Text(text_argument(function, &values[0])?.to_uppercase()),
+        ScalarFunction::Trim => Value::Text(text_argument(function, &values[0])?.trim().to_string()),
+        ScalarFunction::Length => Value::I64(text_argument(function, &values[0])?.chars().count() as i64),
+        ScalarFunction::Substr => substr(&values)?,
+        ScalarFunction::Concat => {
+            let mut joined = String::new();
+            for value in &values {
+                joined.push_str(text_argument(function, value)?);
+            }
+            Value::Text(joined)
+        }
+    })
+}
+
+fn text_argument(function: ScalarFunction, value: &Value) -> Result<&str> {
+    match value {
+        Value::Text(text) => Ok(text.as_str()),
+        other => Err(query_runtime_error(format!(
+            "`{}()` requires text arguments, got `{}`",
+            function_name(function),
+            other.kind()
+        ))),
+    }
+}
+
+fn integer_argument(function: ScalarFunction, value: &Value) -> Result<i64> {
+    match value {
+        Value::I64(number) => Ok(*number),
+        Value::U64(number) => signed_u64(*number),
+        other => Err(query_runtime_error(format!(
+            "`{}()` requires integer position arguments, got `{}`",
+            function_name(function),
+            other.kind()
+        ))),
+    }
+}
+
+/// `SUBSTR(text, start[, length])` over Unicode characters.
+///
+/// `start` is 1-based, and a negative `start` counts from the end (`-1` is the
+/// last character). Zero has no unambiguous meaning and is rejected instead of
+/// guessing, as is a negative `length`. A slice that falls outside the string
+/// yields an empty string.
+fn substr(args: &[Value]) -> Result<Value> {
+    let text = text_argument(ScalarFunction::Substr, &args[0])?;
+    let start = integer_argument(ScalarFunction::Substr, &args[1])?;
+    if start == 0 {
+        return Err(query_runtime_error(
+            "`SUBSTR` start position must not be 0: positions are 1-based and negative positions count from the end",
+        ));
+    }
+    let length = args.get(2).map(|value| integer_argument(ScalarFunction::Substr, value)).transpose()?;
+    if let Some(length) = length
+        && length < 0
+    {
+        return Err(query_runtime_error("`SUBSTR` length must not be negative"));
+    }
+    let count = text.chars().count() as i64;
+    let begin = if start > 0 { start - 1 } else { count + start }.clamp(0, count);
+    let end = match length {
+        Some(length) => (begin + length).clamp(begin, count),
+        None => count,
+    };
+    Ok(Value::Text(text.chars().skip(begin as usize).take((end - begin) as usize).collect()))
+}
+
+fn function_name(function: ScalarFunction) -> &'static str {
+    match function {
+        ScalarFunction::Lower => "LOWER",
+        ScalarFunction::Upper => "UPPER",
+        ScalarFunction::Length => "LENGTH",
+        ScalarFunction::Substr => "SUBSTR",
+        ScalarFunction::Trim => "TRIM",
+        ScalarFunction::Concat => "CONCAT",
     }
 }
 
