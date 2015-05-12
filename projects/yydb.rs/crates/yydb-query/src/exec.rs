@@ -751,8 +751,9 @@ fn arithmetic_symbol(op: BinaryOp) -> &'static str {
 /// Evaluate one scalar function call.
 ///
 /// Every function propagates `NULL`: a `NULL` argument, including a `NULL`
-/// inside `CONCAT`, makes the whole result `NULL`. Arguments must be text (or
-/// integer positions for `SUBSTR`) — any other kind is an error rather than an
+/// inside `CONCAT`, makes the whole result `NULL`. String functions require text
+/// arguments (or integer positions for `SUBSTR`) and the date part extractors
+/// require a `date` or `datetime` — any other kind is an error rather than an
 /// implicit conversion.
 fn eval_function(
     function: ScalarFunction,
@@ -783,6 +784,36 @@ fn eval_function(
             }
             Value::Text(joined)
         }
+        ScalarFunction::Year | ScalarFunction::Month | ScalarFunction::Day => {
+            Value::I64(date_part(function, &values[0])? as i64)
+        }
+    })
+}
+
+/// Extract one calendar part from a `date` or `datetime` value.
+///
+/// A `datetime` contributes its UTC calendar date exactly as stored: no timezone
+/// is applied, because the value carries none. Anything else — text, `time`,
+/// numbers — is rejected rather than parsed with an assumed format.
+fn date_part(function: ScalarFunction, value: &Value) -> Result<i32> {
+    let (year, month, day) = match value {
+        Value::Date(date) => date.to_ymd(),
+        Value::Timestamp(timestamp) => {
+            let (date, _) = timestamp.to_parts();
+            date.to_ymd()
+        }
+        other => {
+            return Err(query_runtime_error(format!(
+                "`{}()` requires a `date` or `datetime` argument, got `{}`",
+                function_name(function),
+                other.kind()
+            )));
+        }
+    };
+    Ok(match function {
+        ScalarFunction::Year => year,
+        ScalarFunction::Month => month as i32,
+        _ => day as i32,
     })
 }
 
@@ -846,6 +877,9 @@ fn function_name(function: ScalarFunction) -> &'static str {
         ScalarFunction::Substr => "SUBSTR",
         ScalarFunction::Trim => "TRIM",
         ScalarFunction::Concat => "CONCAT",
+        ScalarFunction::Year => "YEAR",
+        ScalarFunction::Month => "MONTH",
+        ScalarFunction::Day => "DAY",
     }
 }
 

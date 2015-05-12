@@ -309,9 +309,12 @@ pub enum BinaryOp {
 
 /// Scalar functions the query executor evaluates row by row.
 ///
-/// Every function propagates `NULL` and accepts text arguments only, so a
-/// non-text argument is an error rather than an implicit conversion. Both rules
-/// are enforced by the executor because lowering has no column types to check.
+/// Every function propagates `NULL`, so a `NULL` argument makes the whole result
+/// `NULL`. Argument kinds are checked by the executor because lowering has no
+/// column types: the string functions accept text only (and integer positions
+/// for [`ScalarFunction::Substr`]), while the date part extractors accept `date`
+/// and `datetime` only. Any other kind is an error rather than an implicit
+/// conversion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarFunction {
     /// `LOWER(text)`: lower-case the whole string.
@@ -327,6 +330,12 @@ pub enum ScalarFunction {
     Trim,
     /// `CONCAT(a, b, …)`: concatenate two or more strings.
     Concat,
+    /// `YEAR(date_or_datetime)`: calendar year, as [`Value::I64`].
+    Year,
+    /// `MONTH(date_or_datetime)`: calendar month (`1`–`12`), as [`Value::I64`].
+    Month,
+    /// `DAY(date_or_datetime)`: day of the month (`1`–`31`), as [`Value::I64`].
+    Day,
 }
 
 /// Set operator combining two row pipelines.

@@ -1416,6 +1416,104 @@ fn nested_function_calls_inside_an_aggregate_are_rejected() {
     assert!(msg.contains("one argument"), "unexpected: {msg}");
 }
 
+// ─── Date part extraction ──────────────────────────────────────────────
+
+const DATE_SCHEMA: &str = r#"
+table Visit {
+    @@visit_id: i64,
+    happened_on: date,
+    created_at: datetime,
+    at_time: time,
+}
+"#;
+
+fn date_contract() -> ResolvedContract {
+    resolved_contract_from_document(DATE_SCHEMA).expect("visit schema resolves")
+}
+
+fn seed_visits(contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>) {
+    exec(
+        "INSERT INTO Visit (visit_id, happened_on, created_at, at_time) VALUES \
+         (1, '2024-02-29', '2023-12-31T23:59:58Z', '12:00:00'), \
+         (2, '1999-12-31', '2024-06-01T00:00:00Z', '23:59:59')",
+        &[],
+        contract,
+        records,
+    );
+}
+
+#[test]
+fn date_parts_read_the_calendar_date_of_date_and_datetime_columns() {
+    let contract = date_contract();
+    let mut records = BTreeMap::new();
+    seed_visits(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT YEAR(happened_on) AS y, MONTH(happened_on) AS m, DAY(happened_on) AS d, \
+         YEAR(created_at) AS cy, MONTH(created_at) AS cm, DAY(created_at) AS cd \
+         FROM Visit ORDER BY visit_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("date parts");
+    assert_eq!(outcome.rows[0].get("y"), Some(&Value::I64(2024)));
+    assert_eq!(outcome.rows[0].get("m"), Some(&Value::I64(2)));
+    assert_eq!(outcome.rows[0].get("d"), Some(&Value::I64(29)));
+    // A `datetime` contributes the stored UTC calendar date, not a shifted one.
+    assert_eq!(outcome.rows[0].get("cy"), Some(&Value::I64(2023)));
+    assert_eq!(outcome.rows[0].get("cm"), Some(&Value::I64(12)));
+    assert_eq!(outcome.rows[0].get("cd"), Some(&Value::I64(31)));
+    assert_eq!(outcome.rows[1].get("y"), Some(&Value::I64(1999)));
+    assert_eq!(outcome.rows[1].get("m"), Some(&Value::I64(12)));
+    assert_eq!(outcome.rows[1].get("d"), Some(&Value::I64(31)));
+    assert_eq!(outcome.rows[1].get("cy"), Some(&Value::I64(2024)));
+}
+
+#[test]
+fn date_parts_propagate_null_and_reject_non_temporal_arguments() {
+    let contract = date_contract();
+    let mut records = BTreeMap::new();
+    seed_visits(&contract, &mut records);
+    exec("UPDATE Visit SET happened_on = NULL WHERE visit_id = 1", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT YEAR(happened_on) AS y, MONTH(happened_on) AS m, DAY(happened_on) AS d \
+         FROM Visit WHERE visit_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("null propagation");
+    for column in ["y", "m", "d"] {
+        assert_eq!(outcome.rows[0].get(column), Some(&Value::Null), "`{column}` must be NULL");
+    }
+
+    // A `time` column carries no calendar date, and text is never parsed with an
+    // assumed format.
+    for sql in ["SELECT YEAR(at_time) AS v FROM Visit", "SELECT MONTH('2024-01-31') AS v FROM Visit", "SELECT DAY(visit_id) AS v FROM Visit"]
+    {
+        let err = execute_sql(sql, &[], &contract, &[], &mut records).expect_err("non-temporal argument must reject");
+        let message = format!("{err}");
+        assert!(message.contains("`date` or `datetime`"), "`{sql}` unexpected: {message}");
+    }
+}
+
+#[test]
+fn date_functions_reject_wrong_argument_counts_at_prepare_time() {
+    for (sql, expected) in [
+        ("SELECT YEAR() AS v FROM Visit", "exactly one argument"),
+        ("SELECT MONTH(happened_on, happened_on) AS v FROM Visit", "exactly one argument"),
+        ("SELECT DAY() AS v FROM Visit", "exactly one argument"),
+    ] {
+        let err = prepare_sql(sql).expect_err("wrong arity must reject");
+        let message = format!("{err}");
+        assert!(message.contains(expected), "`{sql}` expected `{expected}`, got: {message}");
+    }
+}
+
 #[test]
 fn select_rejects_star_mixed_with_projected_columns() {
     let err = prepare_sql("SELECT *, email FROM Account").expect_err("* cannot mix with other columns");

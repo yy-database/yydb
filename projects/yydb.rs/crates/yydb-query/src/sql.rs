@@ -902,7 +902,10 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
 /// Argument counts are checked here, at plan time, so a malformed call is
 /// rejected while preparing instead of failing on the first row. `NULL`
 /// propagation and argument types are execution concerns because lowering has
-/// no column types.
+/// no column types. The accepted set is the text functions (`LOWER`, `UPPER`,
+/// `LENGTH`, `SUBSTR`, `TRIM`, `CONCAT`) and the date part extractors (`YEAR`,
+/// `MONTH`, `DAY`), whose argument must be a `date` or `datetime` column rather
+/// than text that the executor would have to guess a format for.
 fn lower_scalar_function(
     name: &Identifier,
     args: &[Expression],
@@ -917,6 +920,9 @@ fn lower_scalar_function(
         "TRIM" => (ScalarFunction::Trim, args.len() == 1, "exactly one argument"),
         "SUBSTR" => (ScalarFunction::Substr, args.len() == 2 || args.len() == 3, "two or three arguments"),
         "CONCAT" => (ScalarFunction::Concat, args.len() >= 2, "two or more arguments"),
+        "YEAR" => (ScalarFunction::Year, args.len() == 1, "exactly one argument"),
+        "MONTH" => (ScalarFunction::Month, args.len() == 1, "exactly one argument"),
+        "DAY" => (ScalarFunction::Day, args.len() == 1, "exactly one argument"),
         other => return Err(sql_error(format!("scalar function `{other}` is not supported by YYDB"))),
     };
     if !arity_ok {
