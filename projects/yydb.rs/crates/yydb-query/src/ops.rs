@@ -451,6 +451,94 @@ impl AggregateField {
     }
 }
 
+/// Window function one [`WindowField`] computes.
+///
+/// The ranking functions ignore the frame; the aggregates evaluate it, so they
+/// follow the same type rules as the plain [`AggregateField`] path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFunction {
+    /// `ROW_NUMBER()`: 1-based position inside the ordered partition.
+    RowNumber,
+    /// `RANK()`: 1-based position where peers share a rank and leave a gap.
+    Rank,
+    /// `DENSE_RANK()`: 1-based peer group number with no gaps.
+    DenseRank,
+    /// `SUM(expr)` over the frame.
+    Sum,
+    /// `COUNT(*)` or `COUNT(expr)` over the frame.
+    Count,
+    /// `AVG(expr)` over the frame. Always a [`Value::F64`] outside the empty case.
+    Avg,
+    /// `MIN(expr)` over the frame.
+    Min,
+    /// `MAX(expr)` over the frame.
+    Max,
+}
+
+impl WindowFunction {
+    /// Stable upper-case spelling used in diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RowNumber => "ROW_NUMBER",
+            Self::Rank => "RANK",
+            Self::DenseRank => "DENSE_RANK",
+            Self::Sum => "SUM",
+            Self::Count => "COUNT",
+            Self::Avg => "AVG",
+            Self::Min => "MIN",
+            Self::Max => "MAX",
+        }
+    }
+
+    /// Whether the function reads a value expression from each row.
+    ///
+    /// The ranking functions do not, and neither does `COUNT(*)`.
+    pub fn reads_argument(self) -> bool {
+        !matches!(self, Self::RowNumber | Self::Rank | Self::DenseRank)
+    }
+}
+
+/// One `ORDER BY` key of a window specification.
+///
+/// The comparison and the `NULL` placement are the shared ones used by
+/// [`QueryOp::Sort`], so a window never orders values by its own rule.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowOrderKey {
+    /// Value expression read from the current row.
+    pub expr: ProjectExpr,
+    /// Whether the order is ascending.
+    pub ascending: bool,
+}
+
+/// Partitioning and ordering one window function is evaluated over.
+///
+/// The frame is not modelled yet: every aggregate window uses the SQL default
+/// frame, which the executor derives from `order_by` alone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowSpec {
+    /// `PARTITION BY` value expressions; empty means one single partition.
+    pub partition_by: Vec<ProjectExpr>,
+    /// `ORDER BY` keys; empty means every partition row is a peer.
+    pub order_by: Vec<WindowOrderKey>,
+}
+
+/// One window computation over the current rows.
+///
+/// Execution appends the value as a new column named `name` and keeps the row
+/// order unchanged, so a following [`QueryOp::Project`] renames columns only.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowField {
+    /// Output column name (from SELECT alias, or the lower-case function name).
+    pub name: String,
+    /// Function to compute.
+    pub function: WindowFunction,
+    /// Value expression per row. `None` only for the ranking functions and
+    /// `COUNT(*)`.
+    pub argument: Option<ProjectExpr>,
+    /// Window the function is evaluated over.
+    pub spec: WindowSpec,
+}
+
 /// Closed physical op set for read pipelines.
 #[derive(Debug, Clone, PartialEq)]
 pub enum QueryOp {
@@ -528,6 +616,15 @@ pub enum QueryOp {
         group_keys: Vec<ProjectField>,
         /// Aggregate function outputs, in SELECT order.
         aggregates: Vec<AggregateField>,
+    },
+    /// Compute window values over the current rows.
+    ///
+    /// The rows keep their order and gain one column per field, so the operator
+    /// never reorders a result. Each field is evaluated over its own partition
+    /// and frame, and the ranking functions ignore the frame entirely.
+    Window {
+        /// Window computations, in SELECT order.
+        fields: Vec<WindowField>,
     },
     /// Replace each row with the projected column set.
     Project {

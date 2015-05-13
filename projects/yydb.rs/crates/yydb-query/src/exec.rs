@@ -10,7 +10,7 @@ use super::{
     lower,
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow,
-        ScalarFunction, SetOpKind,
+        ScalarFunction, SetOpKind, WindowField, WindowFunction,
     },
     resolve, store,
 };
@@ -93,6 +93,9 @@ pub fn execute_ops(
             }
             QueryOp::Aggregate { group_keys, aggregates } => {
                 rows = execute_aggregate(&rows, group_keys, aggregates, contract, records, bound_values)?;
+            }
+            QueryOp::Window { fields } => {
+                rows = execute_window(&rows, fields, contract, records, bound_values)?;
             }
             QueryOp::Project { fields } => {
                 let table = current_table
@@ -1561,6 +1564,230 @@ fn eval_project_expr(
         ProjectExpr::Nested { path, .. } => Ok(read_path(path, row, "", contract, records)),
         ProjectExpr::Computed(inner) => eval_expr(inner, row, "", contract, records, bound_values),
     }
+}
+
+// ─── window ──────────────────────────────────────────────────────────────
+
+/// Compute every window value and append it to the current rows.
+///
+/// The row order is preserved: a window only widens the rows, so a following
+/// `Sort` still decides the result order. Each field is independent, which is
+/// what lets one statement mix `ROW_NUMBER()` with a differently partitioned
+/// `SUM`.
+fn execute_window(
+    rows: &[QueryRow],
+    fields: &[WindowField],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
+    let mut rows: Vec<QueryRow> = rows.to_vec();
+    for field in fields {
+        // One value per input row, in the input order.
+        let mut values: Vec<Value> = vec![Value::Null; rows.len()];
+        for partition in partition_rows(&rows, field, contract, records, bound_values)? {
+            let values_of_partition = eval_window_partition(&rows, &partition, field, contract, records, bound_values)?;
+            for (row_index, value) in partition.into_iter().zip(values_of_partition) {
+                values[row_index] = value;
+            }
+        }
+        for (row, value) in rows.iter_mut().zip(values) {
+            row.insert(field.name.clone(), value);
+        }
+    }
+    Ok(rows)
+}
+
+/// Row indices of every partition, each in input order.
+///
+/// The partitions are keyed by the `PARTITION BY` values through the shared
+/// canonical key form, so a partition is decided exactly like `GROUP BY` decides
+/// a group.
+fn partition_rows(
+    rows: &[QueryRow],
+    field: &WindowField,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<Vec<usize>>> {
+    if field.spec.partition_by.is_empty() {
+        return Ok(vec![(0..rows.len()).collect()]);
+    }
+    let mut partitions: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (index, row) in rows.iter().enumerate() {
+        let mut keys = Vec::with_capacity(field.spec.partition_by.len());
+        for expr in &field.spec.partition_by {
+            keys.push(eval_project_expr(expr, row, contract, records, bound_values)?);
+        }
+        partitions.entry(group_key_to_string(&keys)).or_default().push(index);
+    }
+    Ok(partitions.into_values().collect())
+}
+
+/// Values one window field produces over one partition, aligned with the
+/// partition's input row indices.
+fn eval_window_partition(
+    rows: &[QueryRow],
+    partition: &[usize],
+    field: &WindowField,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<Value>> {
+    // The window operates on the rows ordered by its own `ORDER BY`; the result
+    // is written back to the input positions so the caller keeps its order.
+    let mut keys: Vec<Vec<Value>> = Vec::with_capacity(partition.len());
+    for &index in partition {
+        keys.push(eval_window_order_keys(&rows[index], field, contract, records, bound_values)?);
+    }
+    let mut order: Vec<usize> = (0..partition.len()).collect();
+    if !field.spec.order_by.is_empty() {
+        order.sort_by(|&left, &right| compare_window_keys(field, &keys[left], &keys[right]));
+    }
+
+    let mut values = vec![Value::Null; order.len()];
+    if matches!(field.function, WindowFunction::RowNumber | WindowFunction::Rank | WindowFunction::DenseRank) {
+        let mut dense_rank = 0_i64;
+        let mut rank = 0_i64;
+        for (position, &slot) in order.iter().enumerate() {
+            // Peers are the adjacent rows whose `ORDER BY` values compare equal.
+            let peer = position > 0 && compare_window_keys(field, &keys[order[position - 1]], &keys[slot]).is_eq();
+            if !peer {
+                dense_rank += 1;
+                rank = position as i64 + 1;
+            }
+            values[slot] = Value::I64(match field.function {
+                WindowFunction::RowNumber => position as i64 + 1,
+                WindowFunction::Rank => rank,
+                _ => dense_rank,
+            });
+        }
+        return Ok(values);
+    }
+
+    for (position, &slot) in order.iter().enumerate() {
+        let (start, end) = window_frame_range(field, &keys, &order, position);
+        let frame_rows: Vec<QueryRow> = if start <= end {
+            order[start..=end].iter().map(|&index| rows[partition[index]].clone()).collect()
+        }
+        else {
+            Vec::new()
+        };
+        values[slot] = eval_window_aggregate(field, &frame_rows, contract, records, bound_values)?;
+    }
+    Ok(values)
+}
+
+/// The `ORDER BY` values of one row, in key order.
+fn eval_window_order_keys(
+    row: &QueryRow,
+    field: &WindowField,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Vec<Value>> {
+    let mut keys = Vec::with_capacity(field.spec.order_by.len());
+    for key in &field.spec.order_by {
+        keys.push(eval_project_expr(&key.expr, row, contract, records, bound_values)?);
+    }
+    Ok(keys)
+}
+
+/// Compare two `ORDER BY` value vectors with the shared value order.
+///
+/// The `NULL` placement is the one [`compare_values`] already defines and
+/// [`QueryOp::Sort`] already uses, so a window and an `ORDER BY` never disagree
+/// about where `NULL` rows belong.
+fn compare_window_keys(field: &WindowField, left: &[Value], right: &[Value]) -> std::cmp::Ordering {
+    for (key, (left_value, right_value)) in field.spec.order_by.iter().zip(left.iter().zip(right)) {
+        let ord = compare_values(left_value, right_value);
+        let ord = if key.ascending { ord } else { ord.reverse() };
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+/// Inclusive frame bounds of `position` as indices into `order`.
+///
+/// SQL default: the whole partition without `ORDER BY`, otherwise everything up
+/// to and including the current row's last peer.
+fn window_frame_range(field: &WindowField, keys: &[Vec<Value>], order: &[usize], position: usize) -> (usize, usize) {
+    let len = order.len();
+    if field.spec.order_by.is_empty() {
+        return (0, len - 1);
+    }
+    let mut end = position;
+    while end + 1 < len && compare_window_keys(field, &keys[order[position]], &keys[order[end + 1]]).is_eq() {
+        end += 1;
+    }
+    (0, end)
+}
+
+/// Aggregate one frame with the same rules as the plain aggregate path.
+///
+/// `SUM` keeps the numeric family it was given, `AVG` is always `F64`, `COUNT`
+/// is `I64`, and `MIN` / `MAX` keep the type of the value they picked. An empty
+/// frame therefore yields `0` for `COUNT` and `NULL` for the rest.
+fn eval_window_aggregate(
+    field: &WindowField,
+    frame_rows: &[QueryRow],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Value> {
+    let argument = || {
+        field
+            .argument
+            .clone()
+            .ok_or_else(|| query_runtime_error(format!("`{}` requires an argument expression", field.function.as_str())))
+    };
+    let name = String::new();
+    let aggregate = match field.function {
+        WindowFunction::Sum => AggregateField::Sum { name, expr: argument()? },
+        WindowFunction::Avg => AggregateField::Avg { name, expr: argument()? },
+        WindowFunction::Count => AggregateField::Count { name, expr: field.argument.clone() },
+        WindowFunction::Min | WindowFunction::Max => return window_extreme(field, argument()?, frame_rows, contract, records, bound_values),
+        WindowFunction::RowNumber | WindowFunction::Rank | WindowFunction::DenseRank => {
+            unreachable!("ranking functions never read the frame")
+        }
+    };
+    let (_, value) = eval_aggregate(&aggregate, frame_rows, contract, records, bound_values)?;
+    Ok(value)
+}
+
+/// `MIN(expr)` / `MAX(expr)` over one frame, keeping the picked value's type.
+///
+/// `NULL` values are skipped, so a frame of only `NULL`s is `NULL`. A tie keeps
+/// the first value it saw, which preserves that value's exact numeric kind.
+fn window_extreme(
+    field: &WindowField,
+    expr: ProjectExpr,
+    frame_rows: &[QueryRow],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Value> {
+    let mut best: Option<Value> = None;
+    for row in frame_rows {
+        let value = eval_project_expr(&expr, row, contract, records, bound_values)?;
+        if matches!(value, Value::Null) {
+            continue;
+        }
+        best = Some(match best {
+            None => value,
+            Some(current) => {
+                let ord = compare_values(&value, &current);
+                let replace = match field.function {
+                    WindowFunction::Min => ord == std::cmp::Ordering::Less,
+                    _ => ord == std::cmp::Ordering::Greater,
+                };
+                if replace { value } else { current }
+            }
+        });
+    }
+    Ok(best.unwrap_or(Value::Null))
 }
 
 /// Build a canonical string key for a GROUP BY value vector.

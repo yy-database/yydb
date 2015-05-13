@@ -10,15 +10,15 @@ use oak_sql::ast::{
     Assignment, BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource,
     InsertStatement, JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem,
     SelectStatement, SetOperationStatement, SetOperator, SqlRoot, SqlStatement, TableName, TableSource, UnaryOperator,
-    UpdateStatement, WithClause,
+    UpdateStatement, WindowOrderItem, WithClause, WindowSpec as AstWindowSpec,
 };
 use yydb_types::{Error, Result, Value};
 
 use super::{
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, Expr, JoinKind, Pred, ProjectExpr,
-        ProjectField, QueryOp, ReturningProjection, ScalarFunction, SetOpKind, SortKey, WriteAssignment, WriteBinOp,
-        WriteExpr, WriteField, WriteOp,
+        ProjectField, QueryOp, ReturningProjection, ScalarFunction, SetOpKind, SortKey, WindowField, WindowFunction,
+        WindowOrderKey, WindowSpec, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     params::{ParameterDescriptor, PARAM_PREFIX, name_to_slot},
 };
@@ -200,6 +200,19 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
     // HAVING — MVP rejects until Aggregate + Filter composition lands.
     if select.having.is_some() {
         return Err(sql_error("HAVING clause is not yet supported by the YYDB query executor"));
+    }
+
+    // Window functions. Every `OVER (...)` item is computed over the filtered
+    // rows before ORDER BY, which is why a window cannot be combined with
+    // GROUP BY: the aggregate op replaces the rows the window would read.
+    let windows = lower_windows(select, parameters, &scope)?;
+    if !windows.is_empty() {
+        if has_aggregate {
+            return Err(sql_error(
+                "window functions cannot be combined with `GROUP BY` or aggregate functions in the same SELECT",
+            ));
+        }
+        ops.push(QueryOp::Window { fields: windows });
     }
 
     // ORDER BY.
@@ -428,10 +441,12 @@ fn lower_aggregate(
     };
 
     // Walk SELECT items for aggregate function calls — also capture alias.
+    // A windowed call (`SUM(x) OVER (...)`) is computed by the `Window` op
+    // instead, so it must not be lowered as a plain aggregate here.
     let mut aggregates: Vec<AggregateField> = Vec::new();
     for item in &select.items {
         if let SelectItem::Expression { expr, alias, .. } = item
-            && let Expression::FunctionCall { name, args, .. } = expr
+            && let Expression::FunctionCall { name, args, window: None, .. } = expr
             && is_aggregate_function(name)
         {
             let agg = lower_aggregate_function(name, args, alias, parameters, quantifier_is_distinct, ctes)?;
@@ -450,6 +465,9 @@ fn lower_group_key(item: &GroupByItem) -> Result<ProjectField> {
             Ok(ProjectField { name, expr: ProjectExpr::Scalar { path } })
         }
         GroupByItem::Expression(expr) => {
+            if let Some(name) = first_window_function(expr) {
+                return Err(sql_error(format!("window function `{name}` cannot appear in `GROUP BY`")));
+            }
             // Recurse into a plain identifier expression only.
             let Expression::Identifier(identifier) = expr
             else {
@@ -523,6 +541,159 @@ fn lower_aggregate_function(
     }
 }
 
+// ─── window lowering ─────────────────────────────────────────────────────
+
+/// Lower every `OVER (...)` item of a SELECT list into [`WindowField`]s.
+///
+/// Only a top-level SELECT item may carry a window specification: the frame is
+/// evaluated over the whole partitioned row set, which no scalar expression,
+/// predicate or aggregate argument can reach.
+fn lower_windows(
+    select: &SelectStatement,
+    parameters: &[ParameterDescriptor],
+    ctes: &CteScope,
+) -> Result<Vec<WindowField>> {
+    let mut fields = Vec::new();
+    for item in &select.items {
+        let SelectItem::Expression { expr, alias, .. } = item
+        else {
+            continue;
+        };
+        let Expression::FunctionCall { name, args, distinct, window: Some(spec), .. } = expr
+        else {
+            continue;
+        };
+        fields.push(lower_window_field(name, args, *distinct, spec, output_name(expr, alias), parameters, ctes)?);
+    }
+    Ok(fields)
+}
+
+/// Lower one window function call.
+///
+/// The function name decides the arity: the ranking functions take no argument,
+/// `COUNT(*)` takes the wildcard, and every other accepted function takes
+/// exactly one expression. An unimplemented function is rejected by name rather
+/// than being approximated by a nearby ranking function.
+fn lower_window_field(
+    name: &Identifier,
+    args: &[Expression],
+    distinct: bool,
+    window: &AstWindowSpec,
+    output: String,
+    parameters: &[ParameterDescriptor],
+    ctes: &CteScope,
+) -> Result<WindowField> {
+    let fn_name = name.name.to_ascii_uppercase();
+    let function = match fn_name.as_str() {
+        "ROW_NUMBER" => WindowFunction::RowNumber,
+        "RANK" => WindowFunction::Rank,
+        "DENSE_RANK" => WindowFunction::DenseRank,
+        "SUM" => WindowFunction::Sum,
+        "COUNT" => WindowFunction::Count,
+        "AVG" => WindowFunction::Avg,
+        "MIN" => WindowFunction::Min,
+        "MAX" => WindowFunction::Max,
+        other => {
+            return Err(sql_error(format!(
+                "window function `{other}` is not supported by YYDB \
+                 (supported: `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `SUM`, `COUNT`, `AVG`, `MIN`, `MAX`)"
+            )));
+        }
+    };
+    if distinct {
+        return Err(sql_error(format!(
+            "`{fn_name}(DISTINCT …) OVER (...)` is not supported by YYDB: remove DISTINCT from the window call"
+        )));
+    }
+    let argument = match function {
+        WindowFunction::RowNumber | WindowFunction::Rank | WindowFunction::DenseRank => {
+            if !args.is_empty() {
+                return Err(sql_error(format!("`{fn_name}` takes no arguments, got {}", args.len())));
+            }
+            None
+        }
+        WindowFunction::Count if matches!(args, [Expression::Wildcard { .. }]) => None,
+        _ => {
+            if args.len() != 1 {
+                return Err(sql_error(format!("`{fn_name}` requires exactly one argument, got {}", args.len())));
+            }
+            Some(lower_project_expr(&args[0], parameters, ctes)?)
+        }
+    };
+    Ok(WindowField { name: output, function, argument, spec: lower_window_spec(window, ctes)? })
+}
+
+/// Lower an `OVER (...)` clause into the shared [`WindowSpec`].
+///
+/// `PARTITION BY` and `ORDER BY` accept column references only, which is what
+/// the parser already guarantees. An explicit frame is rejected rather than
+/// read as a row count: a `RANGE` frame compares values instead of rows, so it
+/// would silently change which rows an aggregate sees.
+fn lower_window_spec(window: &AstWindowSpec, _ctes: &CteScope) -> Result<WindowSpec> {
+    if window.frame.is_some() {
+        return Err(sql_error("explicit window frames (`ROWS` / `RANGE`) are not supported yet by YYDB"));
+    }
+    let mut partition_by = Vec::with_capacity(window.partition_by.len());
+    for column in &window.partition_by {
+        partition_by.push(ProjectExpr::Scalar { path: split_identifier(column) });
+    }
+    let mut order_by = Vec::with_capacity(window.order_by.len());
+    for item in &window.order_by {
+        let WindowOrderItem { column, direction, .. } = item;
+        order_by.push(WindowOrderKey {
+            expr: ProjectExpr::Scalar { path: split_identifier(column) },
+            ascending: !matches!(direction, oak_sql::ast::OrderDirection::Desc),
+        });
+    }
+    Ok(WindowSpec { partition_by, order_by })
+}
+
+/// Split a written identifier into the path components the executor resolves.
+fn split_identifier(identifier: &Identifier) -> Vec<String> {
+    identifier.name.split('.').map(str::to_string).collect()
+}
+
+/// Name of the first window function inside `expr`, if it contains one.
+///
+/// Subqueries carry their own scope, so they are not searched.
+fn first_window_function(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::FunctionCall { name, args, window, .. } => {
+            if window.is_some() {
+                return Some(name.name.to_string());
+            }
+            args.iter().find_map(first_window_function)
+        }
+        Expression::Binary { left, right, .. } => first_window_function(left).or_else(|| first_window_function(right)),
+        Expression::Unary { expr, .. } | Expression::IsNull { expr, .. } | Expression::IsTruth { expr, .. } => {
+            first_window_function(expr)
+        }
+        Expression::Cast { expr, .. } => first_window_function(expr),
+        Expression::Vector { elements, .. } => elements.iter().find_map(first_window_function),
+        Expression::InList { expr, list, .. } => {
+            first_window_function(expr).or_else(|| list.iter().find_map(first_window_function))
+        }
+        Expression::Between { expr, low, high, .. } => first_window_function(expr)
+            .or_else(|| first_window_function(low))
+            .or_else(|| first_window_function(high)),
+        Expression::Case { branches, else_branch, .. } => {
+            for (when, then) in branches {
+                if let Some(name) = first_window_function(when).or_else(|| first_window_function(then)) {
+                    return Some(name);
+                }
+            }
+            else_branch.as_ref().and_then(|els| first_window_function(els))
+        }
+        Expression::Identifier(_)
+        | Expression::Literal(_)
+        | Expression::Wildcard { .. }
+        | Expression::Subquery { .. }
+        | Expression::InSubquery { .. }
+        | Expression::Exists { .. }
+        | Expression::Error { .. } => None,
+    }
+}
+
 /// Lower one aggregate argument into a [`ProjectExpr`].
 ///
 /// A plain column reference becomes [`ProjectExpr::Scalar`] so the executor can
@@ -547,6 +718,11 @@ fn lower_project_expr(
 }
 
 fn lower_sort_key(item: &OrderByItem) -> Result<SortKey> {
+    if let Some(name) = first_window_function(&item.expr) {
+        return Err(sql_error(format!(
+            "window function `{name}` cannot appear in `ORDER BY`: order by the window column alias instead"
+        )));
+    }
     let Expression::Identifier(identifier) = &item.expr
     else {
         return Err(sql_error("ORDER BY supports plain column references only"));
@@ -585,12 +761,18 @@ fn lower_projection(
         // Skip aggregate functions — they are consumed by the Aggregate op. A
         // scalar function (`LOWER(email)`, `LENGTH(email)` …) is projected like
         // any other computed expression.
-        if let Expression::FunctionCall { name, .. } = expr
+        if let Expression::FunctionCall { name, window: None, .. } = expr
             && is_aggregate_function(name)
         {
             continue;
         }
         let name = output_name(expr, alias);
+        // A window call is already computed by the `Window` op that runs before
+        // this projection, so the field only re-emits the column it wrote.
+        if matches!(expr, Expression::FunctionCall { window: Some(_), .. }) {
+            fields.push(ProjectField { name: name.clone(), expr: ProjectExpr::Scalar { path: vec![name.clone()] } });
+            continue;
+        }
         // Plain identifier → scalar column path. A qualified name arrives as one
         // identifier containing a dot, so it is split like a predicate path:
         // the executor then resolves the qualified key first and falls back to
@@ -611,6 +793,11 @@ fn lower_projection(
 // ─── predicates ──────────────────────────────────────────────────────────
 
 fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<Pred> {
+    if let Some(name) = first_window_function(expr) {
+        return Err(sql_error(format!(
+            "window function `{name}` cannot appear in a predicate (`WHERE`, `JOIN ON`, `HAVING` or `ON CONFLICT WHERE`)"
+        )));
+    }
     match expr {
         Expression::Literal(Literal::Boolean(value, _)) => Ok(if *value { Pred::True } else { Pred::False }),
         Expression::Binary { left, op: BinaryOperator::And, right, .. } => Ok(Pred::And(
@@ -868,7 +1055,17 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
             Ok(Expr::Not(Box::new(lower_expr(expr, parameters, ctes)?)))
         }
         Expression::Subquery { query, .. } => Ok(Expr::Subquery { ops: lower_scalar_subquery(query, parameters, ctes)? }),
-        Expression::FunctionCall { name, args, .. } => lower_scalar_function(name, args, parameters, ctes),
+        Expression::FunctionCall { name, args, window, .. } => {
+            // A window value is not a scalar: it depends on the whole partitioned
+            // row set, so it may only appear as its own SELECT item.
+            if window.is_some() {
+                return Err(sql_error(format!(
+                    "window function `{}` is only supported as a top-level SELECT item",
+                    name.name
+                )));
+            }
+            lower_scalar_function(name, args, parameters, ctes)
+        }
         Expression::IsNull { .. }
         | Expression::IsTruth { .. }
         | Expression::InList { .. }
@@ -1044,6 +1241,11 @@ fn lower_returning(
     };
     if clause.items.is_empty() {
         return Err(sql_error("RETURNING requires at least one item"));
+    }
+    if clause.items.iter().any(|item| {
+        matches!(item, SelectItem::Expression { expr, .. } if first_window_function(expr).is_some())
+    }) {
+        return Err(sql_error("RETURNING does not support window functions"));
     }
     if clause.items.iter().any(|item| {
         matches!(item, SelectItem::Expression { expr: Expression::FunctionCall { name, .. }, .. } if is_aggregate_function(name))
@@ -1510,7 +1712,23 @@ fn check_reference(expr: &Expression, references: &[String], require_qualificati
             check_reference(expr, references, require_qualification)
         }
         Expression::Cast { expr, .. } => check_reference(expr, references, require_qualification),
-        Expression::FunctionCall { args, .. } | Expression::Vector { elements: args, .. } => {
+        Expression::FunctionCall { args, window, .. } => {
+            for arg in args {
+                check_reference(arg, references, require_qualification)?;
+            }
+            // The window clause reads the same row, so its columns must belong to
+            // a source of this statement like any other reference.
+            if let Some(window) = window {
+                for column in &window.partition_by {
+                    check_identifier(column, references, require_qualification)?;
+                }
+                for item in &window.order_by {
+                    check_identifier(&item.column, references, require_qualification)?;
+                }
+            }
+            Ok(())
+        }
+        Expression::Vector { elements: args, .. } => {
             for arg in args {
                 check_reference(arg, references, require_qualification)?;
             }
