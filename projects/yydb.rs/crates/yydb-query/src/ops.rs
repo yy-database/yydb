@@ -510,16 +510,49 @@ pub struct WindowOrderKey {
     pub ascending: bool,
 }
 
-/// Partitioning and ordering one window function is evaluated over.
+/// One bound of an explicit `ROWS` frame.
 ///
-/// The frame is not modelled yet: every aggregate window uses the SQL default
-/// frame, which the executor derives from `order_by` alone.
+/// Offsets count rows, which is why `RANGE` frames are rejected during lowering
+/// instead of being read as a row offset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFrameBound {
+    /// `UNBOUNDED PRECEDING`: the first row of the partition.
+    UnboundedPreceding,
+    /// `n PRECEDING`: `n` rows before the current row.
+    Preceding(u64),
+    /// `CURRENT ROW`: the current row.
+    CurrentRow,
+    /// `n FOLLOWING`: `n` rows after the current row.
+    Following(u64),
+    /// `UNBOUNDED FOLLOWING`: the last row of the partition.
+    UnboundedFollowing,
+}
+
+/// Explicit `ROWS` frame of the current row.
+///
+/// Both bounds are inclusive. A frame that starts after its end is empty, which
+/// the executor reports as the aggregate's empty-input result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowFrame {
+    /// Bound the frame starts at.
+    pub start: WindowFrameBound,
+    /// Bound the frame ends at.
+    pub end: WindowFrameBound,
+}
+
+/// Partitioning, ordering and frame one window function is evaluated over.
+///
+/// Without a `frame` the SQL default applies: the whole partition when there is
+/// no `order_by`, otherwise everything up to and including the current row's
+/// last peer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowSpec {
     /// `PARTITION BY` value expressions; empty means one single partition.
     pub partition_by: Vec<ProjectExpr>,
     /// `ORDER BY` keys; empty means every partition row is a peer.
     pub order_by: Vec<WindowOrderKey>,
+    /// Explicit `ROWS` frame, absent for the default frame.
+    pub frame: Option<WindowFrame>,
 }
 
 /// One window computation over the current rows.

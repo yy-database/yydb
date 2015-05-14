@@ -10,15 +10,17 @@ use oak_sql::ast::{
     Assignment, BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource,
     InsertStatement, JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem,
     SelectStatement, SetOperationStatement, SetOperator, SqlRoot, SqlStatement, TableName, TableSource, UnaryOperator,
-    UpdateStatement, WindowOrderItem, WithClause, WindowSpec as AstWindowSpec,
+    UpdateStatement, WindowFrame as AstWindowFrame, WindowFrameBound as AstWindowFrameBound,
+    WindowFrameUnit as AstWindowFrameUnit, WindowOrderItem, WithClause, WindowSpec as AstWindowSpec,
 };
 use yydb_types::{Error, Result, Value};
 
 use super::{
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, Expr, JoinKind, Pred, ProjectExpr,
-        ProjectField, QueryOp, ReturningProjection, ScalarFunction, SetOpKind, SortKey, WindowField, WindowFunction,
-        WindowOrderKey, WindowSpec, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
+        ProjectField, QueryOp, ReturningProjection, ScalarFunction, SetOpKind, SortKey, WindowField, WindowFrame,
+        WindowFrameBound, WindowFunction, WindowOrderKey, WindowSpec, WriteAssignment, WriteBinOp, WriteExpr, WriteField,
+        WriteOp,
     },
     params::{ParameterDescriptor, PARAM_PREFIX, name_to_slot},
 };
@@ -626,13 +628,15 @@ fn lower_window_field(
 /// Lower an `OVER (...)` clause into the shared [`WindowSpec`].
 ///
 /// `PARTITION BY` and `ORDER BY` accept column references only, which is what
-/// the parser already guarantees. An explicit frame is rejected rather than
-/// read as a row count: a `RANGE` frame compares values instead of rows, so it
-/// would silently change which rows an aggregate sees.
+/// the parser already guarantees. An explicit `ROWS` frame lowers into its two
+/// bounds, while `RANGE` is rejected: a range frame compares values instead of
+/// rows, so reading it as a row offset would silently change which rows an
+/// aggregate sees.
 fn lower_window_spec(window: &AstWindowSpec, _ctes: &CteScope) -> Result<WindowSpec> {
-    if window.frame.is_some() {
-        return Err(sql_error("explicit window frames (`ROWS` / `RANGE`) are not supported yet by YYDB"));
-    }
+    let frame = match &window.frame {
+        Some(frame) => Some(lower_window_frame(frame)?),
+        None => None,
+    };
     let mut partition_by = Vec::with_capacity(window.partition_by.len());
     for column in &window.partition_by {
         partition_by.push(ProjectExpr::Scalar { path: split_identifier(column) });
@@ -645,7 +649,36 @@ fn lower_window_spec(window: &AstWindowSpec, _ctes: &CteScope) -> Result<WindowS
             ascending: !matches!(direction, oak_sql::ast::OrderDirection::Desc),
         });
     }
-    Ok(WindowSpec { partition_by, order_by })
+    Ok(WindowSpec { partition_by, order_by, frame })
+}
+
+/// Lower one explicit window frame, which must count rows.
+///
+/// The single-bound form (`ROWS 2 PRECEDING`) ends at the current row, exactly
+/// like `ROWS BETWEEN 2 PRECEDING AND CURRENT ROW`.
+fn lower_window_frame(frame: &AstWindowFrame) -> Result<WindowFrame> {
+    if matches!(frame.unit, AstWindowFrameUnit::Range) {
+        return Err(sql_error(
+            "`RANGE` window frames are not supported by YYDB: a range frame compares values instead of rows, \
+             so write the frame with `ROWS` between two row offsets",
+        ));
+    }
+    let end = match &frame.end {
+        Some(bound) => lower_window_bound(bound),
+        None => WindowFrameBound::CurrentRow,
+    };
+    Ok(WindowFrame { start: lower_window_bound(&frame.start), end })
+}
+
+/// Map one written frame bound onto the operator's bound vocabulary.
+fn lower_window_bound(bound: &AstWindowFrameBound) -> WindowFrameBound {
+    match bound {
+        AstWindowFrameBound::UnboundedPreceding => WindowFrameBound::UnboundedPreceding,
+        AstWindowFrameBound::Preceding(offset) => WindowFrameBound::Preceding(*offset),
+        AstWindowFrameBound::CurrentRow => WindowFrameBound::CurrentRow,
+        AstWindowFrameBound::Following(offset) => WindowFrameBound::Following(*offset),
+        AstWindowFrameBound::UnboundedFollowing => WindowFrameBound::UnboundedFollowing,
+    }
 }
 
 /// Split a written identifier into the path components the executor resolves.

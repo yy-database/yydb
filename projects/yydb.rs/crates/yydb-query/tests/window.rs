@@ -245,19 +245,135 @@ fn window_over_empty_table_yields_no_rows() {
     assert!(summed.is_empty());
 }
 
+// ─── explicit `ROWS` frames ─────────────────────────────────────────────
+
+#[test]
+fn window_rows_between_preceding_and_current_row() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    let rows = rows(
+        "SELECT sale_id, \
+                SUM(amount) OVER (PARTITION BY region ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS near, \
+                COUNT(*) OVER (PARTITION BY region ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS n \
+         FROM Sale ORDER BY region, amount, sale_id",
+        &contract,
+        &mut records,
+    );
+
+    // east 10, 20, 20 and west 5, 15 — a row frame, so peers are separate rows.
+    let expected = [(1_i64, 10_i64, 1_i64), (2, 30, 2), (3, 40, 2), (4, 5, 1), (5, 20, 2)];
+    for (row, (id, near, n)) in rows.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "near"), Value::I64(near));
+        assert_eq!(cell(row, "n"), Value::I64(n));
+    }
+}
+
+#[test]
+fn window_rows_between_current_row_and_following() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    let rows = rows(
+        "SELECT sale_id, \
+                SUM(amount) OVER (PARTITION BY region ORDER BY amount ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS near, \
+                COUNT(amount) OVER (PARTITION BY region ORDER BY amount ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS n \
+         FROM Sale ORDER BY region, amount, sale_id",
+        &contract,
+        &mut records,
+    );
+
+    let expected = [(1_i64, 30_i64, 2_i64), (2, 40, 2), (3, 20, 1), (4, 20, 2), (5, 15, 1)];
+    for (row, (id, near, n)) in rows.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "near"), Value::I64(near));
+        assert_eq!(cell(row, "n"), Value::I64(n));
+    }
+}
+
+#[test]
+fn window_rows_unbounded_frames() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    // `UNBOUNDED PRECEDING … CURRENT ROW` counts rows, so a tie group does not
+    // extend the frame the way the default range frame does.
+    let running_rows = rows(
+        "SELECT sale_id, \
+                SUM(amount) OVER (PARTITION BY region ORDER BY amount ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running \
+         FROM Sale ORDER BY region, amount, sale_id",
+        &contract,
+        &mut records,
+    );
+    let expected = [(1_i64, 10_i64), (2, 30), (3, 50), (4, 5), (5, 20)];
+    for (row, (id, running)) in running_rows.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "running"), Value::I64(running));
+    }
+
+    // Both bounds unbounded is the whole partition.
+    let whole = rows(
+        "SELECT sale_id, \
+                SUM(amount) OVER (PARTITION BY region ORDER BY amount ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total \
+         FROM Sale ORDER BY sale_id",
+        &contract,
+        &mut records,
+    );
+    let expected = [(1_i64, 50_i64), (2, 50), (3, 50), (4, 20), (5, 20)];
+    for (row, (id, total)) in whole.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "total"), Value::I64(total));
+    }
+}
+
+#[test]
+fn window_rows_frame_outside_the_partition_is_empty() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    let rows = rows(
+        "SELECT sale_id, \
+                SUM(amount) OVER (PARTITION BY region ORDER BY amount ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING) AS next, \
+                COUNT(*) OVER (PARTITION BY region ORDER BY amount ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING) AS n, \
+                MIN(amount) OVER (PARTITION BY region ORDER BY amount ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING) AS lowest \
+         FROM Sale ORDER BY region, amount, sale_id",
+        &contract,
+        &mut records,
+    );
+
+    // The last row of each partition has no follower, so its frame is empty:
+    // `COUNT(*)` is 0 and every other aggregate is `NULL`.
+    let expected = [(1_i64, Value::I64(20), Value::I64(1)), (2, Value::I64(20), Value::I64(1))];
+    for (row, (id, next, n)) in rows.iter().take(2).zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "next"), next);
+        assert_eq!(cell(row, "n"), n);
+    }
+    assert_eq!(cell(&rows[2], "next"), Value::Null);
+    assert_eq!(cell(&rows[2], "n"), Value::I64(0));
+    assert_eq!(cell(&rows[2], "lowest"), Value::Null);
+
+    assert_eq!(cell(&rows[3], "next"), Value::I64(15));
+    assert_eq!(cell(&rows[4], "next"), Value::Null);
+    assert_eq!(cell(&rows[4], "n"), Value::I64(0));
+    assert_eq!(cell(&rows[4], "lowest"), Value::Null);
+}
+
 // ─── rejections ─────────────────────────────────────────────────────────
 
 #[test]
-fn window_explicit_frames_are_rejected() {
-    for sql in [
+fn window_range_frame_is_rejected() {
+    let error = prepare_sql(
         "SELECT SUM(amount) OVER (PARTITION BY region ORDER BY amount RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS s \
          FROM Sale",
-        "SELECT SUM(amount) OVER (PARTITION BY region ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS s \
-         FROM Sale",
-    ] {
-        let error = prepare_sql(sql).expect_err("an explicit frame must be rejected");
-        assert!(format!("{error}").contains("explicit window frames"), "unexpected frame error: {error}");
-    }
+    )
+    .expect_err("a RANGE frame must be rejected");
+    assert!(format!("{error}").contains("`RANGE` window frames"), "unexpected frame error: {error}");
 }
 
 #[test]

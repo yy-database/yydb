@@ -10,7 +10,7 @@ use super::{
     lower,
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow,
-        ScalarFunction, SetOpKind, WindowField, WindowFunction,
+        ScalarFunction, SetOpKind, WindowField, WindowFrameBound, WindowFunction,
     },
     resolve, store,
 };
@@ -1711,18 +1711,42 @@ fn compare_window_keys(field: &WindowField, left: &[Value], right: &[Value]) -> 
 
 /// Inclusive frame bounds of `position` as indices into `order`.
 ///
-/// SQL default: the whole partition without `ORDER BY`, otherwise everything up
-/// to and including the current row's last peer.
+/// Without an explicit frame the SQL default applies: the whole partition when
+/// there is no `ORDER BY`, otherwise everything up to and including the current
+/// row's last peer. An explicit `ROWS` frame counts rows from the current row
+/// and is clamped to the partition, so an out-of-range bound never reads a row
+/// outside it. A frame that starts after it ends is reported as `start > end`,
+/// which the caller turns into the aggregate's empty-input result.
 fn window_frame_range(field: &WindowField, keys: &[Vec<Value>], order: &[usize], position: usize) -> (usize, usize) {
     let len = order.len();
-    if field.spec.order_by.is_empty() {
-        return (0, len - 1);
+    let Some(frame) = &field.spec.frame else {
+        if field.spec.order_by.is_empty() {
+            return (0, len - 1);
+        }
+        let mut end = position;
+        while end + 1 < len && compare_window_keys(field, &keys[order[position]], &keys[order[end + 1]]).is_eq() {
+            end += 1;
+        }
+        return (0, end);
+    };
+    let start = frame_bound_index(&frame.start, position, len).max(0);
+    let end = frame_bound_index(&frame.end, position, len).min(len as i64 - 1);
+    if start > end {
+        return (1, 0);
     }
-    let mut end = position;
-    while end + 1 < len && compare_window_keys(field, &keys[order[position]], &keys[order[end + 1]]).is_eq() {
-        end += 1;
+    (start as usize, end as usize)
+}
+
+/// Index one frame bound denotes, before it is clamped to the partition.
+fn frame_bound_index(bound: &WindowFrameBound, position: usize, len: usize) -> i64 {
+    let position = position as i64;
+    match bound {
+        WindowFrameBound::UnboundedPreceding => 0,
+        WindowFrameBound::Preceding(offset) => position - *offset as i64,
+        WindowFrameBound::CurrentRow => position,
+        WindowFrameBound::Following(offset) => position + *offset as i64,
+        WindowFrameBound::UnboundedFollowing => len as i64 - 1,
     }
-    (0, end)
 }
 
 /// Aggregate one frame with the same rules as the plain aggregate path.
