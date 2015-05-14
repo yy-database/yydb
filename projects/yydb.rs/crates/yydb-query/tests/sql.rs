@@ -1286,10 +1286,8 @@ fn scalar_functions_compose_with_aggregates_and_ordering() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    // 16 + 18 + 18 characters across the seeded email addresses. The length is
-    // materialised by the derived table because `oak-sql` drops a nested
-    // `FunctionCall` from the argument list of an outer call, so
-    // `SUM(LENGTH(email))` cannot reach the lowering as two calls.
+    // 16 + 18 + 18 characters across the seeded email addresses, materialised
+    // by the derived table.
     let outcome = execute_sql(
         "SELECT SUM(lengths.n) AS total FROM (SELECT LENGTH(email) AS n FROM Account) AS lengths",
         &[],
@@ -1403,17 +1401,6 @@ fn substr_rejects_ambiguous_positions() {
 fn unknown_scalar_function_is_rejected() {
     let err = prepare_sql("SELECT REVERSE(email) AS v FROM Account").expect_err("unknown function must reject");
     assert!(format!("{err}").contains("`REVERSE`"), "unexpected: {err}");
-}
-
-#[test]
-fn nested_function_calls_inside_an_aggregate_are_rejected() {
-    // `oak-sql` only keeps `Identifier` and `Expression` children of a call, so a
-    // nested `FunctionCall` never reaches the lowering and `SUM(LENGTH(email))`
-    // looks like `SUM()`. Rejecting the empty argument list keeps the statement
-    // from executing as if the inner call were absent.
-    let err = prepare_sql("SELECT SUM(LENGTH(email)) AS total FROM Account").expect_err("nested call must reject");
-    let msg = format!("{err}");
-    assert!(msg.contains("one argument"), "unexpected: {msg}");
 }
 
 // ─── Date part extraction ──────────────────────────────────────────────
