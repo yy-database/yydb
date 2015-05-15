@@ -1028,12 +1028,13 @@ fn negate_number(value: Value) -> Value {
 
 /// Lower an arbitrary SQL expression into the backend-neutral [`Expr`] IR.
 ///
-/// Primitive terminals (identifiers → columns, literals and parameter bindings
-/// → bound values), arithmetic and comparison/logical [`Expression::Binary`]
-/// nodes, and the compound nodes [`Expression::Case`] / [`Expression::Cast`] are
-/// supported. A scalar subquery stays a nested pipeline in [`Expr::Subquery`]
-/// and is resolved at execution time. Everything else (function calls,
-/// `EXISTS`, `IN` …) is rejected here; callers decide where this IR is allowed —
+/// The accepted surface is primitive terminals (identifiers → columns, literals
+/// and parameter bindings → bound values), scalar function calls (recursively
+/// lowered into [`Expr::Function`]), arithmetic and comparison/logical
+/// [`Expression::Binary`] nodes, and the compound nodes [`Expression::Case`] /
+/// [`Expression::Cast`]. A scalar subquery stays a nested pipeline in
+/// [`Expr::Subquery`] and is resolved at execution time. Everything else
+/// (`EXISTS`, `IN` …) is rejected here; callers decide where this IR is allowed —
 /// today SELECT projection, aggregate arguments and `RETURNING` use it.
 fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<Expr> {
     match expr {
@@ -1143,6 +1144,13 @@ fn lower_scalar_function(
     ctes: &CteScope,
 ) -> Result<Expr> {
     let fn_name = name.name.to_ascii_uppercase();
+    // Aggregates are consumed by the Aggregate op only as a top-level SELECT
+    // item, so one reached through another call is a nested aggregate: `SUM(AVG(x))`
+    // has no per-row value to aggregate and is rejected instead of being read as
+    // an unknown scalar function.
+    if is_aggregate_function(name) {
+        return Err(sql_error(format!("aggregate function `{fn_name}` cannot be nested inside another function call")));
+    }
     let (function, arity_ok, expected) = match fn_name.as_str() {
         "LOWER" => (ScalarFunction::Lower, args.len() == 1, "exactly one argument"),
         "UPPER" => (ScalarFunction::Upper, args.len() == 1, "exactly one argument"),
