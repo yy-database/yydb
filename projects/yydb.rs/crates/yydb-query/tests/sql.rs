@@ -1403,6 +1403,120 @@ fn unknown_scalar_function_is_rejected() {
     assert!(format!("{err}").contains("`REVERSE`"), "unexpected: {err}");
 }
 
+// ─── Nested scalar calls ───────────────────────────────────────────────
+//
+// A scalar call may be an argument of another scalar call, including an
+// aggregate argument, because `oak-sql` keeps the nested `FunctionCall` in the
+// argument list. Nested aggregates and nested window calls stay rejected.
+
+#[test]
+fn aggregate_argument_accepts_a_nested_scalar_call() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // 16 + 18 + 18 characters across the seeded email addresses.
+    let outcome = execute_sql("SELECT SUM(LENGTH(email)) AS total FROM Account", &[], &contract, &[], &mut records)
+        .expect("sum of a nested call");
+    assert_eq!(outcome.rows[0].get("total"), Some(&Value::I64(52)));
+}
+
+#[test]
+fn nested_calls_accept_several_nested_arguments() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT CONCAT(LOWER(email), UPPER(tenant)) AS joined FROM Account WHERE account_id = 2",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("two nested arguments");
+    assert_eq!(outcome.rows[0].get("joined"), Some(&Value::Text("linus@example.testT1".into())));
+}
+
+#[test]
+fn three_nested_calls_propagate_null() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 1", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT LENGTH(LOWER(TRIM(tenant))) AS depth FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("three nested calls");
+    assert_eq!(outcome.rows[0].get("depth"), Some(&Value::Null), "a NULL argument stays NULL through the chain");
+    assert_eq!(outcome.rows[1].get("depth"), Some(&Value::I64(2)));
+    assert_eq!(outcome.rows[2].get("depth"), Some(&Value::I64(2)));
+
+    // The aggregate skips the NULL row instead of counting it as a value.
+    let total = execute_sql(
+        "SELECT SUM(LENGTH(LOWER(TRIM(tenant)))) AS total FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("sum over three nested calls");
+    assert_eq!(total.rows[0].get("total"), Some(&Value::I64(4)));
+}
+
+#[test]
+fn aggregate_calls_nested_in_another_call_are_rejected() {
+    for sql in [
+        "SELECT SUM(AVG(score)) AS v FROM Account",
+        "SELECT COUNT(SUM(score)) AS v FROM Account",
+        "SELECT LOWER(SUM(score)) AS v FROM Account",
+    ] {
+        let err = prepare_sql(sql).expect_err("a nested aggregate must reject");
+        let msg = format!("{err}");
+        assert!(msg.contains("cannot be nested inside another function call"), "`{sql}` unexpected: {msg}");
+    }
+}
+
+#[test]
+fn nested_calls_stay_rejected_in_predicates_and_ordering() {
+    // `WHERE` and `ORDER BY` take plain column references only, so they reject a
+    // computed expression whether or not it nests a call.
+    for sql in [
+        "SELECT account_id FROM Account WHERE LOWER(email) = 'ada@example.test'",
+        "SELECT account_id FROM Account WHERE LENGTH(LOWER(email)) > 17",
+    ] {
+        let err = prepare_sql(sql).expect_err("a computed predicate must reject");
+        let msg = format!("{err}");
+        assert!(msg.contains("predicates support plain column references only"), "`{sql}` unexpected: {msg}");
+    }
+
+    for sql in
+        ["SELECT account_id FROM Account ORDER BY LOWER(email)", "SELECT account_id FROM Account ORDER BY LENGTH(LOWER(email))"]
+    {
+        let err = prepare_sql(sql).expect_err("a computed sort key must reject");
+        let msg = format!("{err}");
+        assert!(msg.contains("ORDER BY supports plain column references only"), "`{sql}` unexpected: {msg}");
+    }
+}
+
+#[test]
+fn unimplemented_functions_reject_nested_calls() {
+    for sql in [
+        "SELECT CHAR_LENGTH(NOW()) AS v FROM Account",
+        "SELECT COALESCE(LOWER(email), UPPER(tenant)) AS v FROM Account",
+        "SELECT SUM(REVERSE(email)) AS v FROM Account",
+    ] {
+        let err = prepare_sql(sql).expect_err("an unimplemented function must reject");
+        let msg = format!("{err}");
+        assert!(msg.contains("is not supported by YYDB"), "`{sql}` unexpected: {msg}");
+    }
+}
+
 // ─── Date part extraction ──────────────────────────────────────────────
 
 const DATE_SCHEMA: &str = r#"

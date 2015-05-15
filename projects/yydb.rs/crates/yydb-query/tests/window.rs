@@ -397,12 +397,13 @@ fn window_in_order_by_is_rejected() {
 
 #[test]
 fn window_inside_aggregate_argument_is_rejected() {
-    // The AST builder never hands a nested call to the lowering, so the outer
-    // `SUM` reads as an empty call. It is still rejected instead of being
-    // accepted with the window silently dropped.
+    // The nested `OVER` call reaches the lowering as the outer `SUM` argument, so
+    // the window rule rejects it instead of letting the window be dropped.
     let error = prepare_sql("SELECT SUM(SUM(amount) OVER (PARTITION BY region)) AS s FROM Sale")
         .expect_err("a window inside an aggregate argument must be rejected");
-    assert!(format!("{error}").contains("SUM"), "unexpected nested window error: {error}");
+    let message = format!("{error}");
+    assert!(message.contains("`SUM`"), "unexpected nested window error: {message}");
+    assert!(message.contains("top-level SELECT item"), "unexpected nested window error: {message}");
 }
 
 #[test]
