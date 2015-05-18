@@ -310,11 +310,13 @@ pub enum BinaryOp {
 /// Scalar functions the query executor evaluates row by row.
 ///
 /// Every function propagates `NULL`, so a `NULL` argument makes the whole result
-/// `NULL`. Argument kinds are checked by the executor because lowering has no
-/// column types: the string functions accept text only (and integer positions
-/// for [`ScalarFunction::Substr`]), while the date part extractors accept `date`
-/// and `datetime` only. Any other kind is an error rather than an implicit
-/// conversion.
+/// `NULL`. [`ScalarFunction::Coalesce`] is the exception: it evaluates its
+/// arguments left to right and returns the first non-`NULL` one, so `NULL` does
+/// not by itself decide the result. Argument kinds are checked by the executor
+/// because lowering has no column types: the string functions accept text only
+/// (and integer positions for [`ScalarFunction::Substr`]), while the date part
+/// extractors accept `date` and `datetime` only. Any other kind is an error
+/// rather than an implicit conversion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarFunction {
     /// `LOWER(text)`: lower-case the whole string.
@@ -334,6 +336,9 @@ pub enum ScalarFunction {
     /// `REPLACE(text, from, to)`: replace every occurrence of `from` with `to`.
     /// An empty `from` leaves `text` untouched.
     Replace,
+    /// `COALESCE(a, b, …)`: the first non-`NULL` argument, or `NULL` when every
+    /// argument is `NULL`.
+    Coalesce,
     /// `CONCAT(a, b, …)`: concatenate two or more strings.
     Concat,
     /// `YEAR(date_or_datetime)`: calendar year, as [`Value::I64`].

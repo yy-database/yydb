@@ -754,7 +754,8 @@ fn arithmetic_symbol(op: BinaryOp) -> &'static str {
 /// Evaluate one scalar function call.
 ///
 /// Every function propagates `NULL`: a `NULL` argument, including a `NULL`
-/// inside `CONCAT`, makes the whole result `NULL`. String functions require text
+/// inside `CONCAT`, makes the whole result `NULL`, except `COALESCE`, which
+/// returns its first non-`NULL` argument. String functions require text
 /// arguments (or integer positions for `SUBSTR`) and the date part extractors
 /// require a `date` or `datetime` — any other kind is an error rather than an
 /// implicit conversion.
@@ -771,7 +772,11 @@ fn eval_function(
     for arg in args {
         values.push(eval_expr(arg, row, table, contract, records, bound_values)?);
     }
-    if values.iter().any(|value| matches!(value, Value::Null)) {
+    // `COALESCE` is the one function that a `NULL` argument does not decide, so
+    // it skips the blanket propagation and picks the first non-`NULL` value.
+    if !matches!(function, ScalarFunction::Coalesce)
+        && values.iter().any(|value| matches!(value, Value::Null))
+    {
         return Ok(Value::Null);
     }
     Ok(match function {
@@ -800,7 +805,35 @@ fn eval_function(
         ScalarFunction::Year | ScalarFunction::Month | ScalarFunction::Day => {
             Value::I64(date_part(function, &values[0])? as i64)
         }
+        ScalarFunction::Coalesce => coalesce(&values)?,
     })
+}
+
+/// `COALESCE(a, b, …)`: the first non-`NULL` argument, or `NULL` when every
+/// argument is `NULL`.
+///
+/// The result kind is decided at execution time, and every non-`NULL` argument
+/// must share one value kind: `COALESCE(text, i64)` is an error rather than an
+/// implicit conversion, because the returned value is passed through unchanged.
+fn coalesce(args: &[Value]) -> Result<Value> {
+    let mut selected: Option<&Value> = None;
+    for value in args {
+        if matches!(value, Value::Null) {
+            continue;
+        }
+        match selected {
+            Some(first) if first.kind() != value.kind() => {
+                return Err(query_runtime_error(format!(
+                    "`COALESCE()` arguments must share one value kind, got `{}` and `{}`",
+                    first.kind(),
+                    value.kind()
+                )));
+            }
+            Some(_) => {}
+            None => selected = Some(value),
+        }
+    }
+    Ok(selected.cloned().unwrap_or(Value::Null))
 }
 
 /// Extract one calendar part from a `date` or `datetime` value.
@@ -891,6 +924,7 @@ fn function_name(function: ScalarFunction) -> &'static str {
         ScalarFunction::Substr => "SUBSTR",
         ScalarFunction::Trim => "TRIM",
         ScalarFunction::Replace => "REPLACE",
+        ScalarFunction::Coalesce => "COALESCE",
         ScalarFunction::Concat => "CONCAT",
         ScalarFunction::Year => "YEAR",
         ScalarFunction::Month => "MONTH",

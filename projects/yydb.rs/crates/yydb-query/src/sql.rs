@@ -1137,7 +1137,8 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
 /// `LENGTH`, `CHAR_LENGTH`, `SUBSTR`, `TRIM`, `REPLACE`, `CONCAT`) and the date
 /// part extractors (`YEAR`, `MONTH`, `DAY`), whose argument must be a `date` or
 /// `datetime` column rather than text that the executor would have to guess a
-/// format for.
+/// format for. `COALESCE` takes any number of arguments because its result kind
+/// is decided at execution time from the first non-`NULL` argument.
 fn lower_scalar_function(
     name: &Identifier,
     args: &[Expression],
@@ -1164,6 +1165,7 @@ fn lower_scalar_function(
         "YEAR" => (ScalarFunction::Year, args.len() == 1, "exactly one argument"),
         "MONTH" => (ScalarFunction::Month, args.len() == 1, "exactly one argument"),
         "DAY" => (ScalarFunction::Day, args.len() == 1, "exactly one argument"),
+        "COALESCE" => (ScalarFunction::Coalesce, !args.is_empty(), "at least one argument"),
         other => return Err(sql_error(format!("scalar function `{other}` is not supported by YYDB"))),
     };
     if !arity_ok {

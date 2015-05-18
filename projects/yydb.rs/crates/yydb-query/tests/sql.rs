@@ -1454,6 +1454,7 @@ fn scalar_functions_reject_wrong_argument_counts_at_prepare_time() {
         ("SELECT CHAR_LENGTH(email, email) AS v FROM Account", "exactly one argument"),
         ("SELECT REPLACE(email) AS v FROM Account", "exactly three arguments"),
         ("SELECT REPLACE(email, 'a') AS v FROM Account", "exactly three arguments"),
+        ("SELECT COALESCE() AS v FROM Account", "at least one argument"),
     ] {
         let err = prepare_sql(sql).expect_err("wrong arity must reject");
         let msg = format!("{err}");
@@ -1480,6 +1481,89 @@ fn substr_rejects_ambiguous_positions() {
 fn unknown_scalar_function_is_rejected() {
     let err = prepare_sql("SELECT REVERSE(email) AS v FROM Account").expect_err("unknown function must reject");
     assert!(format!("{err}").contains("`REVERSE`"), "unexpected: {err}");
+}
+
+// ─── COALESCE ──────────────────────────────────────────────────────────
+//
+// `COALESCE` returns the first non-`NULL` argument, so unlike the other scalar
+// functions a `NULL` argument does not decide the result. Every non-`NULL`
+// argument must fall into the same value kind because the value is returned
+// unchanged, never converted.
+
+#[test]
+fn coalesce_returns_the_first_non_null_argument() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 1", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT COALESCE(tenant, 'missing') AS fallback, COALESCE(NULL, tenant, email) AS chained, \
+         COALESCE(tenant, CONCAT(tenant, '!')) AS nested_fallback, COALESCE(NULL, NULL) AS all_null, \
+         COALESCE(NULL, score) AS number FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("coalesce");
+    assert_eq!(outcome.rows[0].get("fallback"), Some(&Value::Text("missing".into())));
+    assert_eq!(outcome.rows[0].get("chained"), Some(&Value::Text("ada@example.test".into())));
+    assert_eq!(outcome.rows[0].get("nested_fallback"), Some(&Value::Null));
+    assert_eq!(outcome.rows[0].get("all_null"), Some(&Value::Null));
+    assert_eq!(outcome.rows[0].get("number"), Some(&Value::I64(10)));
+}
+
+#[test]
+fn coalesce_accepts_nested_scalar_calls() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 1", &[], &contract, &mut records);
+
+    // Row 1 has no tenant, so the fallback reaches the upper-cased email.
+    let outcome = execute_sql(
+        "SELECT COALESCE(LOWER(tenant), UPPER(email)) AS chosen, CHAR_LENGTH(COALESCE(tenant, email)) AS length \
+         FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("nested coalesce");
+    assert_eq!(outcome.rows[0].get("chosen"), Some(&Value::Text("ADA@EXAMPLE.TEST".into())));
+    assert_eq!(outcome.rows[0].get("length"), Some(&Value::I64(16)));
+    assert_eq!(outcome.rows[1].get("chosen"), Some(&Value::Text("t1".into())));
+    assert_eq!(outcome.rows[1].get("length"), Some(&Value::I64(2)));
+    assert_eq!(outcome.rows[2].get("chosen"), Some(&Value::Text("t2".into())));
+}
+
+#[test]
+fn coalesce_rejects_mixed_value_kinds() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let err = execute_sql("SELECT COALESCE(tenant, account_id) AS v FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("text and integer arguments must reject");
+    assert!(format!("{err}").contains("must share one value kind"), "unexpected: {err}");
+
+    // `NULL` arguments do not carry a kind, so they cannot paper over a mix.
+    let err = execute_sql("SELECT COALESCE(NULL, tenant, account_id) AS v FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("a NULL first argument must not hide the mix");
+    assert!(format!("{err}").contains("must share one value kind"), "unexpected: {err}");
+}
+
+#[test]
+fn coalesce_rejects_nested_aggregates() {
+    for sql in [
+        "SELECT COALESCE(SUM(score), 0) AS v FROM Account",
+        "SELECT COALESCE(0, AVG(score)) AS v FROM Account",
+    ] {
+        let err = prepare_sql(sql).expect_err("an aggregate inside COALESCE must reject");
+        let msg = format!("{err}");
+        assert!(msg.contains("cannot be nested inside another function call"), "`{sql}` unexpected: {msg}");
+    }
 }
 
 // ─── Nested scalar calls ───────────────────────────────────────────────
@@ -1588,7 +1672,7 @@ fn unimplemented_functions_reject_nested_calls() {
     for sql in [
         "SELECT NOW() AS v FROM Account",
         "SELECT CHAR_LENGTH(NOW()) AS v FROM Account",
-        "SELECT COALESCE(LOWER(email), UPPER(tenant)) AS v FROM Account",
+        "SELECT COALESCE(NOW(), email) AS v FROM Account",
         "SELECT SUM(REVERSE(email)) AS v FROM Account",
     ] {
         let err = prepare_sql(sql).expect_err("an unimplemented function must reject");
