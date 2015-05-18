@@ -1134,9 +1134,10 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
 /// rejected while preparing instead of failing on the first row. `NULL`
 /// propagation and argument types are execution concerns because lowering has
 /// no column types. The accepted set is the text functions (`LOWER`, `UPPER`,
-/// `LENGTH`, `SUBSTR`, `TRIM`, `CONCAT`) and the date part extractors (`YEAR`,
-/// `MONTH`, `DAY`), whose argument must be a `date` or `datetime` column rather
-/// than text that the executor would have to guess a format for.
+/// `LENGTH`, `CHAR_LENGTH`, `SUBSTR`, `TRIM`, `REPLACE`, `CONCAT`) and the date
+/// part extractors (`YEAR`, `MONTH`, `DAY`), whose argument must be a `date` or
+/// `datetime` column rather than text that the executor would have to guess a
+/// format for.
 fn lower_scalar_function(
     name: &Identifier,
     args: &[Expression],
@@ -1155,7 +1156,9 @@ fn lower_scalar_function(
         "LOWER" => (ScalarFunction::Lower, args.len() == 1, "exactly one argument"),
         "UPPER" => (ScalarFunction::Upper, args.len() == 1, "exactly one argument"),
         "LENGTH" => (ScalarFunction::Length, args.len() == 1, "exactly one argument"),
+        "CHAR_LENGTH" => (ScalarFunction::CharLength, args.len() == 1, "exactly one argument"),
         "TRIM" => (ScalarFunction::Trim, args.len() == 1, "exactly one argument"),
+        "REPLACE" => (ScalarFunction::Replace, args.len() == 3, "exactly three arguments"),
         "SUBSTR" => (ScalarFunction::Substr, args.len() == 2 || args.len() == 3, "two or three arguments"),
         "CONCAT" => (ScalarFunction::Concat, args.len() >= 2, "two or more arguments"),
         "YEAR" => (ScalarFunction::Year, args.len() == 1, "exactly one argument"),

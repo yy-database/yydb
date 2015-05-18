@@ -323,11 +323,17 @@ pub enum ScalarFunction {
     Upper,
     /// `LENGTH(text)`: number of Unicode characters, as [`Value::I64`].
     Length,
+    /// `CHAR_LENGTH(text)`: number of Unicode characters, as [`Value::I64`].
+    /// Counts exactly like [`ScalarFunction::Length`].
+    CharLength,
     /// `SUBSTR(text, start[, length])`: 1-based character slice, where a
     /// negative `start` counts from the end of the string.
     Substr,
     /// `TRIM(text)`: strip leading and trailing whitespace.
     Trim,
+    /// `REPLACE(text, from, to)`: replace every occurrence of `from` with `to`.
+    /// An empty `from` leaves `text` untouched.
+    Replace,
     /// `CONCAT(a, b, …)`: concatenate two or more strings.
     Concat,
     /// `YEAR(date_or_datetime)`: calendar year, as [`Value::I64`].

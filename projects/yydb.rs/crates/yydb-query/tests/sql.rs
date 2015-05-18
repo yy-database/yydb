@@ -1281,6 +1281,71 @@ fn select_projects_trim_and_concat() {
 }
 
 #[test]
+fn select_projects_char_length_and_replace() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT CHAR_LENGTH('héllo') AS accented, CHAR_LENGTH(email) AS email_length, \
+         REPLACE(email, '@example.test', '@example.org') AS rewritten, \
+         REPLACE('aXaXa', 'X', '-') AS every_match, REPLACE(tenant, 't', 'T') AS prefixed \
+         FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("char_length and replace");
+    assert_eq!(outcome.rows[0].get("accented"), Some(&Value::I64(5)));
+    assert_eq!(outcome.rows[0].get("email_length"), Some(&Value::I64(16)));
+    assert_eq!(outcome.rows[0].get("rewritten"), Some(&Value::Text("ada@example.org".into())));
+    assert_eq!(outcome.rows[0].get("every_match"), Some(&Value::Text("a-a-a".into())));
+    assert_eq!(outcome.rows[0].get("prefixed"), Some(&Value::Text("T1".into())));
+}
+
+#[test]
+fn replace_with_an_empty_needle_returns_the_input() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // `str::replace` would insert the replacement between every character, so
+    // the empty needle must short-circuit to the original text.
+    let outcome = execute_sql(
+        "SELECT REPLACE('abc', '', '-') AS untouched, REPLACE('', '', '-') AS blank \
+         FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("empty needle");
+    assert_eq!(outcome.rows[0].get("untouched"), Some(&Value::Text("abc".into())));
+    assert_eq!(outcome.rows[0].get("blank"), Some(&Value::Text(String::new())));
+}
+
+#[test]
+fn char_length_and_replace_accept_nested_calls() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // `t1` + `-` + `ada@example.test` is 19 characters.
+    let outcome = execute_sql(
+        "SELECT CHAR_LENGTH(CONCAT(LOWER(tenant), '-', email)) AS joined_length, \
+         REPLACE(UPPER(email), '@EXAMPLE.TEST', '') AS local_part FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("nested char_length and replace");
+    assert_eq!(outcome.rows[0].get("joined_length"), Some(&Value::I64(19)));
+    assert_eq!(outcome.rows[0].get("local_part"), Some(&Value::Text("ADA".into())));
+}
+
+#[test]
 fn scalar_functions_compose_with_aggregates_and_ordering() {
     let contract = contract();
     let mut records = BTreeMap::new();
@@ -1337,14 +1402,16 @@ fn scalar_functions_propagate_null_arguments() {
 
     let outcome = execute_sql(
         "SELECT LOWER(NULL) AS l, UPPER(NULL) AS u, LENGTH(NULL) AS n, SUBSTR(NULL, 1) AS s, \
-         TRIM(NULL) AS t, CONCAT('a', NULL) AS c, CONCAT(tenant, '!') AS d FROM Account WHERE account_id = 1",
+         TRIM(NULL) AS t, CONCAT('a', NULL) AS c, CONCAT(tenant, '!') AS d, \
+         CHAR_LENGTH(NULL) AS cl, REPLACE(NULL, 'a', 'b') AS rn, REPLACE(tenant, NULL, 'b') AS rf, \
+         REPLACE(tenant, 't', NULL) AS rt FROM Account WHERE account_id = 1",
         &[],
         &contract,
         &[],
         &mut records,
     )
     .expect("null propagation");
-    for column in ["l", "u", "n", "s", "t", "c", "d"] {
+    for column in ["l", "u", "n", "s", "t", "c", "d", "cl", "rn", "rf", "rt"] {
         assert_eq!(outcome.rows[0].get(column), Some(&Value::Null), "`{column}` must be NULL");
     }
 }
@@ -1366,6 +1433,14 @@ fn scalar_functions_reject_non_text_arguments() {
     let err = execute_sql("SELECT SUBSTR(tenant, tenant) AS v FROM Account", &[], &contract, &[], &mut records)
         .expect_err("SUBSTR position must be an integer");
     assert!(format!("{err}").contains("integer position"), "unexpected: {err}");
+
+    let err = execute_sql("SELECT CHAR_LENGTH(account_id) AS v FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("CHAR_LENGTH over an integer must reject");
+    assert!(format!("{err}").contains("text arguments"), "unexpected: {err}");
+
+    let err = execute_sql("SELECT REPLACE(tenant, account_id, 'x') AS v FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("REPLACE over an integer must reject");
+    assert!(format!("{err}").contains("text arguments"), "unexpected: {err}");
 }
 
 #[test]
@@ -1375,6 +1450,10 @@ fn scalar_functions_reject_wrong_argument_counts_at_prepare_time() {
         ("SELECT LOWER(email, email) AS v FROM Account", "exactly one argument"),
         ("SELECT SUBSTR(email) AS v FROM Account", "two or three arguments"),
         ("SELECT CONCAT(email) AS v FROM Account", "two or more arguments"),
+        ("SELECT CHAR_LENGTH() AS v FROM Account", "exactly one argument"),
+        ("SELECT CHAR_LENGTH(email, email) AS v FROM Account", "exactly one argument"),
+        ("SELECT REPLACE(email) AS v FROM Account", "exactly three arguments"),
+        ("SELECT REPLACE(email, 'a') AS v FROM Account", "exactly three arguments"),
     ] {
         let err = prepare_sql(sql).expect_err("wrong arity must reject");
         let msg = format!("{err}");
@@ -1507,6 +1586,7 @@ fn nested_calls_stay_rejected_in_predicates_and_ordering() {
 #[test]
 fn unimplemented_functions_reject_nested_calls() {
     for sql in [
+        "SELECT NOW() AS v FROM Account",
         "SELECT CHAR_LENGTH(NOW()) AS v FROM Account",
         "SELECT COALESCE(LOWER(email), UPPER(tenant)) AS v FROM Account",
         "SELECT SUM(REVERSE(email)) AS v FROM Account",

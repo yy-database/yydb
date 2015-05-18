@@ -778,8 +778,18 @@ fn eval_function(
         ScalarFunction::Lower => Value::Text(text_argument(function, &values[0])?.to_lowercase()),
         ScalarFunction::Upper => Value::Text(text_argument(function, &values[0])?.to_uppercase()),
         ScalarFunction::Trim => Value::Text(text_argument(function, &values[0])?.trim().to_string()),
-        ScalarFunction::Length => Value::I64(text_argument(function, &values[0])?.chars().count() as i64),
+        ScalarFunction::Length | ScalarFunction::CharLength => {
+            Value::I64(text_argument(function, &values[0])?.chars().count() as i64)
+        }
         ScalarFunction::Substr => substr(&values)?,
+        ScalarFunction::Replace => {
+            let text = text_argument(function, &values[0])?;
+            let from = text_argument(function, &values[1])?;
+            let to = text_argument(function, &values[2])?;
+            // `str::replace` with an empty needle inserts `to` between every
+            // character, so an empty `from` must return the input unchanged.
+            Value::Text(if from.is_empty() { text.to_string() } else { text.replace(from, to) })
+        }
         ScalarFunction::Concat => {
             let mut joined = String::new();
             for value in &values {
@@ -877,8 +887,10 @@ fn function_name(function: ScalarFunction) -> &'static str {
         ScalarFunction::Lower => "LOWER",
         ScalarFunction::Upper => "UPPER",
         ScalarFunction::Length => "LENGTH",
+        ScalarFunction::CharLength => "CHAR_LENGTH",
         ScalarFunction::Substr => "SUBSTR",
         ScalarFunction::Trim => "TRIM",
+        ScalarFunction::Replace => "REPLACE",
         ScalarFunction::Concat => "CONCAT",
         ScalarFunction::Year => "YEAR",
         ScalarFunction::Month => "MONTH",
