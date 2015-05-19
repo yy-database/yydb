@@ -124,20 +124,23 @@ pub enum Pred {
     Not(Box<Pred>),
     /// `[NOT] EXISTS (subquery)`.
     ///
-    /// The subquery keeps its own pipeline. It is resolved once before any row
-    /// is tested, so it must not reference the surrounding statement's row
-    /// sources.
+    /// The subquery keeps its own pipeline. An uncorrelated one is resolved once
+    /// before any row is tested. A `correlated` one reads columns of the row
+    /// under test, so execution re-runs its pipeline for every row and hands
+    /// that row in as the enclosing row.
     Exists {
         /// Lowered subquery pipeline.
         ops: Vec<QueryOp>,
         /// Whether the test is negated (`NOT EXISTS`).
         negated: bool,
+        /// Whether the subquery reads columns of the row under test.
+        correlated: bool,
     },
     /// `expr [NOT] IN (subquery)`.
     ///
-    /// Like [`Pred::Exists`] the subquery is resolved once, before any row is
-    /// tested, into the set of values it produces, and it must not reference the
-    /// surrounding statement's row sources.
+    /// Like [`Pred::Exists`] an uncorrelated subquery is resolved once, before
+    /// any row is tested, into the set of values it produces. A `correlated` one
+    /// produces that set once per row, from the row under test.
     InSubquery {
         /// Field path tested against the subquery output.
         path: Vec<String>,
@@ -145,6 +148,8 @@ pub enum Pred {
         ops: Vec<QueryOp>,
         /// Whether the test is negated (`NOT IN`).
         negated: bool,
+        /// Whether the subquery reads columns of the row under test.
+        correlated: bool,
     },
     /// `expr [NOT] IN (<materialized values>)`, produced by resolving
     /// [`Pred::InSubquery`]. Never appears in a freshly lowered plan.
@@ -163,11 +168,11 @@ pub enum Pred {
     },
     /// `field <op> (subquery)`.
     ///
-    /// Like [`Pred::Exists`] the subquery is resolved once before any row is
-    /// tested, so it must not reference the surrounding statement's row
-    /// sources. It must project exactly one column and produce at most one row:
-    /// zero rows yield `NULL`, more than one row is an error rather than a
-    /// silent first-row pick.
+    /// Like [`Pred::Exists`] an uncorrelated subquery is resolved once before
+    /// any row is tested. A `correlated` one produces its value once per row,
+    /// from the row under test. Either way it must project exactly one column
+    /// and produce at most one row: zero rows yield `NULL`, more than one row is
+    /// an error rather than a silent first-row pick.
     FieldCmpSubquery {
         /// Field path on the left-hand side.
         path: Vec<String>,
@@ -175,6 +180,8 @@ pub enum Pred {
         op: CmpOp,
         /// Lowered subquery pipeline, ending in [`QueryOp::Collect`].
         ops: Vec<QueryOp>,
+        /// Whether the subquery reads columns of the row under test.
+        correlated: bool,
     },
     /// `field <op> <scalar>`, produced by resolving
     /// [`Pred::FieldCmpSubquery`]. Never appears in a freshly lowered plan.
@@ -264,13 +271,16 @@ pub enum Expr {
     },
     /// Scalar subquery `(SELECT ...)` used as a value.
     ///
-    /// The subquery is uncorrelated, so execution resolves it once per
-    /// projection rather than once per row. It must project exactly one column
-    /// and produce at most one row: zero rows yield `NULL`, more than one row is
-    /// an error rather than a silent first-row pick.
+    /// An uncorrelated subquery is resolved once per projection rather than once
+    /// per row. A `correlated` one produces its value once per row, from the row
+    /// being projected. Either way it must project exactly one column and
+    /// produce at most one row: zero rows yield `NULL`, more than one row is an
+    /// error rather than a silent first-row pick.
     Subquery {
         /// Lowered subquery pipeline, ending in [`QueryOp::Collect`].
         ops: Vec<QueryOp>,
+        /// Whether the subquery reads columns of the row being projected.
+        correlated: bool,
     },
 }
 

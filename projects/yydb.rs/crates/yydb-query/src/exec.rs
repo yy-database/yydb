@@ -217,11 +217,11 @@ pub(crate) fn resolve_subquery_predicates(
 ) -> Result<Pred> {
     let resolve = |inner: &Pred| resolve_subquery_predicates(inner, contract, records, bound_values);
     Ok(match predicate {
-        Pred::Exists { ops, negated } => {
+        Pred::Exists { ops, negated, .. } => {
             let found = !execute_ops(ops, contract, records, bound_values)?.is_empty();
             if found == *negated { Pred::False } else { Pred::True }
         }
-        Pred::InSubquery { path, ops, negated } => {
+        Pred::InSubquery { path, ops, negated, .. } => {
             let rows = execute_ops(ops, contract, records, bound_values)?;
             let mut values = Vec::with_capacity(rows.len());
             for row in &rows {
@@ -235,7 +235,7 @@ pub(crate) fn resolve_subquery_predicates(
             }
             Pred::InSet { path: path.clone(), values, negated: *negated }
         }
-        Pred::FieldCmpSubquery { path, op, ops } => Pred::FieldCmpScalar {
+        Pred::FieldCmpSubquery { path, op, ops, .. } => Pred::FieldCmpScalar {
             path: path.clone(),
             op: *op,
             value: scalar_subquery_value(ops, contract, records, bound_values)?,
@@ -495,7 +495,7 @@ pub(crate) fn eval_expr(
         Expr::Function { function, args } => {
             eval_function(*function, args, row, table, contract, records, bound_values)
         }
-        Expr::Subquery { ops } => scalar_subquery_value(ops, contract, records, bound_values),
+        Expr::Subquery { ops, .. } => scalar_subquery_value(ops, contract, records, bound_values),
     }
 }
 
@@ -534,7 +534,7 @@ fn resolve_scalar_subqueries(
 ) -> Result<Expr> {
     let resolve = |inner: &Expr| resolve_scalar_subqueries(inner, contract, records, bound_values);
     Ok(match expr {
-        Expr::Subquery { ops } => {
+        Expr::Subquery { ops, .. } => {
             Expr::Bound(BoundValue::Literal(scalar_subquery_value(ops, contract, records, bound_values)?))
         }
         Expr::Case { branches, else_branch } => {

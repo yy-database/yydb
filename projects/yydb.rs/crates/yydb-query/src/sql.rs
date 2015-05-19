@@ -859,6 +859,7 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
                     path: column_path(right)?,
                     op: flip_cmp(cmp),
                     ops: lower_scalar_subquery(query, parameters, ctes)?,
+                    correlated: false,
                 });
             }
             let left_path = column_path(left)?;
@@ -867,6 +868,7 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
                     path: left_path,
                     op: cmp,
                     ops: lower_scalar_subquery(query, parameters, ctes)?,
+                    correlated: false,
                 });
             }
             // Detect column-vs-column comparisons (JOIN ON). If the right side
@@ -925,7 +927,7 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
             Ok(Pred::FieldBool { path: vec![identifier.name.to_string()], value: BoundValue::Literal(Value::Bool(true)) })
         }
         Expression::Exists { query, negated, .. } => {
-            Ok(Pred::Exists { ops: lower_select(query, parameters, ctes)?, negated: *negated })
+            Ok(Pred::Exists { ops: lower_select(query, parameters, ctes)?, negated: *negated, correlated: false })
         }
         Expression::InSubquery { expr, query, negated, .. } => {
             let path = column_path(expr)?;
@@ -939,7 +941,7 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
                     columns.len()
                 )));
             }
-            Ok(Pred::InSubquery { path, ops: lower_select(query, parameters, ctes)?, negated: *negated })
+            Ok(Pred::InSubquery { path, ops: lower_select(query, parameters, ctes)?, negated: *negated, correlated: false })
         }
         _ => Err(sql_error("unsupported SQL predicate shape")),
     }
@@ -1088,7 +1090,9 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
         Expression::Unary { op: UnaryOperator::Not, expr, .. } => {
             Ok(Expr::Not(Box::new(lower_expr(expr, parameters, ctes)?)))
         }
-        Expression::Subquery { query, .. } => Ok(Expr::Subquery { ops: lower_scalar_subquery(query, parameters, ctes)? }),
+        Expression::Subquery { query, .. } => {
+            Ok(Expr::Subquery { ops: lower_scalar_subquery(query, parameters, ctes)?, correlated: false })
+        }
         Expression::FunctionCall { name, args, window, .. } => {
             // A window value is not a scalar: it depends on the whole partitioned
             // row set, so it may only appear as its own SELECT item.
