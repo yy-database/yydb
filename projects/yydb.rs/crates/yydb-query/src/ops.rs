@@ -11,6 +11,10 @@ use yydb_types::Value;
 /// One logical query result row.
 pub type QueryRow = BTreeMap<String, Value>;
 
+/// Leading component a correlated column path carries so execution reads it from
+/// the enclosing statement's row instead of the row under test.
+pub const OUTER_ROW_MARKER: &str = "__yydb_outer__";
+
 /// Comparison operator for filter predicates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmpOp {

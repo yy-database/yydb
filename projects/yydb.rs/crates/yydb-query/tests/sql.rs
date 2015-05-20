@@ -4361,16 +4361,72 @@ fn not_exists_predicate_inverts_the_subquery_result() {
 }
 
 #[test]
-fn exists_rejects_a_reference_to_the_enclosing_statement() {
-    // The subquery is resolved once instead of per row, so it has no enclosing
-    // row to bind to and a correlated reference is rejected while preparing.
-    let error = prepare_sql(
+fn correlated_exists_reads_the_enclosing_row() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // Accounts 1 and 2 own a project, so the subquery produces one result per
+    // outer row instead of one result for the whole statement.
+    let rows = execute_sql(
         "SELECT account_id FROM Account \
-         WHERE EXISTS (SELECT project_id FROM Project WHERE Project.owner_id = Account.account_id)",
+         WHERE EXISTS (SELECT project_id FROM Project WHERE Project.owner_id = Account.account_id) \
+         ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
     )
-    .expect_err("a correlated EXISTS reference is not supported");
-    let message = format!("{error}");
-    assert!(message.contains("not a row source"), "unexpected error: {message}");
+    .expect("correlated EXISTS")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2], "only accounts that own a project pass");
+
+    // The same subquery without the correlation is decided once, so every
+    // account passes — which is what the statement above would do if it ran the
+    // subquery once and ignored the enclosing row.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE EXISTS (SELECT project_id FROM Project) ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("uncorrelated EXISTS")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+}
+
+#[test]
+fn correlated_not_exists_reads_the_enclosing_row() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // Account 3 owns no project, so only that row survives the per-row run.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account \
+         WHERE NOT EXISTS (SELECT project_id FROM Project WHERE Project.owner_id = Account.account_id) \
+         ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("correlated NOT EXISTS")
+    .rows;
+    assert_eq!(ids(&rows), vec![3]);
+
+    // The uncorrelated form sees every project row, so it rejects every account.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE NOT EXISTS (SELECT project_id FROM Project)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("uncorrelated NOT EXISTS")
+    .rows;
+    assert!(rows.is_empty(), "a non-empty shared subquery rejects every row");
 }
 
 // ─── non-recursive CTEs ────────────────────────────────────────────────
@@ -4822,24 +4878,104 @@ fn in_subquery_follows_three_valued_logic() {
 }
 
 #[test]
-fn in_subquery_rejects_multi_column_and_correlated_subqueries() {
+fn in_subquery_rejects_a_multi_column_subquery() {
     let multi = prepare_sql("SELECT account_id FROM Account WHERE account_id IN (SELECT account_id, score FROM Account)")
         .expect_err("the subquery projects two columns");
     let message = format!("{multi}");
     assert!(message.contains("single-column"), "unexpected error: {message}");
 
-    let correlated = prepare_sql(
-        "SELECT account_id FROM Account \
-         WHERE account_id IN (SELECT owner_id FROM Project WHERE Project.owner_id = Account.account_id)",
-    )
-    .expect_err("a correlated IN reference is not supported");
-    let message = format!("{correlated}");
-    assert!(message.contains("not a row source"), "unexpected error: {message}");
-
     let expression = prepare_sql("SELECT account_id FROM Account WHERE score + 1 IN (SELECT score FROM Account)")
         .expect_err("the tested value must be a plain column");
     let message = format!("{expression}");
     assert!(message.contains("plain column references only"), "unexpected error: {message}");
+}
+
+#[test]
+fn correlated_in_subquery_produces_one_set_per_row() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // Account 1's score (10) is among the project ids it owns, account 2's score
+    // (30) is not, and account 3 owns no project at all, so its set is empty.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account \
+         WHERE score IN (SELECT project_id FROM Project WHERE Project.owner_id = Account.account_id) \
+         ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("correlated IN")
+    .rows;
+    assert_eq!(ids(&rows), vec![1]);
+
+    // One shared set instead of one per row keeps account 3 as well, because
+    // its score matches project 20 from another account's row.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE score IN (SELECT project_id FROM Project) ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("uncorrelated IN")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 3]);
+}
+
+#[test]
+fn correlated_not_in_subquery_follows_three_valued_logic() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // Account 1's score matches its own set, account 2 has no set to be caught
+    // by, and account 3's empty set decides `NOT IN` even without a match.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account \
+         WHERE score NOT IN (SELECT project_id FROM Project WHERE Project.owner_id = Account.account_id) \
+         ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("correlated NOT IN")
+    .rows;
+    assert_eq!(ids(&rows), vec![2, 3]);
+
+    // The shared set catches account 1 and leaves account 2, so the two runs are
+    // decided by different sets of values.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE score NOT IN (SELECT project_id FROM Project) ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("uncorrelated NOT IN")
+    .rows;
+    assert_eq!(ids(&rows), vec![2]);
+
+    // A `NULL` in one row's set makes a non-match unknown, and a `NULL` tested
+    // value is unknown against any non-empty set, so nothing passes. The outer
+    // statement is aliased because the subquery reads the same table: a bare
+    // `Account.…` would name the subquery's own source instead.
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 2", &[], &contract, &mut records);
+    let rows = execute_sql(
+        "SELECT a.account_id FROM Account AS a \
+         WHERE a.tenant NOT IN (SELECT tenant FROM Account WHERE account_id <> a.account_id) \
+         ORDER BY a.account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("correlated NOT IN over a set containing null")
+    .rows;
+    assert!(rows.is_empty(), "an unknown test drops every row");
 }
 
 // ─── scalar subquery ───────────────────────────────────────────────────
@@ -4991,12 +5127,122 @@ fn scalar_subquery_rejects_multiple_rows_and_columns() {
 }
 
 #[test]
-fn scalar_subquery_cannot_reference_the_enclosing_statement() {
-    let error = prepare_sql(
-        "SELECT a.account_id FROM Account AS a \
-         WHERE a.score = (SELECT score FROM Account WHERE Account.account_id = a.account_id)",
+fn correlated_scalar_subquery_projects_one_value_per_row() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // Accounts 1 and 2 get the project ids they own, and account 3 — which owns
+    // no project — gets `NULL` from the empty subquery.
+    let rows = execute_sql(
+        "SELECT account_id, (SELECT SUM(project_id) FROM Project WHERE Project.owner_id = Account.account_id) AS owned \
+         FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
     )
-    .expect_err("a correlated scalar subquery is not supported");
+    .expect("correlated scalar subquery in projection")
+    .rows;
+    assert_eq!(column(&rows, "account_id"), vec![Value::I64(1), Value::I64(2), Value::I64(3)]);
+    assert_eq!(column(&rows, "owned"), vec![Value::I64(21), Value::I64(20), Value::Null]);
+
+    // Predicting the same value once for the whole statement would repeat it on
+    // every row instead.
+    let rows = execute_sql(
+        "SELECT account_id, (SELECT SUM(project_id) FROM Project) AS owned FROM Account ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("uncorrelated scalar subquery in projection")
+    .rows;
+    assert_eq!(column(&rows, "owned"), vec![Value::I64(41), Value::I64(41), Value::I64(41)]);
+}
+
+#[test]
+fn correlated_scalar_subquery_compares_against_the_enclosing_row() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // Each row compares its score with the total of its own tenant: t1 totals 40
+    // so accounts 1 and 2 pass, while t2 totals 20 and account 3 does not. The
+    // outer statement is aliased so `a.tenant` names its row rather than the
+    // subquery's own `Account` source.
+    let rows = execute_sql(
+        "SELECT a.account_id AS account_id FROM Account AS a \
+         WHERE a.score < (SELECT SUM(score) FROM Account WHERE tenant = a.tenant) ORDER BY a.account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("correlated scalar subquery in a comparison")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2]);
+
+    // One total for the whole statement is 60, which every score is below.
+    let rows = execute_sql(
+        "SELECT a.account_id AS account_id FROM Account AS a WHERE a.score < (SELECT SUM(score) FROM Account) \
+         ORDER BY a.account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("uncorrelated scalar subquery in a comparison")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+}
+
+#[test]
+fn correlated_subqueries_reject_more_than_one_level() {
+    // The innermost statement reaches past its enclosing statement, which has no
+    // single row to hand down at that depth.
+    let error = prepare_sql(
+        "SELECT account_id FROM Account WHERE EXISTS (\
+         SELECT project_id FROM Project WHERE EXISTS (\
+         SELECT inner_project.project_id FROM Project AS inner_project \
+         WHERE inner_project.project_id = Account.account_id))",
+    )
+    .expect_err("a grandparent reference is not supported");
+    let message = format!("{error}");
+    assert!(message.contains("two or more levels out"), "unexpected error: {message}");
+}
+
+#[test]
+fn correlated_columns_are_rejected_in_a_subquery_row_source() {
+    // A derived table is its own statement, so it cannot read the row of the
+    // statement above it.
+    let error = prepare_sql(
+        "SELECT account_id FROM Account WHERE EXISTS (\
+         SELECT derived.project_id FROM \
+         (SELECT project_id FROM Project WHERE project_id = Account.account_id) AS derived)",
+    )
+    .expect_err("a derived table cannot read the enclosing statement");
     let message = format!("{error}");
     assert!(message.contains("not a row source"), "unexpected error: {message}");
+}
+
+#[test]
+fn correlated_columns_are_rejected_in_a_subquery_order_by() {
+    // `ORDER BY` decides the order of the whole subquery result, so no single
+    // outer row may feed it.
+    let error =
+        prepare_sql("SELECT account_id FROM Account WHERE EXISTS (SELECT project_id FROM Project ORDER BY Account.account_id)")
+            .expect_err("ORDER BY decides the whole subquery result");
+    let message = format!("{error}");
+    assert!(message.contains("ORDER BY"), "unexpected error: {message}");
+}
+
+#[test]
+fn a_write_assignment_rejects_a_subquery() {
+    // The assignment is evaluated against the row being written, so it has no
+    // enclosing statement row for a subquery to read.
+    let error = prepare_sql("UPDATE Account SET score = (SELECT score FROM Account WHERE account_id = Account.account_id)")
+        .expect_err("a write assignment cannot evaluate a subquery");
+    let message = format!("{error}");
+    assert!(message.contains("write assignment"), "unexpected error: {message}");
 }

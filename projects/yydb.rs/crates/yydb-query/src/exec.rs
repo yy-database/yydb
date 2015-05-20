@@ -9,8 +9,8 @@ use super::{
     catalog::table_row_key_name,
     lower,
     ops::{
-        AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow,
-        ScalarFunction, SetOpKind, WindowField, WindowFrameBound, WindowFunction,
+        AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, OUTER_ROW_MARKER, Pred, ProjectExpr, ProjectField,
+        QueryOp, QueryRow, ScalarFunction, SetOpKind, WindowField, WindowFrameBound, WindowFunction,
     },
     resolve, store,
 };
@@ -26,6 +26,14 @@ pub fn execute(
     execute_ops(&ops, contract, records, &[])
 }
 
+/// Row of the statement that encloses a correlated subquery, plus the table it
+/// was read from. Correlated column paths carry [`OUTER_ROW_MARKER`] and resolve
+/// against this row.
+pub(crate) struct OuterRow<'a> {
+    pub(crate) row: &'a QueryRow,
+    pub(crate) table: &'a str,
+}
+
 /// Execute a pre-lowered op list. `bound_values` supplies parameters for
 /// `BoundValue::Slot { index }` entries; pass `&[]` when all values are
 /// `BoundValue::Literal`.
@@ -34,6 +42,22 @@ pub fn execute_ops(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
+    execute_ops_in(ops, contract, records, bound_values, None)
+}
+
+/// Execute a pipeline on behalf of `outer`, the row of the statement that
+/// encloses it.
+///
+/// `outer` is what a correlated subquery reads: lowering marked those paths, and
+/// execution resolves them against this row. A pipeline that is not nested inside
+/// another statement passes `None`.
+fn execute_ops_in(
+    ops: &[QueryOp],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
     let mut rows: Vec<QueryRow> = Vec::new();
     let mut current_table: Option<String> = None;
@@ -57,8 +81,21 @@ pub fn execute_ops(
                 let table = current_table
                     .as_deref()
                     .ok_or_else(|| Error::Schema { message: "filter without a preceding table scan".into() })?;
-                let predicate = resolve_subquery_predicates(predicate, contract, records, bound_values)?;
-                rows.retain(|row| eval_pred(&predicate, row, table, contract, records, bound_values));
+                if predicate_has_correlated_subquery(predicate) {
+                    // A correlated subquery reads the row under test, so it is
+                    // re-run for every row instead of once for the pipeline.
+                    let mut kept: Vec<QueryRow> = Vec::with_capacity(rows.len());
+                    for row in std::mem::take(&mut rows) {
+                        if eval_pred_for_row(predicate, &row, table, contract, records, bound_values, outer)? {
+                            kept.push(row);
+                        }
+                    }
+                    rows = kept;
+                }
+                else {
+                    let predicate = resolve_subquery_predicates_in(predicate, contract, records, bound_values, None)?;
+                    rows.retain(|row| eval_pred_in(&predicate, row, table, contract, records, bound_values, outer));
+                }
             }
             QueryOp::Join { kind, right, right_alias, on } => {
                 if current_table.is_none() {
@@ -70,14 +107,14 @@ pub fn execute_ops(
                 };
                 let right_rows = store::load_table(records, &storage_right)?;
                 let prefix = right_alias.clone().unwrap_or_else(|| right.clone());
-                rows = execute_join(*kind, &rows, &right_rows, &prefix, on, contract, records, bound_values)?;
+                rows = execute_join(*kind, &rows, &right_rows, &prefix, on, contract, records, bound_values, outer)?;
             }
             QueryOp::JoinSubquery { kind, right, right_alias, on } => {
                 if current_table.is_none() {
                     return Err(Error::Schema { message: "join without a preceding table scan".into() });
                 }
                 let right_rows = execute_ops(right, contract, records, bound_values)?;
-                rows = execute_join(*kind, &rows, &right_rows, right_alias, on, contract, records, bound_values)?;
+                rows = execute_join(*kind, &rows, &right_rows, right_alias, on, contract, records, bound_values, outer)?;
             }
             QueryOp::SetOperation { kind, left, right, columns, right_columns } => {
                 rows = execute_set_operation(
@@ -89,24 +126,26 @@ pub fn execute_ops(
                     contract,
                     records,
                     bound_values,
+                    outer,
                 )?;
             }
             QueryOp::Aggregate { group_keys, aggregates } => {
-                rows = execute_aggregate(&rows, group_keys, aggregates, contract, records, bound_values)?;
+                rows = execute_aggregate(&rows, group_keys, aggregates, contract, records, bound_values, outer)?;
             }
             QueryOp::Window { fields } => {
-                rows = execute_window(&rows, fields, contract, records, bound_values)?;
+                rows = execute_window(&rows, fields, contract, records, bound_values, outer)?;
             }
             QueryOp::Project { fields } => {
                 let table = current_table
                     .as_deref()
                     .ok_or_else(|| Error::Schema { message: "project without a preceding table scan".into() })?;
-                // A scalar subquery does not read the row being projected, so it
-                // is resolved once for the whole pipeline instead of once per row.
+                // An uncorrelated scalar subquery does not read the row being
+                // projected, so it is resolved once for the whole pipeline. A
+                // correlated one stays in place and is evaluated per row.
                 let fields = resolve_projection_subqueries(fields, contract, records, bound_values)?;
                 rows = rows
                     .into_iter()
-                    .map(|row| project_row(&fields, &row, table, contract, records, bound_values))
+                    .map(|row| project_row_in(&fields, &row, table, contract, records, bound_values, outer))
                     .collect::<Result<Vec<_>>>()?;
             }
             QueryOp::Sort { keys } => {
@@ -168,11 +207,23 @@ pub fn project_row(
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> Result<QueryRow> {
+    project_row_in(fields, row, table, contract, records, bound_values, None)
+}
+
+fn project_row_in(
+    fields: &[ProjectField],
+    row: &QueryRow,
+    table: &str,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
+) -> Result<QueryRow> {
     let mut out = QueryRow::new();
     for field in fields {
         match &field.expr {
             ProjectExpr::Scalar { path } => {
-                let value = read_path(path, row, table, contract, records);
+                let value = read_path(path, row, table, contract, records, outer);
                 out.insert(field.name.clone(), value);
             }
             ProjectExpr::Nested { path, fields: nested } => {
@@ -181,8 +232,15 @@ pub fn project_row(
                         let resolved = resolve::resolve_row_at_path(path, row, table, contract, records);
                         match resolved {
                             Ok((nested_row, nested_table)) => {
-                                let nested_projected =
-                                    project_row(nested, &nested_row, &nested_table, Some(contract), records, bound_values)?;
+                                let nested_projected = project_row_in(
+                                    nested,
+                                    &nested_row,
+                                    &nested_table,
+                                    Some(contract),
+                                    records,
+                                    bound_values,
+                                    outer,
+                                )?;
                                 Value::Row(nested_projected)
                             }
                             Err(_) => Value::Null,
@@ -193,7 +251,7 @@ pub fn project_row(
                 out.insert(field.name.clone(), nested_value);
             }
             ProjectExpr::Computed(inner) => {
-                let value = eval_expr(inner, row, table, contract, records, bound_values)?;
+                let value = eval_expr(inner, row, table, contract, records, bound_values, outer)?;
                 out.insert(field.name.clone(), value);
             }
         }
@@ -206,23 +264,38 @@ pub fn project_row(
 ///
 /// An `EXISTS` subquery collapses to a constant. An `IN` subquery collapses to
 /// the set of values it produced, which the row under test is then compared
-/// against. Neither subquery can read the row under test, so running each one
-/// once per filter or join keeps evaluation cheap and surfaces subquery errors,
-/// which a per-row evaluation would have to swallow.
+/// against. This variant expects uncorrelated nodes only; a correlated one needs
+/// the row of the statement that encloses it and is resolved by
+/// [`eval_pred_for_row`] instead.
 pub(crate) fn resolve_subquery_predicates(
     predicate: &Pred,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> Result<Pred> {
-    let resolve = |inner: &Pred| resolve_subquery_predicates(inner, contract, records, bound_values);
+    resolve_subquery_predicates_in(predicate, contract, records, bound_values, None)
+}
+
+/// Resolve every subquery node of a predicate against `outer`, the row of the
+/// enclosing statement.
+///
+/// A correlated node is executed once here with that row bound; an uncorrelated
+/// one is executed once and reused.
+fn resolve_subquery_predicates_in(
+    predicate: &Pred,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
+) -> Result<Pred> {
+    let resolve = |inner: &Pred| resolve_subquery_predicates_in(inner, contract, records, bound_values, outer);
     Ok(match predicate {
-        Pred::Exists { ops, negated, .. } => {
-            let found = !execute_ops(ops, contract, records, bound_values)?.is_empty();
+        Pred::Exists { ops, negated, correlated } => {
+            let found = !execute_subquery(ops, contract, records, bound_values, *correlated, outer)?.is_empty();
             if found == *negated { Pred::False } else { Pred::True }
         }
-        Pred::InSubquery { path, ops, negated, .. } => {
-            let rows = execute_ops(ops, contract, records, bound_values)?;
+        Pred::InSubquery { path, ops, negated, correlated } => {
+            let rows = execute_subquery(ops, contract, records, bound_values, *correlated, outer)?;
             let mut values = Vec::with_capacity(rows.len());
             for row in &rows {
                 if row.len() != 1 {
@@ -235,16 +308,78 @@ pub(crate) fn resolve_subquery_predicates(
             }
             Pred::InSet { path: path.clone(), values, negated: *negated }
         }
-        Pred::FieldCmpSubquery { path, op, ops, .. } => Pred::FieldCmpScalar {
+        Pred::FieldCmpSubquery { path, op, ops, correlated } => Pred::FieldCmpScalar {
             path: path.clone(),
             op: *op,
-            value: scalar_subquery_value(ops, contract, records, bound_values)?,
+            value: scalar_subquery_value(ops, contract, records, bound_values, *correlated, outer)?,
         },
         Pred::And(left, right) => Pred::And(Box::new(resolve(left)?), Box::new(resolve(right)?)),
         Pred::Or(left, right) => Pred::Or(Box::new(resolve(left)?), Box::new(resolve(right)?)),
         Pred::Not(inner) => Pred::Not(Box::new(resolve(inner)?)),
         other => other.clone(),
     })
+}
+
+/// Whether a predicate carries a subquery that reads the row under test, which
+/// forces a per-row run instead of one run per pipeline.
+fn predicate_has_correlated_subquery(predicate: &Pred) -> bool {
+    match predicate {
+        Pred::Exists { correlated, .. } | Pred::InSubquery { correlated, .. } | Pred::FieldCmpSubquery { correlated, .. } => {
+            *correlated
+        }
+        Pred::And(left, right) | Pred::Or(left, right) => {
+            predicate_has_correlated_subquery(left) || predicate_has_correlated_subquery(right)
+        }
+        Pred::Not(inner) => predicate_has_correlated_subquery(inner),
+        _ => false,
+    }
+}
+
+/// Evaluate one predicate against one row.
+///
+/// A correlated subquery is re-run with this row as the enclosing row, which is
+/// what per-row re-execution means. `outer` is the row of the statement that
+/// encloses this pipeline, if any, and only resolves column paths that the
+/// pipeline's own statement marked as outer references.
+fn eval_pred_for_row(
+    predicate: &Pred,
+    row: &QueryRow,
+    table: &str,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
+) -> Result<bool> {
+    let row_outer = OuterRow { row, table };
+    let predicate = if predicate_has_correlated_subquery(predicate) {
+        resolve_subquery_predicates_in(predicate, contract, records, bound_values, Some(&row_outer))?
+    }
+    else {
+        resolve_subquery_predicates_in(predicate, contract, records, bound_values, None)?
+    };
+    Ok(eval_pred_in(&predicate, row, table, contract, records, bound_values, outer))
+}
+
+/// Run one subquery pipeline.
+///
+/// A correlated one is executed against `outer`, the row of the statement that
+/// encloses it. An uncorrelated one runs once on its own.
+fn execute_subquery(
+    ops: &[QueryOp],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+    correlated: bool,
+    outer: Option<&OuterRow<'_>>,
+) -> Result<Vec<QueryRow>> {
+    if !correlated {
+        return execute_ops(ops, contract, records, bound_values);
+    }
+    let Some(outer) = outer
+    else {
+        return Err(query_runtime_error("a correlated subquery reached execution without the row of its enclosing statement"));
+    };
+    execute_ops_in(ops, contract, records, bound_values, Some(outer))
 }
 
 pub(crate) fn eval_pred(
@@ -255,11 +390,23 @@ pub(crate) fn eval_pred(
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> bool {
+    eval_pred_in(pred, row, table, contract, records, bound_values, None)
+}
+
+fn eval_pred_in(
+    pred: &Pred,
+    row: &QueryRow,
+    table: &str,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
+) -> bool {
     match pred {
         Pred::True => true,
         Pred::False => false,
         Pred::FieldBool { path, value } => {
-            let left = read_path(path, row, table, contract, records);
+            let left = read_path(path, row, table, contract, records, outer);
             let right = match resolve_bound_value(value, bound_values) {
                 Ok(v) => v,
                 Err(_) => return false, // unresolved slot → predicate fails safe
@@ -267,7 +414,7 @@ pub(crate) fn eval_pred(
             matches!((&left, &right), (Value::Bool(a), Value::Bool(b)) if a == b)
         }
         Pred::FieldCmp { path, op, value } => {
-            let left = read_path(path, row, table, contract, records);
+            let left = read_path(path, row, table, contract, records, outer);
             let right = match resolve_bound_value(value, bound_values) {
                 Ok(v) => v,
                 Err(_) => return false,
@@ -275,21 +422,21 @@ pub(crate) fn eval_pred(
             cmp_values(&left, *op, &right)
         }
         Pred::FieldCmpField { left_path, op, right_path } => {
-            let left = read_path(left_path, row, table, contract, records);
-            let right = read_path(right_path, row, table, contract, records);
+            let left = read_path(left_path, row, table, contract, records, outer);
+            let right = read_path(right_path, row, table, contract, records, outer);
             cmp_values(&left, *op, &right)
         }
         Pred::And(left, right) => {
-            eval_pred(left, row, table, contract, records, bound_values)
-                && eval_pred(right, row, table, contract, records, bound_values)
+            eval_pred_in(left, row, table, contract, records, bound_values, outer)
+                && eval_pred_in(right, row, table, contract, records, bound_values, outer)
         }
         Pred::Or(left, right) => {
-            eval_pred(left, row, table, contract, records, bound_values)
-                || eval_pred(right, row, table, contract, records, bound_values)
+            eval_pred_in(left, row, table, contract, records, bound_values, outer)
+                || eval_pred_in(right, row, table, contract, records, bound_values, outer)
         }
-        Pred::Not(inner) => !eval_pred(inner, row, table, contract, records, bound_values),
+        Pred::Not(inner) => !eval_pred_in(inner, row, table, contract, records, bound_values, outer),
         Pred::InSet { path, values, negated } => {
-            let left = read_path(path, row, table, contract, records);
+            let left = read_path(path, row, table, contract, records, outer);
             // `WHERE` keeps a row only on TRUE, so an unknown test drops it —
             // which is also what `NOT IN` does over a set that contains NULL.
             match in_set_truth(&left, values) {
@@ -301,7 +448,7 @@ pub(crate) fn eval_pred(
         // A scalar subquery is resolved before any row is tested. A NULL on
         // either side makes the comparison unknown, so no row may pass.
         Pred::FieldCmpScalar { path, op, value } => {
-            let left = read_path(path, row, table, contract, records);
+            let left = read_path(path, row, table, contract, records, outer);
             if matches!(left, Value::Null) || matches!(value, Value::Null) {
                 return false;
             }
@@ -324,8 +471,10 @@ fn scalar_subquery_value(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    correlated: bool,
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
-    let rows = execute_ops(ops, contract, records, bound_values)?;
+    let rows = execute_subquery(ops, contract, records, bound_values, correlated, outer)?;
     let mut rows = rows.into_iter();
     let Some(row) = rows.next()
     else {
@@ -377,7 +526,19 @@ fn read_path(
     table: &str,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
+    outer: Option<&OuterRow<'_>>,
 ) -> Value {
+    // A path lowering marked as an outer reference is read from the row of the
+    // statement that encloses this pipeline, never from the row under test.
+    if let Some((first, rest)) = path.split_first()
+        && first.as_str() == OUTER_ROW_MARKER
+    {
+        let Some(outer) = outer
+        else {
+            return Value::Null;
+        };
+        return read_path(rest, outer.row, outer.table, contract, records, None);
+    }
     // Single-element path — direct bare column lookup, the common case.
     if path.len() == 1 {
         return row.get(&path[0]).cloned().unwrap_or(Value::Null);
@@ -472,30 +633,35 @@ pub(crate) fn eval_expr(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
     match expr {
-        Expr::Column { path } => Ok(read_path(path, row, table, contract, records)),
+        Expr::Column { path } => Ok(read_path(path, row, table, contract, records, outer)),
         Expr::Bound(bv) => resolve_bound_value(bv, bound_values),
         Expr::Case { branches, else_branch } => {
-            eval_case(branches, else_branch, row, table, contract, records, bound_values)
+            eval_case(branches, else_branch, row, table, contract, records, bound_values, outer)
         }
         Expr::Cast { expr: inner, target } => {
-            let value = eval_expr(inner, row, table, contract, records, bound_values)?;
+            let value = eval_expr(inner, row, table, contract, records, bound_values, outer)?;
             eval_cast(&value, target)
         }
         Expr::Binary { op, left, right } => {
-            let l = eval_expr(left, row, table, contract, records, bound_values)?;
-            let r = eval_expr(right, row, table, contract, records, bound_values)?;
+            let l = eval_expr(left, row, table, contract, records, bound_values, outer)?;
+            let r = eval_expr(right, row, table, contract, records, bound_values, outer)?;
             eval_binary(*op, &l, &r)
         }
         Expr::Not(inner) => {
-            let val = eval_expr(inner, row, table, contract, records, bound_values)?;
+            let val = eval_expr(inner, row, table, contract, records, bound_values, outer)?;
             Ok(Value::Bool(!is_truthy(&val)))
         }
-        Expr::Function { function, args } => {
-            eval_function(*function, args, row, table, contract, records, bound_values)
+        Expr::Function { function, args } => eval_function(*function, args, row, table, contract, records, bound_values, outer),
+        // A correlated value subquery reads the row being projected, so that row
+        // becomes the enclosing row of its per-row run.
+        Expr::Subquery { ops, correlated } => {
+            let enclosing = OuterRow { row, table };
+            let outer = if *correlated { Some(&enclosing) } else { None };
+            scalar_subquery_value(ops, contract, records, bound_values, *correlated, outer)
         }
-        Expr::Subquery { ops, .. } => scalar_subquery_value(ops, contract, records, bound_values),
     }
 }
 
@@ -524,8 +690,9 @@ fn resolve_projection_subqueries(
         .collect()
 }
 
-/// Replace every [`Expr::Subquery`] of an expression with the literal value it
-/// produced.
+/// Replace every uncorrelated [`Expr::Subquery`] of an expression with the
+/// literal value it produced. A correlated one is left in place, because its
+/// value depends on the row being projected.
 fn resolve_scalar_subqueries(
     expr: &Expr,
     contract: Option<&ResolvedContract>,
@@ -534,8 +701,14 @@ fn resolve_scalar_subqueries(
 ) -> Result<Expr> {
     let resolve = |inner: &Expr| resolve_scalar_subqueries(inner, contract, records, bound_values);
     Ok(match expr {
-        Expr::Subquery { ops, .. } => {
-            Expr::Bound(BoundValue::Literal(scalar_subquery_value(ops, contract, records, bound_values)?))
+        Expr::Subquery { ops, correlated } => {
+            if *correlated {
+                expr.clone()
+            }
+            else {
+                let value = scalar_subquery_value(ops, contract, records, bound_values, false, None)?;
+                Expr::Bound(BoundValue::Literal(value))
+            }
         }
         Expr::Case { branches, else_branch } => {
             let mut resolved = Vec::with_capacity(branches.len());
@@ -574,15 +747,16 @@ fn eval_case(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
     for (when, then) in branches {
-        let when_val = eval_expr(when, row, table, contract, records, bound_values)?;
+        let when_val = eval_expr(when, row, table, contract, records, bound_values, outer)?;
         if is_truthy(&when_val) {
-            return eval_expr(then, row, table, contract, records, bound_values);
+            return eval_expr(then, row, table, contract, records, bound_values, outer);
         }
     }
     match else_branch {
-        Some(els) => eval_expr(els, row, table, contract, records, bound_values),
+        Some(els) => eval_expr(els, row, table, contract, records, bound_values, outer),
         None => Ok(Value::Null),
     }
 }
@@ -767,10 +941,11 @@ fn eval_function(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
     let mut values = Vec::with_capacity(args.len());
     for arg in args {
-        values.push(eval_expr(arg, row, table, contract, records, bound_values)?);
+        values.push(eval_expr(arg, row, table, contract, records, bound_values, outer)?);
     }
     // `COALESCE` is the one function that a `NULL` argument does not decide, so
     // it skips the blanket propagation and picks the first non-`NULL` value.
@@ -1040,16 +1215,16 @@ fn execute_join(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
-    // A subquery in `ON` is independent of both rows, so it is resolved once for
-    // the whole join instead of once per pair.
-    let on = resolve_subquery_predicates(on, contract, records, bound_values)?;
-    let on = &on;
+    // The `ON` condition is evaluated per candidate pair. A subquery inside it
+    // that reads the pair is therefore run per pair, while one that reads the
+    // enclosing statement's row still resolves against `outer`.
     match kind {
-        JoinKind::Inner => execute_inner_join(left_rows, right_rows, prefix, on, contract, records, bound_values),
-        JoinKind::Left => execute_left_join(left_rows, right_rows, prefix, on, contract, records, bound_values),
-        JoinKind::Right => execute_right_join(left_rows, right_rows, prefix, on, contract, records, bound_values),
-        JoinKind::Full => execute_full_join(left_rows, right_rows, prefix, on, contract, records, bound_values),
+        JoinKind::Inner => execute_inner_join(left_rows, right_rows, prefix, on, contract, records, bound_values, outer),
+        JoinKind::Left => execute_left_join(left_rows, right_rows, prefix, on, contract, records, bound_values, outer),
+        JoinKind::Right => execute_right_join(left_rows, right_rows, prefix, on, contract, records, bound_values, outer),
+        JoinKind::Full => execute_full_join(left_rows, right_rows, prefix, on, contract, records, bound_values, outer),
     }
 }
 
@@ -1061,6 +1236,7 @@ fn execute_inner_join(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
     // Nested loop: for each left row, for each right row, check ON condition.
     // The ON predicate operates on a merged row where both sides are
@@ -1072,7 +1248,7 @@ fn execute_inner_join(
             // JOIN ON condition — eval_pred reads directly from the merged
             // row by table-qualified column name, so `table` is irrelevant
             // for single-element paths.
-            if eval_pred(on, &merged, "", contract, records, bound_values) {
+            if eval_pred_for_row(on, &merged, "", contract, records, bound_values, outer)? {
                 out.push(merged);
             }
         }
@@ -1088,6 +1264,7 @@ fn execute_left_join(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
     // Qualified column names that belong to the right side so we can pad
     // unmatched left rows with NULL for each right column.
@@ -1103,7 +1280,7 @@ fn execute_left_join(
     for (li, left_row) in left_rows.iter().enumerate() {
         for right_row in right_rows {
             let merged = merge_rows(left_row, right_row, prefix);
-            if eval_pred(on, &merged, "", contract, records, bound_values) {
+            if eval_pred_for_row(on, &merged, "", contract, records, bound_values, outer)? {
                 matched[li] = true;
                 out.push(merged);
             }
@@ -1133,6 +1310,7 @@ fn execute_right_join(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
     // Bare column names of the base (left) table, used to pad right rows that
     // never matched. They are never prefixed, so the padded row has the same
@@ -1148,7 +1326,7 @@ fn execute_right_join(
     for left_row in left_rows {
         for (ri, right_row) in right_rows.iter().enumerate() {
             let merged = merge_rows(left_row, right_row, prefix);
-            if eval_pred(on, &merged, "", contract, records, bound_values) {
+            if eval_pred_for_row(on, &merged, "", contract, records, bound_values, outer)? {
                 matched[ri] = true;
                 out.push(merged);
             }
@@ -1181,6 +1359,7 @@ fn execute_full_join(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
     // Column names of each side, used to pad rows that never matched.
     let left_col_names: Vec<String> = left_rows.first().map(|r| r.keys().cloned().collect()).unwrap_or_default();
@@ -1196,7 +1375,7 @@ fn execute_full_join(
     for (li, left_row) in left_rows.iter().enumerate() {
         for (ri, right_row) in right_rows.iter().enumerate() {
             let merged = merge_rows(left_row, right_row, prefix);
-            if eval_pred(on, &merged, "", contract, records, bound_values) {
+            if eval_pred_for_row(on, &merged, "", contract, records, bound_values, outer)? {
                 left_matched[li] = true;
                 right_matched[ri] = true;
                 out.push(merged);
@@ -1267,9 +1446,10 @@ fn execute_set_operation(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
-    let left_rows = execute_ops(left_ops, contract, records, bound_values)?;
-    let right_rows = execute_ops(right_ops, contract, records, bound_values)?;
+    let left_rows = execute_ops_in(left_ops, contract, records, bound_values, outer)?;
+    let right_rows = execute_ops_in(right_ops, contract, records, bound_values, outer)?;
 
     let mut left_columns = match columns {
         Some(columns) => columns.to_vec(),
@@ -1410,12 +1590,13 @@ fn execute_aggregate(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
     if group_keys.is_empty() {
         // Global aggregate: all rows form one group.
         let mut out = QueryRow::new();
         for agg in aggregates {
-            let (name, value) = eval_aggregate(agg, rows, contract, records, bound_values)?;
+            let (name, value) = eval_aggregate(agg, rows, contract, records, bound_values, outer)?;
             out.insert(name, value);
         }
         return Ok(vec![out]);
@@ -1428,7 +1609,7 @@ fn execute_aggregate(
         let mut key_values: Vec<Value> = Vec::with_capacity(group_keys.len());
         for gk in group_keys {
             let value = match &gk.expr {
-                ProjectExpr::Scalar { path } => read_path(path, row, "", contract, records),
+                ProjectExpr::Scalar { path } => read_path(path, row, "", contract, records, outer),
                 ProjectExpr::Nested { .. } => Value::Null, // nested in GROUP BY → unsupported
                 ProjectExpr::Computed(_) => Value::Null, // computed in GROUP BY → unsupported (lowering rejects)
             };
@@ -1445,7 +1626,7 @@ fn execute_aggregate(
         if let Some(first_row) = group_rows.first() {
             for gk in group_keys {
                 let value = match &gk.expr {
-                    ProjectExpr::Scalar { path } => read_path(path, first_row, "", contract, records),
+                    ProjectExpr::Scalar { path } => read_path(path, first_row, "", contract, records, outer),
                     ProjectExpr::Nested { .. } => Value::Null,
                     ProjectExpr::Computed(_) => Value::Null,
                 };
@@ -1455,7 +1636,7 @@ fn execute_aggregate(
         // Aggregate values.
         let group_row_vec: Vec<QueryRow> = group_rows.iter().cloned().cloned().collect();
         for agg in aggregates {
-            let (name, value) = eval_aggregate(agg, &group_row_vec, contract, records, bound_values)?;
+            let (name, value) = eval_aggregate(agg, &group_row_vec, contract, records, bound_values, outer)?;
             out.insert(name, value);
         }
         out_rows.push(out);
@@ -1469,6 +1650,7 @@ fn eval_aggregate(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<(String, Value)> {
     match agg {
         AggregateField::Count { name, expr: None } => {
@@ -1479,7 +1661,7 @@ fn eval_aggregate(
             // COUNT(expr) — non-null values of the expression.
             let mut count = 0_i64;
             for row in group_rows {
-                if !matches!(eval_project_expr(inner, row, contract, records, bound_values)?, Value::Null) {
+                if !matches!(eval_project_expr(inner, row, contract, records, bound_values, outer)?, Value::Null) {
                     count += 1;
                 }
             }
@@ -1493,7 +1675,7 @@ fn eval_aggregate(
             // represented by their Debug output.
             let mut seen: BTreeSet<String> = BTreeSet::new();
             for row in group_rows {
-                let value = eval_project_expr(expr, row, contract, records, bound_values)?;
+                let value = eval_project_expr(expr, row, contract, records, bound_values, outer)?;
                 if !matches!(value, Value::Null) {
                     seen.insert(format!("{value:?}"));
                 }
@@ -1511,7 +1693,7 @@ fn eval_aggregate(
             let mut is_real = false;
             let mut saw_any = false;
             for row in group_rows {
-                match eval_project_expr(expr, row, contract, records, bound_values)? {
+                match eval_project_expr(expr, row, contract, records, bound_values, outer)? {
                     Value::Null => {}
                     Value::I64(n) => {
                         integer_sum += i128::from(n);
@@ -1556,7 +1738,7 @@ fn eval_aggregate(
             let mut sum: f64 = 0.0;
             let mut count: u64 = 0;
             for row in group_rows {
-                match eval_project_expr(expr, row, contract, records, bound_values)? {
+                match eval_project_expr(expr, row, contract, records, bound_values, outer)? {
                     Value::Null => {}
                     Value::I64(n) => {
                         sum += n as f64;
@@ -1604,11 +1786,12 @@ fn eval_project_expr(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
     match expr {
-        ProjectExpr::Scalar { path } => Ok(read_path(path, row, "", contract, records)),
-        ProjectExpr::Nested { path, .. } => Ok(read_path(path, row, "", contract, records)),
-        ProjectExpr::Computed(inner) => eval_expr(inner, row, "", contract, records, bound_values),
+        ProjectExpr::Scalar { path } => Ok(read_path(path, row, "", contract, records, outer)),
+        ProjectExpr::Nested { path, .. } => Ok(read_path(path, row, "", contract, records, outer)),
+        ProjectExpr::Computed(inner) => eval_expr(inner, row, "", contract, records, bound_values, outer),
     }
 }
 
@@ -1626,13 +1809,15 @@ fn execute_window(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
     let mut rows: Vec<QueryRow> = rows.to_vec();
     for field in fields {
         // One value per input row, in the input order.
         let mut values: Vec<Value> = vec![Value::Null; rows.len()];
-        for partition in partition_rows(&rows, field, contract, records, bound_values)? {
-            let values_of_partition = eval_window_partition(&rows, &partition, field, contract, records, bound_values)?;
+        for partition in partition_rows(&rows, field, contract, records, bound_values, outer)? {
+            let values_of_partition =
+                eval_window_partition(&rows, &partition, field, contract, records, bound_values, outer)?;
             for (row_index, value) in partition.into_iter().zip(values_of_partition) {
                 values[row_index] = value;
             }
@@ -1655,6 +1840,7 @@ fn partition_rows(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<Vec<usize>>> {
     if field.spec.partition_by.is_empty() {
         return Ok(vec![(0..rows.len()).collect()]);
@@ -1663,7 +1849,7 @@ fn partition_rows(
     for (index, row) in rows.iter().enumerate() {
         let mut keys = Vec::with_capacity(field.spec.partition_by.len());
         for expr in &field.spec.partition_by {
-            keys.push(eval_project_expr(expr, row, contract, records, bound_values)?);
+            keys.push(eval_project_expr(expr, row, contract, records, bound_values, outer)?);
         }
         partitions.entry(group_key_to_string(&keys)).or_default().push(index);
     }
@@ -1679,12 +1865,13 @@ fn eval_window_partition(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<Value>> {
     // The window operates on the rows ordered by its own `ORDER BY`; the result
     // is written back to the input positions so the caller keeps its order.
     let mut keys: Vec<Vec<Value>> = Vec::with_capacity(partition.len());
     for &index in partition {
-        keys.push(eval_window_order_keys(&rows[index], field, contract, records, bound_values)?);
+        keys.push(eval_window_order_keys(&rows[index], field, contract, records, bound_values, outer)?);
     }
     let mut order: Vec<usize> = (0..partition.len()).collect();
     if !field.spec.order_by.is_empty() {
@@ -1719,7 +1906,7 @@ fn eval_window_partition(
         else {
             Vec::new()
         };
-        values[slot] = eval_window_aggregate(field, &frame_rows, contract, records, bound_values)?;
+        values[slot] = eval_window_aggregate(field, &frame_rows, contract, records, bound_values, outer)?;
     }
     Ok(values)
 }
@@ -1731,10 +1918,11 @@ fn eval_window_order_keys(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<Value>> {
     let mut keys = Vec::with_capacity(field.spec.order_by.len());
     for key in &field.spec.order_by {
-        keys.push(eval_project_expr(&key.expr, row, contract, records, bound_values)?);
+        keys.push(eval_project_expr(&key.expr, row, contract, records, bound_values, outer)?);
     }
     Ok(keys)
 }
@@ -1806,6 +1994,7 @@ fn eval_window_aggregate(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
     let argument = || {
         field
@@ -1818,12 +2007,14 @@ fn eval_window_aggregate(
         WindowFunction::Sum => AggregateField::Sum { name, expr: argument()? },
         WindowFunction::Avg => AggregateField::Avg { name, expr: argument()? },
         WindowFunction::Count => AggregateField::Count { name, expr: field.argument.clone() },
-        WindowFunction::Min | WindowFunction::Max => return window_extreme(field, argument()?, frame_rows, contract, records, bound_values),
+        WindowFunction::Min | WindowFunction::Max => {
+            return window_extreme(field, argument()?, frame_rows, contract, records, bound_values, outer);
+        }
         WindowFunction::RowNumber | WindowFunction::Rank | WindowFunction::DenseRank => {
             unreachable!("ranking functions never read the frame")
         }
     };
-    let (_, value) = eval_aggregate(&aggregate, frame_rows, contract, records, bound_values)?;
+    let (_, value) = eval_aggregate(&aggregate, frame_rows, contract, records, bound_values, outer)?;
     Ok(value)
 }
 
@@ -1838,10 +2029,11 @@ fn window_extreme(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
     let mut best: Option<Value> = None;
     for row in frame_rows {
-        let value = eval_project_expr(&expr, row, contract, records, bound_values)?;
+        let value = eval_project_expr(&expr, row, contract, records, bound_values, outer)?;
         if matches!(value, Value::Null) {
             continue;
         }

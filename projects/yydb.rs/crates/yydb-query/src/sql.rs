@@ -4,7 +4,7 @@
 //! catalog information and touches no storage, so the same plan can be prepared
 //! once and executed against any schema that declares the referenced tables.
 
-use std::collections::BTreeMap;
+use std::{cell::Cell, collections::BTreeMap, rc::Rc};
 
 use oak_sql::ast::{
     Assignment, BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource,
@@ -17,8 +17,8 @@ use yydb_types::{Error, Result, Value};
 
 use super::{
     ops::{
-        AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, Expr, JoinKind, Pred, ProjectExpr,
-        ProjectField, QueryOp, ReturningProjection, ScalarFunction, SetOpKind, SortKey, WindowField, WindowFrame,
+        AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, Expr, JoinKind, OUTER_ROW_MARKER, Pred,
+        ProjectExpr, ProjectField, QueryOp, ReturningProjection, ScalarFunction, SetOpKind, SortKey, WindowField, WindowFrame,
         WindowFrameBound, WindowFunction, WindowOrderKey, WindowSpec, WriteAssignment, WriteBinOp, WriteExpr, WriteField,
         WriteOp,
     },
@@ -65,7 +65,7 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
     }
     match statement {
         SqlStatement::Select(select) => {
-            let ops = lower_select(select, parameters, &CteScope::new())?;
+            let (ops, _) = lower_select(select, parameters, &CteScope::new())?;
             let mut read_set = Vec::new();
             collect_read_tables(&ops, &mut read_set);
             Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), read_set, write_set: Vec::new() })
@@ -119,11 +119,72 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
 
 // ─── read pipeline ───────────────────────────────────────────────────────
 
-/// Already lowered `WITH` pipelines visible to one statement, keyed by the name
-/// the clause gives them.
-type CteScope = BTreeMap<String, Vec<QueryOp>>;
+/// One enclosing statement a nested subquery may read columns from.
+#[derive(Debug)]
+struct OuterFrame {
+    /// Row-source references that statement exposes to its own expressions.
+    references: Vec<String>,
+    /// Whether a bare column reference is ambiguous in that statement.
+    require_qualification: bool,
+    /// Whether that statement collapses its rows through `GROUP BY` or an
+    /// aggregate function, which leaves no single row to hand to a subquery.
+    aggregate: bool,
+    /// Set once one of that statement's own expressions reads a column of the
+    /// statement enclosing it, which makes it a correlated statement.
+    reads_outer: Cell<bool>,
+}
 
-fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<Vec<QueryOp>> {
+/// Lowering scope of one statement.
+///
+/// `pipelines` carries the `WITH` bodies already lowered. `frames` is the chain
+/// of enclosing statements, innermost last: a subquery that names a reference of
+/// an outer frame is correlated and is executed once per row of that statement,
+/// so every carrier it reaches is lowered with `correlated: true`.
+#[derive(Debug, Clone, Default)]
+struct CteScope {
+    pipelines: BTreeMap<String, Vec<QueryOp>>,
+    frames: Vec<Rc<OuterFrame>>,
+}
+
+impl CteScope {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether `name` reads a column of an enclosing statement.
+    ///
+    /// Only asked after [`check_select_references`] accepted the reference, so
+    /// the answer agrees with the correlation it recorded.
+    fn reads_outer_row(&self, name: &str) -> bool {
+        let Some(local) = self.frames.last()
+        else {
+            return false;
+        };
+        let Some((qualifier, _)) = name.split_once('.')
+        else {
+            return false;
+        };
+        if local.references.iter().any(|reference| reference == qualifier) {
+            return false;
+        }
+        self.frames[..self.frames.len() - 1].iter().any(|frame| frame.references.iter().any(|reference| reference == qualifier))
+    }
+}
+
+/// Whether a statement collapses its rows, so a subquery cannot be handed one
+/// row of it. Mirrors the aggregates [`lower_aggregate`] accepts.
+fn select_has_aggregate(select: &SelectStatement) -> bool {
+    select.group_by.is_some()
+        || select.items.iter().any(|item| {
+            matches!(
+                item,
+                SelectItem::Expression { expr: Expression::FunctionCall { name, window: None, .. }, .. }
+                    if is_aggregate_function(name)
+            )
+        })
+}
+
+fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<(Vec<QueryOp>, bool)> {
     // A `WITH` clause extends the visible scope in written order: each CTE may
     // reference the ones written before it, and the statement body sees all of
     // them.
@@ -177,11 +238,22 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
         ops.push(lower_join_clause(join_clause, right, parameters, &scope)?);
     }
 
+    // This statement's own frame decides what its nested subqueries may read, and
+    // records whether it reads a column of the statement enclosing it — which is
+    // what becomes `correlated` on the carrier that reaches it.
+    let frame = Rc::new(OuterFrame {
+        references: references.clone(),
+        require_qualification: aliased,
+        aggregate: select_has_aggregate(select),
+        reads_outer: Cell::new(false),
+    });
+    scope.frames.push(Rc::clone(&frame));
+
     // Aliases are the only disambiguator, so an aliased statement must reach its
     // columns through them: a bare `id` would silently bind to whichever
     // occurrence happens to carry it. Statements without aliases still reject
     // qualifiers that name no row source of their own scope.
-    check_select_references(select, &references, aliased)?;
+    check_select_references(select, &scope)?;
 
     // WHERE clause.
     if let Some(predicate) = &select.expr {
@@ -228,7 +300,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
 
     // LIMIT.
     if let Some(limit) = &select.limit {
-        lower_limit(limit, parameters, &mut ops)?;
+        lower_limit(limit, parameters, &scope, &mut ops)?;
     }
 
     // SELECT projection (without aggregate function items — those are
@@ -246,7 +318,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
         }
     }
     ops.push(QueryOp::Collect);
-    Ok(ops)
+    Ok((ops, frame.reads_outer.get()))
 }
 
 /// Extend one statement's `WITH` scope with the clause's definitions.
@@ -264,7 +336,7 @@ fn extend_cte_scope(
     };
     for cte in &with_clause.ctes {
         let name = cte.name.name.to_string();
-        if scope.contains_key(&name) {
+        if scope.pipelines.contains_key(&name) {
             return Err(sql_error(format!("`{name}` is defined more than once in the same `WITH` scope")));
         }
         if !cte.columns.is_empty() {
@@ -272,8 +344,12 @@ fn extend_cte_scope(
                 "renaming the output columns of CTE `{name}` (`WITH {name}(a, b) AS …`) is not supported yet"
             )));
         }
-        let ops = lower_select(&cte.query, parameters, scope)?;
-        scope.insert(name, ops);
+        // A `WITH` body is a statement of its own, so it cannot read the row of
+        // the statement that writes the clause.
+        let mut body = scope.clone();
+        body.frames.clear();
+        let (ops, _) = lower_select(&cte.query, parameters, &body)?;
+        scope.pipelines.insert(name, ops);
     }
     Ok(())
 }
@@ -300,8 +376,8 @@ fn lower_set_operation(
     let mut left = (*statement.left).clone();
     extend_cte_scope(&mut scope, left.with.take().as_ref(), parameters)?;
 
-    let left_ops = lower_select(&left, parameters, &scope)?;
-    let right_ops = lower_select(&statement.right, parameters, &scope)?;
+    let left_ops = lower_select(&left, parameters, &scope)?.0;
+    let right_ops = lower_select(&statement.right, parameters, &scope)?.0;
     let columns = pipeline_output_columns(&left_ops);
     let right_columns = pipeline_output_columns(&right_ops);
 
@@ -343,7 +419,7 @@ fn lower_set_operation(
         ops.push(QueryOp::Sort { keys });
     }
     if let Some(limit) = &statement.limit {
-        lower_limit(limit, parameters, &mut ops)?;
+        lower_limit(limit, parameters, &scope, &mut ops)?;
     }
     ops.push(QueryOp::Collect);
     Ok(ops)
@@ -742,9 +818,9 @@ fn lower_project_expr(
         Expression::Identifier(identifier) => {
             // Split qualified names (`table.col`) into path components so the
             // executor can resolve both the full dotted key and the trailing
-            // bare column name.
-            let path: Vec<String> = identifier.name.split('.').map(|s| s.to_string()).collect();
-            Ok(ProjectExpr::Scalar { path })
+            // bare column name. A reference to the enclosing statement is marked
+            // so execution reads it from that statement's row.
+            Ok(ProjectExpr::Scalar { path: reference_path(&identifier.name, ctes) })
         }
         other => Ok(ProjectExpr::Computed(Box::new(lower_expr(other, parameters, ctes)?))),
     }
@@ -763,12 +839,34 @@ fn lower_sort_key(item: &OrderByItem) -> Result<SortKey> {
     Ok(SortKey { field: identifier.name.to_string(), ascending: !matches!(item.direction, oak_sql::ast::OrderDirection::Desc) })
 }
 
-fn lower_limit(limit: &LimitClause, parameters: &[ParameterDescriptor], ops: &mut Vec<QueryOp>) -> Result<()> {
+fn lower_limit(
+    limit: &LimitClause,
+    parameters: &[ParameterDescriptor],
+    scope: &CteScope,
+    ops: &mut Vec<QueryOp>,
+) -> Result<()> {
     if let Some(offset) = &limit.offset {
-        ops.push(QueryOp::Skip { count: lower_bound_value(offset, parameters)? });
+        ops.push(QueryOp::Skip { count: lower_limit_value(offset, parameters, scope)? });
     }
-    ops.push(QueryOp::Take { count: lower_bound_value(&limit.limit, parameters)? });
+    ops.push(QueryOp::Take { count: lower_limit_value(&limit.limit, parameters, scope)? });
     Ok(())
+}
+
+/// Lower one `LIMIT`/`OFFSET` value.
+///
+/// A column of the enclosing statement is rejected here: the subquery would then
+/// change its own row count for every outer row, which per-row re-execution does
+/// not model.
+fn lower_limit_value(expr: &Expression, parameters: &[ParameterDescriptor], scope: &CteScope) -> Result<BoundValue> {
+    if let Expression::Identifier(identifier) = expr
+        && scope.reads_outer_row(&identifier.name)
+    {
+        return Err(sql_error(format!(
+            "`{}` reads a column of the enclosing statement and cannot set `LIMIT`/`OFFSET`: a correlated subquery runs once per outer row and may not change its own row count",
+            identifier.name
+        )));
+    }
+    lower_bound_value(expr, parameters)
 }
 
 /// Returns `None` when the projection is `*` (the scan already yields every
@@ -811,9 +909,7 @@ fn lower_projection(
         // the executor then resolves the qualified key first and falls back to
         // the bare trailing column of an unqualified row source.
         let field_expr = match expr {
-            Expression::Identifier(identifier) => ProjectExpr::Scalar {
-                path: identifier.name.split('.').map(str::to_string).collect(),
-            },
+            Expression::Identifier(identifier) => ProjectExpr::Scalar { path: reference_path(&identifier.name, ctes) },
             // Arbitrary lowerable expression (CASE, CAST, nested CASE inside CASE,
             // etc.) → generic Computed wrapper around our Expr IR.
             other => ProjectExpr::Computed(Box::new(lower_expr(other, parameters, ctes)?)),
@@ -855,21 +951,13 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
             // A scalar subquery on the left of the comparison is mirrored so the
             // field stays on the left-hand side, flipping the operator to match.
             if let Expression::Subquery { query, .. } = left.as_ref() {
-                return Ok(Pred::FieldCmpSubquery {
-                    path: column_path(right)?,
-                    op: flip_cmp(cmp),
-                    ops: lower_scalar_subquery(query, parameters, ctes)?,
-                    correlated: false,
-                });
+                let (ops, correlated) = lower_scalar_subquery(query, parameters, ctes)?;
+                return Ok(Pred::FieldCmpSubquery { path: column_path(right, ctes)?, op: flip_cmp(cmp), ops, correlated });
             }
-            let left_path = column_path(left)?;
+            let left_path = column_path(left, ctes)?;
             if let Expression::Subquery { query, .. } = right.as_ref() {
-                return Ok(Pred::FieldCmpSubquery {
-                    path: left_path,
-                    op: cmp,
-                    ops: lower_scalar_subquery(query, parameters, ctes)?,
-                    correlated: false,
-                });
+                let (ops, correlated) = lower_scalar_subquery(query, parameters, ctes)?;
+                return Ok(Pred::FieldCmpSubquery { path: left_path, op: cmp, ops, correlated });
             }
             // Detect column-vs-column comparisons (JOIN ON). If the right side
             // is a plain identifier that does NOT look like a rewritten param,
@@ -877,7 +965,7 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
             if let Expression::Identifier(right_ident) = right.as_ref() {
                 let right_name = right_ident.name.as_ref();
                 if !right_name.starts_with("__yydb_param_") {
-                    let right_path = vec![right_name.to_string()];
+                    let right_path = reference_path(right_name, ctes);
                     return Ok(Pred::FieldCmpField { left_path, op: cmp, right_path });
                 }
             }
@@ -888,17 +976,17 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
             Ok(Pred::Not(Box::new(lower_predicate(expr, parameters, ctes)?)))
         }
         Expression::IsNull { expr, negated, .. } => Ok(Pred::FieldCmp {
-            path: column_path(expr)?,
+            path: column_path(expr, ctes)?,
             op: if *negated { CmpOp::Ne } else { CmpOp::Eq },
             value: BoundValue::Literal(Value::Null),
         }),
         Expression::IsTruth { expr, value, negated, .. } => Ok(Pred::FieldCmp {
-            path: column_path(expr)?,
+            path: column_path(expr, ctes)?,
             op: if *negated { CmpOp::Ne } else { CmpOp::Eq },
             value: BoundValue::Literal(Value::Bool(*value)),
         }),
         Expression::InList { expr, list, negated, .. } => {
-            let path = column_path(expr)?;
+            let path = column_path(expr, ctes)?;
             let mut branches = Vec::with_capacity(list.len());
             for item in list {
                 branches.push(Pred::FieldCmp { path: path.clone(), op: CmpOp::Eq, value: lower_bound_value(item, parameters)? });
@@ -913,7 +1001,7 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
             Ok(predicate)
         }
         Expression::Between { expr, low, high, negated, .. } => {
-            let path = column_path(expr)?;
+            let path = column_path(expr, ctes)?;
             let mut predicate = Pred::And(
                 Box::new(Pred::FieldCmp { path: path.clone(), op: CmpOp::Ge, value: lower_bound_value(low, parameters)? }),
                 Box::new(Pred::FieldCmp { path, op: CmpOp::Le, value: lower_bound_value(high, parameters)? }),
@@ -924,13 +1012,14 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
             Ok(predicate)
         }
         Expression::Identifier(identifier) => {
-            Ok(Pred::FieldBool { path: vec![identifier.name.to_string()], value: BoundValue::Literal(Value::Bool(true)) })
+            Ok(Pred::FieldBool { path: reference_path(&identifier.name, ctes), value: BoundValue::Literal(Value::Bool(true)) })
         }
         Expression::Exists { query, negated, .. } => {
-            Ok(Pred::Exists { ops: lower_select(query, parameters, ctes)?, negated: *negated, correlated: false })
+            let (ops, correlated) = lower_select(query, parameters, ctes)?;
+            Ok(Pred::Exists { ops, negated: *negated, correlated })
         }
         Expression::InSubquery { expr, query, negated, .. } => {
-            let path = column_path(expr)?;
+            let path = column_path(expr, ctes)?;
             // The test compares one value with one subquery column, so a wider
             // projection is rejected instead of comparing only its first column.
             if let Some(columns) = select_output_names(&query.items)?
@@ -941,7 +1030,8 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
                     columns.len()
                 )));
             }
-            Ok(Pred::InSubquery { path, ops: lower_select(query, parameters, ctes)?, negated: *negated, correlated: false })
+            let (ops, correlated) = lower_select(query, parameters, ctes)?;
+            Ok(Pred::InSubquery { path, ops, negated: *negated, correlated })
         }
         _ => Err(sql_error("unsupported SQL predicate shape")),
     }
@@ -960,7 +1050,7 @@ fn flip_cmp(op: CmpOp) -> CmpOp {
     }
 }
 
-fn column_path(expr: &Expression) -> Result<Vec<String>> {
+fn column_path(expr: &Expression, scope: &CteScope) -> Result<Vec<String>> {
     let Expression::Identifier(identifier) = expr
     else {
         return Err(sql_error("predicates support plain column references only"));
@@ -969,7 +1059,20 @@ fn column_path(expr: &Expression) -> Result<Vec<String>> {
     // whose name contains a dot. Split it so the executor can resolve both
     // the full dotted key (right-table columns with prefix) and the trailing
     // bare column (left-table columns without prefix).
-    Ok(identifier.name.split('.').map(|s| s.to_string()).collect())
+    Ok(reference_path(&identifier.name, scope))
+}
+
+/// Split one written column reference into the path the executor resolves.
+///
+/// A reference to the enclosing statement carries [`OUTER_ROW_MARKER`] as its
+/// first component, so execution reads it from the enclosing row rather than
+/// from the row under test.
+fn reference_path(name: &str, scope: &CteScope) -> Vec<String> {
+    let mut path: Vec<String> = name.split('.').map(str::to_string).collect();
+    if scope.reads_outer_row(name) {
+        path.insert(0, OUTER_ROW_MARKER.to_string());
+    }
+    path
 }
 
 fn lower_bound_value(expr: &Expression, parameters: &[ParameterDescriptor]) -> Result<BoundValue> {
@@ -1040,9 +1143,7 @@ fn negate_number(value: Value) -> Value {
 /// today SELECT projection, aggregate arguments and `RETURNING` use it.
 fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<Expr> {
     match expr {
-        Expression::Identifier(identifier) => Ok(Expr::Column {
-            path: identifier.name.split('.').map(|s| s.to_string()).collect(),
-        }),
+        Expression::Identifier(identifier) => Ok(Expr::Column { path: reference_path(&identifier.name, ctes) }),
         Expression::Literal(_) | Expression::Unary { op: UnaryOperator::Minus, .. } => {
             Ok(Expr::Bound(lower_bound_value(expr, parameters)?))
         }
@@ -1091,7 +1192,8 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
             Ok(Expr::Not(Box::new(lower_expr(expr, parameters, ctes)?)))
         }
         Expression::Subquery { query, .. } => {
-            Ok(Expr::Subquery { ops: lower_scalar_subquery(query, parameters, ctes)?, correlated: false })
+            let (ops, correlated) = lower_scalar_subquery(query, parameters, ctes)?;
+            Ok(Expr::Subquery { ops, correlated })
         }
         Expression::FunctionCall { name, args, window, .. } => {
             // A window value is not a scalar: it depends on the whole partitioned
@@ -1187,12 +1289,13 @@ fn lower_scalar_function(
 /// The subquery must project exactly one column: a wider projection is rejected
 /// here instead of silently yielding only its first column. `SELECT *` inside
 /// the subquery has no known width until execution, which re-checks the
-/// executed row shape.
+/// executed row shape. The second element reports whether the subquery reads the
+/// enclosing statement's row.
 fn lower_scalar_subquery(
     query: &SelectStatement,
     parameters: &[ParameterDescriptor],
     ctes: &CteScope,
-) -> Result<Vec<QueryOp>> {
+) -> Result<(Vec<QueryOp>, bool)> {
     let width = match query.items.as_slice() {
         [SelectItem::Star { .. }] => None,
         items => Some(items.len()),
@@ -1249,6 +1352,11 @@ fn lower_write_expr(expr: &Expression, parameters: &[ParameterDescriptor]) -> Re
                 right: Box::new(lower_write_expr(right, parameters)?),
             })
         }
+        // Write assignments are evaluated against the row being written, so a
+        // subquery has no enclosing statement to read and is rejected by name.
+        Expression::Subquery { .. } | Expression::InSubquery { .. } | Expression::Exists { .. } => Err(sql_error(
+            "a subquery is not supported in a write assignment: an `INSERT`, `UPDATE` or `DELETE` assignment cannot evaluate one",
+        )),
         _ => Err(sql_error("unsupported expression in UPDATE assignment")),
     }
 }
@@ -1478,7 +1586,7 @@ fn lower_insert_select(
     }
 
     let outputs = select_output_names(&select.items)?;
-    let source = lower_select(select, parameters, &CteScope::new())?;
+    let source = lower_select(select, parameters, &CteScope::new())?.0;
     let columns: Vec<String> = insert.columns.iter().map(|column| column.name.to_string()).collect();
     if let Some(outputs) = &outputs
         && !columns.is_empty()
@@ -1665,7 +1773,7 @@ fn row_source(source: &TableSource, parameters: &[ParameterDescriptor], ctes: &C
         TableSource::Table(table) => {
             let name = table.name.name.to_string();
             let alias = table.alias.as_ref().map(|alias| alias.name.to_string());
-            if let Some(ops) = ctes.get(&name) {
+            if let Some(ops) = ctes.pipelines.get(&name) {
                 return Ok(RowSource::Cte { name, alias, ops: ops.clone() });
             }
             Ok(RowSource::Table { table: name, alias })
@@ -1675,7 +1783,13 @@ fn row_source(source: &TableSource, parameters: &[ParameterDescriptor], ctes: &C
                 .as_ref()
                 .map(|alias| alias.name.to_string())
                 .ok_or_else(|| sql_error("a derived table (`FROM (SELECT ...)`) requires an alias"))?;
-            Ok(RowSource::Derived { alias, ops: lower_select(query, parameters, ctes)? })
+            // A derived table is a statement of its own: it has no row of the
+            // enclosing statement to read, so a correlated reference inside it
+            // names no row source and is rejected when the body is checked.
+            let mut body = ctes.clone();
+            body.frames.clear();
+            let (ops, _) = lower_select(query, parameters, &body)?;
+            Ok(RowSource::Derived { alias, ops })
         }
     }
 }
@@ -1702,46 +1816,61 @@ fn push_table(tables: &mut Vec<String>, table: &str) {
     }
 }
 
-/// Reject column references that do not name a row source of this statement.
+/// Where inside a statement a column reference appears.
 ///
-/// A reference qualified with a source the statement does not scan is always
-/// rejected instead of resolving to `NULL`. That is also what catches a
-/// correlated subquery reference: inside `WHERE EXISTS (SELECT …)`, naming an
-/// outer source is not supported, because the subquery is resolved once rather
-/// than per row.
+/// A reference a statement evaluates per row may read the enclosing statement's
+/// row, which is exactly what makes the subquery correlated. A reference that
+/// decides the whole row set instead — `GROUP BY`, `ORDER BY`, a window clause —
+/// cannot, because it is not evaluated once per outer row.
+#[derive(Clone, Copy)]
+enum RefSite {
+    /// Row-level expression: `WHERE`, `ON`, a projection or an argument.
+    Row,
+    /// Whole-result expression, tagged with the clause it appears in.
+    WholeResult(&'static str),
+}
+
+/// Check every column reference of one statement against its own row sources and
+/// the statements that enclose it.
+///
+/// A reference to an enclosing statement makes the subquery correlated: it is
+/// re-executed once per row of that statement, which is the only correlation
+/// execution models. Only one level is supported, and only where the outer
+/// statement still has a single row to hand down, so the same walk rejects a
+/// grandparent reference and a reference to a statement that aggregates its rows.
 ///
 /// When the statement aliases a source, every reference must additionally be
 /// qualified: a bare `id` has no single owner and would silently read whichever
 /// occurrence happens to carry it.
-fn check_select_references(select: &SelectStatement, references: &[String], require_qualification: bool) -> Result<()> {
+fn check_select_references(select: &SelectStatement, scope: &CteScope) -> Result<()> {
     for item in &select.items {
         if let SelectItem::Expression { expr, .. } = item {
-            check_reference(expr, references, require_qualification)?;
+            check_reference(expr, scope, RefSite::Row)?;
         }
     }
     for join in &select.joins {
         if let Some(on) = &join.on {
-            check_reference(on, references, require_qualification)?;
+            check_reference(on, scope, RefSite::Row)?;
         }
     }
     if let Some(expr) = &select.expr {
-        check_reference(expr, references, require_qualification)?;
+        check_reference(expr, scope, RefSite::Row)?;
     }
     if let Some(group_by) = &select.group_by {
         for item in &group_by.items {
             match item {
-                GroupByItem::Column(identifier) => check_identifier(identifier, references, require_qualification)?,
-                GroupByItem::Expression(expr) => check_reference(expr, references, require_qualification)?,
+                GroupByItem::Column(identifier) => check_identifier(identifier, scope, RefSite::WholeResult("GROUP BY"))?,
+                GroupByItem::Expression(expr) => check_reference(expr, scope, RefSite::WholeResult("GROUP BY"))?,
                 GroupByItem::Position { .. } => {}
             }
         }
     }
     if let Some(having) = &select.having {
-        check_reference(&having.condition, references, require_qualification)?;
+        check_reference(&having.condition, scope, RefSite::Row)?;
     }
     if let Some(order_by) = &select.order_by {
         for item in &order_by.items {
-            check_reference(&item.expr, references, require_qualification)?;
+            check_reference(&item.expr, scope, RefSite::WholeResult("ORDER BY"))?;
         }
     }
     Ok(())
@@ -1751,58 +1880,60 @@ fn check_select_references(select: &SelectStatement, references: &[String], requ
 ///
 /// Subqueries carry their own `FROM` scope, so their columns are checked when
 /// the subquery itself is lowered.
-fn check_reference(expr: &Expression, references: &[String], require_qualification: bool) -> Result<()> {
+fn check_reference(expr: &Expression, scope: &CteScope, site: RefSite) -> Result<()> {
     match expr {
-        Expression::Identifier(identifier) => check_identifier(identifier, references, require_qualification),
+        Expression::Identifier(identifier) => check_identifier(identifier, scope, site),
         Expression::Binary { left, right, .. } => {
-            check_reference(left, references, require_qualification)?;
-            check_reference(right, references, require_qualification)
+            check_reference(left, scope, site)?;
+            check_reference(right, scope, site)
         }
         Expression::Unary { expr, .. } | Expression::IsNull { expr, .. } | Expression::IsTruth { expr, .. } => {
-            check_reference(expr, references, require_qualification)
+            check_reference(expr, scope, site)
         }
-        Expression::Cast { expr, .. } => check_reference(expr, references, require_qualification),
+        Expression::Cast { expr, .. } => check_reference(expr, scope, site),
         Expression::FunctionCall { args, window, .. } => {
             for arg in args {
-                check_reference(arg, references, require_qualification)?;
+                check_reference(arg, scope, site)?;
             }
             // The window clause reads the same row, so its columns must belong to
-            // a source of this statement like any other reference.
+            // a source of this statement like any other reference. It partitions
+            // the whole row set, so a correlated column cannot name one row.
             if let Some(window) = window {
+                let window_site = RefSite::WholeResult("OVER (...)");
                 for column in &window.partition_by {
-                    check_identifier(column, references, require_qualification)?;
+                    check_identifier(column, scope, window_site)?;
                 }
                 for item in &window.order_by {
-                    check_identifier(&item.column, references, require_qualification)?;
+                    check_identifier(&item.column, scope, window_site)?;
                 }
             }
             Ok(())
         }
         Expression::Vector { elements: args, .. } => {
             for arg in args {
-                check_reference(arg, references, require_qualification)?;
+                check_reference(arg, scope, site)?;
             }
             Ok(())
         }
         Expression::Between { expr, low, high, .. } => {
-            check_reference(expr, references, require_qualification)?;
-            check_reference(low, references, require_qualification)?;
-            check_reference(high, references, require_qualification)
+            check_reference(expr, scope, site)?;
+            check_reference(low, scope, site)?;
+            check_reference(high, scope, site)
         }
         Expression::InList { expr, list, .. } => {
-            check_reference(expr, references, require_qualification)?;
+            check_reference(expr, scope, site)?;
             for item in list {
-                check_reference(item, references, require_qualification)?;
+                check_reference(item, scope, site)?;
             }
             Ok(())
         }
         Expression::Case { branches, else_branch, .. } => {
             for (when, then) in branches {
-                check_reference(when, references, require_qualification)?;
-                check_reference(then, references, require_qualification)?;
+                check_reference(when, scope, site)?;
+                check_reference(then, scope, site)?;
             }
             if let Some(els) = else_branch {
-                check_reference(els, references, require_qualification)?;
+                check_reference(els, scope, site)?;
             }
             Ok(())
         }
@@ -1815,20 +1946,59 @@ fn check_reference(expr: &Expression, references: &[String], require_qualificati
     }
 }
 
-fn check_identifier(identifier: &Identifier, references: &[String], require_qualification: bool) -> Result<()> {
+fn check_identifier(identifier: &Identifier, scope: &CteScope, site: RefSite) -> Result<()> {
     let name = identifier.name.as_ref();
     if name.starts_with(PARAM_PREFIX) {
         return Ok(());
     }
-    let sources = references.join(", ");
-    match name.split_once('.') {
-        Some((qualifier, _)) if references.iter().any(|reference| reference == qualifier) => Ok(()),
-        Some((qualifier, _)) => Err(sql_error(format!(
-            "`{name}` names `{qualifier}`, which is not a row source of this statement (available sources: {sources})"
-        ))),
-        None if require_qualification => Err(sql_error(format!(
-            "column reference `{name}` must be qualified with a row-source alias (available sources: {sources})"
-        ))),
-        None => Ok(()),
+    let Some(local) = scope.frames.last()
+    else {
+        return Ok(());
+    };
+    let sources = local.references.join(", ");
+    let Some((qualifier, _)) = name.split_once('.')
+    else {
+        return if local.require_qualification {
+            Err(sql_error(format!(
+                "column reference `{name}` must be qualified with a row-source alias (available sources: {sources})"
+            )))
+        }
+        else {
+            Ok(())
+        };
+    };
+    if local.references.iter().any(|reference| reference == qualifier) {
+        return Ok(());
     }
+    // Innermost first, skipping the statement being checked.
+    let outer = scope.frames[..scope.frames.len() - 1]
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, frame)| frame.references.iter().any(|reference| reference == qualifier));
+    let Some((index, frame)) = outer
+    else {
+        return Err(sql_error(format!(
+            "`{name}` names `{qualifier}`, which is not a row source of this statement (available sources: {sources})"
+        )));
+    };
+    // Per-row re-execution binds a subquery to the row of the statement that
+    // directly encloses it, which must be the outermost statement.
+    if index != 0 || scope.frames.len() != 2 {
+        return Err(sql_error(format!(
+            "`{name}` reads a column of a statement two or more levels out: YYDB re-runs a correlated subquery once per row of its enclosing statement and supports a single level only"
+        )));
+    }
+    if let RefSite::WholeResult(clause) = site {
+        return Err(sql_error(format!(
+            "`{name}` reads a column of the enclosing statement inside `{clause}`, which decides the whole subquery result instead of one row: a correlated subquery may only read outer columns in its row-level expressions"
+        )));
+    }
+    if frame.aggregate {
+        return Err(sql_error(format!(
+            "`{name}` reads a column of the enclosing statement, which collapses its rows (`GROUP BY` or an aggregate function), so no single row can be handed to each subquery run"
+        )));
+    }
+    local.reads_outer.set(true);
+    Ok(())
 }
