@@ -2814,6 +2814,147 @@ fn aggregate_count_sum_avg_group_by() {
     assert_eq!(outcome.rows[1].get("a"), Some(&Value::F64(20.0)));
 }
 
+// ─── Empty-input aggregate semantics ───────────────────────────────────
+//
+// Without `GROUP BY` the whole input is one group, so zero input rows still
+// produce exactly one row: counting aggregates report `0` and value
+// aggregates report `NULL`. `GROUP BY` has no group to report, so an empty
+// input produces zero rows.
+
+#[test]
+fn aggregate_count_over_an_empty_input_reports_zero() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // Every row is filtered out, yet the global aggregate still has one group.
+    let star =
+        execute_sql("SELECT COUNT(*) AS c FROM Account WHERE account_id > 9000", &[], &contract, &[], &mut records)
+            .expect("count star over an empty input");
+    assert_eq!(star.rows.len(), 1);
+    assert_eq!(star.rows[0].get("c"), Some(&Value::I64(0)));
+
+    let nonnull =
+        execute_sql("SELECT COUNT(email) AS c FROM Account WHERE account_id > 9000", &[], &contract, &[], &mut records)
+            .expect("count expr over an empty input");
+    assert_eq!(nonnull.rows.len(), 1);
+    assert_eq!(nonnull.rows[0].get("c"), Some(&Value::I64(0)));
+
+    let distinct = execute_sql(
+        "SELECT COUNT(DISTINCT email) AS c FROM Account WHERE account_id > 9000",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("count distinct over an empty input");
+    assert_eq!(distinct.rows.len(), 1);
+    assert_eq!(distinct.rows[0].get("c"), Some(&Value::I64(0)));
+}
+
+#[test]
+fn aggregate_sum_and_avg_over_an_empty_input_yield_null() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT SUM(score) AS s, AVG(score) AS a FROM Account WHERE account_id > 9000",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("sum and avg over an empty input");
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("s"), Some(&Value::Null));
+    assert_eq!(outcome.rows[0].get("a"), Some(&Value::Null));
+}
+
+#[test]
+fn aggregate_group_by_over_an_empty_input_yields_no_rows() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT tenant, COUNT(*) AS c FROM Account WHERE account_id > 9000 GROUP BY tenant",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("grouped aggregate over an empty input");
+    assert!(outcome.rows.is_empty(), "a grouped aggregate reports no group, so no row");
+}
+
+#[test]
+fn aggregate_mix_over_an_empty_input_keeps_every_column() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT COUNT(*) AS c, SUM(score) AS s FROM Account WHERE account_id > 9000",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("mixed aggregates over an empty input");
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("c"), Some(&Value::I64(0)));
+    assert_eq!(outcome.rows[0].get("s"), Some(&Value::Null));
+}
+
+#[test]
+fn aggregate_over_an_empty_table_matches_a_filtered_empty_input() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+
+    let empty_table =
+        execute_sql("SELECT COUNT(*) AS c, SUM(score) AS s FROM Account", &[], &contract, &[], &mut records)
+            .expect("aggregate over an empty table");
+    assert_eq!(empty_table.rows.len(), 1);
+    assert_eq!(empty_table.rows[0].get("c"), Some(&Value::I64(0)));
+    assert_eq!(empty_table.rows[0].get("s"), Some(&Value::Null));
+
+    // The same shape holds when the rows exist but the predicate drops them.
+    seed(&contract, &mut records);
+    let filtered = execute_sql(
+        "SELECT COUNT(*) AS c, SUM(score) AS s FROM Account WHERE account_id > 9000",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("aggregate over a filtered empty input");
+    assert_eq!(filtered.rows, empty_table.rows);
+}
+
+#[test]
+fn aggregate_count_is_zero_and_sum_is_null_for_an_all_null_column() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET score = NULL WHERE account_id > 0", &[], &contract, &mut records);
+
+    // Rows are present, but the argument never holds a value.
+    let outcome = execute_sql(
+        "SELECT COUNT(*) AS c_all, COUNT(score) AS c_nonnull, SUM(score) AS s, AVG(score) AS a FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("aggregate over an all-null column");
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("c_all"), Some(&Value::I64(3)));
+    assert_eq!(outcome.rows[0].get("c_nonnull"), Some(&Value::I64(0)));
+    assert_eq!(outcome.rows[0].get("s"), Some(&Value::Null));
+    assert_eq!(outcome.rows[0].get("a"), Some(&Value::Null));
+}
+
 // ─── Parameterized value type mismatches ───────────────────────────────
 //
 // NOTE: the lowering pass currently infers `SlotTy::Any` for every
