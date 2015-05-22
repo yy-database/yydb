@@ -293,7 +293,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
     if let Some(order_by) = &select.order_by {
         let mut keys = Vec::with_capacity(order_by.items.len());
         for item in &order_by.items {
-            keys.push(lower_sort_key(item)?);
+            keys.push(lower_sort_key(item, parameters, &scope)?);
         }
         ops.push(QueryOp::Sort { keys });
     }
@@ -385,11 +385,12 @@ fn lower_set_operation(
 
     // The combined rows carry the left operand's column names, so an `ORDER BY`
     // may only name one of them. Sorting on an unknown name would silently read
-    // `NULL` instead of failing.
+    // `NULL` instead of failing. Sorting by a scalar expression is fine — the
+    // executor evaluates it per row.
     if let (Some(columns), Some(order_by)) = (&columns, &statement.order_by) {
         for item in &order_by.items {
-            let key = lower_sort_key(item)?;
-            if !columns.contains(&key.field) {
+            let key = lower_sort_key(item, parameters, &scope)?;
+            if key.expr.is_none() && !columns.contains(&key.field) {
                 return Err(sql_error(format!(
                     "ORDER BY column `{}` is not an output column of this {} (output columns: {})",
                     key.field,
@@ -410,7 +411,7 @@ fn lower_set_operation(
     if let Some(order_by) = &statement.order_by {
         let mut keys = Vec::with_capacity(order_by.items.len());
         for item in &order_by.items {
-            keys.push(lower_sort_key(item)?);
+            keys.push(lower_sort_key(item, parameters, &scope)?);
         }
         ops.push(QueryOp::Sort { keys });
     }
@@ -823,17 +824,25 @@ fn lower_project_expr(expr: &Expression, parameters: &[ParameterDescriptor], cte
     }
 }
 
-fn lower_sort_key(item: &OrderByItem) -> Result<SortKey> {
+fn lower_sort_key(item: &OrderByItem, parameters: &[ParameterDescriptor], scope: &CteScope) -> Result<SortKey> {
     if let Some(name) = first_window_function(&item.expr) {
         return Err(sql_error(format!(
             "window function `{name}` cannot appear in `ORDER BY`: order by the window column alias instead"
         )));
     }
-    let Expression::Identifier(identifier) = &item.expr
-    else {
-        return Err(sql_error("ORDER BY supports plain column references only"));
-    };
-    Ok(SortKey { field: identifier.name.to_string(), ascending: !matches!(item.direction, oak_sql::ast::OrderDirection::Desc) })
+    let ascending = !matches!(item.direction, oak_sql::ast::OrderDirection::Desc);
+    match &item.expr {
+        Expression::Identifier(identifier) => Ok(SortKey {
+            field: identifier.name.to_string(),
+            expr: None,
+            ascending,
+        }),
+        other => Ok(SortKey {
+            field: "expr".to_string(),
+            expr: Some(lower_expr(other, parameters, scope)?),
+            ascending,
+        }),
+    }
 }
 
 fn lower_limit(

@@ -1600,14 +1600,50 @@ fn scalar_expressions_in_where_evaluate_per_row() {
 }
 
 #[test]
-fn order_by_still_rejects_scalar_expressions() {
-    for sql in
-        ["SELECT account_id FROM Account ORDER BY LOWER(email)", "SELECT account_id FROM Account ORDER BY LENGTH(LOWER(email))"]
-    {
-        let err = prepare_sql(sql).expect_err("a computed sort key must reject");
-        let msg = format!("{err}");
-        assert!(msg.contains("ORDER BY supports plain column references only"), "`{sql}` unexpected: {msg}");
+fn order_by_accepts_scalar_expressions() {
+    // Lowering of scalar expressions in ORDER BY.
+    for sql in [
+        "SELECT account_id FROM Account ORDER BY LOWER(email)",
+        "SELECT account_id FROM Account ORDER BY LENGTH(LOWER(email))",
+        "SELECT account_id FROM Account ORDER BY score + 1",
+        "SELECT account_id FROM Account ORDER BY CASE WHEN active THEN 1 ELSE 0 END",
+    ] {
+        let stmt = prepare_sql(sql).expect("scalar expr sort key now lowers: `{sql}`");
+        let has_expr = stmt.ops.iter().any(|op| {
+            let QueryOp::Sort { keys } = op else { return false };
+            keys.iter().any(|k| k.expr.is_some())
+        });
+        assert!(has_expr, "order by expr `{sql}` must produce a Sort with expr keys");
     }
+}
+
+#[test]
+fn order_by_scalar_expression_executes_per_row() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account ORDER BY LOWER(email)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("LOWER(email) ORDER BY must execute");
+    // ada@example.test < grace@example.test < linus@example.test
+    assert_eq!(ids(&outcome.rows), vec![1, 3, 2]);
+
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account ORDER BY score + 1 DESC",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("arithmetic ORDER BY DESC must execute");
+    // score + 1 DESC => 31 (linus=30), 21 (grace=20), 11 (ada=10)
+    assert_eq!(ids(&outcome.rows), vec![2, 3, 1]);
 }
 
 #[test]

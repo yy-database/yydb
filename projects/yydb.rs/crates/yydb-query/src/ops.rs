@@ -413,10 +413,15 @@ pub struct ProjectField {
 }
 
 /// Sort key.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SortKey {
-    /// Output field name to order by.
+    /// Output field name to order by when `expr` is absent. Also used as a
+    /// diagnostic hint and as the path to compare when the row already carries
+    /// the computed column (ORDER BY alias).
     pub field: String,
+    /// When present the sort value is computed from this expression per row
+    /// instead of being read from the row under `field`.
+    pub expr: Option<Expr>,
     /// Whether the order is ascending.
     pub ascending: bool,
 }

@@ -149,18 +149,40 @@ fn execute_ops_in(
                     .collect::<Result<Vec<_>>>()?;
             }
             QueryOp::Sort { keys } => {
-                rows.sort_by(|left, right| {
-                    for key in keys {
-                        let left_value = left.get(&key.field).unwrap_or(&Value::Null);
-                        let right_value = right.get(&key.field).unwrap_or(&Value::Null);
-                        let ord = compare_values(left_value, right_value);
-                        let ord = if key.ascending { ord } else { ord.reverse() };
+                // Precompute a per-row sort-key value vector so the comparator can
+                // stay pure. Each SortKey either reads a named output column or
+                // computes a scalar expression per row.
+                let table = current_table.as_deref().unwrap_or("");
+                let row_exprs: Vec<Option<&Expr>> = keys.iter().map(|k| k.expr.as_ref()).collect();
+                let asc: Vec<bool> = keys.iter().map(|k| k.ascending).collect();
+                let fields: Vec<&str> = keys.iter().map(|k| k.field.as_str()).collect();
+                let mut indexed: Vec<(Vec<Value>, BTreeMap<String, Value>)> = rows
+                    .into_iter()
+                    .map(|row| {
+                        let mut vals = Vec::with_capacity(keys.len());
+                        for (idx, expr_opt) in row_exprs.iter().enumerate() {
+                            let v = match expr_opt {
+                                Some(expr) => eval_expr(expr, &row, table, contract, records, bound_values, outer)?,
+                                None => row.get(fields[idx]).cloned().unwrap_or(Value::Null),
+                            };
+                            vals.push(v);
+                        }
+                        Ok((vals, row))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                indexed.sort_by(|a, b| {
+                    let (lv, _) = &a;
+                    let (rv, _) = &b;
+                    for idx in 0..keys.len() {
+                        let ord = compare_values(&lv[idx], &rv[idx]);
+                        let ord = if asc[idx] { ord } else { ord.reverse() };
                         if ord != std::cmp::Ordering::Equal {
                             return ord;
                         }
                     }
                     std::cmp::Ordering::Equal
                 });
+                rows = indexed.into_iter().map(|(_, row)| row).collect();
             }
             QueryOp::Skip { count } => {
                 let skip = match resolve_bound_value(count, bound_values)? {

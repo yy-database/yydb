@@ -125,12 +125,12 @@ fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[VosExpr], parameter
         }
         "sort_by" => {
             let key = args.first().ok_or_else(|| query_error("`.sort_by` requires a key lambda"))?;
-            ops.push(QueryOp::Sort { keys: vec![SortKey { field: lower_field_lambda(key)?, ascending: true }] });
+            ops.push(QueryOp::Sort { keys: vec![SortKey { field: lower_field_lambda(key)?, expr: None, ascending: true }] });
             Ok(())
         }
         "sort_by_desc" => {
             let key = args.first().ok_or_else(|| query_error("`.sort_by_desc` requires a key lambda"))?;
-            ops.push(QueryOp::Sort { keys: vec![SortKey { field: lower_field_lambda(key)?, ascending: false }] });
+            ops.push(QueryOp::Sort { keys: vec![SortKey { field: lower_field_lambda(key)?, expr: None, ascending: false }] });
             Ok(())
         }
         "skip" => {
