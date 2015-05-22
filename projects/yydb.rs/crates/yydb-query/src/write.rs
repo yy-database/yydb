@@ -44,16 +44,8 @@ pub fn execute_ops(
     for op in ops {
         match op {
             WriteOp::Insert { table, rows, conflict, returning } => {
-                let inserted = insert_rows(
-                    table,
-                    rows,
-                    conflict.as_ref(),
-                    returning.as_ref(),
-                    contract,
-                    declared,
-                    records,
-                    bound_values,
-                )?;
+                let inserted =
+                    insert_rows(table, rows, conflict.as_ref(), returning.as_ref(), contract, declared, records, bound_values)?;
                 outcome.affected += inserted.len();
                 outcome.rows.extend(inserted);
             }
@@ -110,7 +102,8 @@ fn eval_write_expr(expr: &WriteExpr, row: &QueryRow, bound_values: &[Value]) -> 
     match expr {
         WriteExpr::Bound(bound) => Ok(resolve_value(bound, bound_values)?.clone()),
         WriteExpr::Column { path } => {
-            let Some(first) = path.first() else {
+            let Some(first) = path.first()
+            else {
                 return Err(write_error("empty column path in UPDATE expression"));
             };
             Ok(row.get(first).cloned().unwrap_or(Value::Null))
@@ -276,9 +269,8 @@ fn insert_rows(
 ) -> Result<Vec<QueryRow>> {
     let (entry, storage) = resolve_table(contract, table)?;
     let pk_field = catalog::primary_field_name(entry)?.to_string();
-    let target = conflict
-        .map(|clause| conflict_target(entry, declared, &storage, &pk_field, &clause.columns, table))
-        .transpose()?;
+    let target =
+        conflict.map(|clause| conflict_target(entry, declared, &storage, &pk_field, &clause.columns, table)).transpose()?;
     let returning = match returning {
         None | Some(ReturningProjection::Star) => None,
         Some(ReturningProjection::Fields(fields)) => {
@@ -292,10 +284,7 @@ fn insert_rows(
     // Uniqueness checks and conflict detection both compare against the current
     // table contents, so the rows are loaded whenever either is in play.
     let mut working: Vec<WorkingRow> = if target.is_some() || constraints::has_rules(declared, &storage) {
-        store::load_table_entries(records, &storage)?
-            .into_iter()
-            .map(|(key, row)| WorkingRow { key, row })
-            .collect()
+        store::load_table_entries(records, &storage)?.into_iter().map(|(key, row)| WorkingRow { key, row }).collect()
     }
     else {
         Vec::new()
@@ -407,9 +396,7 @@ fn validate_returning(entry: &ResolvedTypeContract, table: &str, expr: &ProjectE
     match expr {
         ProjectExpr::Scalar { path } => validate_returning_column(entry, table, path),
         ProjectExpr::Computed(inner) => validate_returning_expr(entry, table, inner),
-        ProjectExpr::Nested { .. } => {
-            Err(write_error(format!("RETURNING on `{table}` does not support nested projections")))
-        }
+        ProjectExpr::Nested { .. } => Err(write_error(format!("RETURNING on `{table}` does not support nested projections"))),
     }
 }
 
@@ -597,9 +584,8 @@ fn update_rows(
 ) -> Result<usize> {
     let (entry, storage) = resolve_table(contract, table)?;
     let pk_field = catalog::primary_field_name(entry)?.to_string();
-    let predicate = predicate
-        .map(|predicate| exec::resolve_subquery_predicates(predicate, None, records, bound_values))
-        .transpose()?;
+    let predicate =
+        predicate.map(|predicate| exec::resolve_subquery_predicates(predicate, None, records, bound_values)).transpose()?;
     let predicate = predicate.as_ref();
 
     let mut replacements: Vec<(String, QueryRow)> = Vec::new();
@@ -643,9 +629,8 @@ fn delete_rows(
     bound_values: &[Value],
 ) -> Result<usize> {
     let (_, storage) = resolve_table(contract, table)?;
-    let predicate = predicate
-        .map(|predicate| exec::resolve_subquery_predicates(predicate, None, records, bound_values))
-        .transpose()?;
+    let predicate =
+        predicate.map(|predicate| exec::resolve_subquery_predicates(predicate, None, records, bound_values)).transpose()?;
     let predicate = predicate.as_ref();
     let mut doomed: Vec<String> = Vec::new();
     {

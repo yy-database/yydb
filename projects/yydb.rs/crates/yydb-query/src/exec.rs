@@ -454,6 +454,22 @@ fn eval_pred_in(
             }
             cmp_values(&left, *op, value)
         }
+        // Per-row expression comparison with SQL three-valued NULL semantics.
+        // Any NULL on either side drops the row, mirroring `FieldCmpScalar`.
+        Pred::ExprCmp { expr, op, value } => {
+            let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            let right = match resolve_bound_value(value, bound_values) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            if matches!(left, Value::Null) || matches!(right, Value::Null) {
+                return false;
+            }
+            cmp_values(&left, *op, &right)
+        }
         // Subqueries are resolved before any row is tested. Reaching one here
         // means the caller skipped that step, so no row may pass.
         Pred::Exists { .. } | Pred::InSubquery { .. } | Pred::FieldCmpSubquery { .. } => false,
@@ -854,9 +870,8 @@ fn eval_arithmetic(op: BinaryOp, left: &Value, right: &Value) -> Result<Value> {
 
 /// Narrow a `u64` operand into the signed range the result type uses.
 fn signed_u64(value: u64) -> Result<i64> {
-    i64::try_from(value).map_err(|_| {
-        query_runtime_error(format!("integer operand `{value}` is outside the signed 64-bit range"))
-    })
+    i64::try_from(value)
+        .map_err(|_| query_runtime_error(format!("integer operand `{value}` is outside the signed 64-bit range")))
 }
 
 fn integer_arithmetic(op: BinaryOp, left: i64, right: i64) -> Result<Value> {
@@ -879,10 +894,7 @@ fn integer_arithmetic(op: BinaryOp, left: i64, right: i64) -> Result<Value> {
         _ => unreachable!("integer_arithmetic only receives arithmetic operators"),
     };
     checked.map(Value::I64).ok_or_else(|| {
-        query_runtime_error(format!(
-            "integer arithmetic `{}` overflowed the signed 64-bit range",
-            arithmetic_symbol(op)
-        ))
+        query_runtime_error(format!("integer arithmetic `{}` overflowed the signed 64-bit range", arithmetic_symbol(op)))
     })
 }
 
@@ -906,10 +918,7 @@ fn real_arithmetic(op: BinaryOp, left: f64, right: f64) -> Result<Value> {
         _ => unreachable!("real_arithmetic only receives arithmetic operators"),
     };
     if !result.is_finite() {
-        return Err(query_runtime_error(format!(
-            "REAL arithmetic `{}` produced a non-finite result",
-            arithmetic_symbol(op)
-        )));
+        return Err(query_runtime_error(format!("REAL arithmetic `{}` produced a non-finite result", arithmetic_symbol(op))));
     }
     Ok(Value::F64(result))
 }
@@ -949,9 +958,7 @@ fn eval_function(
     }
     // `COALESCE` is the one function that a `NULL` argument does not decide, so
     // it skips the blanket propagation and picks the first non-`NULL` value.
-    if !matches!(function, ScalarFunction::Coalesce)
-        && values.iter().any(|value| matches!(value, Value::Null))
-    {
+    if !matches!(function, ScalarFunction::Coalesce) && values.iter().any(|value| matches!(value, Value::Null)) {
         return Ok(Value::Null);
     }
     Ok(match function {
@@ -1041,11 +1048,9 @@ fn date_part(function: ScalarFunction, value: &Value) -> Result<i32> {
 fn text_argument(function: ScalarFunction, value: &Value) -> Result<&str> {
     match value {
         Value::Text(text) => Ok(text.as_str()),
-        other => Err(query_runtime_error(format!(
-            "`{}()` requires text arguments, got `{}`",
-            function_name(function),
-            other.kind()
-        ))),
+        other => {
+            Err(query_runtime_error(format!("`{}()` requires text arguments, got `{}`", function_name(function), other.kind())))
+        }
     }
 }
 
@@ -1129,7 +1134,14 @@ fn eval_cast(value: &Value, target: &str) -> Result<Value> {
 
 fn cast_to_integer(value: &Value) -> Result<Value> {
     let n = match value {
-        Value::Bool(b) => if *b { 1 } else { 0 },
+        Value::Bool(b) => {
+            if *b {
+                1
+            }
+            else {
+                0
+            }
+        }
         Value::I64(n) => return Ok(Value::I64(*n)),
         Value::U64(n) => {
             let clamped = (*n).min(i64::MAX as u64) as i64;
@@ -1141,10 +1153,9 @@ fn cast_to_integer(value: &Value) -> Result<Value> {
             }
             *n as i64
         }
-        Value::Text(s) => s
-            .trim()
-            .parse::<i64>()
-            .map_err(|_| query_runtime_error(format!("CAST text `{s}` to INTEGER failed")))?,
+        Value::Text(s) => {
+            s.trim().parse::<i64>().map_err(|_| query_runtime_error(format!("CAST text `{s}` to INTEGER failed")))?
+        }
         _ => return Err(query_runtime_error(format!("CAST from `{:?}` to INTEGER is not supported", value))),
     };
     Ok(Value::I64(n))
@@ -1152,14 +1163,20 @@ fn cast_to_integer(value: &Value) -> Result<Value> {
 
 fn cast_to_real(value: &Value) -> Result<Value> {
     let n = match value {
-        Value::Bool(b) => if *b { 1.0 } else { 0.0 },
+        Value::Bool(b) => {
+            if *b {
+                1.0
+            }
+            else {
+                0.0
+            }
+        }
         Value::I64(n) => *n as f64,
         Value::U64(n) => *n as f64,
         Value::F64(n) => return Ok(Value::F64(*n)),
-        Value::Text(s) => s
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| query_runtime_error(format!("CAST text `{s}` to REAL failed")))?,
+        Value::Text(s) => {
+            s.trim().parse::<f64>().map_err(|_| query_runtime_error(format!("CAST text `{s}` to REAL failed")))?
+        }
         _ => return Err(query_runtime_error(format!("CAST from `{:?}` to REAL is not supported", value))),
     };
     Ok(Value::F64(n))
@@ -1176,12 +1193,7 @@ fn cast_to_text(value: &Value) -> Result<Value> {
             // Format specifier `.15` matches SQLite-like display precision.
             let s = format!("{n:.15}");
             let trimmed = s.trim_end_matches('0').trim_end_matches('.').to_string();
-            if trimmed.contains('.') {
-                trimmed
-            }
-            else {
-                format!("{trimmed}.0")
-            }
+            if trimmed.contains('.') { trimmed } else { format!("{trimmed}.0") }
         }
         Value::Text(s) => return Ok(Value::Text(s.clone())),
         Value::Uuid(u) => u.to_string(),
@@ -1474,8 +1486,7 @@ fn execute_set_operation(
     }
     check_set_operation_types(kind, &left_rows, &right_rows, &left_columns, &right_columns)?;
 
-    let aligned_right: Vec<QueryRow> =
-        right_rows.iter().map(|row| align_row(row, &right_columns, &left_columns)).collect();
+    let aligned_right: Vec<QueryRow> = right_rows.iter().map(|row| align_row(row, &right_columns, &left_columns)).collect();
     Ok(match kind {
         SetOpKind::UnionAll => left_rows.into_iter().chain(aligned_right).collect(),
         SetOpKind::Union => {
@@ -1489,18 +1500,13 @@ fn execute_set_operation(
             out
         }
         SetOpKind::Intersect | SetOpKind::Except => {
-            let right_keys: BTreeSet<String> =
-                aligned_right.iter().map(|row| set_row_key(row, &left_columns)).collect();
+            let right_keys: BTreeSet<String> = aligned_right.iter().map(|row| set_row_key(row, &left_columns)).collect();
             let mut out: Vec<QueryRow> = Vec::new();
             let mut seen: BTreeSet<String> = BTreeSet::new();
             for row in left_rows {
                 let key = set_row_key(&row, &left_columns);
-                let keep = if matches!(kind, SetOpKind::Intersect) {
-                    right_keys.contains(&key)
-                }
-                else {
-                    !right_keys.contains(&key)
-                };
+                let keep =
+                    if matches!(kind, SetOpKind::Intersect) { right_keys.contains(&key) } else { !right_keys.contains(&key) };
                 if keep && seen.insert(key) {
                     out.push(row);
                 }
@@ -1611,7 +1617,7 @@ fn execute_aggregate(
             let value = match &gk.expr {
                 ProjectExpr::Scalar { path } => read_path(path, row, "", contract, records, outer),
                 ProjectExpr::Nested { .. } => Value::Null, // nested in GROUP BY → unsupported
-                ProjectExpr::Computed(_) => Value::Null, // computed in GROUP BY → unsupported (lowering rejects)
+                ProjectExpr::Computed(_) => Value::Null,   // computed in GROUP BY → unsupported (lowering rejects)
             };
             key_values.push(value);
         }
@@ -1711,10 +1717,7 @@ fn eval_aggregate(
                         saw_any = true;
                     }
                     other => {
-                        return Err(query_runtime_error(format!(
-                            "SUM() requires numeric values, got `{}`",
-                            other.kind()
-                        )));
+                        return Err(query_runtime_error(format!("SUM() requires numeric values, got `{}`", other.kind())));
                     }
                 }
             }
@@ -1725,9 +1728,8 @@ fn eval_aggregate(
                 finite_real(real_sum, "SUM()")?
             }
             else {
-                let sum = i64::try_from(integer_sum).map_err(|_| {
-                    query_runtime_error("SUM() overflowed the signed 64-bit range")
-                })?;
+                let sum =
+                    i64::try_from(integer_sum).map_err(|_| query_runtime_error("SUM() overflowed the signed 64-bit range"))?;
                 Value::I64(sum)
             };
             Ok((name.clone(), result))
@@ -1753,10 +1755,7 @@ fn eval_aggregate(
                         count += 1;
                     }
                     other => {
-                        return Err(query_runtime_error(format!(
-                            "AVG() requires numeric values, got `{}`",
-                            other.kind()
-                        )));
+                        return Err(query_runtime_error(format!("AVG() requires numeric values, got `{}`", other.kind())));
                     }
                 }
             }
@@ -1859,8 +1858,7 @@ fn execute_window(
         // One value per input row, in the input order.
         let mut values: Vec<Value> = vec![Value::Null; rows.len()];
         for partition in partition_rows(&rows, field, contract, records, bound_values, outer)? {
-            let values_of_partition =
-                eval_window_partition(&rows, &partition, field, contract, records, bound_values, outer)?;
+            let values_of_partition = eval_window_partition(&rows, &partition, field, contract, records, bound_values, outer)?;
             for (row_index, value) in partition.into_iter().zip(values_of_partition) {
                 values[row_index] = value;
             }
@@ -1996,7 +1994,8 @@ fn compare_window_keys(field: &WindowField, left: &[Value], right: &[Value]) -> 
 /// which the caller turns into the aggregate's empty-input result.
 fn window_frame_range(field: &WindowField, keys: &[Vec<Value>], order: &[usize], position: usize) -> (usize, usize) {
     let len = order.len();
-    let Some(frame) = &field.spec.frame else {
+    let Some(frame) = &field.spec.frame
+    else {
         if field.spec.order_by.is_empty() {
             return (0, len - 1);
         }

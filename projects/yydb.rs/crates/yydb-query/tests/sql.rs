@@ -342,9 +342,8 @@ fn seed_orphan_projects(contract: &ResolvedContract, records: &mut BTreeMap<Stri
 }
 
 fn seed_account(contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>, id: i64, active: bool) {
-    let sql = format!(
-        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES ({id}, 'seed@test', 't', 0, {active})"
-    );
+    let sql =
+        format!("INSERT INTO Account (account_id, email, tenant, score, active) VALUES ({id}, 'seed@test', 't', 0, {active})");
     exec(&sql, &[], contract, records);
 }
 
@@ -582,16 +581,8 @@ fn every_join_kind_emits_the_same_merged_row_shape() {
 
     // Base table columns stay bare, joined table columns stay prefixed, so a
     // padded row from either side has the same columns as a matched row.
-    let expected_keys = vec![
-        "Project.name",
-        "Project.owner_id",
-        "Project.project_id",
-        "account_id",
-        "active",
-        "email",
-        "score",
-        "tenant",
-    ];
+    let expected_keys =
+        vec!["Project.name", "Project.owner_id", "Project.project_id", "account_id", "active", "email", "score", "tenant"];
 
     for kind in ["JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN"] {
         let sql = format!("SELECT * FROM Account {kind} Project ON Account.account_id = Project.owner_id");
@@ -618,21 +609,14 @@ fn select_with_is_not_null_filters_out_missing_rows() {
     // Insert one row where email is NULL (we cannot easily do this via INSERT VALUES
     // because lowering always requires an explicit column list — but we can check
     // that the lowering itself accepts IS NOT NULL syntax).
-    let stmt =
-        prepare_sql("SELECT account_id FROM Account WHERE email IS NOT NULL").expect("IS NOT NULL lowers cleanly");
+    let stmt = prepare_sql("SELECT account_id FROM Account WHERE email IS NOT NULL").expect("IS NOT NULL lowers cleanly");
     assert_eq!(stmt.ops.len(), 4); // Scan → Filter → Project → Collect
 
     let contract = contract();
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE email IS NOT NULL",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("IS NOT NULL selects present rows");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE email IS NOT NULL", &[], &contract, &[], &mut records)
+        .expect("IS NOT NULL selects present rows");
     assert_eq!(ids(&outcome.rows), vec![1, 2, 3]);
 }
 
@@ -643,14 +627,8 @@ fn select_with_is_not_true_on_bool_column() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE active IS NOT TRUE",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("IS NOT TRUE");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE active IS NOT TRUE", &[], &contract, &[], &mut records)
+        .expect("IS NOT TRUE");
     assert_eq!(ids(&outcome.rows), vec![2]); // only linus has active=false
 }
 
@@ -660,14 +638,8 @@ fn select_with_is_not_false_on_bool_column() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE active IS NOT FALSE",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("IS NOT FALSE");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE active IS NOT FALSE", &[], &contract, &[], &mut records)
+        .expect("IS NOT FALSE");
     assert_eq!(ids(&outcome.rows), vec![1, 3]); // ada and grace have active=true
 }
 
@@ -679,14 +651,8 @@ fn select_with_in_multi_element_list() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE tenant IN ('t1', 't2')",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("IN multi");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE tenant IN ('t1', 't2')", &[], &contract, &[], &mut records)
+        .expect("IN multi");
     assert_eq!(ids(&outcome.rows), vec![1, 2, 3]);
 }
 
@@ -696,14 +662,8 @@ fn select_with_in_single_element_list() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE tenant IN ('t2')",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("IN single");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE tenant IN ('t2')", &[], &contract, &[], &mut records)
+        .expect("IN single");
     assert_eq!(ids(&outcome.rows), vec![3]);
 }
 
@@ -713,14 +673,8 @@ fn select_with_not_in_excludes_matches() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE tenant NOT IN ('t1')",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("NOT IN");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE tenant NOT IN ('t1')", &[], &contract, &[], &mut records)
+        .expect("NOT IN");
     assert_eq!(ids(&outcome.rows), vec![3]);
 }
 
@@ -767,14 +721,9 @@ fn select_with_not_between_excludes_range() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE score NOT BETWEEN 10 AND 25",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("NOT BETWEEN");
+    let outcome =
+        execute_sql("SELECT account_id FROM Account WHERE score NOT BETWEEN 10 AND 25", &[], &contract, &[], &mut records)
+            .expect("NOT BETWEEN");
     assert_eq!(ids(&outcome.rows), vec![2]); // score=30 is outside [10,25]
 }
 
@@ -787,14 +736,9 @@ fn select_with_between_reversed_endpoints_is_semantically_empty() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE score BETWEEN 30 AND 10",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("BETWEEN reversed lowers and yields empty");
+    let outcome =
+        execute_sql("SELECT account_id FROM Account WHERE score BETWEEN 30 AND 10", &[], &contract, &[], &mut records)
+            .expect("BETWEEN reversed lowers and yields empty");
     assert!(outcome.rows.is_empty());
 }
 
@@ -806,14 +750,9 @@ fn select_with_compound_and_of_comparisons() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE tenant = 't1' AND score > 15",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("AND of comparisons");
+    let outcome =
+        execute_sql("SELECT account_id FROM Account WHERE tenant = 't1' AND score > 15", &[], &contract, &[], &mut records)
+            .expect("AND of comparisons");
     assert_eq!(ids(&outcome.rows), vec![2]); // linus in t1 with score 30
 }
 
@@ -859,14 +798,8 @@ fn select_with_not_grouped_predicate() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE NOT (tenant = 't1')",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("NOT grouped");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE NOT (tenant = 't1')", &[], &contract, &[], &mut records)
+        .expect("NOT grouped");
     assert_eq!(ids(&outcome.rows), vec![3]); // grace in t2
 }
 
@@ -879,14 +812,8 @@ fn select_with_not_single_comparison() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE NOT (active IS TRUE)",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("NOT with IS TRUE");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE NOT (active IS TRUE)", &[], &contract, &[], &mut records)
+        .expect("NOT with IS TRUE");
     assert_eq!(ids(&outcome.rows), vec![2]);
 }
 
@@ -898,14 +825,7 @@ fn select_with_limit_zero_returns_no_rows() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account LIMIT 0",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("LIMIT 0");
+    let outcome = execute_sql("SELECT account_id FROM Account LIMIT 0", &[], &contract, &[], &mut records).expect("LIMIT 0");
     assert!(outcome.rows.is_empty());
 }
 
@@ -940,14 +860,9 @@ fn select_with_order_by_multiple_columns() {
     // First by tenant (asc), then by score (desc). t1 rows: ada(10), linus(30).
     // After primary sort by tenant asc: t1 rows first, then t2.
     // Within t1, score desc: linus(30), ada(10). t2: grace(20).
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account ORDER BY tenant ASC, score DESC",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("ORDER BY multi-col");
+    let outcome =
+        execute_sql("SELECT account_id FROM Account ORDER BY tenant ASC, score DESC", &[], &contract, &[], &mut records)
+            .expect("ORDER BY multi-col");
     assert_eq!(ids(&outcome.rows), vec![2, 1, 3]);
 }
 
@@ -965,14 +880,9 @@ fn select_projects_column_arithmetic() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id + score AS total FROM Account ORDER BY account_id",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("column arithmetic");
+    let outcome =
+        execute_sql("SELECT account_id + score AS total FROM Account ORDER BY account_id", &[], &contract, &[], &mut records)
+            .expect("column arithmetic");
     assert_eq!(outcome.rows[0].get("total"), Some(&Value::I64(11)));
     assert_eq!(outcome.rows[1].get("total"), Some(&Value::I64(32)));
     assert_eq!(outcome.rows[2].get("total"), Some(&Value::I64(23)));
@@ -984,14 +894,9 @@ fn select_projects_arithmetic_with_operator_precedence() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT score * 2 - 1 AS bumped FROM Account ORDER BY account_id",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("precedence");
+    let outcome =
+        execute_sql("SELECT score * 2 - 1 AS bumped FROM Account ORDER BY account_id", &[], &contract, &[], &mut records)
+            .expect("precedence");
     assert_eq!(outcome.rows[0].get("bumped"), Some(&Value::I64(19)));
     assert_eq!(outcome.rows[1].get("bumped"), Some(&Value::I64(59)));
     assert_eq!(outcome.rows[2].get("bumped"), Some(&Value::I64(39)));
@@ -1156,14 +1061,8 @@ fn select_rejects_integer_arithmetic_overflow() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let err = execute_sql(
-        "SELECT score * 9223372036854775807 AS blown FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect_err("integer overflow must reject instead of wrapping");
+    let err = execute_sql("SELECT score * 9223372036854775807 AS blown FROM Account", &[], &contract, &[], &mut records)
+        .expect_err("integer overflow must reject instead of wrapping");
     let msg = format!("{err}");
     assert!(msg.contains("overflowed"), "unexpected: {msg}");
 }
@@ -1363,14 +1262,9 @@ fn scalar_functions_compose_with_aggregates_and_ordering() {
     .expect("sum of lengths");
     assert_eq!(outcome.rows[0].get("total"), Some(&Value::I64(52)));
 
-    let rows = execute_sql(
-        "SELECT UPPER(tenant) AS tenant_upper FROM Account ORDER BY account_id",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("function projection with ordering");
+    let rows =
+        execute_sql("SELECT UPPER(tenant) AS tenant_upper FROM Account ORDER BY account_id", &[], &contract, &[], &mut records)
+            .expect("function projection with ordering");
     assert_eq!(rows.rows[0].get("tenant_upper"), Some(&Value::Text("T1".into())));
     assert_eq!(rows.rows[2].get("tenant_upper"), Some(&Value::Text("T2".into())));
 }
@@ -1556,10 +1450,7 @@ fn coalesce_rejects_mixed_value_kinds() {
 
 #[test]
 fn coalesce_rejects_nested_aggregates() {
-    for sql in [
-        "SELECT COALESCE(SUM(score), 0) AS v FROM Account",
-        "SELECT COALESCE(0, AVG(score)) AS v FROM Account",
-    ] {
+    for sql in ["SELECT COALESCE(SUM(score), 0) AS v FROM Account", "SELECT COALESCE(0, AVG(score)) AS v FROM Account"] {
         let err = prepare_sql(sql).expect_err("an aggregate inside COALESCE must reject");
         let msg = format!("{err}");
         assert!(msg.contains("cannot be nested inside another function call"), "`{sql}` unexpected: {msg}");
@@ -1621,14 +1512,8 @@ fn three_nested_calls_propagate_null() {
     assert_eq!(outcome.rows[2].get("depth"), Some(&Value::I64(2)));
 
     // The aggregate skips the NULL row instead of counting it as a value.
-    let total = execute_sql(
-        "SELECT SUM(LENGTH(LOWER(TRIM(tenant)))) AS total FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("sum over three nested calls");
+    let total = execute_sql("SELECT SUM(LENGTH(LOWER(TRIM(tenant)))) AS total FROM Account", &[], &contract, &[], &mut records)
+        .expect("sum over three nested calls");
     assert_eq!(total.rows[0].get("total"), Some(&Value::I64(4)));
 }
 
@@ -1646,18 +1531,76 @@ fn aggregate_calls_nested_in_another_call_are_rejected() {
 }
 
 #[test]
-fn nested_calls_stay_rejected_in_predicates_and_ordering() {
-    // `WHERE` and `ORDER BY` take plain column references only, so they reject a
-    // computed expression whether or not it nests a call.
-    for sql in [
-        "SELECT account_id FROM Account WHERE LOWER(email) = 'ada@example.test'",
-        "SELECT account_id FROM Account WHERE LENGTH(LOWER(email)) > 17",
-    ] {
-        let err = prepare_sql(sql).expect_err("a computed predicate must reject");
-        let msg = format!("{err}");
-        assert!(msg.contains("predicates support plain column references only"), "`{sql}` unexpected: {msg}");
-    }
+fn scalar_expressions_in_where_evaluate_per_row() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
 
+    // 1. 函数调用：WHERE LOWER(email) 命中
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account WHERE LOWER(email) = 'ada@example.test' ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("LOWER predicate must execute");
+    assert_eq!(ids(&outcome.rows), vec![1]);
+
+    // 2. 嵌套函数：WHERE LENGTH(LOWER(email)) > 17
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account WHERE LENGTH(LOWER(email)) > 17 ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("nested function predicate must execute");
+    // 'ada@example.test' = 16 chars, 'linus@example.test' = 19, 'grace@example.test' = 18
+    assert_eq!(ids(&outcome.rows), vec![2, 3]);
+
+    // 3. 算术：WHERE score + 1 >= 21
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account WHERE score + 1 >= 21 ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("arithmetic predicate must execute");
+    assert_eq!(ids(&outcome.rows), vec![2, 3]);
+
+    // 4. 参数位：WHERE LOWER(email) = $1
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account WHERE LOWER(email) = $1 ORDER BY account_id",
+        &[Value::Text("ada@example.test".into())],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("parameterised expr predicate must execute");
+    assert_eq!(ids(&outcome.rows), vec![1]);
+
+    // 5. NULL 传播：WHERE LOWER(tenant) = 't1' 正常，但若 tenant 含 NULL 则该 NULL 行被丢弃
+    exec(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (4, 'null@example.test', NULL, 5, true)",
+        &[],
+        &contract,
+        &mut records,
+    );
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account WHERE LOWER(tenant) = 't1' ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("NULL-propagating expr predicate must execute");
+    assert_eq!(ids(&outcome.rows), vec![1, 2]); // t1 = account 1 and 2; t2 = 3; NULL = 4 dropped
+}
+
+#[test]
+fn order_by_still_rejects_scalar_expressions() {
     for sql in
         ["SELECT account_id FROM Account ORDER BY LOWER(email)", "SELECT account_id FROM Account ORDER BY LENGTH(LOWER(email))"]
     {
@@ -1758,8 +1701,11 @@ fn date_parts_propagate_null_and_reject_non_temporal_arguments() {
 
     // A `time` column carries no calendar date, and text is never parsed with an
     // assumed format.
-    for sql in ["SELECT YEAR(at_time) AS v FROM Visit", "SELECT MONTH('2024-01-31') AS v FROM Visit", "SELECT DAY(visit_id) AS v FROM Visit"]
-    {
+    for sql in [
+        "SELECT YEAR(at_time) AS v FROM Visit",
+        "SELECT MONTH('2024-01-31') AS v FROM Visit",
+        "SELECT DAY(visit_id) AS v FROM Visit",
+    ] {
         let err = execute_sql(sql, &[], &contract, &[], &mut records).expect_err("non-temporal argument must reject");
         let message = format!("{err}");
         assert!(message.contains("`date` or `datetime`"), "`{sql}` unexpected: {message}");
@@ -1790,12 +1736,9 @@ fn select_rejects_star_mixed_with_projected_columns() {
 #[test]
 fn select_rejects_arithmetic_on_rhs_of_predicate() {
     // WHERE score = 1 + 1 — value side is arithmetic, must reject
-    let err = prepare_sql("SELECT * FROM Account WHERE score = 1 + 1")
-        .expect_err("arithmetic value-side predicate must be rejected");
-    assert!(
-        format!("{err}").contains("unsupported") || format!("{err}").contains("arithmetic"),
-        "unexpected: {err}"
-    );
+    let err =
+        prepare_sql("SELECT * FROM Account WHERE score = 1 + 1").expect_err("arithmetic value-side predicate must be rejected");
+    assert!(format!("{err}").contains("unsupported") || format!("{err}").contains("arithmetic"), "unexpected: {err}");
 }
 
 // ─── LIKE is rejected ──────────────────────────────────────────────────
@@ -1822,14 +1765,8 @@ fn select_with_boolean_literal_always_true_predicate() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE true",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("WHERE true");
+    let outcome =
+        execute_sql("SELECT account_id FROM Account WHERE true", &[], &contract, &[], &mut records).expect("WHERE true");
     assert_eq!(ids(&outcome.rows), vec![1, 2, 3]);
 }
 
@@ -1839,14 +1776,8 @@ fn select_with_boolean_literal_always_false_predicate() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE false",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("WHERE false");
+    let outcome =
+        execute_sql("SELECT account_id FROM Account WHERE false", &[], &contract, &[], &mut records).expect("WHERE false");
     assert!(outcome.rows.is_empty());
 }
 
@@ -1871,9 +1802,7 @@ fn select_rejects_column_to_column_comparison_on_rhs() {
     let stmt = prepare_sql("SELECT * FROM Account WHERE account_id = account_id")
         .expect("column-to-column comparison now lowers successfully");
     // The Filter predicate should be FieldCmpField.
-    let has_field_cmp_field = stmt.ops.iter().any(|op| matches!(
-        op, QueryOp::Filter { predicate: Pred::FieldCmpField { .. } }
-    ));
+    let has_field_cmp_field = stmt.ops.iter().any(|op| matches!(op, QueryOp::Filter { predicate: Pred::FieldCmpField { .. } }));
     assert!(has_field_cmp_field, "expected FieldCmpField in lowered ops: {stmt:?}");
 }
 
@@ -1893,24 +1822,11 @@ fn update_without_where_affects_every_row() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let update = execute_sql(
-        "UPDATE Account SET score = 0",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("update all");
+    let update = execute_sql("UPDATE Account SET score = 0", &[], &contract, &[], &mut records).expect("update all");
     assert_eq!(update.affected, 3);
 
-    let outcome = execute_sql(
-        "SELECT account_id, score FROM Account ORDER BY account_id",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read after update all");
+    let outcome = execute_sql("SELECT account_id, score FROM Account ORDER BY account_id", &[], &contract, &[], &mut records)
+        .expect("read after update all");
     for row in &outcome.rows {
         assert_eq!(row.get("score"), Some(&Value::I64(0)));
     }
@@ -1922,14 +1838,8 @@ fn update_with_zero_affected_rows_still_succeeds() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let update = execute_sql(
-        "UPDATE Account SET score = 99 WHERE account_id = 9999",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("update no-match");
+    let update = execute_sql("UPDATE Account SET score = 99 WHERE account_id = 9999", &[], &contract, &[], &mut records)
+        .expect("update no-match");
     assert_eq!(update.affected, 0);
     // records unchanged
     assert_eq!(records.len(), 3);
@@ -1942,24 +1852,12 @@ fn update_self_reference_arithmetic_increments_row() {
     seed(&contract, &mut records);
 
     // score 10 → 11
-    let outcome = execute_sql(
-        "UPDATE Account SET score = score + 1 WHERE account_id = 1",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("update arithmetic");
+    let outcome = execute_sql("UPDATE Account SET score = score + 1 WHERE account_id = 1", &[], &contract, &[], &mut records)
+        .expect("update arithmetic");
     assert_eq!(outcome.affected, 1);
 
-    let rows = execute_sql(
-        "SELECT account_id, score FROM Account ORDER BY account_id",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read back");
+    let rows = execute_sql("SELECT account_id, score FROM Account ORDER BY account_id", &[], &contract, &[], &mut records)
+        .expect("read back");
     assert_eq!(rows.rows.len(), 3);
     assert_eq!(rows.rows[0].get("account_id"), Some(&Value::I64(1)));
     assert_eq!(rows.rows[0].get("score"), Some(&Value::I64(11)));
@@ -1975,24 +1873,13 @@ fn update_arithmetic_with_parameter_slot() {
     seed(&contract, &mut records);
 
     // score * score + 2 → 10 * 10 + 2 = 102
-    let outcome = execute_sql(
-        "UPDATE Account SET score = score * score + 2 WHERE account_id = 1",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("update compound arithmetic");
+    let outcome =
+        execute_sql("UPDATE Account SET score = score * score + 2 WHERE account_id = 1", &[], &contract, &[], &mut records)
+            .expect("update compound arithmetic");
     assert_eq!(outcome.affected, 1);
 
-    let rows = execute_sql(
-        "SELECT account_id, score FROM Account WHERE account_id = 1",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read back");
+    let rows = execute_sql("SELECT account_id, score FROM Account WHERE account_id = 1", &[], &contract, &[], &mut records)
+        .expect("read back");
     assert_eq!(rows.rows[0].get("score"), Some(&Value::I64(102)));
 }
 
@@ -2013,14 +1900,8 @@ fn update_arithmetic_with_bound_parameter() {
     .expect("update arithmetic with bound param");
     assert_eq!(outcome.affected, 1);
 
-    let rows = execute_sql(
-        "SELECT score FROM Account WHERE account_id = 2",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read back");
+    let rows =
+        execute_sql("SELECT score FROM Account WHERE account_id = 2", &[], &contract, &[], &mut records).expect("read back");
     assert_eq!(rows.rows[0].get("score"), Some(&Value::I64(35)));
 }
 
@@ -2029,15 +1910,13 @@ fn update_arithmetic_with_bound_parameter() {
 #[test]
 fn insert_rejects_missing_column_list() {
     // INSERT INTO Account VALUES (...) — no explicit column list
-    let err = prepare_sql("INSERT INTO Account VALUES (1, 'x', 't', 0, true)")
-        .expect_err("implicit column list must reject");
+    let err = prepare_sql("INSERT INTO Account VALUES (1, 'x', 't', 0, true)").expect_err("implicit column list must reject");
     assert!(format!("{err}").contains("explicit column list"));
 }
 
 #[test]
 fn insert_rejects_column_value_count_mismatch() {
-    let err = prepare_sql("INSERT INTO Account (account_id, email) VALUES (1)")
-        .expect_err("mismatched counts must reject");
+    let err = prepare_sql("INSERT INTO Account (account_id, email) VALUES (1)").expect_err("mismatched counts must reject");
     assert!(format!("{err}").contains("count"));
 }
 
@@ -2064,35 +1943,22 @@ fn insert_bind_positional_parameters_in_values() {
     let contract = contract();
     let mut records = BTreeMap::new();
 
-    let stmt = prepare_sql(
-        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, ?, ?)",
-    )
-    .expect("param insert prepares");
+    let stmt = prepare_sql("INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, ?, ?)")
+        .expect("param insert prepares");
     assert_eq!(stmt.parameters.len(), 5);
 
     execute_sql(
         "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, ?, ?)",
-        &[
-            Value::I64(4),
-            Value::Text("ada@param.test".into()),
-            Value::Text("tp".into()),
-            Value::I64(99),
-            Value::Bool(true),
-        ],
+        &[Value::I64(4), Value::Text("ada@param.test".into()), Value::Text("tp".into()), Value::I64(99), Value::Bool(true)],
         &contract,
         &[],
         &mut records,
     )
     .expect("param insert executes");
 
-    let outcome = execute_sql(
-        "SELECT account_id, email, score FROM Account WHERE account_id = 4",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read param-inserted row");
+    let outcome =
+        execute_sql("SELECT account_id, email, score FROM Account WHERE account_id = 4", &[], &contract, &[], &mut records)
+            .expect("read param-inserted row");
     assert_eq!(outcome.rows.len(), 1);
     assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("ada@param.test".into())));
     assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(99)));
@@ -2104,24 +1970,13 @@ fn update_with_positional_parameter_in_where() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let update = execute_sql(
-        "UPDATE Account SET score = 777 WHERE account_id = ?",
-        &[Value::I64(2)],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("param update");
+    let update =
+        execute_sql("UPDATE Account SET score = 777 WHERE account_id = ?", &[Value::I64(2)], &contract, &[], &mut records)
+            .expect("param update");
     assert_eq!(update.affected, 1);
 
-    let outcome = execute_sql(
-        "SELECT score FROM Account WHERE account_id = 2",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read updated");
+    let outcome =
+        execute_sql("SELECT score FROM Account WHERE account_id = 2", &[], &contract, &[], &mut records).expect("read updated");
     assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(777)));
 }
 
@@ -2131,24 +1986,12 @@ fn delete_with_positional_parameter_in_where() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let delete = execute_sql(
-        "DELETE FROM Account WHERE tenant = ?",
-        &[Value::Text("t1".into())],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("param delete");
+    let delete = execute_sql("DELETE FROM Account WHERE tenant = ?", &[Value::Text("t1".into())], &contract, &[], &mut records)
+        .expect("param delete");
     assert_eq!(delete.affected, 2);
 
-    let remaining = execute_sql(
-        "SELECT account_id FROM Account ORDER BY account_id",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read remaining");
+    let remaining = execute_sql("SELECT account_id FROM Account ORDER BY account_id", &[], &contract, &[], &mut records)
+        .expect("read remaining");
     assert_eq!(ids(&remaining.rows), vec![3]);
 }
 
@@ -2192,16 +2035,15 @@ fn insert_i64_boundary_values() {
     )
     .expect("insert negative");
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account ORDER BY account_id",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read boundary ids");
-    let got: Vec<i64> = outcome.rows.iter()
-        .map(|r| match r.get("account_id") { Some(Value::I64(n)) => *n, _ => panic!() })
+    let outcome = execute_sql("SELECT account_id FROM Account ORDER BY account_id", &[], &contract, &[], &mut records)
+        .expect("read boundary ids");
+    let got: Vec<i64> = outcome
+        .rows
+        .iter()
+        .map(|r| match r.get("account_id") {
+            Some(Value::I64(n)) => *n,
+            _ => panic!(),
+        })
         .collect();
     assert_eq!(got, vec![-9223372036854775807, -42, 9223372036854775807]);
 }
@@ -2227,11 +2069,7 @@ fn insert_empty_string_and_special_chars() {
     // doubled-quote escaping inside literals.
     execute_sql(
         "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, 0, true)",
-        &[
-            Value::I64(11),
-            Value::Text("o'brien@test".into()),
-            Value::Text("it's".into()),
-        ],
+        &[Value::I64(11), Value::Text("o'brien@test".into()), Value::Text("it's".into())],
         &contract,
         &[],
         &mut records,
@@ -2265,14 +2103,8 @@ fn insert_unicode_text() {
     )
     .expect("insert unicode");
 
-    let outcome = execute_sql(
-        "SELECT email, tenant FROM Account WHERE account_id = 12",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read unicode");
+    let outcome = execute_sql("SELECT email, tenant FROM Account WHERE account_id = 12", &[], &contract, &[], &mut records)
+        .expect("read unicode");
     assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("邮件@测试.中文".into())));
     assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text("租户".into())));
 }
@@ -2339,14 +2171,9 @@ fn update_multiple_fields_then_read_all_back() {
     )
     .expect("multi-col update");
 
-    let outcome = execute_sql(
-        "SELECT score, email, tenant FROM Account WHERE account_id = 3",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read updated multi-col");
+    let outcome =
+        execute_sql("SELECT score, email, tenant FROM Account WHERE account_id = 3", &[], &contract, &[], &mut records)
+            .expect("read updated multi-col");
     assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(500)));
     assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("changed@test".into())));
     assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text("zzz".into())));
@@ -2360,14 +2187,7 @@ fn delete_then_insert_same_row_preserves_visibility() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    execute_sql(
-        "DELETE FROM Account WHERE account_id = 1",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("delete ada");
+    execute_sql("DELETE FROM Account WHERE account_id = 1", &[], &contract, &[], &mut records).expect("delete ada");
 
     execute_sql(
         "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'ada.2@new.test', 't99', 42, false)",
@@ -2378,14 +2198,9 @@ fn delete_then_insert_same_row_preserves_visibility() {
     )
     .expect("reinsert ada");
 
-    let outcome = execute_sql(
-        "SELECT email, tenant, score, active FROM Account WHERE account_id = 1",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read reinserted");
+    let outcome =
+        execute_sql("SELECT email, tenant, score, active FROM Account WHERE account_id = 1", &[], &contract, &[], &mut records)
+            .expect("read reinserted");
     assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text("ada.2@new.test".into())));
     assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text("t99".into())));
     assert_eq!(outcome.rows[0].get("score"), Some(&Value::I64(42)));
@@ -2401,14 +2216,8 @@ fn select_with_is_null_on_populated_column_yields_empty() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account WHERE email IS NULL",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("IS NULL empty");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE email IS NULL", &[], &contract, &[], &mut records)
+        .expect("IS NULL empty");
     assert!(outcome.rows.is_empty());
 }
 
@@ -2420,35 +2229,17 @@ fn update_can_set_null_on_nullable_column() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let update = execute_sql(
-        "UPDATE Account SET tenant = NULL WHERE account_id = 1",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("set null");
+    let update = execute_sql("UPDATE Account SET tenant = NULL WHERE account_id = 1", &[], &contract, &[], &mut records)
+        .expect("set null");
     assert_eq!(update.affected, 1);
 
-    let outcome = execute_sql(
-        "SELECT tenant FROM Account WHERE account_id = 1",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read null tenant");
+    let outcome = execute_sql("SELECT tenant FROM Account WHERE account_id = 1", &[], &contract, &[], &mut records)
+        .expect("read null tenant");
     assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Null));
 
     // IS NULL now finds this row
-    let nulls = execute_sql(
-        "SELECT account_id FROM Account WHERE tenant IS NULL",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("find null tenant");
+    let nulls = execute_sql("SELECT account_id FROM Account WHERE tenant IS NULL", &[], &contract, &[], &mut records)
+        .expect("find null tenant");
     assert_eq!(ids(&nulls.rows), vec![1]);
 }
 
@@ -2466,9 +2257,8 @@ fn real_literal_matches_integer_column_through_numeric_promotion() {
     seed(&contract, &mut records);
 
     // 20.0 promotes `score` (i64) to f64 and matches grace's row.
-    let outcome =
-        execute_sql("SELECT account_id FROM Account WHERE score = 20.0", &[], &contract, &[], &mut records)
-            .expect("real literal comparison");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE score = 20.0", &[], &contract, &[], &mut records)
+        .expect("real literal comparison");
     assert_eq!(ids(&outcome.rows), vec![3]);
 }
 
@@ -2478,9 +2268,8 @@ fn real_literal_orders_against_integer_column() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome =
-        execute_sql("SELECT account_id FROM Account WHERE score > 10.5", &[], &contract, &[], &mut records)
-            .expect("real literal range");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE score > 10.5", &[], &contract, &[], &mut records)
+        .expect("real literal range");
     assert_eq!(ids(&outcome.rows), vec![2, 3]);
 }
 
@@ -2492,9 +2281,8 @@ fn real_literal_never_matches_a_text_column() {
 
     // No implicit numeric-to-text conversion: a REAL and a TEXT value have no
     // common comparison domain, so the predicate never matches.
-    let outcome =
-        execute_sql("SELECT account_id FROM Account WHERE tenant = 1.5", &[], &contract, &[], &mut records)
-            .expect("real vs text comparison");
+    let outcome = execute_sql("SELECT account_id FROM Account WHERE tenant = 1.5", &[], &contract, &[], &mut records)
+        .expect("real vs text comparison");
     assert!(outcome.rows.is_empty(), "REAL must not be compared as text");
 }
 
@@ -2582,14 +2370,8 @@ fn uuid_column_round_trip_through_sql_parameters() {
     // parameter bindings — the UUID Value gets serialized through the row
     // storage layer which may encode it as text bytes. We verify only that
     // the round-trip is coherent (not that the wire type is preserved).
-    let outcome = execute_sql(
-        "SELECT user_name FROM User WHERE user_name = 'ada'",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("verify insert landed");
+    let outcome = execute_sql("SELECT user_name FROM User WHERE user_name = 'ada'", &[], &contract, &[], &mut records)
+        .expect("verify insert landed");
     assert_eq!(outcome.rows.len(), 1);
     assert_eq!(outcome.rows[0].get("user_name"), Some(&Value::Text("ada".into())));
 }
@@ -2614,25 +2396,13 @@ fn update_uuid_column_via_parameter_binding() {
 
     // Search by the UUID bound as parameter — the lowering path forwards the
     // raw Value into the predicate comparison, which should still match.
-    execute_sql(
-        "UPDATE User SET user_name = 'renamed' WHERE user_id = ?",
-        &[Value::Uuid(id_a)],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("update by uuid");
+    execute_sql("UPDATE User SET user_name = 'renamed' WHERE user_id = ?", &[Value::Uuid(id_a)], &contract, &[], &mut records)
+        .expect("update by uuid");
 
     // Verify the UPDATE landed by reading back the row (via a column we know is
     // preserved correctly: user_name).
-    let rows = execute_sql(
-        "SELECT user_name FROM User WHERE active IS TRUE",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read after update");
+    let rows = execute_sql("SELECT user_name FROM User WHERE active IS TRUE", &[], &contract, &[], &mut records)
+        .expect("read after update");
     assert_eq!(rows.rows.len(), 1);
     assert_eq!(rows.rows[0].get("user_name"), Some(&Value::Text("renamed".into())));
 
@@ -2660,25 +2430,15 @@ fn large_text_values_round_trip() {
 
     execute_sql(
         "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, 0, true)",
-        &[
-            Value::I64(9001),
-            Value::Text(long_email.clone()),
-            Value::Text(long_tenant.clone()),
-        ],
+        &[Value::I64(9001), Value::Text(long_email.clone()), Value::Text(long_tenant.clone())],
         &contract,
         &[],
         &mut records,
     )
     .expect("insert large text");
 
-    let outcome = execute_sql(
-        "SELECT email, tenant FROM Account WHERE account_id = 9001",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read large text");
+    let outcome = execute_sql("SELECT email, tenant FROM Account WHERE account_id = 9001", &[], &contract, &[], &mut records)
+        .expect("read large text");
     assert_eq!(outcome.rows[0].get("email"), Some(&Value::Text(long_email)));
     assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text(long_tenant)));
 }
@@ -2700,14 +2460,8 @@ fn insert_explicit_null_literal() {
     )
     .expect("insert null literal");
 
-    let outcome = execute_sql(
-        "SELECT email FROM Account WHERE account_id = 9100",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("read null");
+    let outcome =
+        execute_sql("SELECT email FROM Account WHERE account_id = 9100", &[], &contract, &[], &mut records).expect("read null");
     assert_eq!(outcome.rows[0].get("email"), Some(&Value::Null));
 }
 
@@ -2770,16 +2524,14 @@ fn aggregate_avg_with_null_yields_null() {
     exec("UPDATE Account SET score = NULL WHERE account_id = 1", &[], &contract, &mut records);
 
     // After the UPDATE, tenant='t1' has linus(30) only — ada's score is NULL.
-    let outcome =
-        execute_sql("SELECT AVG(score) AS a FROM Account WHERE tenant = 't1'", &[], &contract, &[], &mut records)
-            .expect("avg partial");
+    let outcome = execute_sql("SELECT AVG(score) AS a FROM Account WHERE tenant = 't1'", &[], &contract, &[], &mut records)
+        .expect("avg partial");
     assert_eq!(outcome.rows.len(), 1);
     assert_eq!(outcome.rows[0].get("a"), Some(&Value::F64(30.0)));
 
     // A WHERE clause that matches zero rows should yield NULL for AVG
-    let empty =
-        execute_sql("SELECT AVG(score) AS a FROM Account WHERE score IS NULL", &[], &contract, &[], &mut records)
-            .expect("avg no match");
+    let empty = execute_sql("SELECT AVG(score) AS a FROM Account WHERE score IS NULL", &[], &contract, &[], &mut records)
+        .expect("avg no match");
     assert_eq!(empty.rows.len(), 1);
     assert_eq!(empty.rows[0].get("a"), Some(&Value::Null));
 }
@@ -2828,9 +2580,8 @@ fn aggregate_count_over_an_empty_input_reports_zero() {
     seed(&contract, &mut records);
 
     // Every row is filtered out, yet the global aggregate still has one group.
-    let star =
-        execute_sql("SELECT COUNT(*) AS c FROM Account WHERE account_id > 9000", &[], &contract, &[], &mut records)
-            .expect("count star over an empty input");
+    let star = execute_sql("SELECT COUNT(*) AS c FROM Account WHERE account_id > 9000", &[], &contract, &[], &mut records)
+        .expect("count star over an empty input");
     assert_eq!(star.rows.len(), 1);
     assert_eq!(star.rows[0].get("c"), Some(&Value::I64(0)));
 
@@ -2912,9 +2663,8 @@ fn aggregate_over_an_empty_table_matches_a_filtered_empty_input() {
     let contract = contract();
     let mut records = BTreeMap::new();
 
-    let empty_table =
-        execute_sql("SELECT COUNT(*) AS c, SUM(score) AS s FROM Account", &[], &contract, &[], &mut records)
-            .expect("aggregate over an empty table");
+    let empty_table = execute_sql("SELECT COUNT(*) AS c, SUM(score) AS s FROM Account", &[], &contract, &[], &mut records)
+        .expect("aggregate over an empty table");
     assert_eq!(empty_table.rows.len(), 1);
     assert_eq!(empty_table.rows[0].get("c"), Some(&Value::I64(0)));
     assert_eq!(empty_table.rows[0].get("s"), Some(&Value::Null));
@@ -2968,9 +2718,8 @@ fn aggregate_min_and_max_over_an_integer_column() {
     seed(&contract, &mut records);
 
     // scores = 10, 30, 20
-    let outcome =
-        execute_sql("SELECT MIN(score) AS lo, MAX(score) AS hi FROM Account", &[], &contract, &[], &mut records)
-            .expect("min and max over integers");
+    let outcome = execute_sql("SELECT MIN(score) AS lo, MAX(score) AS hi FROM Account", &[], &contract, &[], &mut records)
+        .expect("min and max over integers");
     assert_eq!(outcome.rows.len(), 1);
     assert_eq!(outcome.rows[0].get("lo"), Some(&Value::I64(10)));
     assert_eq!(outcome.rows[0].get("hi"), Some(&Value::I64(30)));
@@ -3006,14 +2755,9 @@ fn aggregate_min_and_max_skip_null_inputs() {
     exec("UPDATE Account SET score = 3 WHERE account_id = 3", &[], &contract, &mut records);
 
     // 1, NULL, 3 → MIN 1, MAX 3, while COUNT(*) still sees all three rows.
-    let outcome = execute_sql(
-        "SELECT COUNT(*) AS c, MIN(score) AS lo, MAX(score) AS hi FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("min and max skip nulls");
+    let outcome =
+        execute_sql("SELECT COUNT(*) AS c, MIN(score) AS lo, MAX(score) AS hi FROM Account", &[], &contract, &[], &mut records)
+            .expect("min and max skip nulls");
     assert_eq!(outcome.rows[0].get("c"), Some(&Value::I64(3)));
     assert_eq!(outcome.rows[0].get("lo"), Some(&Value::I64(1)));
     assert_eq!(outcome.rows[0].get("hi"), Some(&Value::I64(3)));
@@ -3027,14 +2771,9 @@ fn aggregate_min_and_max_are_null_for_an_all_null_column() {
     exec("UPDATE Account SET score = NULL WHERE account_id > 0", &[], &contract, &mut records);
 
     // Rows are present, but the argument never holds a value.
-    let outcome = execute_sql(
-        "SELECT COUNT(*) AS c, MIN(score) AS lo, MAX(score) AS hi FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("min and max over an all-null column");
+    let outcome =
+        execute_sql("SELECT COUNT(*) AS c, MIN(score) AS lo, MAX(score) AS hi FROM Account", &[], &contract, &[], &mut records)
+            .expect("min and max over an all-null column");
     assert_eq!(outcome.rows[0].get("c"), Some(&Value::I64(3)));
     assert_eq!(outcome.rows[0].get("lo"), Some(&Value::Null));
     assert_eq!(outcome.rows[0].get("hi"), Some(&Value::Null));
@@ -3119,38 +2858,19 @@ fn select_distinct_count_collapses_duplicate_values() {
     seed(&contract, &mut records);
 
     // scores = 10, 30, 20 — all distinct → COUNT(DISTINCT score) = 3
-    let distinct = execute_sql(
-        "SELECT DISTINCT COUNT(score) AS c FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("distinct count");
+    let distinct = execute_sql("SELECT DISTINCT COUNT(score) AS c FROM Account", &[], &contract, &[], &mut records)
+        .expect("distinct count");
     assert_eq!(distinct.rows[0].get("c"), Some(&Value::I64(3)));
 
     // Now make two rows have the same score
     exec("UPDATE Account SET score = 10 WHERE account_id = 2", &[], &contract, &mut records);
     // scores = 10, 10, 20 — distinct = {10, 20} → 2
-    let distinct2 = execute_sql(
-        "SELECT DISTINCT COUNT(score) AS c FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("distinct count duplicates");
+    let distinct2 = execute_sql("SELECT DISTINCT COUNT(score) AS c FROM Account", &[], &contract, &[], &mut records)
+        .expect("distinct count duplicates");
     assert_eq!(distinct2.rows[0].get("c"), Some(&Value::I64(2)));
 
     // Plain COUNT(score) still counts all non-null rows
-    let plain = execute_sql(
-        "SELECT COUNT(score) AS c FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("plain count");
+    let plain = execute_sql("SELECT COUNT(score) AS c FROM Account", &[], &contract, &[], &mut records).expect("plain count");
     assert_eq!(plain.rows[0].get("c"), Some(&Value::I64(3)));
 }
 
@@ -3162,14 +2882,8 @@ fn select_distinct_count_skips_null_values() {
     // Set score NULL on ada and linus (grace keeps 20)
     exec("UPDATE Account SET score = NULL WHERE account_id IN (1, 2)", &[], &contract, &mut records);
 
-    let distinct = execute_sql(
-        "SELECT DISTINCT COUNT(score) AS c FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("distinct count nulls");
+    let distinct = execute_sql("SELECT DISTINCT COUNT(score) AS c FROM Account", &[], &contract, &[], &mut records)
+        .expect("distinct count nulls");
     // Only grace has score=20 → one distinct non-null value
     assert_eq!(distinct.rows[0].get("c"), Some(&Value::I64(1)));
 }
@@ -3177,8 +2891,7 @@ fn select_distinct_count_skips_null_values() {
 #[test]
 fn select_distinct_count_star_is_rejected() {
     // SELECT DISTINCT COUNT(*) is ambiguous at lowering time.
-    let err = prepare_sql("SELECT DISTINCT COUNT(*) AS c FROM Account")
-        .expect_err("DISTINCT COUNT(*) must reject");
+    let err = prepare_sql("SELECT DISTINCT COUNT(*) AS c FROM Account").expect_err("DISTINCT COUNT(*) must reject");
     assert!(format!("{err}").contains("ambiguous"));
 }
 
@@ -3189,14 +2902,8 @@ fn select_distinct_does_not_change_plain_sum() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT DISTINCT SUM(score) AS s FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("distinct sum");
+    let outcome =
+        execute_sql("SELECT DISTINCT SUM(score) AS s FROM Account", &[], &contract, &[], &mut records).expect("distinct sum");
     assert_eq!(outcome.rows[0].get("s"), Some(&Value::I64(60))); // 10 + 30 + 20
 }
 
@@ -3303,13 +3010,7 @@ fn cast_text_to_integer_succeeds_for_valid_number() {
     // should lower).
     execute_sql(
         "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (?, ?, ?, ?, ?)",
-        &[
-            Value::I64(5),
-            Value::Text("cast@test".into()),
-            Value::Text("42".into()),
-            Value::I64(0),
-            Value::Bool(true),
-        ],
+        &[Value::I64(5), Value::Text("cast@test".into()), Value::Text("42".into()), Value::I64(0), Value::Bool(true)],
         &contract,
         &[],
         &mut records,
@@ -3354,14 +3055,9 @@ fn cast_null_preserves_null() {
     seed(&contract, &mut records);
     exec("UPDATE Account SET tenant = NULL WHERE account_id = 1", &[], &contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT CAST(tenant AS TEXT) AS t FROM Account WHERE account_id = 1",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("CAST null");
+    let outcome =
+        execute_sql("SELECT CAST(tenant AS TEXT) AS t FROM Account WHERE account_id = 1", &[], &contract, &[], &mut records)
+            .expect("CAST null");
     assert_eq!(outcome.rows[0].get("t"), Some(&Value::Null));
 }
 
@@ -3481,14 +3177,8 @@ fn multi_row_insert_rejects_a_repeated_primary_key_without_publishing() {
 fn multi_row_insert_rolls_back_when_a_row_conflicts_with_a_stored_row() {
     let contract = multi_row_contract();
     let mut records = BTreeMap::new();
-    execute_sql(
-        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("seed row");
+    execute_sql("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &[], &mut records)
+        .expect("seed row");
 
     let error = execute_sql(
         "INSERT INTO Account (account_id, email, score) VALUES (2, 'linus@test', 30), (3, 'ada@test', 20)",
@@ -3531,14 +3221,8 @@ fn multi_row_insert_rejects_a_unique_conflict_inside_the_statement() {
 fn on_conflict_do_nothing_skips_a_row_that_collides_on_the_primary_key() {
     let contract = multi_row_contract();
     let mut records = BTreeMap::new();
-    execute_sql(
-        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("seed row");
+    execute_sql("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &[], &mut records)
+        .expect("seed row");
 
     let outcome = execute_sql(
         "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO NOTHING",
@@ -3561,14 +3245,8 @@ fn on_conflict_do_nothing_skips_a_row_that_collides_on_the_primary_key() {
 fn on_conflict_do_nothing_skips_only_the_colliding_rows_of_one_statement() {
     let contract = multi_row_contract();
     let mut records = BTreeMap::new();
-    execute_sql(
-        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("seed row");
+    execute_sql("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &[], &mut records)
+        .expect("seed row");
 
     let outcome = execute_sql(
         "INSERT INTO Account (account_id, email, score) VALUES (2, 'linus@test', 30), (1, 'other@test', 99), (3, 'grace@test', 20) ON CONFLICT (account_id) DO NOTHING",
@@ -3690,14 +3368,8 @@ fn on_conflict_rejects_an_unknown_target_column() {
 fn on_conflict_do_update_replaces_the_conflicting_row() {
     let contract = multi_row_contract();
     let mut records = BTreeMap::new();
-    execute_sql(
-        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("seed row");
+    execute_sql("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &[], &mut records)
+        .expect("seed row");
 
     let outcome = execute_sql(
         "INSERT INTO Account (account_id, email, score) VALUES (1, 'other@test', 99) ON CONFLICT (account_id) DO UPDATE SET score = 42",
@@ -3721,14 +3393,8 @@ fn on_conflict_do_update_replaces_the_conflicting_row() {
 fn on_conflict_do_update_inserts_a_row_that_does_not_conflict() {
     let contract = multi_row_contract();
     let mut records = BTreeMap::new();
-    execute_sql(
-        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("seed row");
+    execute_sql("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10)", &[], &contract, &[], &mut records)
+        .expect("seed row");
 
     let outcome = execute_sql(
         "INSERT INTO Account (account_id, email, score) VALUES (2, 'linus@test', 30) ON CONFLICT (account_id) DO UPDATE SET score = 42",
@@ -4137,10 +3803,8 @@ fn insert_returning_rejects_an_unknown_column_inside_an_expression() {
 
 #[test]
 fn insert_returning_rejects_an_aggregate_function() {
-    let error = prepare_sql(
-        "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) RETURNING COUNT(*)",
-    )
-    .expect_err("aggregates have no per-row meaning in RETURNING");
+    let error = prepare_sql("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@test', 10) RETURNING COUNT(*)")
+        .expect_err("aggregates have no per-row meaning in RETURNING");
     assert!(format!("{error}").contains("aggregate"), "unexpected error: {error}");
 }
 
@@ -4193,10 +3857,9 @@ fn column(rows: &[BTreeMap<String, Value>], name: &str) -> Vec<Value> {
 
 #[test]
 fn insert_select_lowers_into_a_write_op_carrying_its_read_pipeline() {
-    let stmt = prepare_sql(
-        "INSERT INTO Target (target_id, email, score) SELECT source_id, email, score FROM Source WHERE score > 10",
-    )
-    .expect("prepare");
+    let stmt =
+        prepare_sql("INSERT INTO Target (target_id, email, score) SELECT source_id, email, score FROM Source WHERE score > 10")
+            .expect("prepare");
     assert_eq!(stmt.query_kind, QueryKind::Write);
     assert!(stmt.ops.is_empty(), "a write statement carries no top-level read pipeline");
     assert_eq!(stmt.read_set, vec!["Source".to_owned()]);
@@ -4206,10 +3869,7 @@ fn insert_select_lowers_into_a_write_op_carrying_its_read_pipeline() {
         [WriteOp::InsertFromQuery { table, columns, source, outputs, .. }] => {
             assert_eq!(table, "Target");
             assert_eq!(columns, &vec!["target_id".to_owned(), "email".to_owned(), "score".to_owned()]);
-            assert_eq!(
-                outputs.as_deref(),
-                Some(&["source_id".to_owned(), "email".to_owned(), "score".to_owned()][..])
-            );
+            assert_eq!(outputs.as_deref(), Some(&["source_id".to_owned(), "email".to_owned(), "score".to_owned()][..]));
             assert!(matches!(source.last(), Some(QueryOp::Collect)), "source must end in Collect");
         }
         other => panic!("unexpected write ops {other:?}"),
@@ -4259,9 +3919,8 @@ fn insert_select_projects_constant_columns_into_the_target() {
     .expect("constant select");
     assert_eq!(inserted.affected, 1);
 
-    let rows = execute_sql("SELECT target_id, email, score FROM Target", &[], &contract, &[], &mut records)
-        .expect("read back")
-        .rows;
+    let rows =
+        execute_sql("SELECT target_id, email, score FROM Target", &[], &contract, &[], &mut records).expect("read back").rows;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("target_id"), Some(&Value::I64(900)));
     assert_eq!(rows[0].get("email"), Some(&Value::Text("copy@test".into())));
@@ -4286,9 +3945,8 @@ fn insert_select_star_uses_the_catalog_column_order() {
         execute_sql("INSERT INTO Mirror SELECT * FROM Target", &[], &contract, &[], &mut records).expect("insert select star");
     assert_eq!(inserted.affected, 1);
 
-    let rows = execute_sql("SELECT mirror_id, email, score FROM Mirror", &[], &contract, &[], &mut records)
-        .expect("read back")
-        .rows;
+    let rows =
+        execute_sql("SELECT mirror_id, email, score FROM Mirror", &[], &contract, &[], &mut records).expect("read back").rows;
     assert_eq!(rows[0].get("mirror_id"), Some(&Value::I64(2)));
     assert_eq!(rows[0].get("email"), Some(&Value::Text("linus@test".into())));
     assert_eq!(rows[0].get("score"), Some(&Value::I64(30)));
@@ -4400,18 +4058,9 @@ fn insert_select_rejects_sources_the_read_pipeline_cannot_shape() {
     seed_sources(&contract, &mut records);
 
     let cases = [
-        (
-            "INSERT INTO Target (target_id, email, score) SELECT COUNT(*) AS n, 'x@test', 0 FROM Source",
-            "aggregate functions",
-        ),
-        (
-            "INSERT INTO Target (target_id, email, score) SELECT score, email, source_id FROM Source GROUP BY score",
-            "GROUP BY",
-        ),
-        (
-            "INSERT INTO Target (target_id, email, score) SELECT source_id, email, email FROM Source",
-            "appears more than once",
-        ),
+        ("INSERT INTO Target (target_id, email, score) SELECT COUNT(*) AS n, 'x@test', 0 FROM Source", "aggregate functions"),
+        ("INSERT INTO Target (target_id, email, score) SELECT score, email, source_id FROM Source GROUP BY score", "GROUP BY"),
+        ("INSERT INTO Target (target_id, email, score) SELECT source_id, email, email FROM Source", "appears more than once"),
     ];
 
     for (sql, needle) in cases {
@@ -4529,10 +4178,7 @@ fn derived_table_scans_its_sub_pipeline_and_exposes_the_alias() {
     .expect("derived table select")
     .rows;
     assert_eq!(column(&rows, "id"), vec![Value::I64(2), Value::I64(3)]);
-    assert_eq!(
-        column(&rows, "mail"),
-        vec![Value::Text("linus@example.test".into()), Value::Text("grace@example.test".into())]
-    );
+    assert_eq!(column(&rows, "mail"), vec![Value::Text("linus@example.test".into()), Value::Text("grace@example.test".into())]);
 }
 
 #[test]
@@ -4767,10 +4413,7 @@ fn cte_joins_like_a_table_and_a_later_cte_reads_an_earlier_one() {
     .expect("CTE left join")
     .rows;
     assert_eq!(column(&rows, "id"), vec![Value::I64(1), Value::I64(2), Value::I64(3)]);
-    assert_eq!(
-        column(&rows, "project"),
-        vec![Value::Text("p2".into()), Value::Text("p3".into()), Value::Null]
-    );
+    assert_eq!(column(&rows, "project"), vec![Value::Text("p2".into()), Value::Text("p3".into()), Value::Null]);
 
     // `scored` reads `base`: a CTE sees the names written before it.
     let rows = execute_sql(
@@ -4793,10 +4436,9 @@ fn ctes_reject_duplicate_names_forward_references_and_column_renaming() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let duplicate = prepare_sql(
-        "WITH x AS (SELECT account_id FROM Account), x AS (SELECT account_id FROM Account) SELECT * FROM x",
-    )
-    .expect_err("a name may be defined once per scope");
+    let duplicate =
+        prepare_sql("WITH x AS (SELECT account_id FROM Account), x AS (SELECT account_id FROM Account) SELECT * FROM x")
+            .expect_err("a name may be defined once per scope");
     assert!(format!("{duplicate}").contains("more than once"), "unexpected error: {duplicate}");
 
     let renamed = prepare_sql("WITH x(account_id) AS (SELECT account_id FROM Account) SELECT * FROM x")
@@ -4822,8 +4464,8 @@ fn ctes_reject_duplicate_names_forward_references_and_column_renaming() {
 
 #[test]
 fn set_operation_lowers_into_one_merging_op() {
-    let stmt =
-        prepare_sql("SELECT account_id FROM Account UNION SELECT score FROM Account ORDER BY account_id LIMIT 2").expect("prepare");
+    let stmt = prepare_sql("SELECT account_id FROM Account UNION SELECT score FROM Account ORDER BY account_id LIMIT 2")
+        .expect("prepare");
     assert!(matches!(stmt.ops.first(), Some(QueryOp::SetOperation { kind: SetOpKind::Union, .. })));
     // SetOperation -> Sort -> Take -> Collect
     assert_eq!(stmt.ops.len(), 4);
@@ -5033,14 +4675,9 @@ fn set_operations_reject_mismatched_columns() {
     let message = format!("{count}");
     assert!(message.contains("same number of columns"), "unexpected error: {message}");
 
-    let types = execute_sql(
-        "SELECT account_id FROM Account UNION ALL SELECT tenant FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect_err("operands produce different column types");
+    let types =
+        execute_sql("SELECT account_id FROM Account UNION ALL SELECT tenant FROM Account", &[], &contract, &[], &mut records)
+            .expect_err("operands produce different column types");
     let message = format!("{types}");
     assert!(message.contains("mixes `integer` and `text`"), "unexpected error: {message}");
 

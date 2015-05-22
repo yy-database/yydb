@@ -23,11 +23,7 @@ fn exec(sql: &str, contract: &ResolvedContract, records: &mut BTreeMap<String, V
 }
 
 /// Run one query and return its rows.
-fn rows(
-    sql: &str,
-    contract: &ResolvedContract,
-    records: &mut BTreeMap<String, Vec<u8>>,
-) -> Vec<BTreeMap<String, Value>> {
+fn rows(sql: &str, contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>) -> Vec<BTreeMap<String, Value>> {
     execute_sql(sql, &[], contract, &[], records).expect("window query executes").rows
 }
 
@@ -118,8 +114,7 @@ fn window_cumulative_sum_stops_at_the_peer_group() {
     );
 
     // A tie group is read as one frame end, so both `east` 20 rows see 10+20+20.
-    let expected =
-        [(1_i64, 10_i64, 1_i64), (2, 50, 3), (3, 50, 3), (4, 5, 1), (5, 20, 2)];
+    let expected = [(1_i64, 10_i64, 1_i64), (2, 50, 3), (3, 50, 3), (4, 5, 1), (5, 20, 2)];
     for (row, (id, running, seen)) in rows.iter().zip(expected) {
         assert_eq!(cell(row, "sale_id"), Value::I64(id));
         assert_eq!(cell(row, "running"), Value::I64(running));
@@ -428,7 +423,6 @@ fn window_ranking_arity_is_checked() {
         .expect_err("ROW_NUMBER takes no argument");
     assert!(format!("{error}").contains("takes no arguments"), "unexpected arity error: {error}");
 
-    let error =
-        prepare_sql("SELECT SUM() OVER (PARTITION BY region) AS s FROM Sale").expect_err("SUM requires one argument");
+    let error = prepare_sql("SELECT SUM() OVER (PARTITION BY region) AS s FROM Sale").expect_err("SUM requires one argument");
     assert!(format!("{error}").contains("requires exactly one argument"), "unexpected arity error: {error}");
 }

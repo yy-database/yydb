@@ -186,9 +186,9 @@ fn sql_insert_select_copies_rows_through_the_connection() {
 
     // A source whose column count does not match the target list is rejected
     // before anything is published.
-    let mismatch =
-        conn.execute_sql_write("INSERT INTO Archive (archive_id, email) SELECT account_id, email, score FROM Account", &[])
-            .expect_err("two target columns for three source columns");
+    let mismatch = conn
+        .execute_sql_write("INSERT INTO Archive (archive_id, email) SELECT account_id, email, score FROM Account", &[])
+        .expect_err("two target columns for three source columns");
     assert_eq!(mismatch.code(), "yydb.schema.invalid");
     assert_eq!(conn.query_sql("SELECT archive_id FROM Archive").expect("read archive").len(), 1);
 }

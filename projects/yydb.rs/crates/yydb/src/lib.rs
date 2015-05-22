@@ -105,10 +105,10 @@ pub mod objects {
 /// Query planning and DML operations (VOS frontend only on the public surface).
 pub mod query {
     pub use yydb_query::{
-        BoundStatement, BoundValue, CmpOp, ParameterDescriptor, Pred, PreparedStatement, ProjectExpr, ProjectField,
-        QueryKind, QueryOp, QueryRow, SlotTy, SortKey, WriteAssignment, WriteField, WriteOp, WriteOutcome, bind_named,
-        bind_ordered, execute, execute_prepared, execute_write, execute_write_prepared, execute_write_with_constraints,
-        fingerprint, prepare, resolved_contract_from_document, try_insert_returning, upsert_row,
+        BoundStatement, BoundValue, CmpOp, ParameterDescriptor, Pred, PreparedStatement, ProjectExpr, ProjectField, QueryKind,
+        QueryOp, QueryRow, SlotTy, SortKey, WriteAssignment, WriteField, WriteOp, WriteOutcome, bind_named, bind_ordered,
+        execute, execute_prepared, execute_write, execute_write_prepared, execute_write_with_constraints, fingerprint, prepare,
+        resolved_contract_from_document, try_insert_returning, upsert_row,
     };
 }
 

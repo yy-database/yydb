@@ -8,10 +8,10 @@ use std::{cell::Cell, collections::BTreeMap, rc::Rc};
 
 use oak_sql::ast::{
     Assignment, BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource,
-    InsertStatement, JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem,
-    SelectStatement, SetOperationStatement, SetOperator, SqlRoot, SqlStatement, TableName, TableSource, UnaryOperator,
-    UpdateStatement, WindowFrame as AstWindowFrame, WindowFrameBound as AstWindowFrameBound,
-    WindowFrameUnit as AstWindowFrameUnit, WindowOrderItem, WithClause, WindowSpec as AstWindowSpec,
+    InsertStatement, JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem, SelectStatement,
+    SetOperationStatement, SetOperator, SqlRoot, SqlStatement, TableName, TableSource, UnaryOperator, UpdateStatement,
+    WindowFrame as AstWindowFrame, WindowFrameBound as AstWindowFrameBound, WindowFrameUnit as AstWindowFrameUnit,
+    WindowOrderItem, WindowSpec as AstWindowSpec, WithClause,
 };
 use yydb_types::{Error, Result, Value};
 
@@ -22,7 +22,7 @@ use super::{
         WindowFrameBound, WindowFunction, WindowOrderKey, WindowSpec, WriteAssignment, WriteBinOp, WriteExpr, WriteField,
         WriteOp,
     },
-    params::{ParameterDescriptor, PARAM_PREFIX, name_to_slot},
+    params::{PARAM_PREFIX, ParameterDescriptor, name_to_slot},
 };
 
 fn sql_error(message: impl Into<String>) -> Error {
@@ -325,11 +325,7 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
 ///
 /// The definitions are lowered in written order, so each one may reference the
 /// CTEs above it. Renaming a CTE's output columns is not modelled yet.
-fn extend_cte_scope(
-    scope: &mut CteScope,
-    with_clause: Option<&WithClause>,
-    parameters: &[ParameterDescriptor],
-) -> Result<()> {
+fn extend_cte_scope(scope: &mut CteScope, with_clause: Option<&WithClause>, parameters: &[ParameterDescriptor]) -> Result<()> {
     let Some(with_clause) = with_clause
     else {
         return Ok(());
@@ -455,11 +451,9 @@ fn pipeline_output_columns(ops: &[QueryOp]) -> Option<Vec<String>> {
                 names.extend(aggregates.iter().map(|agg| agg.name().to_string()));
                 return Some(names);
             }
-            QueryOp::Filter { .. }
-            | QueryOp::Sort { .. }
-            | QueryOp::Skip { .. }
-            | QueryOp::Take { .. }
-            | QueryOp::Collect => continue,
+            QueryOp::Filter { .. } | QueryOp::Sort { .. } | QueryOp::Skip { .. } | QueryOp::Take { .. } | QueryOp::Collect => {
+                continue;
+            }
             _ => return None,
         }
     }
@@ -480,12 +474,7 @@ fn lower_join_clause(
         JoinType::Right => JoinKind::Right,
         JoinType::Full => JoinKind::Full,
     };
-    let on = join
-        .on
-        .as_ref()
-        .map(|expr| lower_predicate(expr, parameters, ctes))
-        .transpose()?
-        .unwrap_or(Pred::True);
+    let on = join.on.as_ref().map(|expr| lower_predicate(expr, parameters, ctes)).transpose()?.unwrap_or(Pred::True);
     Ok(match right {
         RowSource::Table { table, alias } => QueryOp::Join { kind, right: table, right_alias: alias, on },
         RowSource::Derived { alias, ops } => QueryOp::JoinSubquery { kind, right: ops, right_alias: alias, on },
@@ -549,7 +538,9 @@ fn lower_group_key(item: &GroupByItem) -> Result<ProjectField> {
             // Recurse into a plain identifier expression only.
             let Expression::Identifier(identifier) = expr
             else {
-                return Err(sql_error("GROUP BY supports plain column references only (complex expressions not yet supported)"));
+                return Err(sql_error(
+                    "GROUP BY supports plain column references only (complex expressions not yet supported)",
+                ));
             };
             let name = identifier.name.to_string();
             let path = vec![name.clone()];
@@ -640,11 +631,7 @@ fn lower_aggregate_function(
 /// Only a top-level SELECT item may carry a window specification: the frame is
 /// evaluated over the whole partitioned row set, which no scalar expression,
 /// predicate or aggregate argument can reach.
-fn lower_windows(
-    select: &SelectStatement,
-    parameters: &[ParameterDescriptor],
-    ctes: &CteScope,
-) -> Result<Vec<WindowField>> {
+fn lower_windows(select: &SelectStatement, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<Vec<WindowField>> {
     let mut fields = Vec::new();
     for item in &select.items {
         let SelectItem::Expression { expr, alias, .. } = item
@@ -796,9 +783,9 @@ fn first_window_function(expr: &Expression) -> Option<String> {
         Expression::InList { expr, list, .. } => {
             first_window_function(expr).or_else(|| list.iter().find_map(first_window_function))
         }
-        Expression::Between { expr, low, high, .. } => first_window_function(expr)
-            .or_else(|| first_window_function(low))
-            .or_else(|| first_window_function(high)),
+        Expression::Between { expr, low, high, .. } => {
+            first_window_function(expr).or_else(|| first_window_function(low)).or_else(|| first_window_function(high))
+        }
         Expression::Case { branches, else_branch, .. } => {
             for (when, then) in branches {
                 if let Some(name) = first_window_function(when).or_else(|| first_window_function(then)) {
@@ -823,11 +810,7 @@ fn first_window_function(expr: &Expression) -> Option<String> {
 /// read it straight from the row. Anything else goes through [`lower_expr`], so
 /// `SUM(score + 1)` is computed per row instead of being rejected or
 /// approximated.
-fn lower_project_expr(
-    expr: &Expression,
-    parameters: &[ParameterDescriptor],
-    ctes: &CteScope,
-) -> Result<ProjectExpr> {
+fn lower_project_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<ProjectExpr> {
     match expr {
         Expression::Identifier(identifier) => {
             // Split qualified names (`table.col`) into path components so the
@@ -968,6 +951,20 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
                 let (ops, correlated) = lower_scalar_subquery(query, parameters, ctes)?;
                 return Ok(Pred::FieldCmpSubquery { path: column_path(right, ctes)?, op: flip_cmp(cmp), ops, correlated });
             }
+            // A non-identifier left-hand side (function call, arithmetic, CASE,
+            // CAST, parameter, …) lowers to `ExprCmp` so the executor evaluates
+            // the expression per row and compares the result with SQL three-valued
+            // NULL semantics. Subquery on the right still mirrors onto
+            // `FieldCmpSubquery` with a path on the left — but `ExprCmp` cannot
+            // carry a subquery on the right, so reject that shape explicitly.
+            if !matches!(left.as_ref(), Expression::Identifier(_)) {
+                if let Expression::Subquery { .. } = right.as_ref() {
+                    return Err(sql_error("comparing a scalar expression with a subquery on the right is not supported"));
+                }
+                let expr = lower_expr(left, parameters, ctes)?;
+                let value = lower_bound_value(right, parameters)?;
+                return Ok(Pred::ExprCmp { expr: Box::new(expr), op: cmp, value });
+            }
             let left_path = column_path(left, ctes)?;
             if let Expression::Subquery { query, .. } = right.as_ref() {
                 let (ops, correlated) = lower_scalar_subquery(query, parameters, ctes)?;
@@ -1003,7 +1000,11 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
             let path = column_path(expr, ctes)?;
             let mut branches = Vec::with_capacity(list.len());
             for item in list {
-                branches.push(Pred::FieldCmp { path: path.clone(), op: CmpOp::Eq, value: lower_bound_value(item, parameters)? });
+                branches.push(Pred::FieldCmp {
+                    path: path.clone(),
+                    op: CmpOp::Eq,
+                    value: lower_bound_value(item, parameters)?,
+                });
             }
             let mut predicate = branches
                 .into_iter()
@@ -1121,17 +1122,15 @@ fn lower_bound_value(expr: &Expression, parameters: &[ParameterDescriptor]) -> R
 /// REAL literal is rejected by the catalog-directed coercion.
 fn numeric_literal(text: &str) -> Result<Value> {
     if text.contains('.') || text.contains('e') || text.contains('E') {
-        let value: f64 =
-            text.parse().map_err(|_| sql_error(format!("`{text}` is not a valid REAL literal")))?;
+        let value: f64 = text.parse().map_err(|_| sql_error(format!("`{text}` is not a valid REAL literal")))?;
         if !value.is_finite() {
             return Err(sql_error(format!("REAL literal `{text}` is outside the finite `f64` range")));
         }
         Ok(Value::F64(value))
     }
     else {
-        let value: i64 = text
-            .parse()
-            .map_err(|_| sql_error(format!("integer literal `{text}` is outside the signed 64-bit range")))?;
+        let value: i64 =
+            text.parse().map_err(|_| sql_error(format!("integer literal `{text}` is outside the signed 64-bit range")))?;
         Ok(Value::I64(value))
     }
 }
@@ -1164,20 +1163,14 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
         Expression::Case { branches, else_branch, .. } => {
             let mut lowered_branches = Vec::with_capacity(branches.len());
             for (when, then) in branches {
-                lowered_branches.push((
-                    Box::new(lower_expr(when, parameters, ctes)?),
-                    Box::new(lower_expr(then, parameters, ctes)?),
-                ));
+                lowered_branches
+                    .push((Box::new(lower_expr(when, parameters, ctes)?), Box::new(lower_expr(then, parameters, ctes)?)));
             }
-            let lowered_else =
-                else_branch.as_ref().map(|els| lower_expr(els, parameters, ctes)).transpose()?.map(Box::new);
+            let lowered_else = else_branch.as_ref().map(|els| lower_expr(els, parameters, ctes)).transpose()?.map(Box::new);
             Ok(Expr::Case { branches: lowered_branches, else_branch: lowered_else })
         }
         Expression::Cast { expr: inner, target, .. } => {
-            Ok(Expr::Cast {
-                expr: Box::new(lower_expr(inner, parameters, ctes)?),
-                target: target.to_ascii_uppercase(),
-            })
+            Ok(Expr::Cast { expr: Box::new(lower_expr(inner, parameters, ctes)?), target: target.to_ascii_uppercase() })
         }
         Expression::Binary { left, op, right, .. } => {
             let bin_op = match op {
@@ -1194,7 +1187,9 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
                 BinaryOperator::GreaterEqual => BinaryOp::Ge,
                 BinaryOperator::And => BinaryOp::And,
                 BinaryOperator::Or => BinaryOp::Or,
-                other => return Err(sql_error(format!("binary operator `{other:?}` is not supported in projection expressions"))),
+                other => {
+                    return Err(sql_error(format!("binary operator `{other:?}` is not supported in projection expressions")));
+                }
             };
             Ok(Expr::Binary {
                 op: bin_op,
@@ -1202,9 +1197,7 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
                 right: Box::new(lower_expr(right, parameters, ctes)?),
             })
         }
-        Expression::Unary { op: UnaryOperator::Not, expr, .. } => {
-            Ok(Expr::Not(Box::new(lower_expr(expr, parameters, ctes)?)))
-        }
+        Expression::Unary { op: UnaryOperator::Not, expr, .. } => Ok(Expr::Not(Box::new(lower_expr(expr, parameters, ctes)?))),
         Expression::Subquery { query, .. } => {
             let (ops, correlated) = lower_scalar_subquery(query, parameters, ctes)?;
             Ok(Expr::Subquery { ops, correlated })
@@ -1213,10 +1206,7 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
             // A window value is not a scalar: it depends on the whole partitioned
             // row set, so it may only appear as its own SELECT item.
             if window.is_some() {
-                return Err(sql_error(format!(
-                    "window function `{}` is only supported as a top-level SELECT item",
-                    name.name
-                )));
+                return Err(sql_error(format!("window function `{}` is only supported as a top-level SELECT item", name.name)));
             }
             lower_scalar_function(name, args, parameters, ctes)
         }
@@ -1403,10 +1393,7 @@ fn lower_insert(insert: &InsertStatement, parameters: &[ParameterDescriptor]) ->
 /// scalar expression shapes it accepts stay identical for reads and writes.
 /// Aggregate functions are rejected instead of being skipped, because a
 /// `RETURNING COUNT(*)` would otherwise hand back an empty row.
-fn lower_returning(
-    insert: &InsertStatement,
-    parameters: &[ParameterDescriptor],
-) -> Result<Option<ReturningProjection>> {
+fn lower_returning(insert: &InsertStatement, parameters: &[ParameterDescriptor]) -> Result<Option<ReturningProjection>> {
     let Some(clause) = &insert.returning
     else {
         return Ok(None);
@@ -1414,9 +1401,11 @@ fn lower_returning(
     if clause.items.is_empty() {
         return Err(sql_error("RETURNING requires at least one item"));
     }
-    if clause.items.iter().any(|item| {
-        matches!(item, SelectItem::Expression { expr, .. } if first_window_function(expr).is_some())
-    }) {
+    if clause
+        .items
+        .iter()
+        .any(|item| matches!(item, SelectItem::Expression { expr, .. } if first_window_function(expr).is_some()))
+    {
         return Err(sql_error("RETURNING does not support window functions"));
     }
     if clause.items.iter().any(|item| {
@@ -1453,10 +1442,7 @@ fn lower_conflict(insert: &InsertStatement, parameters: &[ParameterDescriptor]) 
         OnConflictAction::DoNothing => ConflictAction::DoNothing,
         OnConflictAction::DoUpdate { assignments, selection } => ConflictAction::DoUpdate {
             assignments: lower_conflict_assignments(assignments, parameters)?,
-            predicate: selection
-                .as_ref()
-                .map(|expr| lower_conflict_predicate(expr, parameters))
-                .transpose()?,
+            predicate: selection.as_ref().map(|expr| lower_conflict_predicate(expr, parameters)).transpose()?,
         },
     };
     Ok(Some(ConflictClause { columns, action }))
@@ -1466,10 +1452,7 @@ fn lower_conflict(insert: &InsertStatement, parameters: &[ParameterDescriptor]) 
 ///
 /// The assignments reuse the update write-expression surface, so an expression
 /// the executor cannot evaluate is rejected instead of being approximated.
-fn lower_conflict_assignments(
-    assignments: &[Assignment],
-    parameters: &[ParameterDescriptor],
-) -> Result<Vec<WriteAssignment>> {
+fn lower_conflict_assignments(assignments: &[Assignment], parameters: &[ParameterDescriptor]) -> Result<Vec<WriteAssignment>> {
     if assignments.is_empty() {
         return Err(sql_error("ON CONFLICT DO UPDATE requires at least one assignment"));
     }
@@ -1524,6 +1507,10 @@ fn reject_excluded_paths(predicate: &Pred) -> Result<()> {
         // The subquery has its own scope, checked when it is lowered. The
         // compared field still belongs to this statement.
         Pred::FieldCmpSubquery { path, .. } | Pred::FieldCmpScalar { path, .. } => check(path),
+        // `ExprCmp` may carry `Expr::Column { path, .. }` internally but the
+        // lowering already validates every path it contains, so nothing extra
+        // is needed here.
+        Pred::ExprCmp { .. } => Ok(()),
     }
 }
 
@@ -1534,9 +1521,7 @@ fn conflict_target_column(written: &str, table: &str) -> Result<String> {
     match parts.as_slice() {
         [column] => Ok((*column).to_string()),
         [prefix, column] if *prefix == table => Ok((*column).to_string()),
-        _ => Err(sql_error(format!(
-            "ON CONFLICT target `{written}` must be a column of the insert target `{table}`"
-        ))),
+        _ => Err(sql_error(format!("ON CONFLICT target `{written}` must be a column of the insert target `{table}`"))),
     }
 }
 
@@ -1640,9 +1625,7 @@ fn is_aggregate_function(name: &Identifier) -> bool {
 /// Returns `None` for `SELECT *`, whose columns are only known once the scanned
 /// table is resolved against the catalog.
 fn select_output_names(items: &[SelectItem]) -> Result<Option<Vec<String>>> {
-    if items.len() == 1
-        && matches!(items[0], SelectItem::Star { .. })
-    {
+    if items.len() == 1 && matches!(items[0], SelectItem::Star { .. }) {
         return Ok(None);
     }
     let mut names = Vec::with_capacity(items.len());
@@ -1697,14 +1680,12 @@ fn lower_update(update: &UpdateStatement, parameters: &[ParameterDescriptor]) ->
             value: lower_write_expr(&assignment.value, parameters)?,
         });
     }
-    let predicate =
-        update.selection.as_ref().map(|expr| lower_predicate(expr, parameters, &CteScope::new())).transpose()?;
+    let predicate = update.selection.as_ref().map(|expr| lower_predicate(expr, parameters, &CteScope::new())).transpose()?;
     Ok(WriteOp::Update { table: table_name(&update.table_name), assignments, predicate })
 }
 
 fn lower_delete(delete: &DeleteStatement, parameters: &[ParameterDescriptor]) -> Result<WriteOp> {
-    let predicate =
-        delete.selection.as_ref().map(|expr| lower_predicate(expr, parameters, &CteScope::new())).transpose()?;
+    let predicate = delete.selection.as_ref().map(|expr| lower_predicate(expr, parameters, &CteScope::new())).transpose()?;
     Ok(WriteOp::Delete { table: table_name(&delete.table_name), predicate })
 }
 

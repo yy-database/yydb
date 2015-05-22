@@ -201,6 +201,20 @@ pub enum Pred {
         /// Value the subquery produced.
         value: Value,
     },
+    /// Arbitrary scalar expression compared against a bound value.
+    ///
+    /// Used by `WHERE LOWER(email) = 'a'` or `WHERE score + 1 >= 10`. Like
+    /// [`Pred::FieldCmpScalar`] this follows SQL three-valued logic: a `NULL`
+    /// on either side makes the comparison unknown, so a `WHERE` clause drops
+    /// the row.
+    ExprCmp {
+        /// Expression evaluated row by row.
+        expr: Box<Expr>,
+        /// Comparison operator.
+        op: CmpOp,
+        /// Right-hand side value (literal or bind-time parameter slot).
+        value: BoundValue,
+    },
 }
 
 /// One projected value expression.

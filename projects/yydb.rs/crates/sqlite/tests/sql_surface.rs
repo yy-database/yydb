@@ -214,17 +214,11 @@ fn mixed_sql_dml_within_single_transaction() {
     // All changes visible within txn
     let snapshot = ids(&conn.query("SELECT account_id FROM Account ORDER BY account_id").unwrap());
     assert_eq!(snapshot, vec![1, 3]);
-    assert_eq!(
-        conn.query("SELECT score FROM Account WHERE account_id = 1").unwrap()[0].get("score"),
-        Some(&Value::I64(500))
-    );
+    assert_eq!(conn.query("SELECT score FROM Account WHERE account_id = 1").unwrap()[0].get("score"), Some(&Value::I64(500)));
 
     conn.rollback().expect("rollback");
 
     // Back to original state
     assert_eq!(ids(&conn.query("SELECT account_id FROM Account ORDER BY account_id").unwrap()), vec![1, 2]);
-    assert_eq!(
-        conn.query("SELECT score FROM Account WHERE account_id = 1").unwrap()[0].get("score"),
-        Some(&Value::I64(10))
-    );
+    assert_eq!(conn.query("SELECT score FROM Account WHERE account_id = 1").unwrap()[0].get("score"), Some(&Value::I64(10)));
 }
