@@ -615,6 +615,20 @@ fn lower_aggregate_function(
             let expr = lower_project_expr(&args[0], parameters, ctes)?;
             Ok(AggregateField::Avg { name: output_name, expr })
         }
+        "MIN" => {
+            if args.len() != 1 {
+                return Err(sql_error("MIN() requires exactly one argument"));
+            }
+            let expr = lower_project_expr(&args[0], parameters, ctes)?;
+            Ok(AggregateField::Min { name: output_name, expr })
+        }
+        "MAX" => {
+            if args.len() != 1 {
+                return Err(sql_error("MAX() requires exactly one argument"));
+            }
+            let expr = lower_project_expr(&args[0], parameters, ctes)?;
+            Ok(AggregateField::Max { name: output_name, expr })
+        }
         other => Err(sql_error(format!("aggregate function `{other}` is not supported by YYDB MVP"))),
     }
 }
@@ -1618,7 +1632,7 @@ fn output_name(expr: &Expression, alias: &Option<Identifier>) -> String {
 /// Every other call is a scalar function, which flows through [`lower_expr`]
 /// into the projection or aggregate argument instead.
 fn is_aggregate_function(name: &Identifier) -> bool {
-    matches!(name.name.to_ascii_uppercase().as_str(), "COUNT" | "SUM" | "AVG")
+    matches!(name.name.to_ascii_uppercase().as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX")
 }
 
 /// Output column names of a SELECT list, in projection order.

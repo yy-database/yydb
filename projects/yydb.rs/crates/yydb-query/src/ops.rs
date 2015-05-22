@@ -462,6 +462,22 @@ pub enum AggregateField {
         /// Expression to aggregate.
         expr: ProjectExpr,
     },
+    /// `MIN(expr)` — smallest non-null value. Keeps the picked value's type and
+    /// returns `NULL` when the group holds no value.
+    Min {
+        /// Output column name (from SELECT alias, or `min` if none).
+        name: String,
+        /// Expression to aggregate.
+        expr: ProjectExpr,
+    },
+    /// `MAX(expr)` — largest non-null value. Keeps the picked value's type and
+    /// returns `NULL` when the group holds no value.
+    Max {
+        /// Output column name (from SELECT alias, or `max` if none).
+        name: String,
+        /// Expression to aggregate.
+        expr: ProjectExpr,
+    },
 }
 
 impl AggregateField {
@@ -471,7 +487,9 @@ impl AggregateField {
             Self::Count { name, .. }
             | Self::CountDistinct { name, .. }
             | Self::Sum { name, .. }
-            | Self::Avg { name, .. } => name,
+            | Self::Avg { name, .. }
+            | Self::Min { name, .. }
+            | Self::Max { name, .. } => name,
         }
     }
 }

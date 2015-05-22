@@ -1763,7 +1763,50 @@ fn eval_aggregate(
             let result = if count > 0 { finite_real(sum / count as f64, "AVG()")? } else { Value::Null };
             Ok((name.clone(), result))
         }
+        AggregateField::Min { name, expr } => {
+            let value = extreme_value(expr, group_rows, false, contract, records, bound_values, outer)?;
+            Ok((name.clone(), value))
+        }
+        AggregateField::Max { name, expr } => {
+            let value = extreme_value(expr, group_rows, true, contract, records, bound_values, outer)?;
+            Ok((name.clone(), value))
+        }
     }
+}
+
+/// `MIN(expr)` / `MAX(expr)` over a set of rows, keeping the picked value's type.
+///
+/// This is the one comparison kernel behind both the projection aggregates and
+/// the window aggregates: the order comes from [`compare_values`], the rule
+/// `ORDER BY` and window ordering already share, so no second comparison is
+/// written for the extreme values. `NULL` values are skipped, so a set of only
+/// `NULL`s (or no rows at all) is `NULL`. A tie keeps the first value it saw,
+/// which preserves that value's exact numeric kind.
+fn extreme_value(
+    expr: &ProjectExpr,
+    rows: &[QueryRow],
+    want_max: bool,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+    outer: Option<&OuterRow<'_>>,
+) -> Result<Value> {
+    let mut best: Option<Value> = None;
+    for row in rows {
+        let value = eval_project_expr(expr, row, contract, records, bound_values, outer)?;
+        if matches!(value, Value::Null) {
+            continue;
+        }
+        best = Some(match best {
+            None => value,
+            Some(current) => {
+                let ord = compare_values(&value, &current);
+                let wanted = if want_max { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Less };
+                if ord == wanted { value } else { current }
+            }
+        });
+    }
+    Ok(best.unwrap_or(Value::Null))
 }
 
 /// Reject a non-finite REAL aggregate such as an overflowing `SUM`.
@@ -2018,10 +2061,10 @@ fn eval_window_aggregate(
     Ok(value)
 }
 
-/// `MIN(expr)` / `MAX(expr)` over one frame, keeping the picked value's type.
+/// `MIN(expr)` / `MAX(expr)` over one frame.
 ///
-/// `NULL` values are skipped, so a frame of only `NULL`s is `NULL`. A tie keeps
-/// the first value it saw, which preserves that value's exact numeric kind.
+/// The frame is just a set of rows, so the pick is the shared [`extreme_value`]
+/// kernel the projection aggregates use.
 fn window_extreme(
     field: &WindowField,
     expr: ProjectExpr,
@@ -2031,25 +2074,7 @@ fn window_extreme(
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
-    let mut best: Option<Value> = None;
-    for row in frame_rows {
-        let value = eval_project_expr(&expr, row, contract, records, bound_values, outer)?;
-        if matches!(value, Value::Null) {
-            continue;
-        }
-        best = Some(match best {
-            None => value,
-            Some(current) => {
-                let ord = compare_values(&value, &current);
-                let replace = match field.function {
-                    WindowFunction::Min => ord == std::cmp::Ordering::Less,
-                    _ => ord == std::cmp::Ordering::Greater,
-                };
-                if replace { value } else { current }
-            }
-        });
-    }
-    Ok(best.unwrap_or(Value::Null))
+    extreme_value(&expr, frame_rows, field.function == WindowFunction::Max, contract, records, bound_values, outer)
 }
 
 /// Build a canonical string key for a GROUP BY value vector.
