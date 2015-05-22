@@ -2955,6 +2955,149 @@ fn aggregate_count_is_zero_and_sum_is_null_for_an_all_null_column() {
     assert_eq!(outcome.rows[0].get("a"), Some(&Value::Null));
 }
 
+// ─── `MIN` / `MAX` in the projection aggregate form ────────────────────
+//
+// `MIN` / `MAX` used to exist only as window functions. As projection
+// aggregates they follow `SUM` / `AVG`: `NULL` inputs are skipped, an empty or
+// all-`NULL` group is `NULL`, and the picked value keeps the kind it came with.
+
+#[test]
+fn aggregate_min_and_max_over_an_integer_column() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // scores = 10, 30, 20
+    let outcome =
+        execute_sql("SELECT MIN(score) AS lo, MAX(score) AS hi FROM Account", &[], &contract, &[], &mut records)
+            .expect("min and max over integers");
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("lo"), Some(&Value::I64(10)));
+    assert_eq!(outcome.rows[0].get("hi"), Some(&Value::I64(30)));
+
+    // Without an alias the output column is the lower-case function name.
+    let unaliased = execute_sql("SELECT MIN(score), MAX(score) FROM Account", &[], &contract, &[], &mut records)
+        .expect("min and max keep their default names");
+    assert_eq!(unaliased.rows[0].get("min"), Some(&Value::I64(10)));
+    assert_eq!(unaliased.rows[0].get("max"), Some(&Value::I64(30)));
+}
+
+#[test]
+fn aggregate_min_and_max_keep_text_values_unconverted() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // emails = ada, linus, grace — the values order as text, so a numeric
+    // reading of the column would pick a different pair.
+    let outcome = execute_sql("SELECT MIN(email) AS lo, MAX(email) AS hi FROM Account", &[], &contract, &[], &mut records)
+        .expect("min and max over text");
+    assert_eq!(outcome.rows[0].get("lo"), Some(&Value::Text("ada@example.test".into())));
+    assert_eq!(outcome.rows[0].get("hi"), Some(&Value::Text("linus@example.test".into())));
+}
+
+#[test]
+fn aggregate_min_and_max_skip_null_inputs() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET score = 1 WHERE account_id = 1", &[], &contract, &mut records);
+    exec("UPDATE Account SET score = NULL WHERE account_id = 2", &[], &contract, &mut records);
+    exec("UPDATE Account SET score = 3 WHERE account_id = 3", &[], &contract, &mut records);
+
+    // 1, NULL, 3 → MIN 1, MAX 3, while COUNT(*) still sees all three rows.
+    let outcome = execute_sql(
+        "SELECT COUNT(*) AS c, MIN(score) AS lo, MAX(score) AS hi FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("min and max skip nulls");
+    assert_eq!(outcome.rows[0].get("c"), Some(&Value::I64(3)));
+    assert_eq!(outcome.rows[0].get("lo"), Some(&Value::I64(1)));
+    assert_eq!(outcome.rows[0].get("hi"), Some(&Value::I64(3)));
+}
+
+#[test]
+fn aggregate_min_and_max_are_null_for_an_all_null_column() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET score = NULL WHERE account_id > 0", &[], &contract, &mut records);
+
+    // Rows are present, but the argument never holds a value.
+    let outcome = execute_sql(
+        "SELECT COUNT(*) AS c, MIN(score) AS lo, MAX(score) AS hi FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("min and max over an all-null column");
+    assert_eq!(outcome.rows[0].get("c"), Some(&Value::I64(3)));
+    assert_eq!(outcome.rows[0].get("lo"), Some(&Value::Null));
+    assert_eq!(outcome.rows[0].get("hi"), Some(&Value::Null));
+}
+
+#[test]
+fn aggregate_min_and_max_over_an_empty_input_yield_null() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // Every row is filtered out, yet the global aggregate still has one group.
+    let outcome = execute_sql(
+        "SELECT COUNT(*) AS c, MIN(score) AS lo, MAX(score) AS hi FROM Account WHERE account_id > 9000",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("min and max over an empty input");
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("c"), Some(&Value::I64(0)));
+    assert_eq!(outcome.rows[0].get("lo"), Some(&Value::Null));
+    assert_eq!(outcome.rows[0].get("hi"), Some(&Value::Null));
+}
+
+#[test]
+fn aggregate_min_and_max_group_by() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // t1: ada(10), linus(30) → 10 / 30
+    // t2: grace(20) → 20 / 20
+    let outcome = execute_sql(
+        "SELECT tenant, MIN(score) AS lo, MAX(score) AS hi FROM Account GROUP BY tenant ORDER BY tenant",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("grouped min and max");
+    assert_eq!(outcome.rows.len(), 2);
+    assert_eq!(outcome.rows[0].get("tenant"), Some(&Value::Text("t1".into())));
+    assert_eq!(outcome.rows[0].get("lo"), Some(&Value::I64(10)));
+    assert_eq!(outcome.rows[0].get("hi"), Some(&Value::I64(30)));
+    assert_eq!(outcome.rows[1].get("tenant"), Some(&Value::Text("t2".into())));
+    assert_eq!(outcome.rows[1].get("lo"), Some(&Value::I64(20)));
+    assert_eq!(outcome.rows[1].get("hi"), Some(&Value::I64(20)));
+}
+
+#[test]
+fn aggregate_min_and_max_reject_a_wrong_argument_count() {
+    for (sql, needle) in [
+        ("SELECT MIN() AS m FROM Account", "MIN() requires exactly one argument"),
+        ("SELECT MAX(score, tenant) AS m FROM Account", "MAX() requires exactly one argument"),
+    ] {
+        let error = prepare_sql(sql).expect_err("a wrong argument count must reject");
+        let message = format!("{error}");
+        assert!(message.contains(needle), "`{sql}` unexpected: {message}");
+    }
+}
+
 // ─── Parameterized value type mismatches ───────────────────────────────
 //
 // NOTE: the lowering pass currently infers `SlotTy::Any` for every
