@@ -5,7 +5,7 @@ use vos::syntax::{VosBinaryOp, VosExpr, VosFieldInit, VosLiteral, VosProgram, Vo
 use yydb_types::{Error, Result};
 
 use super::{
-    ops::{BoundValue, CmpOp, Pred, ProjectExpr, ProjectField, QueryOp, SortKey},
+    ops::{BoundValue, CmpOp, CountExpr, Pred, ProjectExpr, ProjectField, QueryOp, SortKey},
     params::ParameterDescriptor,
 };
 
@@ -135,12 +135,12 @@ fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[VosExpr], parameter
         }
         "skip" => {
             let count = bound_count(args.first(), method, parameters)?;
-            ops.push(QueryOp::Skip { count });
+            ops.push(QueryOp::Skip { count: CountExpr::Bound(count) });
             Ok(())
         }
         "take" => {
             let count = bound_count(args.first(), method, parameters)?;
-            ops.push(QueryOp::Take { count });
+            ops.push(QueryOp::Take { count: CountExpr::Bound(count) });
             Ok(())
         }
         "insert" | "update" | "delete" => {

@@ -17,10 +17,10 @@ use yydb_types::{Error, Result, Value};
 
 use super::{
     ops::{
-        AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, Expr, JoinKind, OUTER_ROW_MARKER, Pred,
-        ProjectExpr, ProjectField, QueryOp, ReturningProjection, ScalarFunction, SetOpKind, SortKey, WindowField, WindowFrame,
-        WindowFrameBound, WindowFunction, WindowOrderKey, WindowSpec, WriteAssignment, WriteBinOp, WriteExpr, WriteField,
-        WriteOp,
+        AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, CountExpr, Expr, JoinKind,
+        OUTER_ROW_MARKER, Pred, ProjectExpr, ProjectField, QueryOp, ReturningProjection, ScalarFunction, SetOpKind,
+        SortKey, WindowField, WindowFrame, WindowFrameBound, WindowFunction, WindowOrderKey, WindowSpec,
+        WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     params::{PARAM_PREFIX, ParameterDescriptor, name_to_slot},
 };
@@ -862,17 +862,65 @@ fn lower_limit(
 ///
 /// A column of the enclosing statement is rejected here: the subquery would then
 /// change its own row count for every outer row, which per-row re-execution does
-/// not model.
-fn lower_limit_value(expr: &Expression, parameters: &[ParameterDescriptor], scope: &CteScope) -> Result<BoundValue> {
-    if let Expression::Identifier(identifier) = expr
-        && scope.reads_outer_row(&identifier.name)
-    {
-        return Err(sql_error(format!(
-            "`{}` reads a column of the enclosing statement and cannot set `LIMIT`/`OFFSET`: a correlated subquery runs once per outer row and may not change its own row count",
-            identifier.name
-        )));
+/// not model. A correlated subquery is equally rejected. Plain literals and
+/// parameter slots stay [`CountExpr::Bound`]; a scalar subquery lowers into
+/// [`CountExpr::Expr`]. Anything else (arithmetic on columns, functions over
+/// columns) is rejected because there is no meaningful row context to evaluate
+/// it against.
+fn lower_limit_value(expr: &Expression, parameters: &[ParameterDescriptor], scope: &CteScope) -> Result<CountExpr> {
+    match expr {
+        Expression::Identifier(identifier) => {
+            if scope.reads_outer_row(&identifier.name) {
+                return Err(sql_error(format!(
+                    "`{}` reads a column of the enclosing statement and cannot set `LIMIT`/`OFFSET`: a correlated subquery runs once per outer row and may not change its own row count",
+                    identifier.name
+                )));
+            }
+            Ok(CountExpr::Bound(lower_bound_value(expr, parameters)?))
+        }
+        Expression::Literal(_) | Expression::Unary { op: UnaryOperator::Minus, .. } => {
+            Ok(CountExpr::Bound(lower_bound_value(expr, parameters)?))
+        }
+        Expression::Subquery { query, .. } => {
+            let (ops, correlated) = lower_scalar_subquery(query, parameters, scope)?;
+            if correlated {
+                return Err(sql_error(
+                    "a correlated scalar subquery cannot set `LIMIT`/`OFFSET`: it would re-run and change the row count for every outer row",
+                ));
+            }
+            Ok(CountExpr::Expr(Box::new(Expr::Subquery { ops, correlated: false })))
+        }
+        other => {
+            if expr_has_column_ref(other) {
+                return Err(sql_error(
+                    "`LIMIT`/`OFFSET` does not support expressions that read table columns: use a literal, parameter or scalar subquery instead",
+                ));
+            }
+            Ok(CountExpr::Expr(Box::new(lower_expr(other, parameters, scope)?)))
+        }
     }
-    lower_bound_value(expr, parameters)
+}
+
+fn expr_has_column_ref(expr: &Expression) -> bool {
+    match expr {
+        Expression::Identifier(_) => !matches!(expr, Expression::Identifier(ident) if ident.name.starts_with("__yydb_param_")),
+        Expression::Binary { left, right, .. } => expr_has_column_ref(left) || expr_has_column_ref(right),
+        Expression::Unary { expr: inner, .. } | Expression::IsNull { expr: inner, .. } | Expression::IsTruth { expr: inner, .. } => expr_has_column_ref(inner),
+        Expression::FunctionCall { args, .. } => args.iter().any(expr_has_column_ref),
+        Expression::Cast { expr: inner, .. } => expr_has_column_ref(inner),
+        Expression::Case { branches, else_branch, .. } => {
+            branches.iter().any(|(w, t)| expr_has_column_ref(w) || expr_has_column_ref(t))
+                || else_branch.as_ref().is_some_and(|e| expr_has_column_ref(e))
+        }
+        Expression::Between { expr: inner, low, high, .. } => {
+            expr_has_column_ref(inner) || expr_has_column_ref(low) || expr_has_column_ref(high)
+        }
+        Expression::InList { expr: inner, list, .. } => {
+            expr_has_column_ref(inner) || list.iter().any(expr_has_column_ref)
+        }
+        Expression::InSubquery { expr: inner, .. } => expr_has_column_ref(inner),
+        _ => false,
+    }
 }
 
 /// Returns `None` when the projection is `*` (the scan already yields every

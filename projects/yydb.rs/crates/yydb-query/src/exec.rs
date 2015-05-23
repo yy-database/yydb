@@ -9,8 +9,8 @@ use super::{
     catalog::table_row_key_name,
     lower,
     ops::{
-        AggregateField, BinaryOp, BoundValue, CmpOp, Expr, JoinKind, OUTER_ROW_MARKER, Pred, ProjectExpr, ProjectField,
-        QueryOp, QueryRow, ScalarFunction, SetOpKind, WindowField, WindowFrameBound, WindowFunction,
+        AggregateField, BinaryOp, BoundValue, CmpOp, CountExpr, Expr, JoinKind, OUTER_ROW_MARKER, Pred, ProjectExpr,
+        ProjectField, QueryOp, QueryRow, ScalarFunction, SetOpKind, WindowField, WindowFrameBound, WindowFunction,
     },
     resolve, store,
 };
@@ -185,18 +185,12 @@ fn execute_ops_in(
                 rows = indexed.into_iter().map(|(_, row)| row).collect();
             }
             QueryOp::Skip { count } => {
-                let skip = match resolve_bound_value(count, bound_values)? {
-                    Value::I64(n) => (n as usize).min(rows.len()),
-                    _ => return Err(query_runtime_error("Skip/Take count must be an integer")),
-                };
-                rows = rows.into_iter().skip(skip).collect();
+                let count = resolve_count_expr(count, contract, records, bound_values)?;
+                rows = rows.into_iter().skip(count).collect();
             }
             QueryOp::Take { count } => {
-                let take = match resolve_bound_value(count, bound_values)? {
-                    Value::I64(n) => n as usize,
-                    _ => return Err(query_runtime_error("Skip/Take count must be an integer")),
-                };
-                rows.truncate(take);
+                let count = resolve_count_expr(count, contract, records, bound_values)?;
+                rows.truncate(count);
             }
             QueryOp::Collect => {}
         }
@@ -206,6 +200,51 @@ fn execute_ops_in(
 
 fn query_runtime_error(message: impl Into<String>) -> Error {
     Error::Schema { message: message.into() }
+}
+
+/// Resolve a CountExpr (Skip/Take count) to a usize, rejecting non-integer values.
+fn resolve_count_expr(
+    count: &CountExpr,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<usize> {
+    let value = match count {
+        CountExpr::Bound(bv) => resolve_bound_value(bv, bound_values)?,
+        CountExpr::Expr(inner) => resolve_standalone_expr(inner, contract, records, bound_values)?,
+    };
+    match value {
+        Value::I64(n) => {
+            if n < 0 {
+                return Err(query_runtime_error("LIMIT/OFFSET must be non-negative"));
+            }
+            Ok(n as usize)
+        }
+        _ => Err(query_runtime_error("LIMIT/OFFSET count must be an integer")),
+    }
+}
+
+/// Resolve an uncorrelated scalar expression that evaluates independently of
+/// any row context. Used for `LIMIT (SELECT …)` positions where the subquery
+/// carries no outer-row references. Column references in the expression read
+/// from a synthetic empty row and resolve to `NULL`.
+fn resolve_standalone_expr(
+    expr: &Expr,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<Value> {
+    match expr {
+        Expr::Bound(bv) => resolve_bound_value(bv, bound_values),
+        Expr::Subquery { ops, correlated } => scalar_subquery_value(ops, contract, records, bound_values, *correlated, None),
+        other => {
+            // Everything else needs a row to resolve Column paths. Pass an empty
+            // row — lowering already rejected expressions that read table
+            // columns here, so only Bound atoms or Subqueries should reach us.
+            let row = BTreeMap::new();
+            eval_expr(other, &row, "", contract, records, bound_values, None)
+        }
+    }
 }
 
 /// Resolve a BoundValue either to the baked-in literal or to the bound

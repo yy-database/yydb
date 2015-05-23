@@ -64,6 +64,19 @@ pub enum SlotTy {
     Null,
 }
 
+/// Count expression for `LIMIT` / `OFFSET` positions: either a bake-in literal
+/// or bind-time parameter, or an arbitrary scalar expression that is evaluated
+/// at execution time (used for `LIMIT (SELECT …)` positions).
+#[derive(Debug, Clone, PartialEq)]
+pub enum CountExpr {
+    /// Compile-time constant or bind-time parameter slot.
+    Bound(BoundValue),
+    /// Arbitrary scalar expression evaluated at execution time. Used for
+    /// `LIMIT (SELECT COUNT(*) FROM …)` positions where the value is not
+    /// known until the pipeline runs.
+    Expr(Box<Expr>),
+}
+
 impl SlotTy {
     /// Stable lower-case name used in diagnostics and wire payloads.
     pub fn as_str(self) -> &'static str {
@@ -733,13 +746,15 @@ pub enum QueryOp {
     },
     /// Drop the first `count` rows.
     Skip {
-        /// Number of rows to drop.
-        count: BoundValue,
+        /// Number of rows to drop — either a bake-in literal/parameter slot,
+        /// or an expression evaluated at execution time (for `LIMIT (SELECT …)`).
+        count: CountExpr,
     },
     /// Keep only the first `count` rows.
     Take {
-        /// Number of rows to keep.
-        count: BoundValue,
+        /// Number of rows to keep — either a bake-in literal/parameter slot,
+        /// or an expression evaluated at execution time (for `LIMIT (SELECT …)`).
+        count: CountExpr,
     },
     /// Materialize the pipeline result.
     Collect,
