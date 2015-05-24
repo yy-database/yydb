@@ -228,6 +228,19 @@ pub enum Pred {
         /// Right-hand side value (literal or bind-time parameter slot).
         value: BoundValue,
     },
+    /// `WHERE (SELECT …)` — a scalar subquery evaluated as a boolean predicate.
+    ///
+    /// The subquery must project exactly one column. Zero rows yields `NULL`
+    /// (unknown → row dropped); one row yields `TRUE` when the value is truthy,
+    /// `FALSE` otherwise. More than one row is an error. An uncorrelated
+    /// subquery is resolved once before any row is tested; a `correlated` one
+    /// produces its value once per row.
+    SubqueryAsBool {
+        /// Lowered subquery pipeline, ending in [`QueryOp::Collect`].
+        ops: Vec<QueryOp>,
+        /// Whether the subquery reads columns of the row under test.
+        correlated: bool,
+    },
 }
 
 /// One projected value expression.

@@ -1105,6 +1105,10 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
             let (ops, correlated) = lower_select(query, parameters, ctes)?;
             Ok(Pred::InSubquery { path, ops, negated: *negated, correlated })
         }
+        Expression::Subquery { query, .. } => {
+            let (ops, correlated) = lower_scalar_subquery(query, parameters, ctes)?;
+            Ok(Pred::SubqueryAsBool { ops, correlated })
+        }
         _ => Err(sql_error("unsupported SQL predicate shape")),
     }
 }
@@ -1568,6 +1572,8 @@ fn reject_excluded_paths(predicate: &Pred) -> Result<()> {
         // lowering already validates every path it contains, so nothing extra
         // is needed here.
         Pred::ExprCmp { .. } => Ok(()),
+        // A bare subquery-as-bool has its own scope, checked when lowered.
+        Pred::SubqueryAsBool { .. } => Ok(()),
     }
 }
 

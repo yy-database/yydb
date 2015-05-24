@@ -374,6 +374,10 @@ fn resolve_subquery_predicates_in(
             op: *op,
             value: scalar_subquery_value(ops, contract, records, bound_values, *correlated, outer)?,
         },
+        Pred::SubqueryAsBool { ops, correlated } => {
+            let value = scalar_subquery_value(ops, contract, records, bound_values, *correlated, outer)?;
+            if is_truthy(&value) { Pred::True } else { Pred::False }
+        }
         Pred::And(left, right) => Pred::And(Box::new(resolve(left)?), Box::new(resolve(right)?)),
         Pred::Or(left, right) => Pred::Or(Box::new(resolve(left)?), Box::new(resolve(right)?)),
         Pred::Not(inner) => Pred::Not(Box::new(resolve(inner)?)),
@@ -385,9 +389,10 @@ fn resolve_subquery_predicates_in(
 /// forces a per-row run instead of one run per pipeline.
 fn predicate_has_correlated_subquery(predicate: &Pred) -> bool {
     match predicate {
-        Pred::Exists { correlated, .. } | Pred::InSubquery { correlated, .. } | Pred::FieldCmpSubquery { correlated, .. } => {
-            *correlated
-        }
+        Pred::Exists { correlated, .. }
+        | Pred::InSubquery { correlated, .. }
+        | Pred::FieldCmpSubquery { correlated, .. }
+        | Pred::SubqueryAsBool { correlated, .. } => *correlated,
         Pred::And(left, right) | Pred::Or(left, right) => {
             predicate_has_correlated_subquery(left) || predicate_has_correlated_subquery(right)
         }
@@ -533,7 +538,7 @@ fn eval_pred_in(
         }
         // Subqueries are resolved before any row is tested. Reaching one here
         // means the caller skipped that step, so no row may pass.
-        Pred::Exists { .. } | Pred::InSubquery { .. } | Pred::FieldCmpSubquery { .. } => false,
+        Pred::Exists { .. } | Pred::InSubquery { .. } | Pred::FieldCmpSubquery { .. } | Pred::SubqueryAsBool { .. } => false,
     }
 }
 

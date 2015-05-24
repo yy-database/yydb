@@ -5155,6 +5155,25 @@ fn correlated_scalar_subquery_compares_against_the_enclosing_row() {
 }
 
 #[test]
+fn bare_scalar_subquery_as_bool_predicate() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // `WHERE (SELECT account_id FROM Account WHERE account_id = 1)` → truthy scalar → keeps every row.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account WHERE (SELECT account_id FROM Account WHERE account_id = 1)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("bare scalar subquery as bool predicate must execute")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+}
+
+#[test]
 fn correlated_subqueries_reject_more_than_one_level() {
     // The innermost statement reaches past its enclosing statement, which has no
     // single row to hand down at that depth.
