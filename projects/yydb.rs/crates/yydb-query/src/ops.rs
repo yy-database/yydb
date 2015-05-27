@@ -228,6 +228,65 @@ pub enum Pred {
         /// Right-hand side value (literal or bind-time parameter slot).
         value: BoundValue,
     },
+    /// Arbitrary scalar expression tested for `[NOT] NULL`.
+    ///
+    /// Unlike [`Pred::FieldCmp`] with `Value::Null`, `IS NULL` is its own
+    /// three-valued operator: `expr IS NULL` is `TRUE` on `NULL`, `FALSE` on
+    /// non-`NULL`, never unknown. `IS NOT NULL` mirrors that.
+    ExprIsNull {
+        /// Expression evaluated row by row.
+        expr: Box<Expr>,
+        /// Whether the test is negated (`IS NOT NULL`).
+        negated: bool,
+    },
+    /// Arbitrary scalar expression tested with `[NOT] BETWEEN low AND high`.
+    ///
+    /// The comparison follows SQL three-valued logic — a `NULL` in `expr`,
+    /// `low` or `high` makes the result unknown, so a `WHERE` clause drops
+    /// the row.
+    ExprBetween {
+        /// Expression evaluated row by row.
+        expr: Box<Expr>,
+        /// Lower bound (literal or bind-time parameter slot).
+        low: BoundValue,
+        /// Upper bound.
+        high: BoundValue,
+        /// Whether the test is negated (`NOT BETWEEN`).
+        negated: bool,
+    },
+    /// Arbitrary scalar expression tested with `[NOT] IN (<values>)`.
+    ExprInList {
+        /// Expression evaluated row by row.
+        expr: Box<Expr>,
+        /// Literal / bind-time values the expression may match.
+        list: Vec<BoundValue>,
+        /// Whether the test is negated (`NOT IN`).
+        negated: bool,
+    },
+    /// Arbitrary scalar expression tested with `[NOT] IN (subquery)`.
+    ExprInSubquery {
+        /// Expression evaluated row by row.
+        expr: Box<Expr>,
+        /// Lowered subquery pipeline, ending in [`QueryOp::Collect`].
+        ops: Vec<QueryOp>,
+        /// Whether the test is negated (`NOT IN`).
+        negated: bool,
+        /// Whether the subquery reads columns of the row under test.
+        correlated: bool,
+    },
+    /// Arbitrary scalar expression tested against materialized IN values.
+    ///
+    /// Produced by resolving [`Pred::ExprInSubquery`]. Never appears in a
+    /// freshly lowered plan. Follows the same three-valued semantics as
+    /// [`Pred::InSet`].
+    ExprInSet {
+        /// Expression evaluated row by row.
+        expr: Box<Expr>,
+        /// Values the subquery produced, in row order.
+        values: Vec<Value>,
+        /// Whether the test is negated (`NOT IN`).
+        negated: bool,
+    },
     /// `WHERE (SELECT …)` — a scalar subquery evaluated as a boolean predicate.
     ///
     /// The subquery must project exactly one column. Zero rows yields `NULL`

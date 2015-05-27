@@ -727,6 +727,85 @@ fn select_with_not_between_excludes_range() {
     assert_eq!(ids(&outcome.rows), vec![2]); // score=30 is outside [10,25]
 }
 
+// ─── Expression left-hand side for IS NULL / BETWEEN / IN ─────────────────
+
+#[test]
+fn is_null_accepts_scalar_expression_on_the_left() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // All seed rows have non-empty email, so LENGTH(email) is never NULL.
+    let empty = execute_sql(
+        "SELECT account_id FROM Account WHERE LENGTH(email) IS NULL",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("expr IS NULL");
+    assert!(ids(&empty.rows).is_empty(), "all emails are populated");
+
+    let not_null = execute_sql(
+        "SELECT account_id FROM Account WHERE LENGTH(email) IS NOT NULL ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("expr IS NOT NULL");
+    assert_eq!(ids(&not_null.rows), vec![1, 2, 3]);
+}
+
+#[test]
+fn between_accepts_scalar_expression_on_the_left() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // score + 1 BETWEEN 11 AND 21:
+    // account_id=1: 10+1=11 ∈ [11,21] ✓
+    // account_id=2: 30+1=31 ∉ [11,21]
+    // account_id=3: 20+1=21 ∈ [11,21] ✓
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account WHERE score + 1 BETWEEN 11 AND 21 ORDER BY score",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("expr BETWEEN");
+    assert_eq!(ids(&outcome.rows), vec![1, 3]);
+}
+
+#[test]
+fn in_list_accepts_scalar_expression_on_the_left() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account WHERE UPPER(email) IN ('ADA@EXAMPLE.TEST', 'GRACE@EXAMPLE.TEST') ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("expr IN (list)");
+    assert_eq!(ids(&outcome.rows), vec![1, 3]);
+
+    let not_in = execute_sql(
+        "SELECT account_id FROM Account WHERE UPPER(email) NOT IN ('ADA@EXAMPLE.TEST') ORDER BY account_id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("expr NOT IN (list)");
+    assert_eq!(ids(&not_in.rows), vec![2, 3]);
+}
+
+
 #[test]
 fn select_with_between_reversed_endpoints_is_semantically_empty() {
     // `BETWEEN 30 AND 10` — lower endpoint > upper endpoint — the lowering
@@ -4840,11 +4919,27 @@ fn in_subquery_rejects_a_multi_column_subquery() {
         .expect_err("the subquery projects two columns");
     let message = format!("{multi}");
     assert!(message.contains("single-column"), "unexpected error: {message}");
+}
 
-    let expression = prepare_sql("SELECT account_id FROM Account WHERE score + 1 IN (SELECT score FROM Account)")
-        .expect_err("the tested value must be a plain column");
-    let message = format!("{expression}");
-    assert!(message.contains("plain column references only"), "unexpected error: {message}");
+#[test]
+fn in_subquery_accepts_expression_on_the_left() {
+    let contract = left_join_contract();
+    let mut records = BTreeMap::new();
+    seed_left_join(&contract, &mut records);
+
+    // score + 1 must be among project_ids {10, 11, 20}.
+    // account_id=1: 10+1=11 ∈ set → match
+    // account_id=2: 30+1=31 ∉ set
+    // account_id=3: 20+1=21 ∉ set
+    let outcome = execute_sql(
+        "SELECT account_id FROM Account WHERE score + 1 IN (SELECT project_id FROM Project)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("expr-left IN subquery");
+    assert_eq!(ids(&outcome.rows), vec![1]);
 }
 
 #[test]

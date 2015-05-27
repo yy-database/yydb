@@ -378,6 +378,20 @@ fn resolve_subquery_predicates_in(
             let value = scalar_subquery_value(ops, contract, records, bound_values, *correlated, outer)?;
             if is_truthy(&value) { Pred::True } else { Pred::False }
         }
+        Pred::ExprInSubquery { expr, ops, negated, correlated } => {
+            let rows = execute_subquery(ops, contract, records, bound_values, *correlated, outer)?;
+            let mut values = Vec::with_capacity(rows.len());
+            for row in &rows {
+                if row.len() != 1 {
+                    return Err(query_runtime_error(format!(
+                        "`IN (SELECT ...)` requires a single-column subquery, but its rows carry {} columns",
+                        row.len()
+                    )));
+                }
+                values.push(row.values().next().cloned().unwrap_or(Value::Null));
+            }
+            Pred::ExprInSet { expr: expr.clone(), values, negated: *negated }
+        }
         Pred::And(left, right) => Pred::And(Box::new(resolve(left)?), Box::new(resolve(right)?)),
         Pred::Or(left, right) => Pred::Or(Box::new(resolve(left)?), Box::new(resolve(right)?)),
         Pred::Not(inner) => Pred::Not(Box::new(resolve(inner)?)),
@@ -392,7 +406,8 @@ fn predicate_has_correlated_subquery(predicate: &Pred) -> bool {
         Pred::Exists { correlated, .. }
         | Pred::InSubquery { correlated, .. }
         | Pred::FieldCmpSubquery { correlated, .. }
-        | Pred::SubqueryAsBool { correlated, .. } => *correlated,
+        | Pred::SubqueryAsBool { correlated, .. }
+        | Pred::ExprInSubquery { correlated, .. } => *correlated,
         Pred::And(left, right) | Pred::Or(left, right) => {
             predicate_has_correlated_subquery(left) || predicate_has_correlated_subquery(right)
         }
@@ -536,9 +551,75 @@ fn eval_pred_in(
             }
             cmp_values(&left, *op, &right)
         }
+        // `IS NULL` is a dedicated three-valued operator: `expr IS NULL` is
+        // TRUE on NULL, FALSE otherwise — never unknown.
+        Pred::ExprIsNull { expr, negated } => {
+            let value = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            let is_null = matches!(value, Value::Null);
+            if *negated { !is_null } else { is_null }
+        }
+        // `[NOT] BETWEEN` follows SQL three-valued logic — any NULL makes the
+        // result unknown so a WHERE clause drops the row.
+        Pred::ExprBetween { expr, low, high, negated } => {
+            let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            let low = match resolve_bound_value(low, bound_values) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            let high = match resolve_bound_value(high, bound_values) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            if matches!(left, Value::Null) || matches!(low, Value::Null) || matches!(high, Value::Null) {
+                return false;
+            }
+            let in_range = cmp_values(&left, CmpOp::Ge, &low) && cmp_values(&left, CmpOp::Le, &high);
+            if *negated { !in_range } else { in_range }
+        }
+        // `[NOT] IN (<values>)` with expression left-hand side follows the same
+        // three-valued rules as `Pred::InSet`.
+        Pred::ExprInList { expr, list, negated } => {
+            let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            let mut values = Vec::with_capacity(list.len());
+            for item in list {
+                values.push(match resolve_bound_value(item, bound_values) {
+                    Ok(v) => v,
+                    Err(_) => return false,
+                });
+            }
+            match in_set_truth(&left, &values) {
+                Some(true) => !*negated,
+                Some(false) => *negated,
+                None => false,
+            }
+        }
+        Pred::ExprInSet { expr, values, negated } => {
+            let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            match in_set_truth(&left, values) {
+                Some(true) => !*negated,
+                Some(false) => *negated,
+                None => false,
+            }
+        }
         // Subqueries are resolved before any row is tested. Reaching one here
         // means the caller skipped that step, so no row may pass.
-        Pred::Exists { .. } | Pred::InSubquery { .. } | Pred::FieldCmpSubquery { .. } | Pred::SubqueryAsBool { .. } => false,
+        Pred::Exists { .. }
+        | Pred::InSubquery { .. }
+        | Pred::FieldCmpSubquery { .. }
+        | Pred::SubqueryAsBool { .. }
+        | Pred::ExprInSubquery { .. } => false,
     }
 }
 
