@@ -222,3 +222,104 @@ fn mixed_sql_dml_within_single_transaction() {
     assert_eq!(ids(&conn.query("SELECT account_id FROM Account ORDER BY account_id").unwrap()), vec![1, 2]);
     assert_eq!(conn.query("SELECT score FROM Account WHERE account_id = 1").unwrap()[0].get("score"), Some(&Value::I64(10)));
 }
+
+// ─── WAL recovery lifecycle ────────────────────────────────────────────
+
+#[test]
+fn wal_recovery_restores_committed_rows_after_reopen() {
+    use yydb::{Connection, JournalMode, OpenFlags};
+
+    let directory = std::env::temp_dir().join(format!("yydb-wal-life-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("temp dir");
+    let path = directory.join("life.yydb");
+
+    // Phase 1: open in WAL mode, seed schema, write rows under transaction, commit.
+    {
+        let conn = Connection::open_with_flags(&path, OpenFlags::wal()).expect("open wal");
+        conn.ensure_schema(SCHEMA).expect("schema");
+
+        conn.begin().expect("begin txn 1");
+        conn.execute_sql_write(
+            "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@example.test', 10)",
+            &[],
+        )
+        .expect("insert 1");
+        conn.execute_sql_write(
+            "INSERT INTO Account (account_id, email, score) VALUES (2, 'linus@example.test', 30)",
+            &[],
+        )
+        .expect("insert 2");
+        conn.commit().expect("commit txn 1");
+
+        conn.begin().expect("begin txn 2");
+        conn.execute_sql_write(
+            "INSERT INTO Account (account_id, email, score) VALUES (3, 'grace@example.test', 20)",
+            &[],
+        )
+        .expect("insert 3");
+        conn.commit().expect("commit txn 2");
+    }
+    // conn dropped — simulates crash, no clean close/checkpoint.
+
+    // Phase 2: verify sidecars exist and WAL holds un-checkpointed frames.
+    let wal_path = format!("{}-wal", path.display());
+    let shm_path = format!("{}-shm", path.display());
+    assert!(std::path::Path::new(&wal_path).exists(), "wal sidecar must exist");
+    assert!(std::path::Path::new(&shm_path).exists(), "shm sidecar must exist");
+
+    // Phase 3: reopen — recovery folds WAL into the main file.
+    let reopened = Connection::open(&path).expect("reopen recovery");
+    let rows = reopened.query_sql("SELECT account_id FROM Account ORDER BY account_id").expect("reopen query");
+    assert_eq!(
+        rows.iter()
+            .map(|r| match r.get("account_id") { Some(Value::I64(id)) => *id, other => panic!("{other:?}") })
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3],
+        "WAL recovery must surface all committed rows",
+    );
+    assert_eq!(reopened.journal_mode(), JournalMode::Delete, "default mode after open is delete");
+
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn rollback_after_begin_does_not_affect_wal_recovery() {
+    use yydb::{Connection, OpenFlags};
+
+    let directory = std::env::temp_dir().join(format!("yydb-wal-rollback-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("temp dir");
+    let path = directory.join("rollback.yydb");
+
+    {
+        let conn = Connection::open_with_flags(&path, OpenFlags::wal()).expect("open wal");
+        conn.ensure_schema(SCHEMA).expect("schema");
+
+        conn.begin().expect("begin");
+        conn.execute_sql_write(
+            "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@example.test', 10)",
+            &[],
+        )
+        .expect("insert");
+        conn.rollback().expect("rollback");
+        // Row must not be visible after rollback.
+        assert!(conn.query_sql("SELECT account_id FROM Account").unwrap().is_empty());
+
+        conn.begin().expect("begin again");
+        conn.execute_sql_write(
+            "INSERT INTO Account (account_id, email, score) VALUES (7, 'committed@example.test', 70)",
+            &[],
+        )
+        .expect("insert committed");
+        conn.commit().expect("commit");
+    }
+
+    // Reopen — only the committed row must survive.
+    let reopened = Connection::open(&path).expect("reopen");
+    let rows = reopened.query_sql("SELECT account_id FROM Account").expect("reopen query");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("account_id"), Some(&Value::I64(7)));
+
+    let _ = std::fs::remove_dir_all(&directory);
+}
