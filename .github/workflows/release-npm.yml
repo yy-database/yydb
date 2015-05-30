@@ -23,6 +23,9 @@ jobs:
   check-python:
     name: Python binding gate
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projects/yydb.py/packages/yydb
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
@@ -47,7 +50,6 @@ jobs:
         working-directory: projects/yydb.rs
         run: cargo test -p yydb-pyo3
       - name: Build wheel
-        working-directory: projects/yydb.py/packages/yydb
         run: maturin build --out dist
       - name: Install wheel in clean venv + import + unittest + example
         shell: bash
