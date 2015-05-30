@@ -20,6 +20,47 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  check-python:
+    name: Python binding gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-07-20
+          components: rustfmt
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: projects/yydb.rs
+      - name: Install maturin
+        run: python -m pip install --upgrade pip "maturin>=1.7,<2.0"
+      - name: Check formatting
+        working-directory: projects/yydb.rs
+        run: cargo fmt -p yydb-pyo3 --check
+      - name: Cargo check
+        working-directory: projects/yydb.rs
+        run: cargo check -p yydb-pyo3
+      - name: Cargo test
+        working-directory: projects/yydb.rs
+        run: cargo test -p yydb-pyo3
+      - name: Build wheel
+        working-directory: projects/yydb.py/packages/yydb
+        run: maturin build --out dist
+      - name: Install wheel in clean venv + import + unittest + example
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          VENV_PY=.venv/bin/python
+          "$VENV_PY" -m pip install --upgrade pip
+          "$VENV_PY" -m pip install dist/*.whl
+          "$VENV_PY" -c "import yydb, yydb_pyo3; print(yydb.version())"
+          "$VENV_PY" -m unittest discover -s tests -v
+          "$VENV_PY" ../../examples/embedded/main.py
+
   build-engine:
     name: engine ${{ matrix.pkg }}
     runs-on: ${{ matrix.os }}
@@ -78,7 +119,7 @@ jobs:
 
   publish-npm:
     name: publish npm
-    needs: build-engine
+    needs: [check-python, build-engine]
     runs-on: ubuntu-latest
     environment: NPM_PUBLISH
     permissions:
