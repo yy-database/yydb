@@ -460,6 +460,14 @@ pub enum ScalarFunction {
     Month,
     /// `DAY(date_or_datetime)`: day of the month (`1`–`31`), as [`Value::I64`].
     Day,
+    /// `NOW()`: frozen UTC timestamp captured at query start, as [`Value::Timestamp`].
+    Now,
+    /// `CURRENT_TIMESTAMP`: alias for [`ScalarFunction::Now`].
+    CurrentTimestamp,
+    /// `CURRENT_DATE`: frozen UTC date part of the query start timestamp, as [`Value::Date`].
+    CurrentDate,
+    /// `CURRENT_TIME`: frozen UTC wall-clock time part of the query start timestamp, as [`Value::Time`].
+    CurrentTime,
 }
 
 /// Set operator combining two row pipelines.

@@ -1,9 +1,11 @@
 //! Execute Phase 1 query ops against stored table rows.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use vos::types::ResolvedContract;
-use yydb_types::{Error, Result, Value};
+use yydb_types::{Error, Result, Timestamp, Value};
 
 use super::{
     catalog::table_row_key_name,
@@ -14,6 +16,59 @@ use super::{
     },
     resolve, store,
 };
+
+// Query-start clock instant, set for the duration of one `execute_ops_in` call.
+// `NOW`, `CURRENT_TIMESTAMP`, `CURRENT_DATE`, and `CURRENT_TIME` freeze to this
+// instant so repeated calls within the same query yield the same value.
+thread_local! {
+    static QUERY_START_CLOCK: RefCell<Option<Timestamp>> = RefCell::new(None);
+}
+
+/// Freeze the query-start clock from `SystemTime::now()`. Panics if called while
+/// a clock is already set (nested top-level executes share one clock).
+fn freeze_query_start_clock() -> Timestamp {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is before UNIX epoch");
+    let micros = duration.as_micros() as i64;
+    let ts = Timestamp::from_unix_micros(micros).expect("current UTC instant fits in the YYDB timestamp range");
+    QUERY_START_CLOCK.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        debug_assert!(slot.is_none(), "query-start clock already set — nested execute_ops calls share one clock");
+        *slot = Some(ts);
+    });
+    ts
+}
+
+/// Unfreeze the query-start clock after `execute_ops_in` finishes.
+fn clear_query_start_clock() {
+    QUERY_START_CLOCK.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+}
+
+/// Read the frozen query-start clock, or the live `SystemTime::now()` when the
+/// clock was not set (tests, isolated eval_expr calls).
+fn query_start_timestamp() -> Timestamp {
+    QUERY_START_CLOCK.with(|cell| {
+        if let Some(ts) = *cell.borrow() {
+            return ts;
+        }
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is before UNIX epoch");
+        let micros = duration.as_micros() as i64;
+        Timestamp::from_unix_micros(micros).expect("current UTC instant fits in the YYDB timestamp range")
+    })
+}
+
+/// RAII guard that clears the query-start clock when dropped.
+struct QueryStartClockGuard;
+impl Drop for QueryStartClockGuard {
+    fn drop(&mut self) {
+        clear_query_start_clock();
+    }
+}
 
 /// Execute a VOS source directly (convenience wrapper). Parses + lowers + runs.
 pub fn execute(
@@ -59,6 +114,24 @@ fn execute_ops_in(
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
+    // Freeze the query-start clock for the duration of this pipeline (and any
+    // nested sub-pipelines it spawns). The RAII guard clears it on exit so the
+    // next unrelated query gets a fresh instant.
+    let _clock_guard = if outer.is_none() {
+        QUERY_START_CLOCK.with(|cell| {
+            if cell.borrow().is_none() {
+                freeze_query_start_clock();
+                Some(QueryStartClockGuard)
+            }
+            else {
+                None // nested inside an already-frozen top-level execute
+            }
+        })
+    }
+    else {
+        None
+    };
+
     let mut rows: Vec<QueryRow> = Vec::new();
     let mut current_table: Option<String> = None;
     for op in ops {
@@ -1135,6 +1208,16 @@ fn eval_function(
             Value::I64(date_part(function, &values[0])? as i64)
         }
         ScalarFunction::Coalesce => coalesce(&values)?,
+        // Clock functions read the frozen query-start instant (or live wall
+        // clock when executed outside a top-level execute pipeline, e.g.
+        // in a unit test). Every call within one query returns the same value.
+        ScalarFunction::Now | ScalarFunction::CurrentTimestamp => Value::Timestamp(query_start_timestamp()),
+        ScalarFunction::CurrentDate => {
+            Value::Date(query_start_timestamp().to_parts().0)
+        }
+        ScalarFunction::CurrentTime => {
+            Value::Time(query_start_timestamp().to_parts().1)
+        }
     })
 }
 
@@ -1256,6 +1339,10 @@ fn function_name(function: ScalarFunction) -> &'static str {
         ScalarFunction::Year => "YEAR",
         ScalarFunction::Month => "MONTH",
         ScalarFunction::Day => "DAY",
+        ScalarFunction::Now => "NOW",
+        ScalarFunction::CurrentTimestamp => "CURRENT_TIMESTAMP",
+        ScalarFunction::CurrentDate => "CURRENT_DATE",
+        ScalarFunction::CurrentTime => "CURRENT_TIME",
     }
 }
 

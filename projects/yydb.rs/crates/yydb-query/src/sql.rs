@@ -764,6 +764,20 @@ fn split_identifier(identifier: &Identifier) -> Vec<String> {
     identifier.name.split('.').map(str::to_string).collect()
 }
 
+/// When an Oak identifier is one of the four SQL-standard clock registers
+/// written without parentheses (`NOW`, `CURRENT_TIMESTAMP`, `CURRENT_DATE`,
+/// `CURRENT_TIME`), lower it to the matching [`ScalarFunction::Now`] variant
+/// with no arguments so the executor reads the frozen query-start instant.
+fn try_lower_clock_register(identifier: &Identifier) -> Option<Expr> {
+    match identifier.name.to_ascii_uppercase().as_str() {
+        "NOW" => Some(Expr::Function { function: ScalarFunction::Now, args: Vec::new() }),
+        "CURRENT_TIMESTAMP" => Some(Expr::Function { function: ScalarFunction::CurrentTimestamp, args: Vec::new() }),
+        "CURRENT_DATE" => Some(Expr::Function { function: ScalarFunction::CurrentDate, args: Vec::new() }),
+        "CURRENT_TIME" => Some(Expr::Function { function: ScalarFunction::CurrentTime, args: Vec::new() }),
+        _ => None,
+    }
+}
+
 /// Name of the first window function inside `expr`, if it contains one.
 ///
 /// Subqueries carry their own scope, so they are not searched.
@@ -818,6 +832,9 @@ fn lower_project_expr(expr: &Expression, parameters: &[ParameterDescriptor], cte
             // executor can resolve both the full dotted key and the trailing
             // bare column name. A reference to the enclosing statement is marked
             // so execution reads it from that statement's row.
+            if let Some(clock) = try_lower_clock_register(identifier) {
+                return Ok(ProjectExpr::Computed(Box::new(clock)));
+            }
             Ok(ProjectExpr::Scalar { path: reference_path(&identifier.name, ctes) })
         }
         other => Ok(ProjectExpr::Computed(Box::new(lower_expr(other, parameters, ctes)?))),
@@ -963,7 +980,14 @@ fn lower_projection(
         // the executor then resolves the qualified key first and falls back to
         // the bare trailing column of an unqualified row source.
         let field_expr = match expr {
-            Expression::Identifier(identifier) => ProjectExpr::Scalar { path: reference_path(&identifier.name, ctes) },
+            Expression::Identifier(identifier) => {
+                if let Some(clock) = try_lower_clock_register(identifier) {
+                    ProjectExpr::Computed(Box::new(clock))
+                }
+                else {
+                    ProjectExpr::Scalar { path: reference_path(&identifier.name, ctes) }
+                }
+            }
             // Arbitrary lowerable expression (CASE, CAST, nested CASE inside CASE,
             // etc.) → generic Computed wrapper around our Expr IR.
             other => ProjectExpr::Computed(Box::new(lower_expr(other, parameters, ctes)?)),
@@ -1261,7 +1285,17 @@ fn negate_number(value: Value) -> Value {
 /// today SELECT projection, aggregate arguments and `RETURNING` use it.
 fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteScope) -> Result<Expr> {
     match expr {
-        Expression::Identifier(identifier) => Ok(Expr::Column { path: reference_path(&identifier.name, ctes) }),
+        // Bare identifiers are column references — except for the four SQL
+        // standard clock registers that Oak keeps as plain names rather than
+        // function calls: `CURRENT_TIMESTAMP`, `CURRENT_DATE`, `CURRENT_TIME`,
+        // and also `NOW` written without parentheses. Lower them to the clock
+        // scalar functions so the executor can freeze them at query start.
+        Expression::Identifier(identifier) => {
+            if let Some(clock) = try_lower_clock_register(identifier) {
+                return Ok(clock);
+            }
+            Ok(Expr::Column { path: reference_path(&identifier.name, ctes) })
+        }
         Expression::Literal(_) | Expression::Unary { op: UnaryOperator::Minus, .. } => {
             Ok(Expr::Bound(lower_bound_value(expr, parameters)?))
         }
@@ -1381,6 +1415,32 @@ fn lower_scalar_function(
         "MONTH" => (ScalarFunction::Month, args.len() == 1, "exactly one argument"),
         "DAY" => (ScalarFunction::Day, args.len() == 1, "exactly one argument"),
         "COALESCE" => (ScalarFunction::Coalesce, !args.is_empty(), "at least one argument"),
+        "NOW" | "CURRENT_TIMESTAMP" => {
+            if !args.is_empty() {
+                return Err(sql_error(format!("`{fn_name}` takes no arguments, got {}", args.len())));
+            }
+            // Clock functions freeze at execution time, not lowering time. The
+            // executor reads a thread-local query start instant so repeated
+            // calls within one query (or across rows of a projection) yield
+            // the same value.
+            let function = match fn_name.as_str() {
+                "NOW" => ScalarFunction::Now,
+                _ => ScalarFunction::CurrentTimestamp,
+            };
+            return Ok(Expr::Function { function, args: Vec::new() });
+        }
+        "CURRENT_DATE" => {
+            if !args.is_empty() {
+                return Err(sql_error(format!("`{fn_name}` takes no arguments, got {}", args.len())));
+            }
+            return Ok(Expr::Function { function: ScalarFunction::CurrentDate, args: Vec::new() });
+        }
+        "CURRENT_TIME" => {
+            if !args.is_empty() {
+                return Err(sql_error(format!("`{fn_name}` takes no arguments, got {}", args.len())));
+            }
+            return Ok(Expr::Function { function: ScalarFunction::CurrentTime, args: Vec::new() });
+        }
         other => return Err(sql_error(format!("scalar function `{other}` is not supported by YYDB"))),
     };
     if !arity_ok {

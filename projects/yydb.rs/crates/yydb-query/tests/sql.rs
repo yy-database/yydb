@@ -1728,9 +1728,8 @@ fn order_by_scalar_expression_executes_per_row() {
 #[test]
 fn unimplemented_functions_reject_nested_calls() {
     for sql in [
-        "SELECT NOW() AS v FROM Account",
-        "SELECT CHAR_LENGTH(NOW()) AS v FROM Account",
-        "SELECT COALESCE(NOW(), email) AS v FROM Account",
+        "SELECT REVERSE(email) AS v FROM Account",
+        "SELECT CHAR_LENGTH(REVERSE(email)) AS v FROM Account",
         "SELECT SUM(REVERSE(email)) AS v FROM Account",
     ] {
         let err = prepare_sql(sql).expect_err("an unimplemented function must reject");
@@ -1837,6 +1836,88 @@ fn date_functions_reject_wrong_argument_counts_at_prepare_time() {
         let err = prepare_sql(sql).expect_err("wrong arity must reject");
         let message = format!("{err}");
         assert!(message.contains(expected), "`{sql}` expected `{expected}`, got: {message}");
+    }
+}
+
+// ─── Clock functions: NOW / CURRENT_TIMESTAMP / CURRENT_DATE / CURRENT_TIME ───
+
+#[test]
+fn clock_functions_return_frozen_values_at_query_start() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // All four clock forms lower cleanly without arguments.
+    let stmt = prepare_sql(
+        "SELECT NOW() AS now_v, CURRENT_TIMESTAMP AS ct_v, CURRENT_DATE AS cd_v, CURRENT_TIME AS ctm_v FROM Account",
+    )
+    .expect("clock functions lower");
+    assert_eq!(stmt.query_kind, QueryKind::Read);
+
+    // Execute twice in quick succession — the frozen instant means both rows
+    // carry the same timestamp within one query.
+    let outcome = execute_sql(
+        "SELECT NOW() AS a, NOW() AS b, CURRENT_TIMESTAMP AS c FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("clock executes");
+    assert_eq!(outcome.rows.len(), 3);
+    for row in &outcome.rows {
+        let a = row.get("a").expect("col a");
+        let b = row.get("b").expect("col b");
+        let c = row.get("c").expect("col c");
+        assert_eq!(a, b, "NOW() must be idempotent within one row");
+        assert_eq!(b, c, "NOW() and CURRENT_TIMESTAMP must be identical");
+        assert!(matches!(a, Value::Timestamp(_)), "NOW() must produce a Timestamp");
+    }
+}
+
+#[test]
+fn clock_date_and_time_match_the_frozen_timestamp_parts() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT NOW() AS n, CURRENT_DATE AS d, CURRENT_TIME AS t FROM Account WHERE account_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("date and time execute");
+    let row = &outcome.rows[0];
+    if let (Value::Timestamp(ts), Value::Date(date), Value::Time(time)) = (
+        row.get("n").expect("now"),
+        row.get("d").expect("current_date"),
+        row.get("t").expect("current_time"),
+    ) {
+        let (expected_date, expected_time) = ts.to_parts();
+        assert_eq!(date, &expected_date, "CURRENT_DATE must match NOW() date part");
+        assert_eq!(time, &expected_time, "CURRENT_TIME must match NOW() time part");
+    }
+    else {
+        panic!("unexpected clock output kinds: {row:?}");
+    }
+}
+
+#[test]
+fn clock_functions_reject_arguments_at_prepare_time() {
+    for sql in [
+        "SELECT NOW(1) AS v FROM Account",
+        "SELECT CURRENT_TIMESTAMP('extra') AS v FROM Account",
+        "SELECT CURRENT_DATE(NOW()) AS v FROM Account",
+        "SELECT CURRENT_TIME(0) AS v FROM Account",
+    ] {
+        let err = prepare_sql(sql).expect_err("clock functions take no arguments");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("takes no arguments"),
+            "`{sql}` must reject with 'takes no arguments', got: {msg}"
+        );
     }
 }
 
