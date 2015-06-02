@@ -986,3 +986,24 @@ pub enum WriteOp {
         predicate: Option<Pred>,
     },
 }
+
+/// Closed physical op set for session / transaction boundary statements.
+///
+/// These are lowered from SQL `TransactionAction` variants. The engine
+/// dispatches them directly onto the [`yydb_engine::Connection`] boundary
+/// instead of running them through the read or write executors.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionOp {
+    /// `BEGIN` / `START TRANSACTION`.
+    Begin,
+    /// `COMMIT` / `COMMIT TRANSACTION`.
+    Commit,
+    /// `ROLLBACK` (without a savepoint target).
+    Rollback,
+    /// `SAVEPOINT <name>`.
+    Savepoint(String),
+    /// `ROLLBACK TO SAVEPOINT <name>` / `ROLLBACK TO <name>`.
+    RollbackToSavepoint(String),
+    /// `RELEASE SAVEPOINT <name>` / `RELEASE <name>`.
+    ReleaseSavepoint(String),
+}

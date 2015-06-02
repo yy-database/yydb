@@ -9,8 +9,8 @@ use std::{cell::Cell, collections::BTreeMap, rc::Rc};
 use oak_sql::ast::{
     Assignment, BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource,
     InsertStatement, JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem, SelectStatement,
-    SetOperationStatement, SetOperator, SqlRoot, SqlStatement, TableName, TableSource, UnaryOperator, UpdateStatement,
-    WindowFrame as AstWindowFrame, WindowFrameBound as AstWindowFrameBound, WindowFrameUnit as AstWindowFrameUnit,
+    SetOperationStatement, SetOperator, SqlRoot, SqlStatement, TableName, TableSource, TransactionAction, UnaryOperator,
+    UpdateStatement, WindowFrame as AstWindowFrame, WindowFrameBound as AstWindowFrameBound, WindowFrameUnit as AstWindowFrameUnit,
     WindowOrderItem, WindowSpec as AstWindowSpec, WithClause,
 };
 use yydb_types::{Error, Result, Value};
@@ -18,9 +18,9 @@ use yydb_types::{Error, Result, Value};
 use super::{
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, CountExpr, Expr, JoinKind,
-        OUTER_ROW_MARKER, Pred, ProjectExpr, ProjectField, QueryOp, ReturningProjection, ScalarFunction, SetOpKind,
-        SortKey, WindowField, WindowFrame, WindowFrameBound, WindowFunction, WindowOrderKey, WindowSpec,
-        WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
+        OUTER_ROW_MARKER, Pred, ProjectExpr, ProjectField, QueryOp, ReturningProjection, ScalarFunction,
+        SessionOp, SetOpKind, SortKey, WindowField, WindowFrame, WindowFrameBound, WindowFunction, WindowOrderKey,
+        WindowSpec, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     params::{PARAM_PREFIX, ParameterDescriptor, name_to_slot},
 };
@@ -29,13 +29,18 @@ fn sql_error(message: impl Into<String>) -> Error {
     Error::Schema { message: message.into() }
 }
 
-/// One lowered SQL program: either a read pipeline or a write op list.
+/// One lowered SQL program: either a read pipeline, a write op list, or a
+/// session/transaction boundary op.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SqlPlan {
-    /// Read pipeline ending in [`QueryOp::Collect`]; empty for writes.
+    /// Read pipeline ending in [`QueryOp::Collect`]; empty for writes and session ops.
     pub read_ops: Vec<QueryOp>,
-    /// Write operators; empty for reads.
+    /// Write operators; empty for reads and session ops.
     pub write_ops: Vec<WriteOp>,
+    /// Session / transaction boundary operator list (empty for read and write
+    /// statements). Always at most one op — SQL source must contain exactly
+    /// one statement, and session statements lower to a single op.
+    pub session_ops: Vec<SessionOp>,
     /// Tables read by this statement.
     pub read_set: Vec<String>,
     /// Tables written by this statement.
@@ -68,7 +73,7 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
             let (ops, _) = lower_select(select, parameters, &CteScope::new())?;
             let mut read_set = Vec::new();
             collect_read_tables(&ops, &mut read_set);
-            Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), read_set, write_set: Vec::new() })
+            Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), session_ops: Vec::new(), read_set, write_set: Vec::new() })
         }
         SqlStatement::Insert(insert) => {
             let op = lower_insert(insert, parameters)?;
@@ -77,6 +82,7 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
                 read_set: read_tables_of_write(&op),
                 write_ops: vec![op],
                 write_set: vec![insert.table_name.name.name.to_string()],
+                session_ops: Vec::new(),
             })
         }
         SqlStatement::Update(update) => {
@@ -86,6 +92,7 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
                 write_ops: vec![op],
                 read_set: Vec::new(),
                 write_set: vec![update.table_name.name.name.to_string()],
+                session_ops: Vec::new(),
             })
         }
         SqlStatement::Delete(delete) => {
@@ -95,20 +102,38 @@ pub fn lower_root(root: &SqlRoot, parameters: &[ParameterDescriptor]) -> Result<
                 write_ops: vec![op],
                 read_set: Vec::new(),
                 write_set: vec![delete.table_name.name.name.to_string()],
+                session_ops: Vec::new(),
             })
         }
         SqlStatement::SetOperation(set_operation) => {
             let ops = lower_set_operation(set_operation, parameters, &CteScope::new())?;
             let mut read_set = Vec::new();
             collect_read_tables(&ops, &mut read_set);
-            Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), read_set, write_set: Vec::new() })
+            Ok(SqlPlan { read_ops: ops, write_ops: Vec::new(), session_ops: Vec::new(), read_set, write_set: Vec::new() })
+        }
+        SqlStatement::Transaction(transaction) => {
+            let op = match &transaction.action {
+                TransactionAction::Begin => SessionOp::Begin,
+                TransactionAction::Commit => SessionOp::Commit,
+                TransactionAction::Rollback => SessionOp::Rollback,
+                TransactionAction::Savepoint(name) => SessionOp::Savepoint(name.to_string()),
+                TransactionAction::RollbackToSavepoint(name) => SessionOp::RollbackToSavepoint(name.to_string()),
+                TransactionAction::ReleaseSavepoint(name) => SessionOp::ReleaseSavepoint(name.to_string()),
+            };
+            Ok(SqlPlan {
+                read_ops: Vec::new(),
+                write_ops: Vec::new(),
+                session_ops: vec![op],
+                read_set: Vec::new(),
+                write_set: Vec::new(),
+            })
         }
         SqlStatement::Error { message, .. } => Err(sql_error(format!("SQL statement error: {message}"))),
         SqlStatement::Create(_) | SqlStatement::Drop(_) | SqlStatement::Alter(_) => {
             Err(sql_error("DDL is owned by the schema document, not by SQL statements"))
         }
-        SqlStatement::Transaction(_) | SqlStatement::SetNames(_) | SqlStatement::SetVariable(_) => {
-            Err(sql_error("session statements are applied through the connection surface, not lowered into operators"))
+        SqlStatement::SetNames(_) | SqlStatement::SetVariable(_) => {
+            Err(sql_error("session variable statements are not part of the YYDB SQL query surface"))
         }
         SqlStatement::Show(_) | SqlStatement::Pragma(_) => {
             Err(sql_error("session introspection is not part of the YYDB SQL query surface"))

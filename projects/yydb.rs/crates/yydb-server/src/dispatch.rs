@@ -274,6 +274,7 @@ fn dispatch_authed(conn: &Connection, state: &SessionState, request: &Frame) -> 
             let required = match plan.statement.query_kind {
                 QueryKind::Read => Permission::Read,
                 QueryKind::Write => Permission::Write,
+                QueryKind::Session => Permission::Write,
             };
             {
                 let session_guard = state.session.lock().expect("session auth poisoned");

@@ -19,7 +19,7 @@ use yydb_types::{Error, Result, Value};
 
 use super::{
     exec, lower,
-    ops::{BoundValue, QueryOp, QueryRow, SlotTy, WriteOp},
+    ops::{BoundValue, QueryOp, QueryRow, SessionOp, SlotTy, WriteOp},
     sql,
     write::{self, WriteOutcome},
 };
@@ -52,13 +52,15 @@ pub struct ParameterDescriptor {
     pub usage_count: u32,
 }
 
-/// Read / write query kind — populated after lowering when ops are inspected.
+/// Read / write / session query kind — populated after lowering when ops are inspected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum QueryKind {
     /// Read pipeline ending in `.collect()`.
     Read,
     /// Write program (`Type::insert`, etc.).
     Write,
+    /// Session / transaction boundary (`BEGIN`, `COMMIT`, `SAVEPOINT`, …).
+    Session,
 }
 
 /// A pre-parsed, pre-lowered query plan with known parameter slots.
@@ -86,7 +88,13 @@ pub struct PreparedStatement {
     /// Lowered write ops (empty for read statements).
     #[serde(skip)]
     pub write_ops: Vec<WriteOp>,
-    /// Whether this statement is a read pipeline or a write program.
+    /// Lowered session / transaction boundary ops (empty for read and write
+    /// statements). Always at most one op — SQL source must contain exactly
+    /// one statement.
+    #[serde(skip)]
+    pub session_ops: Vec<SessionOp>,
+    /// Whether this statement is a read pipeline, a write program, or a
+    /// session boundary.
     pub query_kind: QueryKind,
     /// Parameter descriptors in ascending `index` order.
     pub parameters: Vec<ParameterDescriptor>,
@@ -170,6 +178,7 @@ pub fn prepare(source: &str) -> Result<PreparedStatement> {
         dialect: Dialect::Vos,
         ops,
         write_ops: Vec::new(),
+        session_ops: Vec::new(),
         query_kind,
         parameters,
         read_set,
@@ -193,13 +202,22 @@ pub fn prepare_sql(source: &str) -> Result<PreparedStatement> {
     let (parameters, rewritten) = scan_and_rewrite(source, Dialect::Sql)?;
     let source_fingerprint = fingerprint(source);
     let plan = sql::lower(&rewritten, &parameters)?;
-    let query_kind = if plan.write_ops.is_empty() { QueryKind::Read } else { QueryKind::Write };
+    let query_kind = if !plan.session_ops.is_empty() {
+        QueryKind::Session
+    }
+    else if plan.write_ops.is_empty() {
+        QueryKind::Read
+    }
+    else {
+        QueryKind::Write
+    };
 
     Ok(PreparedStatement {
         statement_id: format!("stmt-{source_fingerprint}"),
         dialect: Dialect::Sql,
         ops: plan.read_ops,
         write_ops: plan.write_ops,
+        session_ops: plan.session_ops,
         query_kind,
         parameters,
         read_set: plan.read_set,

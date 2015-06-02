@@ -63,6 +63,10 @@ pub struct Connection {
     pub(crate) backend: std::sync::Arc<Backend>,
     pub(crate) operation_lock: std::sync::Arc<Mutex<()>>,
     pub(crate) txn: Mutex<Option<State>>,
+    /// Named savepoint snapshots, innermost last. Pushed by `SAVEPOINT`,
+    /// consumed by `ROLLBACK TO SAVEPOINT` and `RELEASE SAVEPOINT`.
+    /// Emptied when the enclosing transaction ends.
+    pub(crate) savepoints: Mutex<Vec<(String, State)>>,
     pub(crate) udfs: Mutex<UdfSubsystem>,
     pub(crate) objects: std::sync::Arc<ObjectStore>,
     pub(crate) closed: std::sync::Arc<AtomicBool>,
@@ -93,6 +97,7 @@ impl Connection {
         let connection = Self {
             operation_lock: std::sync::Arc::new(Mutex::new(())),
             txn: Mutex::new(None),
+            savepoints: Mutex::new(Vec::new()),
             backend: std::sync::Arc::new(Backend::File { path: path.clone(), database: Mutex::new(database) }),
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: std::sync::Arc::new(if is_yydx_main_path(&path) {
@@ -114,6 +119,7 @@ impl Connection {
         Ok(Self {
             operation_lock: std::sync::Arc::new(Mutex::new(())),
             txn: Mutex::new(None),
+            savepoints: Mutex::new(Vec::new()),
             backend: std::sync::Arc::new(Backend::Memory { state: Mutex::new(State::default()) }),
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: std::sync::Arc::new(ObjectStore::open_ephemeral()),
@@ -132,6 +138,7 @@ impl Connection {
             backend: std::sync::Arc::clone(&self.backend),
             operation_lock: std::sync::Arc::clone(&self.operation_lock),
             txn: Mutex::new(None),
+            savepoints: Mutex::new(Vec::new()),
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: std::sync::Arc::clone(&self.objects),
             closed: std::sync::Arc::clone(&self.closed),

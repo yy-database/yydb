@@ -34,8 +34,8 @@ use yydb_types::{TableUniqueConstraint, Value};
 pub use catalog::resolved_contract_from_document;
 pub use ops::{
     AggregateField, BoundValue, CmpOp, ConflictAction, ConflictClause, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp,
-    QueryRow, ReturningProjection, SetOpKind, SlotTy, SortKey, WindowField, WindowFrame, WindowFrameBound, WindowFunction,
-    WindowOrderKey, WindowSpec, WriteAssignment, WriteField, WriteOp,
+    QueryRow, ReturningProjection, SessionOp, SetOpKind, SlotTy, SortKey, WindowField, WindowFrame, WindowFrameBound,
+    WindowFunction, WindowOrderKey, WindowSpec, WriteAssignment, WriteField, WriteOp,
 };
 pub use params::{
     BoundStatement, ParameterDescriptor, PreparedStatement, QueryKind, bind_named, bind_ordered, execute_prepared,
@@ -123,5 +123,8 @@ pub fn execute_sql(
             let outcome = params::execute_write_prepared(&stmt, &bound, contract, declared, records)?;
             Ok(SqlOutcome { rows: outcome.rows, affected: outcome.affected })
         }
+        QueryKind::Session => Err(yydb_types::Error::Schema {
+            message: "session / transaction boundary statements must be executed through the connection surface".into(),
+        }),
     }
 }
