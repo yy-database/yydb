@@ -10,7 +10,7 @@ use yydb_protocol::{
     decode_prepare, decode_scalar_call, decode_schema_ensure, encode_authenticate_ok, encode_execute_prepared_ok,
     encode_kv_get_ok, encode_prepare_ok, encode_scalar_call_ok, encode_schema_ok, error_frame,
 };
-use yydb_query::{PreparedStatement, QueryKind};
+use yydb_query::{PreparedStatement, QueryKind, SessionOp};
 use yydb_types::{Error, Result};
 
 use crate::auth::{AuthBootstrap, Permission, Principal, Session, SessionRegistry};
@@ -297,7 +297,28 @@ fn dispatch_authed(conn: &Connection, state: &SessionState, request: &Frame) -> 
                 },
                 None => BTreeMap::new(),
             };
-            let rows = match conn.query_prepared(&plan.statement, &named_params) {
+
+            // ── Route Session ops directly onto the connection boundary ──
+            // `query_prepared` inside the engine only drives the read pipeline.
+            // Session / transaction boundary ops must go straight through the
+            // connection surface so savepoint state and txn bookkeeping see them.
+            let rows_result: Result<Vec<yydb_query::QueryRow>> = match plan.statement.query_kind {
+                QueryKind::Session => (|| -> Result<Vec<yydb_query::QueryRow>> {
+                    for op in &plan.statement.session_ops {
+                        match op {
+                            SessionOp::Begin => conn.begin()?,
+                            SessionOp::Commit => conn.commit()?,
+                            SessionOp::Rollback => conn.rollback()?,
+                            SessionOp::Savepoint(name) => conn.savepoint(name)?,
+                            SessionOp::RollbackToSavepoint(name) => conn.rollback_to_savepoint(name)?,
+                            SessionOp::ReleaseSavepoint(name) => conn.release_savepoint(name)?,
+                        }
+                    }
+                    Ok(Vec::new())
+                })(),
+                _ => conn.query_prepared(&plan.statement, &named_params),
+            };
+            let rows = match rows_result {
                 Ok(r) => r,
                 Err(error) => return error_frame(id, &error),
             };
