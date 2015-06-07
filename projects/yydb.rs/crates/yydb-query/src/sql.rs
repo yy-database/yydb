@@ -394,18 +394,39 @@ fn lower_set_operation(
     ctes: &CteScope,
 ) -> Result<Vec<QueryOp>> {
     let mut scope = ctes.clone();
-    let mut left = (*statement.left).clone();
-    extend_cte_scope(&mut scope, left.with.take().as_ref(), parameters)?;
 
-    let left_ops = lower_select(&left, parameters, &scope)?.0;
-    let right_ops = lower_select(&statement.right, parameters, &scope)?.0;
-    let columns = pipeline_output_columns(&left_ops);
-    let right_columns = pipeline_output_columns(&right_ops);
+    // Lower the first operand and extend CTE scope from it (Oak attaches WITH
+    // only to the leftmost operand; we surface those CTEs to every operand).
+    let mut ops: Vec<QueryOp> = {
+        let first = &statement.operands[0];
+        let mut left = (**first).clone();
+        extend_cte_scope(&mut scope, left.with.take().as_ref(), parameters)?;
+        lower_select(&left, parameters, &scope)?.0
+    };
+    // Output columns are anchored to the first operand and never change as we
+    // fold subsequent operands — every set operation keeps the left side's
+    // column names.
+    let columns = pipeline_output_columns(&ops);
 
-    if let (Some(columns), Some(right_columns)) = (&columns, &right_columns)
-        && columns.len() != right_columns.len()
-    {
-        return Err(set_operation_column_mismatch(statement.operator, columns.len(), right_columns.len()));
+    // Fold remaining operands into the pipeline as nested SetOperation nodes.
+    // `operands.len() == operators.len() + 1` by invariant.
+    for (i, operator) in statement.operators.iter().enumerate() {
+        let right = lower_select(&statement.operands[i + 1], parameters, &scope)?.0;
+        let right_columns = pipeline_output_columns(&right);
+
+        if let (Some(c), Some(rc)) = (&columns, &right_columns)
+            && c.len() != rc.len()
+        {
+            return Err(set_operation_column_mismatch(*operator, c.len(), rc.len()));
+        }
+
+        ops = vec![QueryOp::SetOperation {
+            kind: set_operation_kind(*operator),
+            left: ops,
+            right,
+            columns: columns.clone(),
+            right_columns,
+        }];
     }
 
     // The combined rows carry the left operand's column names, so an `ORDER BY`
@@ -419,32 +440,26 @@ fn lower_set_operation(
                 return Err(sql_error(format!(
                     "ORDER BY column `{}` is not an output column of this {} (output columns: {})",
                     key.field,
-                    set_operator_name(statement.operator),
+                    set_operator_name(*statement.operators.first().unwrap_or(&SetOperator::Union)),
                     columns.join(", ")
                 )));
             }
         }
     }
 
-    let mut ops = vec![QueryOp::SetOperation {
-        kind: set_operation_kind(statement.operator),
-        left: left_ops,
-        right: right_ops,
-        columns,
-        right_columns,
-    }];
+    let mut final_ops = ops;
     if let Some(order_by) = &statement.order_by {
         let mut keys = Vec::with_capacity(order_by.items.len());
         for item in &order_by.items {
             keys.push(lower_sort_key(item, parameters, &scope)?);
         }
-        ops.push(QueryOp::Sort { keys });
+        final_ops.push(QueryOp::Sort { keys });
     }
     if let Some(limit) = &statement.limit {
-        lower_limit(limit, parameters, &scope, &mut ops)?;
+        lower_limit(limit, parameters, &scope, &mut final_ops)?;
     }
-    ops.push(QueryOp::Collect);
-    Ok(ops)
+    final_ops.push(QueryOp::Collect);
+    Ok(final_ops)
 }
 
 fn set_operation_column_mismatch(operator: SetOperator, left: usize, right: usize) -> Error {
@@ -499,6 +514,7 @@ fn lower_join_clause(
         JoinType::Left => JoinKind::Left,
         JoinType::Right => JoinKind::Right,
         JoinType::Full => JoinKind::Full,
+        JoinType::Cross => JoinKind::Cross,
     };
     let on = join.on.as_ref().map(|expr| lower_predicate(expr, parameters, ctes)).transpose()?.unwrap_or(Pred::True);
     Ok(match right {
@@ -574,6 +590,9 @@ fn lower_group_key(item: &GroupByItem) -> Result<ProjectField> {
         }
         GroupByItem::Position { index, .. } => {
             Err(sql_error(format!("GROUP BY positional reference (`GROUP BY {index}`) is not yet supported by YYDB MVP")))
+        }
+        GroupByItem::GroupingSets(_) | GroupByItem::Rollup(_) | GroupByItem::Cube(_) => {
+            Err(sql_error("GROUPING SETS / ROLLUP / CUBE are not yet supported by YYDB MVP"))
         }
     }
 }
@@ -2055,6 +2074,26 @@ fn check_select_references(select: &SelectStatement, scope: &CteScope) -> Result
                 GroupByItem::Column(identifier) => check_identifier(identifier, scope, RefSite::WholeResult("GROUP BY"))?,
                 GroupByItem::Expression(expr) => check_reference(expr, scope, RefSite::WholeResult("GROUP BY"))?,
                 GroupByItem::Position { .. } => {}
+                GroupByItem::GroupingSets(inner) => {
+                    for set in inner {
+                        for sub in set {
+                            match sub {
+                                GroupByItem::Column(identifier) => check_identifier(identifier, scope, RefSite::WholeResult("GROUP BY"))?,
+                                GroupByItem::Expression(expr) => check_reference(expr, scope, RefSite::WholeResult("GROUP BY"))?,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                GroupByItem::Rollup(inner) | GroupByItem::Cube(inner) => {
+                    for sub in inner {
+                        match sub {
+                            GroupByItem::Column(identifier) => check_identifier(identifier, scope, RefSite::WholeResult("GROUP BY"))?,
+                            GroupByItem::Expression(expr) => check_reference(expr, scope, RefSite::WholeResult("GROUP BY"))?,
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
     }

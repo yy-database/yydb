@@ -538,6 +538,9 @@ pub enum JoinKind {
     /// `FULL JOIN` — unmatched rows from both sides are kept, with `NULL` for
     /// the columns of the side that has no matching row.
     Full,
+    /// `CROSS JOIN` — produces the Cartesian product of the two row sets
+    /// without an `ON` condition.
+    Cross,
 }
 
 /// One aggregate function call.

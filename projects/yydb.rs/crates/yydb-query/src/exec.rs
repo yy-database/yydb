@@ -1471,6 +1471,7 @@ fn execute_join(
         JoinKind::Left => execute_left_join(left_rows, right_rows, prefix, on, contract, records, bound_values, outer),
         JoinKind::Right => execute_right_join(left_rows, right_rows, prefix, on, contract, records, bound_values, outer),
         JoinKind::Full => execute_full_join(left_rows, right_rows, prefix, on, contract, records, bound_values, outer),
+        JoinKind::Cross => execute_cross_join(left_rows, right_rows, prefix),
     }
 }
 
@@ -1654,6 +1655,23 @@ fn execute_full_join(
         }
     }
 
+    Ok(out)
+}
+
+/// `CROSS JOIN` — the Cartesian product of both row sets. Every left row is
+/// paired with every right row, and no `ON` predicate is evaluated.
+fn execute_cross_join(
+    left_rows: &[QueryRow],
+    right_rows: &[QueryRow],
+    prefix: &str,
+) -> Result<Vec<QueryRow>> {
+    let capacity = left_rows.len().saturating_mul(right_rows.len());
+    let mut out: Vec<QueryRow> = Vec::with_capacity(capacity);
+    for left_row in left_rows {
+        for right_row in right_rows {
+            out.push(merge_rows(left_row, right_row, prefix));
+        }
+    }
     Ok(out)
 }
 
