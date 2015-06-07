@@ -80,6 +80,15 @@ fn encode_value(value: &Value) -> Result<JsonValue> {
         Value::Null => JsonValue::Null,
         Value::Bool(b) => JsonValue::Bool(*b),
         Value::I64(i) => JsonValue::from(*i),
+        Value::F64(number) => {
+            if !number.is_finite() {
+                return Err(Error::Unsupported("query row encoding rejects non-finite REAL values"));
+            }
+            JsonValue::Number(
+                serde_json::Number::from_f64(*number)
+                    .ok_or(Error::Unsupported("query row encoding rejects non-finite REAL values"))?,
+            )
+        }
         Value::Text(s) => JsonValue::String(s.clone()),
         Value::Uuid(id) => JsonValue::String(id.to_string()),
         Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Decimal(_) => {
@@ -87,7 +96,7 @@ fn encode_value(value: &Value) -> Result<JsonValue> {
         }
         _ => {
             return Err(Error::Unsupported(
-                "query row encoding supports null, bool, i64, text, uuid, date, time, timestamp, and decimal only",
+                "query row encoding supports null, bool, i64, real, text, uuid, date, time, timestamp, and decimal only",
             ));
         }
     })
@@ -98,7 +107,19 @@ fn decode_value(value: &JsonValue) -> Result<Value> {
         JsonValue::Null => Value::Null,
         JsonValue::Bool(b) => Value::Bool(*b),
         JsonValue::Number(n) => {
-            Value::I64(n.as_i64().ok_or_else(|| Error::Corrupt("row json integer is outside the signed 64-bit range"))?)
+            if let Some(integer) = n.as_i64() {
+                Value::I64(integer)
+            }
+            else if n.is_f64() {
+                let real = n.as_f64().ok_or_else(|| Error::Corrupt("row json real is not a finite f64"))?;
+                if !real.is_finite() {
+                    return Err(Error::Corrupt("row json real is not finite"));
+                }
+                Value::F64(real)
+            }
+            else {
+                return Err(Error::Corrupt("row json integer is outside the signed 64-bit range"));
+            }
         }
         JsonValue::String(s) => Value::Text(s.clone()),
         JsonValue::Object(_) => match scalar::tagged_value_from_json(value) {

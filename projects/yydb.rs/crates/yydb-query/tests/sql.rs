@@ -2442,9 +2442,8 @@ fn update_can_set_null_on_nullable_column() {
 // ─── REAL literals ─────────────────────────────────────────────────────
 //
 // A literal with a fractional part or an exponent lowers to `Value::F64`.
-// REAL is a transient expression type: comparisons promote the integer side to
-// `f64`, and storing a REAL into any column is rejected because YYDB has no
-// persisted real column.
+// Comparisons promote the integer side to `f64`. A column declared `f64` is the
+// only place a REAL is persisted; every other column keeps rejecting it.
 
 #[test]
 fn real_literal_matches_integer_column_through_numeric_promotion() {
@@ -2531,6 +2530,143 @@ fn insert_rejects_real_number_in_integer_column() {
     let msg = format!("{err}");
     assert!(msg.contains("REAL") && msg.contains("integer"), "unexpected: {msg}");
     assert!(records.is_empty(), "a rejected REAL write must not publish rows");
+}
+
+// ─── REAL columns (`f64`) ──────────────────────────────────────────────
+
+const REAL_SCHEMA: &str = r#"
+table Metric {
+    @@metric_id: i64,
+    label: utf8,
+    ratio: f64,
+}
+"#;
+
+fn real_contract() -> ResolvedContract {
+    resolved_contract_from_document(REAL_SCHEMA).expect("metric schema resolves")
+}
+
+fn seed_metrics(contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>) {
+    exec("INSERT INTO Metric (metric_id, label, ratio) VALUES (1, 'a', 1.5)", &[], contract, records);
+    exec("INSERT INTO Metric (metric_id, label, ratio) VALUES (2, 'b', -2.25)", &[], contract, records);
+    exec("INSERT INTO Metric (metric_id, label, ratio) VALUES (3, 'c', 3)", &[], contract, records);
+}
+
+#[test]
+fn real_column_round_trips_exact_values() {
+    let contract = real_contract();
+    let mut records = BTreeMap::new();
+    seed_metrics(&contract, &mut records);
+
+    let outcome = execute_sql("SELECT metric_id, ratio FROM Metric ORDER BY metric_id", &[], &contract, &[], &mut records)
+        .expect("read real column");
+    assert_eq!(outcome.rows.len(), 3);
+    assert_eq!(outcome.rows[0].get("ratio"), Some(&Value::F64(1.5)));
+    assert_eq!(outcome.rows[1].get("ratio"), Some(&Value::F64(-2.25)));
+    // An integer literal assigned to an `f64` column is promoted, not rejected.
+    assert_eq!(outcome.rows[2].get("ratio"), Some(&Value::F64(3.0)));
+
+    // A fresh read decodes the stored row again, so precision survives storage.
+    let reread = execute_sql("SELECT ratio FROM Metric WHERE metric_id = 1", &[], &contract, &[], &mut records)
+        .expect("re-read real");
+    assert_eq!(reread.rows[0].get("ratio"), Some(&Value::F64(1.5)));
+}
+
+#[test]
+fn real_column_keeps_shortest_round_trip_precision() {
+    let contract = real_contract();
+    let mut records = BTreeMap::new();
+    exec("INSERT INTO Metric (metric_id, label, ratio) VALUES (1, 'a', 0.1)", &[], &contract, &mut records);
+    exec("INSERT INTO Metric (metric_id, label, ratio) VALUES (2, 'b', 0.0000001)", &[], &contract, &mut records);
+
+    let outcome = execute_sql("SELECT ratio FROM Metric ORDER BY metric_id", &[], &contract, &[], &mut records)
+        .expect("read precise reals");
+    assert_eq!(outcome.rows[0].get("ratio"), Some(&Value::F64(0.1)));
+    assert_eq!(outcome.rows[1].get("ratio"), Some(&Value::F64(0.0000001)));
+}
+
+#[test]
+fn real_column_supports_comparison_ordering_and_aggregates() {
+    let contract = real_contract();
+    let mut records = BTreeMap::new();
+    seed_metrics(&contract, &mut records);
+
+    let filtered = execute_sql("SELECT metric_id FROM Metric WHERE ratio > 1.0 ORDER BY metric_id", &[], &contract, &[], &mut records)
+        .expect("real comparison");
+    let filtered_ids: Vec<i64> = filtered
+        .rows
+        .iter()
+        .map(|row| match row.get("metric_id") {
+            Some(Value::I64(id)) => *id,
+            other => panic!("unexpected metric_id {other:?}"),
+        })
+        .collect();
+    assert_eq!(filtered_ids, vec![1, 3]);
+
+    let ordered = execute_sql("SELECT metric_id FROM Metric ORDER BY ratio DESC", &[], &contract, &[], &mut records)
+        .expect("real ordering");
+    let ordered_ids: Vec<i64> = ordered
+        .rows
+        .iter()
+        .map(|row| match row.get("metric_id") {
+            Some(Value::I64(id)) => *id,
+            other => panic!("unexpected metric_id {other:?}"),
+        })
+        .collect();
+    assert_eq!(ordered_ids, vec![3, 1, 2]);
+
+    let aggregates = execute_sql("SELECT SUM(ratio) AS total, AVG(ratio) AS mean FROM Metric", &[], &contract, &[], &mut records)
+        .expect("real aggregates");
+    assert_eq!(aggregates.rows[0].get("total"), Some(&Value::F64(2.25)));
+    assert_eq!(aggregates.rows[0].get("mean"), Some(&Value::F64(0.75)));
+}
+
+#[test]
+fn real_value_is_rejected_by_a_text_column() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    let err = execute_sql(
+        "INSERT INTO Account (account_id, email, tenant, score, active) VALUES (1, 'x', 2.5, 1, true)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("real into a text column must reject");
+    let msg = format!("{err}");
+    assert!(msg.contains("REAL") && msg.contains("f64"), "unexpected: {msg}");
+    assert!(records.is_empty(), "a rejected REAL write must not publish rows");
+}
+
+#[test]
+fn real_column_rejects_text_and_boolean_literals() {
+    let contract = real_contract();
+    let mut records = BTreeMap::new();
+    for literal in ["'one'", "true"] {
+        let sql = format!("INSERT INTO Metric (metric_id, label, ratio) VALUES (1, 'a', {literal})");
+        let err = execute_sql(&sql, &[], &contract, &[], &mut records)
+            .expect_err("a non-numeric literal into an f64 column must reject");
+        assert!(format!("{err}").contains("f64"), "unexpected: {err}");
+        assert!(records.is_empty(), "a rejected write must not publish rows");
+    }
+}
+
+#[test]
+fn real_column_rejects_non_finite_parameters() {
+    let contract = real_contract();
+    let mut records = BTreeMap::new();
+    for value in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+        let err = execute_sql(
+            "INSERT INTO Metric (metric_id, label, ratio) VALUES (?, ?, ?)",
+            &[Value::I64(1), Value::Text("a".into()), Value::F64(value)],
+            &contract,
+            &[],
+            &mut records,
+        )
+        .expect_err("a non-finite REAL must reject");
+        assert!(format!("{err}").contains("finite"), "unexpected: {err}");
+        assert!(records.is_empty(), "a rejected write must not publish rows");
+    }
 }
 
 // ─── UUID type column round-trip via parameter binding ──────────────────
