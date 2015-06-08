@@ -1106,89 +1106,45 @@ fn lower_predicate(expr: &Expression, parameters: &[ParameterDescriptor], ctes: 
                 }
             }
             let value = lower_bound_value(right, parameters)?;
-            Ok(Pred::FieldCmp { path: left_path, op: cmp, value })
+            // A plain column comparison goes through `ExprCmp` so a `NULL` on
+            // either side is SQL unknown. `FieldCmp` keeps VOS ordinary equality
+            // and the decided `IS [NOT] TRUE/FALSE` tests.
+            Ok(Pred::ExprCmp { expr: Box::new(Expr::Column { path: left_path }), op: cmp, value })
         }
         Expression::Unary { op: UnaryOperator::Not, expr, .. } => {
             Ok(Pred::Not(Box::new(lower_predicate(expr, parameters, ctes)?)))
         }
         Expression::IsNull { expr, negated, .. } => {
-            if let Ok(path) = column_path(expr, ctes) {
-                Ok(Pred::FieldCmp {
-                    path,
-                    op: if *negated { CmpOp::Ne } else { CmpOp::Eq },
-                    value: BoundValue::Literal(Value::Null),
-                })
-            }
-            else {
-                let lowered = lower_expr(expr, parameters, ctes)?;
-                Ok(Pred::ExprIsNull { expr: Box::new(lowered), negated: *negated })
-            }
+            // `IS [NOT] NULL` is decided for every operand shape, including a
+            // bare column, so it never lowers to a comparison against `NULL`.
+            let lowered = lower_expr(expr, parameters, ctes)?;
+            Ok(Pred::ExprIsNull { expr: Box::new(lowered), negated: *negated })
         }
         Expression::IsTruth { expr, value, negated, .. } => {
-            if let Ok(path) = column_path(expr, ctes) {
-                Ok(Pred::FieldCmp {
-                    path,
-                    op: if *negated { CmpOp::Ne } else { CmpOp::Eq },
-                    value: BoundValue::Literal(Value::Bool(*value)),
-                })
-            }
-            else {
-                let lowered = lower_expr(expr, parameters, ctes)?;
-                Ok(Pred::ExprCmp {
-                    expr: Box::new(lowered),
-                    op: if *negated { CmpOp::Ne } else { CmpOp::Eq },
-                    value: BoundValue::Literal(Value::Bool(*value)),
-                })
-            }
+            // `IS [NOT] TRUE/FALSE` is decided as well: a `NULL` operand is
+            // FALSE for the positive forms instead of unknown.
+            let lowered = lower_expr(expr, parameters, ctes)?;
+            Ok(Pred::ExprIsTruth { expr: Box::new(lowered), value: *value, negated: *negated })
         }
         Expression::InList { expr, list, negated, .. } => {
-            if let Ok(path) = column_path(expr, ctes) {
-                let mut branches = Vec::with_capacity(list.len());
-                for item in list {
-                    branches.push(Pred::FieldCmp {
-                        path: path.clone(),
-                        op: CmpOp::Eq,
-                        value: lower_bound_value(item, parameters)?,
-                    });
-                }
-                let mut predicate = branches
-                    .into_iter()
-                    .reduce(|left, right| Pred::Or(Box::new(left), Box::new(right)))
-                    .ok_or_else(|| sql_error("IN requires at least one value"))?;
-                if *negated {
-                    predicate = Pred::Not(Box::new(predicate));
-                }
-                Ok(predicate)
+            let lowered = lower_expr(expr, parameters, ctes)?;
+            let mut values = Vec::with_capacity(list.len());
+            for item in list {
+                values.push(lower_bound_value(item, parameters)?);
             }
-            else {
-                let lowered = lower_expr(expr, parameters, ctes)?;
-                let mut values = Vec::with_capacity(list.len());
-                for item in list {
-                    values.push(lower_bound_value(item, parameters)?);
-                }
-                Ok(Pred::ExprInList { expr: Box::new(lowered), list: values, negated: *negated })
+            if values.is_empty() {
+                return Err(sql_error("IN requires at least one value"));
             }
+            Ok(Pred::ExprInList { expr: Box::new(lowered), list: values, negated: *negated })
         }
         Expression::Between { expr, low, high, negated, .. } => {
-            if let Ok(path) = column_path(expr, ctes) {
-                let mut predicate = Pred::And(
-                    Box::new(Pred::FieldCmp { path: path.clone(), op: CmpOp::Ge, value: lower_bound_value(low, parameters)? }),
-                    Box::new(Pred::FieldCmp { path, op: CmpOp::Le, value: lower_bound_value(high, parameters)? }),
-                );
-                if *negated {
-                    predicate = Pred::Not(Box::new(predicate));
-                }
-                Ok(predicate)
-            }
-            else {
-                let lowered = lower_expr(expr, parameters, ctes)?;
-                Ok(Pred::ExprBetween {
-                    expr: Box::new(lowered),
-                    low: lower_bound_value(low, parameters)?,
-                    high: lower_bound_value(high, parameters)?,
-                    negated: *negated,
-                })
-            }
+            let lowered = lower_expr(expr, parameters, ctes)?;
+            Ok(Pred::ExprBetween {
+                expr: Box::new(lowered),
+                low: lower_bound_value(low, parameters)?,
+                high: lower_bound_value(high, parameters)?,
+                negated: *negated,
+            })
         }
         Expression::Identifier(identifier) => {
             Ok(Pred::FieldBool { path: reference_path(&identifier.name, ctes), value: BoundValue::Literal(Value::Bool(true)) })
@@ -1696,6 +1652,36 @@ fn reject_excluded_paths(predicate: &Pred) -> Result<()> {
             _ => Ok(()),
         }
     }
+    fn check_expr(expr: &Expr) -> Result<()> {
+        match expr {
+            Expr::Column { path } => check(path),
+            Expr::Bound(_) => Ok(()),
+            Expr::Case { branches, else_branch } => {
+                for (when, then) in branches {
+                    check_expr(when)?;
+                    check_expr(then)?;
+                }
+                match else_branch {
+                    Some(expr) => check_expr(expr),
+                    None => Ok(()),
+                }
+            }
+            Expr::Cast { expr, .. } => check_expr(expr),
+            Expr::Binary { left, right, .. } => {
+                check_expr(left)?;
+                check_expr(right)
+            }
+            Expr::Not(inner) => check_expr(inner),
+            Expr::Function { args, .. } => {
+                for arg in args {
+                    check_expr(arg)?;
+                }
+                Ok(())
+            }
+            // A subquery has its own scope, checked when it is lowered.
+            Expr::Subquery { .. } => Ok(()),
+        }
+    }
     match predicate {
         Pred::True | Pred::False => Ok(()),
         Pred::FieldBool { path, .. } => check(path),
@@ -1716,13 +1702,13 @@ fn reject_excluded_paths(predicate: &Pred) -> Result<()> {
         // The subquery has its own scope, checked when it is lowered. The
         // compared field still belongs to this statement.
         Pred::FieldCmpSubquery { path, .. } | Pred::FieldCmpScalar { path, .. } => check(path),
-        // `ExprCmp` may carry `Expr::Column { path, .. }` internally but the
-        // lowering already validates every path it contains, so nothing extra
-        // is needed here.
-        Pred::ExprCmp { .. } => Ok(()),
-        // Same story — the lowering walks the expression tree and validates
-        // every contained column path. Nothing extra to do here.
-        Pred::ExprIsNull { .. } | Pred::ExprBetween { .. } | Pred::ExprInList { .. } => Ok(()),
+        // Every expression-bearing predicate carries its column paths inside
+        // `Expr`, so the whole expression tree is checked here.
+        Pred::ExprCmp { expr, .. }
+        | Pred::ExprIsNull { expr, .. }
+        | Pred::ExprIsTruth { expr, .. }
+        | Pred::ExprBetween { expr, .. }
+        | Pred::ExprInList { expr, .. } => check_expr(expr),
         // Subquery has its own scope checked at lowering time; the tested expr
         // was already validated while being lowered.
         Pred::ExprInSubquery { .. } | Pred::ExprInSet { .. } => Ok(()),

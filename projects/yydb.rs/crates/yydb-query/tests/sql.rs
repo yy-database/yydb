@@ -2439,6 +2439,181 @@ fn update_can_set_null_on_nullable_column() {
     assert_eq!(ids(&nulls.rows), vec![1]);
 }
 
+// ─── NULL three-valued logic ───────────────────────────────────────────
+//
+// Every SQL comparison, `IN`, `BETWEEN`, `AND`, `OR` and `NOT` follows SQL
+// three-valued logic: a `NULL` operand is unknown, and `WHERE` keeps a row only
+// on TRUE. `IS [NOT] NULL` and `IS [NOT] TRUE/FALSE` stay decided.
+
+/// Seed the account rows, then clear ada's tenant so one row carries `NULL`.
+fn seed_with_null_tenant(contract: &ResolvedContract) -> BTreeMap<String, Vec<u8>> {
+    let mut records = BTreeMap::new();
+    seed(contract, &mut records);
+    exec("UPDATE Account SET tenant = NULL WHERE account_id = 1", &[], contract, &mut records);
+    records
+}
+
+#[test]
+fn comparison_with_null_is_unknown_instead_of_true() {
+    let contract = contract();
+    let mut records = seed_with_null_tenant(&contract);
+
+    // `NULL = NULL` and `NULL <> NULL` are both unknown, so no row passes and
+    // negating the comparison does not turn it into a match either.
+    for sql in [
+        "SELECT account_id FROM Account WHERE tenant = NULL",
+        "SELECT account_id FROM Account WHERE tenant <> NULL",
+        "SELECT account_id FROM Account WHERE NOT (tenant = NULL)",
+    ] {
+        let outcome = execute_sql(sql, &[], &contract, &[], &mut records).expect("null comparison");
+        assert!(outcome.rows.is_empty(), "`{sql}` must be unknown and drop every row");
+    }
+
+    let nulls = execute_sql("SELECT account_id FROM Account WHERE tenant IS NULL", &[], &contract, &[], &mut records)
+        .expect("is null");
+    assert_eq!(ids(&nulls.rows), vec![1]);
+
+    let present = execute_sql("SELECT account_id FROM Account WHERE tenant IS NOT NULL", &[], &contract, &[], &mut records)
+        .expect("is not null");
+    assert_eq!(ids(&present.rows), vec![2, 3]);
+}
+
+#[test]
+fn and_or_and_not_propagate_unknown() {
+    let contract = contract();
+    let mut records = seed_with_null_tenant(&contract);
+
+    // ada has tenant NULL and score 10: `tenant = 't1'` is unknown, so the
+    // conjunction is unknown even though `score = 10` is TRUE.
+    let conjunction = execute_sql("SELECT account_id FROM Account WHERE tenant = 't1' AND score = 10", &[], &contract, &[], &mut records)
+        .expect("unknown and true");
+    assert!(conjunction.rows.is_empty(), "unknown AND TRUE must stay unknown");
+
+    // A TRUE operand decides the disjunction regardless of the unknown side:
+    // ada passes through `score = 10` and linus through `tenant = 't1'`.
+    let disjunction = execute_sql("SELECT account_id FROM Account WHERE tenant = 't1' OR score = 10", &[], &contract, &[], &mut records)
+        .expect("unknown or true");
+    assert_eq!(ids(&disjunction.rows), vec![1, 2]);
+
+    // Negating unknown stays unknown, so ada is dropped instead of matched.
+    let negation = execute_sql("SELECT account_id FROM Account WHERE NOT (tenant = 't1')", &[], &contract, &[], &mut records)
+        .expect("not unknown");
+    assert_eq!(ids(&negation.rows), vec![3]);
+}
+
+#[test]
+fn in_list_with_null_follows_three_valued_logic() {
+    let contract = contract();
+    let mut records = seed_with_null_tenant(&contract);
+
+    let match_one = execute_sql("SELECT account_id FROM Account WHERE tenant IN ('t1', NULL)", &[], &contract, &[], &mut records)
+        .expect("in with null");
+    assert_eq!(ids(&match_one.rows), vec![2], "only a definite match passes");
+
+    let match_two = execute_sql("SELECT account_id FROM Account WHERE tenant IN ('t1', 't2', NULL)", &[], &contract, &[], &mut records)
+        .expect("in with null and two matches");
+    assert_eq!(ids(&match_two.rows), vec![2, 3]);
+
+    // A non-match against a set that contains NULL is unknown, so `NOT IN`
+    // cannot keep grace's row and ada's NULL stays unknown too.
+    let negated = execute_sql("SELECT account_id FROM Account WHERE tenant NOT IN ('t1', NULL)", &[], &contract, &[], &mut records)
+        .expect("not in with null");
+    assert!(negated.rows.is_empty(), "unknown NOT IN must drop every row");
+
+    let negated_null_value = execute_sql("SELECT account_id FROM Account WHERE tenant NOT IN ('t1', 't2')", &[], &contract, &[], &mut records)
+        .expect("not in over a null field");
+    assert!(negated_null_value.rows.is_empty(), "a NULL field is unknown for NOT IN");
+
+    let only_null = execute_sql("SELECT account_id FROM Account WHERE tenant IN (NULL)", &[], &contract, &[], &mut records)
+        .expect("in only null");
+    assert!(only_null.rows.is_empty());
+}
+
+#[test]
+fn between_with_null_operands_is_unknown() {
+    let contract = contract();
+    let mut records = seed_with_null_tenant(&contract);
+
+    for sql in [
+        "SELECT account_id FROM Account WHERE score BETWEEN NULL AND 100",
+        "SELECT account_id FROM Account WHERE score BETWEEN 0 AND NULL",
+        "SELECT account_id FROM Account WHERE score NOT BETWEEN NULL AND 5",
+    ] {
+        let outcome = execute_sql(sql, &[], &contract, &[], &mut records).expect("null between");
+        assert!(outcome.rows.is_empty(), "`{sql}` must be unknown and drop every row");
+    }
+
+    // A NULL field is unknown even when the bounds are present, while a
+    // non-matching row still satisfies the negated form.
+    let null_field = execute_sql("SELECT account_id FROM Account WHERE tenant BETWEEN 'a' AND 'z'", &[], &contract, &[], &mut records)
+        .expect("between null field");
+    assert_eq!(ids(&null_field.rows), vec![2, 3]);
+
+    let negated = execute_sql("SELECT account_id FROM Account WHERE score NOT BETWEEN 1 AND 5", &[], &contract, &[], &mut records)
+        .expect("not between decided");
+    assert_eq!(ids(&negated.rows), vec![1, 2, 3]);
+}
+
+#[test]
+fn is_true_and_is_not_true_are_decided_for_null() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+    exec("UPDATE Account SET active = NULL WHERE account_id = 1", &[], &contract, &mut records);
+
+    let is_true = execute_sql("SELECT account_id FROM Account WHERE active IS TRUE", &[], &contract, &[], &mut records)
+        .expect("is true");
+    assert_eq!(ids(&is_true.rows), vec![3]);
+
+    let is_not_true = execute_sql("SELECT account_id FROM Account WHERE active IS NOT TRUE", &[], &contract, &[], &mut records)
+        .expect("is not true");
+    assert_eq!(ids(&is_not_true.rows), vec![1, 2], "NULL is decided as NOT TRUE");
+
+    let is_false = execute_sql("SELECT account_id FROM Account WHERE active IS FALSE", &[], &contract, &[], &mut records)
+        .expect("is false");
+    assert_eq!(ids(&is_false.rows), vec![2]);
+
+    let is_not_false = execute_sql("SELECT account_id FROM Account WHERE active IS NOT FALSE", &[], &contract, &[], &mut records)
+        .expect("is not false");
+    assert_eq!(ids(&is_not_false.rows), vec![1, 3]);
+
+    // Comparing a NULL boolean is unknown, and `NOT` cannot rescue it, so ada
+    // stays out of the negated comparison as well.
+    let comparison = execute_sql("SELECT account_id FROM Account WHERE active = true", &[], &contract, &[], &mut records)
+        .expect("bool comparison");
+    assert_eq!(ids(&comparison.rows), vec![3]);
+
+    let negated_comparison = execute_sql("SELECT account_id FROM Account WHERE NOT (active = true)", &[], &contract, &[], &mut records)
+        .expect("negated bool comparison");
+    assert_eq!(ids(&negated_comparison.rows), vec![2]);
+}
+
+#[test]
+fn aggregates_skip_null_values_and_reject_an_all_null_sum() {
+    let contract = contract();
+    let mut records = seed_with_null_tenant(&contract);
+    exec("UPDATE Account SET score = NULL WHERE account_id = 1", &[], &contract, &mut records);
+
+    let outcome = execute_sql(
+        "SELECT SUM(score) AS total, AVG(score) AS mean, MIN(tenant) AS min_tenant, MAX(tenant) AS max_tenant FROM Account",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("aggregates skip null");
+    assert_eq!(outcome.rows[0].get("total"), Some(&Value::I64(50)), "SUM skips the NULL score");
+    assert_eq!(outcome.rows[0].get("mean"), Some(&Value::F64(25.0)), "AVG divides by the non-NULL count");
+    assert_eq!(outcome.rows[0].get("min_tenant"), Some(&Value::Text("t1".into())));
+    assert_eq!(outcome.rows[0].get("max_tenant"), Some(&Value::Text("t2".into())));
+
+    // A group whose only input is NULL has no numeric value, so SUM is NULL.
+    exec("UPDATE Account SET score = NULL", &[], &contract, &mut records);
+    let all_null =
+        execute_sql("SELECT SUM(score) AS total FROM Account", &[], &contract, &[], &mut records).expect("all null sum");
+    assert_eq!(all_null.rows[0].get("total"), Some(&Value::Null));
+}
+
 // ─── REAL literals ─────────────────────────────────────────────────────
 //
 // A literal with a fractional part or an exponent lowers to `Value::F64`.

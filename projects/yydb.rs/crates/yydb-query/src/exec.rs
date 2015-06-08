@@ -167,7 +167,9 @@ fn execute_ops_in(
                 }
                 else {
                     let predicate = resolve_subquery_predicates_in(predicate, contract, records, bound_values, None)?;
-                    rows.retain(|row| eval_pred_in(&predicate, row, table, contract, records, bound_values, outer));
+                    rows.retain(|row| {
+                        eval_pred_in(&predicate, row, table, contract, records, bound_values, outer) == Some(true)
+                    });
                 }
             }
             QueryOp::Join { kind, right, right_alias, on } => {
@@ -511,7 +513,7 @@ fn eval_pred_for_row(
     else {
         resolve_subquery_predicates_in(predicate, contract, records, bound_values, None)?
     };
-    Ok(eval_pred_in(&predicate, row, table, contract, records, bound_values, outer))
+    Ok(eval_pred_in(&predicate, row, table, contract, records, bound_values, outer) == Some(true))
 }
 
 /// Run one subquery pipeline.
@@ -544,9 +546,14 @@ pub(crate) fn eval_pred(
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> bool {
-    eval_pred_in(pred, row, table, contract, records, bound_values, None)
+    eval_pred_in(pred, row, table, contract, records, bound_values, None) == Some(true)
 }
 
+/// Evaluate one predicate to SQL three-valued logic.
+///
+/// `Some(true)` keeps a row, `Some(false)` and `None` (unknown) both drop it
+/// from a `WHERE` clause, but the distinction matters under `NOT`: negating
+/// unknown stays unknown instead of turning it into `TRUE`.
 fn eval_pred_in(
     pred: &Pred,
     row: &QueryRow,
@@ -555,136 +562,145 @@ fn eval_pred_in(
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
-) -> bool {
+) -> Option<bool> {
     match pred {
-        Pred::True => true,
-        Pred::False => false,
+        Pred::True => Some(true),
+        Pred::False => Some(false),
+        // A bare boolean value is unknown when the field is `NULL`, so
+        // `NOT column` cannot turn a missing value into a passing row.
         Pred::FieldBool { path, value } => {
             let left = read_path(path, row, table, contract, records, outer);
             let right = match resolve_bound_value(value, bound_values) {
                 Ok(v) => v,
-                Err(_) => return false, // unresolved slot → predicate fails safe
+                // An unresolved slot is unknown rather than a guessed value.
+                Err(_) => return None,
             };
-            matches!((&left, &right), (Value::Bool(a), Value::Bool(b)) if a == b)
+            match (&left, &right) {
+                (Value::Bool(a), Value::Bool(b)) => Some(a == b),
+                (Value::Null, _) => None,
+                _ => Some(false),
+            }
         }
+        // `FieldCmp` keeps two-valued semantics for VOS ordinary equality and
+        // the decided `IS [NOT] TRUE/FALSE` tests.
         Pred::FieldCmp { path, op, value } => {
             let left = read_path(path, row, table, contract, records, outer);
             let right = match resolve_bound_value(value, bound_values) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return None,
             };
-            cmp_values(&left, *op, &right)
+            Some(cmp_values(&left, *op, &right))
         }
+        // A join condition is a SQL comparison: either side `NULL` is unknown.
         Pred::FieldCmpField { left_path, op, right_path } => {
             let left = read_path(left_path, row, table, contract, records, outer);
             let right = read_path(right_path, row, table, contract, records, outer);
-            cmp_values(&left, *op, &right)
+            if matches!(left, Value::Null) || matches!(right, Value::Null) {
+                return None;
+            }
+            Some(cmp_values(&left, *op, &right))
         }
-        Pred::And(left, right) => {
-            eval_pred_in(left, row, table, contract, records, bound_values, outer)
-                && eval_pred_in(right, row, table, contract, records, bound_values, outer)
+        Pred::And(left, right) => truth_and(
+            eval_pred_in(left, row, table, contract, records, bound_values, outer),
+            eval_pred_in(right, row, table, contract, records, bound_values, outer),
+        ),
+        Pred::Or(left, right) => truth_or(
+            eval_pred_in(left, row, table, contract, records, bound_values, outer),
+            eval_pred_in(right, row, table, contract, records, bound_values, outer),
+        ),
+        Pred::Not(inner) => {
+            eval_pred_in(inner, row, table, contract, records, bound_values, outer).map(|truth| !truth)
         }
-        Pred::Or(left, right) => {
-            eval_pred_in(left, row, table, contract, records, bound_values, outer)
-                || eval_pred_in(right, row, table, contract, records, bound_values, outer)
-        }
-        Pred::Not(inner) => !eval_pred_in(inner, row, table, contract, records, bound_values, outer),
         Pred::InSet { path, values, negated } => {
             let left = read_path(path, row, table, contract, records, outer);
-            // `WHERE` keeps a row only on TRUE, so an unknown test drops it —
-            // which is also what `NOT IN` does over a set that contains NULL.
-            match in_set_truth(&left, values) {
-                Some(true) => !*negated,
-                Some(false) => *negated,
-                None => false,
-            }
+            in_set_truth(&left, values).map(|truth| truth != *negated)
         }
         // A scalar subquery is resolved before any row is tested. A NULL on
-        // either side makes the comparison unknown, so no row may pass.
+        // either side makes the comparison unknown.
         Pred::FieldCmpScalar { path, op, value } => {
             let left = read_path(path, row, table, contract, records, outer);
             if matches!(left, Value::Null) || matches!(value, Value::Null) {
-                return false;
+                return None;
             }
-            cmp_values(&left, *op, value)
+            Some(cmp_values(&left, *op, value))
         }
         // Per-row expression comparison with SQL three-valued NULL semantics.
-        // Any NULL on either side drops the row, mirroring `FieldCmpScalar`.
         Pred::ExprCmp { expr, op, value } => {
             let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return None,
             };
             let right = match resolve_bound_value(value, bound_values) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return None,
             };
             if matches!(left, Value::Null) || matches!(right, Value::Null) {
-                return false;
+                return None;
             }
-            cmp_values(&left, *op, &right)
+            Some(cmp_values(&left, *op, &right))
         }
-        // `IS NULL` is a dedicated three-valued operator: `expr IS NULL` is
-        // TRUE on NULL, FALSE otherwise — never unknown.
+        // `IS NULL` is decided: `expr IS NULL` is TRUE on NULL, FALSE
+        // otherwise, never unknown.
         Pred::ExprIsNull { expr, negated } => {
             let value = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return None,
             };
             let is_null = matches!(value, Value::Null);
-            if *negated { !is_null } else { is_null }
+            Some(if *negated { !is_null } else { is_null })
         }
-        // `[NOT] BETWEEN` follows SQL three-valued logic — any NULL makes the
-        // result unknown so a WHERE clause drops the row.
+        // `IS [NOT] TRUE/FALSE` is decided as well: a NULL expression is FALSE
+        // for both positive forms, so the negated forms keep the row.
+        Pred::ExprIsTruth { expr, value, negated } => {
+            let evaluated = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
+                Ok(v) => v,
+                Err(_) => return None,
+            };
+            let matches_value = matches!((&evaluated, value), (Value::Bool(actual), expected) if actual == expected);
+            Some(if *negated { !matches_value } else { matches_value })
+        }
+        // `[NOT] BETWEEN` is unknown when any operand is NULL.
         Pred::ExprBetween { expr, low, high, negated } => {
             let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return None,
             };
             let low = match resolve_bound_value(low, bound_values) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return None,
             };
             let high = match resolve_bound_value(high, bound_values) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return None,
             };
             if matches!(left, Value::Null) || matches!(low, Value::Null) || matches!(high, Value::Null) {
-                return false;
+                return None;
             }
             let in_range = cmp_values(&left, CmpOp::Ge, &low) && cmp_values(&left, CmpOp::Le, &high);
-            if *negated { !in_range } else { in_range }
+            Some(if *negated { !in_range } else { in_range })
         }
         // `[NOT] IN (<values>)` with expression left-hand side follows the same
         // three-valued rules as `Pred::InSet`.
         Pred::ExprInList { expr, list, negated } => {
             let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return None,
             };
             let mut values = Vec::with_capacity(list.len());
             for item in list {
                 values.push(match resolve_bound_value(item, bound_values) {
                     Ok(v) => v,
-                    Err(_) => return false,
+                    Err(_) => return None,
                 });
             }
-            match in_set_truth(&left, &values) {
-                Some(true) => !*negated,
-                Some(false) => *negated,
-                None => false,
-            }
+            in_set_truth(&left, &values).map(|truth| truth != *negated)
         }
         Pred::ExprInSet { expr, values, negated } => {
             let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return None,
             };
-            match in_set_truth(&left, values) {
-                Some(true) => !*negated,
-                Some(false) => *negated,
-                None => false,
-            }
+            in_set_truth(&left, values).map(|truth| truth != *negated)
         }
         // Subqueries are resolved before any row is tested. Reaching one here
         // means the caller skipped that step, so no row may pass.
@@ -692,7 +708,27 @@ fn eval_pred_in(
         | Pred::InSubquery { .. }
         | Pred::FieldCmpSubquery { .. }
         | Pred::SubqueryAsBool { .. }
-        | Pred::ExprInSubquery { .. } => false,
+        | Pred::ExprInSubquery { .. } => Some(false),
+    }
+}
+
+/// SQL `AND` over two three-valued operands: `FALSE` dominates, `TRUE` needs
+/// both sides true, and every other combination is unknown.
+fn truth_and(left: Option<bool>, right: Option<bool>) -> Option<bool> {
+    match (left, right) {
+        (Some(false), _) | (_, Some(false)) => Some(false),
+        (Some(true), Some(true)) => Some(true),
+        _ => None,
+    }
+}
+
+/// SQL `OR` over two three-valued operands: `TRUE` dominates, `FALSE` needs
+/// both sides false, and every other combination is unknown.
+fn truth_or(left: Option<bool>, right: Option<bool>) -> Option<bool> {
+    match (left, right) {
+        (Some(true), _) | (_, Some(true)) => Some(true),
+        (Some(false), Some(false)) => Some(false),
+        _ => None,
     }
 }
 

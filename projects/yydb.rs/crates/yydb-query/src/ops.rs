@@ -116,6 +116,12 @@ pub enum Pred {
         value: BoundValue,
     },
     /// Comparison between a row field and a value.
+    ///
+    /// This is a two-valued comparison: `NULL` orders before every other value,
+    /// so a `NULL` field compares equal to `NULL`. VOS keeps that ordinary
+    /// equality for its null checks (`x.avatar == null`), and `IS [NOT]
+    /// TRUE/FALSE` lowers onto this operator too. SQL comparisons never lower
+    /// here — they use [`Pred::ExprCmp`] so a `NULL` operand is unknown.
     FieldCmp {
         /// Field path relative to the row being filtered.
         path: Vec<String>,
@@ -125,6 +131,9 @@ pub enum Pred {
         value: BoundValue,
     },
     /// Comparison between two row fields (used by JOIN ON conditions).
+    ///
+    /// Follows SQL three-valued logic: a `NULL` on either side is unknown, so a
+    /// join never matches a `NULL` against a `NULL`.
     FieldCmpField {
         /// Left field path.
         left_path: Vec<String>,
@@ -237,6 +246,19 @@ pub enum Pred {
         /// Expression evaluated row by row.
         expr: Box<Expr>,
         /// Whether the test is negated (`IS NOT NULL`).
+        negated: bool,
+    },
+    /// Arbitrary scalar expression tested with `[NOT] TRUE` / `[NOT] FALSE`.
+    ///
+    /// Like [`Pred::ExprIsNull`] this test is decided, never unknown: a `NULL`
+    /// expression is `FALSE` for `IS TRUE` and `IS FALSE`, and `TRUE` for their
+    /// negated forms.
+    ExprIsTruth {
+        /// Expression evaluated row by row.
+        expr: Box<Expr>,
+        /// Boolean value the test expects.
+        value: bool,
+        /// Whether the test is negated (`IS NOT TRUE` / `IS NOT FALSE`).
         negated: bool,
     },
     /// Arbitrary scalar expression tested with `[NOT] BETWEEN low AND high`.
