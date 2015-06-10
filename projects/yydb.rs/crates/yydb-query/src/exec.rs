@@ -1221,9 +1221,20 @@ fn eval_function(
         ScalarFunction::Lower => Value::Text(text_argument(function, &values[0])?.to_lowercase()),
         ScalarFunction::Upper => Value::Text(text_argument(function, &values[0])?.to_uppercase()),
         ScalarFunction::Trim => Value::Text(text_argument(function, &values[0])?.trim().to_string()),
-        ScalarFunction::Length | ScalarFunction::CharLength => {
-            Value::I64(text_argument(function, &values[0])?.chars().count() as i64)
-        }
+        // `LENGTH` counts Unicode characters for text and raw bytes for a BLOB.
+        // `CHAR_LENGTH` is character-only, so a BLOB argument is rejected
+        // rather than guessing a character count from raw bytes.
+        ScalarFunction::Length => match &values[0] {
+            Value::Text(text) => Value::I64(text.chars().count() as i64),
+            Value::Bytes(bytes) => Value::I64(bytes.len() as i64),
+            other => {
+                return Err(query_runtime_error(format!(
+                    "`LENGTH()` requires a text or BLOB argument, got `{}`",
+                    other.kind()
+                )));
+            }
+        },
+        ScalarFunction::CharLength => Value::I64(text_argument(function, &values[0])?.chars().count() as i64),
         ScalarFunction::Substr => substr(&values)?,
         ScalarFunction::Replace => {
             let text = text_argument(function, &values[0])?;

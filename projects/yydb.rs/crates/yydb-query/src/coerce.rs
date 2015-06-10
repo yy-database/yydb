@@ -16,6 +16,7 @@ fn coerce_error(message: impl Into<String>) -> Error {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ScalarTarget {
     Real,
+    Bytes,
     Date,
     Time,
     Timestamp,
@@ -26,6 +27,7 @@ impl std::fmt::Display for ScalarTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Real => f.write_str("f64"),
+            Self::Bytes => f.write_str("bytes"),
             Self::Date => f.write_str("date"),
             Self::Time => f.write_str("time"),
             Self::Timestamp => f.write_str("datetime"),
@@ -38,6 +40,7 @@ pub(crate) fn scalar_target(ty: &ResolvedCanonicalType) -> Option<ScalarTarget> 
     use vos::types::{CanonicalScalar, ResolvedCanonicalTypeArgument};
     match ty {
         ResolvedCanonicalType::Scalar(CanonicalScalar::F64) => Some(ScalarTarget::Real),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Bytes) => Some(ScalarTarget::Bytes),
         ResolvedCanonicalType::Scalar(CanonicalScalar::Date) => Some(ScalarTarget::Date),
         ResolvedCanonicalType::Scalar(CanonicalScalar::Time) => Some(ScalarTarget::Time),
         ResolvedCanonicalType::Scalar(CanonicalScalar::DateTime) => Some(ScalarTarget::Timestamp),
@@ -81,13 +84,21 @@ pub(crate) fn value_to_scalar(value: Value, ty: &ResolvedCanonicalType) -> Resul
             ))),
         };
     }
+    // A BLOB value belongs in a `bytes` column. Every other target keeps an
+    // exact value, so bytes are rejected before staging instead of being
+    // reinterpreted as text or a number.
+    if let Value::Bytes(_) = &value {
+        return match scalar_target(ty) {
+            Some(ScalarTarget::Bytes) => coerce_to(value, ScalarTarget::Bytes),
+            _ => Err(coerce_error(
+                "BLOB value cannot be stored: the target column is not `bytes` and YYDB never converts BLOB into an \
+                 integer, bool, text, uuid, date, time, timestamp or decimal column",
+            )),
+        };
+    }
     match ty {
         ResolvedCanonicalType::Scalar(
-            CanonicalScalar::I64
-            | CanonicalScalar::Bool
-            | CanonicalScalar::Utf8
-            | CanonicalScalar::Bytes
-            | CanonicalScalar::Uuid,
+            CanonicalScalar::I64 | CanonicalScalar::Bool | CanonicalScalar::Utf8 | CanonicalScalar::Uuid,
         ) => Ok(value),
         ResolvedCanonicalType::Scalar(scalar) => {
             let target = scalar_target(ty)
@@ -115,6 +126,11 @@ fn coerce_to(value: Value, target: ScalarTarget) -> Result<Value> {
         (Value::Text(_) | Value::Bool(_), ScalarTarget::Real) => {
             Err(coerce_error("column type `f64` requires an integer or REAL numeric literal"))
         }
+        (Value::Bytes(bytes), ScalarTarget::Bytes) => Ok(Value::Bytes(bytes)),
+        (Value::Text(_), ScalarTarget::Bytes) => Err(coerce_error(
+            "column type `bytes` requires a BLOB value: YYDB never converts text into BLOB implicitly, use \
+             `CAST(... AS BLOB)` for an explicit conversion",
+        )),
         (Value::Text(text), ScalarTarget::Date) => Ok(Value::Date(yydb_types::Date::parse_iso(&text).map_err(Error::from)?)),
         (Value::Text(text), ScalarTarget::Time) => Ok(Value::Time(yydb_types::Time::parse_iso(&text).map_err(Error::from)?)),
         (Value::Text(text), ScalarTarget::Timestamp) => {

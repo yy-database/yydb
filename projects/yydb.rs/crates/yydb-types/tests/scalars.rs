@@ -152,6 +152,7 @@ fn tagged_json_roundtrips_without_loss_and_rejects_unknown_tags() {
         yydb_types::Value::Time(Time::parse_iso("23:59:59.999999999").unwrap()),
         yydb_types::Value::Timestamp(Timestamp::parse_iso("9999-12-31T23:59:59.999999Z").unwrap()),
         yydb_types::Value::Decimal(Decimal::parse("-1234.567890", 12, 6).unwrap()),
+        yydb_types::Value::Bytes(vec![0x00, 0xff, 0x10, 0x80]),
     ];
     for value in values {
         let json = scalar::tagged_value_json(&value).expect("tagged");
@@ -161,6 +162,10 @@ fn tagged_json_roundtrips_without_loss_and_rejects_unknown_tags() {
     assert!(scalar::tagged_value_json(&yydb_types::Value::Null).is_none());
     let document = serde_json::json!({ "$yydb": "decimal", "precision": 2, "scale": 0, "unscaled": "100" });
     assert!(matches!(scalar::tagged_value_from_json(&document).unwrap(), Err(ScalarError::Malformed { kind: "decimal", .. })));
+    let odd_length = serde_json::json!({ "$yydb": "bytes", "hex": "abc" });
+    assert!(matches!(scalar::tagged_value_from_json(&odd_length).unwrap(), Err(ScalarError::Malformed { kind: "bytes", .. })));
+    let non_hex = serde_json::json!({ "$yydb": "bytes", "hex": "0g" });
+    assert!(matches!(scalar::tagged_value_from_json(&non_hex).unwrap(), Err(ScalarError::Malformed { kind: "bytes", .. })));
     let unknown = serde_json::json!({ "$yydb": "money" });
     assert!(scalar::tagged_value_from_json(&unknown).unwrap().is_err());
     let wrong_type = serde_json::json!({ "$yydb": "timestamp", "utcMicros": 1 });

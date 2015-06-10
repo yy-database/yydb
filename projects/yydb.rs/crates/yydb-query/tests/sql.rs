@@ -5709,3 +5709,200 @@ fn a_write_assignment_rejects_a_subquery() {
     let message = format!("{error}");
     assert!(message.contains("write assignment"), "unexpected error: {message}");
 }
+
+// ─── BLOB columns (`bytes`) ─────────────────────────────────────────────
+//
+// A `bytes` column stores the payload verbatim. `LENGTH` reports its byte
+// count, equality and ordering compare raw bytes, and no other column type
+// silently converts a BLOB into text or a number.
+
+const BLOB_SCHEMA: &str = r#"
+table Asset {
+    @@asset_id: i64,
+    label: utf8,
+    payload: bytes,
+}
+"#;
+
+fn blob_contract() -> ResolvedContract {
+    resolved_contract_from_document(BLOB_SCHEMA).expect("asset schema resolves")
+}
+
+fn insert_asset(id: i64, label: &str, payload: Vec<u8>, contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>) {
+    exec(
+        "INSERT INTO Asset (asset_id, label, payload) VALUES (?, ?, ?)",
+        &[Value::I64(id), Value::Text(label.into()), Value::Bytes(payload)],
+        contract,
+        records,
+    );
+}
+
+fn asset_ids(rows: &[BTreeMap<String, Value>]) -> Vec<i64> {
+    rows.iter()
+        .map(|row| match row.get("asset_id") {
+            Some(Value::I64(id)) => *id,
+            other => panic!("unexpected asset_id {other:?}"),
+        })
+        .collect()
+}
+
+#[test]
+fn blob_column_round_trips_raw_bytes_verbatim() {
+    let contract = blob_contract();
+    let mut records = BTreeMap::new();
+    // A NUL byte and bytes that are not valid UTF-8 would be corrupted by any
+    // text round trip, so they prove the column keeps the payload exact.
+    let payload = vec![0x00, 0xff, 0x10, 0x80];
+    insert_asset(1, "bin", payload.clone(), &contract, &mut records);
+
+    let rows =
+        execute_sql("SELECT payload FROM Asset WHERE asset_id = 1", &[], &contract, &[], &mut records).expect("read blob").rows;
+    assert_eq!(rows[0].get("payload"), Some(&Value::Bytes(payload)));
+
+    // Storage keeps a tagged hex object rather than a lossy JSON string.
+    let stored = records.values().next().and_then(|bytes| std::str::from_utf8(bytes).ok()).expect("stored row is utf8 json");
+    assert!(stored.contains("\"$yydb\":\"bytes\""), "unexpected stored row: {stored}");
+}
+
+#[test]
+fn blob_length_counts_bytes_while_char_length_counts_characters() {
+    let contract = blob_contract();
+    let mut records = BTreeMap::new();
+    // U+1F600 is four UTF-8 bytes but one character.
+    insert_asset(1, "😀", vec![0xf0, 0x9f, 0x98, 0x80], &contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT LENGTH(payload) AS payload_len, CHAR_LENGTH(label) AS label_chars FROM Asset WHERE asset_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("length of blob and text")
+    .rows;
+    assert_eq!(rows[0].get("payload_len"), Some(&Value::I64(4)));
+    assert_eq!(rows[0].get("label_chars"), Some(&Value::I64(1)));
+}
+
+#[test]
+fn blob_equality_and_ordering_compare_raw_bytes() {
+    let contract = blob_contract();
+    let mut records = BTreeMap::new();
+    insert_asset(1, "a", vec![0x01, 0x02], &contract, &mut records);
+    insert_asset(2, "b", vec![0x01, 0x03], &contract, &mut records);
+    insert_asset(3, "c", vec![0xff], &contract, &mut records);
+
+    let equal = execute_sql(
+        "SELECT asset_id FROM Asset WHERE payload = ?",
+        &[Value::Bytes(vec![0x01, 0x02])],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("blob equality")
+    .rows;
+    assert_eq!(asset_ids(&equal), vec![1]);
+
+    let ordered = execute_sql("SELECT asset_id FROM Asset ORDER BY payload", &[], &contract, &[], &mut records)
+        .expect("blob ordering")
+        .rows;
+    assert_eq!(asset_ids(&ordered), vec![1, 2, 3]);
+
+    let greater = execute_sql(
+        "SELECT asset_id FROM Asset WHERE payload > ?",
+        &[Value::Bytes(vec![0x01, 0x02])],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("blob ordering predicate")
+    .rows;
+    assert_eq!(asset_ids(&greater), vec![2, 3]);
+}
+
+#[test]
+fn blob_and_text_never_compare_equal() {
+    let contract = blob_contract();
+    let mut records = BTreeMap::new();
+    insert_asset(1, "ab", b"ab".to_vec(), &contract, &mut records);
+
+    // The same visible content in different kinds has no common comparison
+    // domain, so the predicate never matches instead of reinterpreting bytes as
+    // text.
+    let rows = execute_sql("SELECT asset_id FROM Asset WHERE payload = 'ab'", &[], &contract, &[], &mut records)
+        .expect("blob versus text comparison")
+        .rows;
+    assert!(rows.is_empty(), "BLOB must never compare equal to text");
+}
+
+#[test]
+fn blob_column_rejects_a_text_literal_instead_of_encoding_it() {
+    let contract = blob_contract();
+    let mut records = BTreeMap::new();
+
+    let err =
+        execute_sql("INSERT INTO Asset (asset_id, label, payload) VALUES (1, 'a', 'text')", &[], &contract, &[], &mut records)
+            .expect_err("text into a bytes column must reject");
+    let message = format!("{err}");
+    assert!(message.contains("BLOB") && message.contains("text"), "unexpected: {message}");
+    assert!(records.is_empty(), "a rejected BLOB write must not publish rows");
+}
+
+#[test]
+fn blob_value_is_rejected_by_a_text_column() {
+    let contract = blob_contract();
+    let mut records = BTreeMap::new();
+
+    let err = execute_sql(
+        "INSERT INTO Asset (asset_id, label, payload) VALUES (?, ?, ?)",
+        &[Value::I64(1), Value::Bytes(b"label".to_vec()), Value::Bytes(vec![0x01])],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("bytes into a text column must reject");
+    let message = format!("{err}");
+    assert!(message.contains("BLOB") && message.contains("bytes"), "unexpected: {message}");
+    assert!(records.is_empty(), "a rejected BLOB write must not publish rows");
+}
+
+#[test]
+fn char_length_rejects_a_blob_argument() {
+    let contract = blob_contract();
+    let mut records = BTreeMap::new();
+    insert_asset(1, "a", vec![0x61], &contract, &mut records);
+
+    let err = execute_sql("SELECT CHAR_LENGTH(payload) AS n FROM Asset", &[], &contract, &[], &mut records)
+        .expect_err("CHAR_LENGTH over a BLOB must reject");
+    assert!(format!("{err}").contains("text arguments"), "unexpected: {err}");
+}
+
+#[test]
+fn length_rejects_a_non_text_non_blob_argument() {
+    let contract = blob_contract();
+    let mut records = BTreeMap::new();
+    insert_asset(1, "a", vec![0x61], &contract, &mut records);
+
+    let err = execute_sql("SELECT LENGTH(asset_id) AS n FROM Asset", &[], &contract, &[], &mut records)
+        .expect_err("LENGTH over an integer must reject");
+    assert!(format!("{err}").contains("text or BLOB"), "unexpected: {err}");
+}
+
+#[test]
+fn explicit_cast_text_to_blob_is_the_only_text_to_blob_conversion() {
+    let contract = blob_contract();
+    let mut records = BTreeMap::new();
+    insert_asset(1, "a", Vec::new(), &contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT CAST('ab' AS BLOB) AS payload, LENGTH(CAST('ab' AS BLOB)) AS payload_len FROM Asset WHERE asset_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("explicit text to BLOB cast")
+    .rows;
+    assert_eq!(rows[0].get("payload"), Some(&Value::Bytes(b"ab".to_vec())));
+    assert_eq!(rows[0].get("payload_len"), Some(&Value::I64(2)));
+}

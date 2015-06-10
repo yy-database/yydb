@@ -727,7 +727,7 @@ fn parse_digits(bytes: &[u8]) -> Option<u32> {
 /// JSON member marking a tagged scalar object on query-row and wire surfaces.
 pub const TAGGED_JSON_KEY: &str = "$yydb";
 
-/// Tagged JSON form for temporal and decimal values.
+/// Tagged JSON form for temporal, decimal, and binary values.
 ///
 /// Returns `None` for every other [`crate::Value`] variant so callers keep
 /// their existing encoding for booleans, integers, and text.
@@ -744,6 +744,10 @@ pub fn tagged_value_json(value: &crate::Value) -> Option<serde_json::Value> {
             "precision": decimal.precision(),
             "scale": decimal.scale(),
             "unscaled": decimal.unscaled().to_string(),
+        })),
+        crate::Value::Bytes(bytes) => Some(serde_json::json!({
+            "$yydb": "bytes",
+            "hex": crate::hex::encode_vec(bytes),
         })),
         _ => None,
     }
@@ -804,7 +808,37 @@ fn parse_tagged_value(json: &serde_json::Value, tag: &serde_json::Value) -> Resu
                 .map(crate::Value::Decimal)
                 .map_err(|error| mismatch("decimal", error, json))
         }
+        "bytes" => {
+            let hex = object.get("hex").and_then(serde_json::Value::as_str).ok_or_else(|| malformed("bytes"))?;
+            let bytes = decode_hex(hex).ok_or_else(|| malformed("bytes"))?;
+            Ok(crate::Value::Bytes(bytes))
+        }
         other => Err(ScalarError::Malformed { kind: "scalar", input: format!("unknown tag `{other}`") }),
+    }
+}
+
+/// Decode a lowercase or uppercase hex string back into bytes.
+///
+/// An odd length or a non-hex digit yields `None` so a malformed `bytes` tag is
+/// rejected instead of silently truncating the payload.
+fn decode_hex(text: &str) -> Option<Vec<u8>> {
+    if text.len() % 2 != 0 {
+        return None;
+    }
+    let digits = text.as_bytes();
+    let mut out = Vec::with_capacity(digits.len() / 2);
+    for pair in digits.chunks(2) {
+        out.push((hex_digit(pair[0])? << 4) | hex_digit(pair[1])?);
+    }
+    Some(out)
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
