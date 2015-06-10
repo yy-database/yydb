@@ -841,10 +841,11 @@ fn read_path(
 /// Number kinds compare with each other: an exact integer pair (`i64`/`u64`)
 /// compares as an integer, and any pair that involves a REAL promotes both
 /// sides to `f64`. Distinct kind families never compare equal: they order by
-/// kind rank (`null` < `bool` < number < text/uuid < everything else), so a
-/// comparison such as `text_column = 1.5` never matches instead of pretending
-/// the two sides are equal. Two values of the same unmodelled kind also compare
-/// equal rather than falling back to an arbitrary order.
+/// kind rank (`null` < `bool` < number < text/uuid < bytes < date < time <
+/// timestamp < decimal), so a comparison such as `text_column = 1.5` or
+/// `date_column = time_column` never matches instead of pretending the two sides
+/// are equal. Two values of the same unmodelled kind also compare equal rather
+/// than falling back to an arbitrary order.
 fn compare_values(left: &Value, right: &Value) -> std::cmp::Ordering {
     match (left, right) {
         (Value::Null, Value::Null) => std::cmp::Ordering::Equal,
@@ -865,6 +866,12 @@ fn compare_values(left: &Value, right: &Value) -> std::cmp::Ordering {
         (Value::Text(a), Value::Uuid(b)) => a.as_str().cmp(&b.to_string()),
         (Value::Uuid(a), Value::Text(b)) => a.to_string().cmp(b),
         (Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
+        (Value::Date(a), Value::Date(b)) => a.cmp(b),
+        (Value::Time(a), Value::Time(b)) => a.cmp(b),
+        (Value::Timestamp(a), Value::Timestamp(b)) => a.cmp(b),
+        // `Decimal::compare` is exact across declared scales, so `1.50` and
+        // `1.5` compare equal without a floating-point detour.
+        (Value::Decimal(a), Value::Decimal(b)) => a.compare(*b),
         _ => value_kind_rank(left).cmp(&value_kind_rank(right)),
     }
 }
@@ -877,7 +884,13 @@ fn value_kind_rank(value: &Value) -> u8 {
         Value::I64(_) | Value::U64(_) | Value::F64(_) => 2,
         Value::Text(_) | Value::Uuid(_) => 3,
         Value::Bytes(_) => 4,
-        _ => 5,
+        // Each temporal and exact-decimal family keeps its own rank, so two
+        // different families never collapse into an equality.
+        Value::Date(_) => 5,
+        Value::Time(_) => 6,
+        Value::Timestamp(_) => 7,
+        Value::Decimal(_) => 8,
+        _ => 9,
     }
 }
 

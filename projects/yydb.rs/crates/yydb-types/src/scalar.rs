@@ -727,12 +727,13 @@ fn parse_digits(bytes: &[u8]) -> Option<u32> {
 /// JSON member marking a tagged scalar object on query-row and wire surfaces.
 pub const TAGGED_JSON_KEY: &str = "$yydb";
 
-/// Tagged JSON form for temporal, decimal, and binary values.
+/// Tagged JSON form for UUID, temporal, decimal, and binary values.
 ///
 /// Returns `None` for every other [`crate::Value`] variant so callers keep
 /// their existing encoding for booleans, integers, and text.
 pub fn tagged_value_json(value: &crate::Value) -> Option<serde_json::Value> {
     match value {
+        crate::Value::Uuid(id) => Some(serde_json::json!({ "$yydb": "uuid", "value": id.to_string() })),
         crate::Value::Date(date) => Some(serde_json::json!({ "$yydb": "date", "days": date.days() })),
         crate::Value::Time(time) => Some(serde_json::json!({ "$yydb": "time", "nanos": time.nanos() })),
         crate::Value::Timestamp(timestamp) => Some(serde_json::json!({
@@ -771,6 +772,10 @@ fn parse_tagged_value(json: &serde_json::Value, tag: &serde_json::Value) -> Resu
     };
     let object = json.as_object().ok_or_else(|| malformed("scalar"))?;
     match tag {
+        "uuid" => {
+            let text = object.get("value").and_then(serde_json::Value::as_str).ok_or_else(|| malformed("uuid"))?;
+            uuid::Uuid::parse_str(text).map(crate::Value::Uuid).map_err(|_| malformed("uuid"))
+        }
         "date" => {
             let days = object.get("days").and_then(serde_json::Value::as_i64).ok_or_else(|| malformed("date"))?;
             let days = i32::try_from(days).map_err(|_| malformed("date"))?;

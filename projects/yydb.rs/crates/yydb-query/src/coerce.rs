@@ -67,9 +67,10 @@ pub(crate) fn scalar_target(ty: &ResolvedCanonicalType) -> Option<ScalarTarget> 
 ///
 /// Canonical scalars outside the YYDB execution set are rejected instead of
 /// being stored untyped, so a declared `utf16` or narrow integer never degrades
-/// into text or a wider integer. `uuid` is the one opaque exception: it keeps
-/// its canonical textual form in VOS query writes. Columns without a scalar
-/// target (records and user types) accept the value unchanged.
+/// into text or a wider integer. A `uuid` column keeps the canonical lowercase
+/// spelling, so a UUID value and a UUID text literal normalize to the same
+/// value. Columns without a scalar target (records and user types) accept the
+/// value unchanged.
 pub(crate) fn value_to_scalar(value: Value, ty: &ResolvedCanonicalType) -> Result<Value> {
     use vos::types::CanonicalScalar;
     // A REAL value belongs in an `f64` column. Every other declared column
@@ -97,9 +98,8 @@ pub(crate) fn value_to_scalar(value: Value, ty: &ResolvedCanonicalType) -> Resul
         };
     }
     match ty {
-        ResolvedCanonicalType::Scalar(
-            CanonicalScalar::I64 | CanonicalScalar::Bool | CanonicalScalar::Utf8 | CanonicalScalar::Uuid,
-        ) => Ok(value),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Uuid) => coerce_uuid(value),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::I64 | CanonicalScalar::Bool | CanonicalScalar::Utf8) => Ok(value),
         ResolvedCanonicalType::Scalar(scalar) => {
             let target = scalar_target(ty)
                 .ok_or_else(|| coerce_error(format!("VOS scalar `{scalar}` is not in the YYDB execution scalar set")))?;
@@ -112,6 +112,26 @@ pub(crate) fn value_to_scalar(value: Value, ty: &ResolvedCanonicalType) -> Resul
         }
         _ => Ok(value),
     }
+}
+
+/// Normalize a `uuid` column value to its canonical lowercase spelling.
+///
+/// A UUID value and a UUID text literal both end up as [`Value::Uuid`], so rows
+/// written through the VOS and SQL frontends project, compare, and sort the
+/// same way. Text that is not a UUID is rejected instead of being stored as if
+/// it were one, and every other kind is rejected as well.
+fn coerce_uuid(value: Value) -> Result<Value> {
+    let parsed = match &value {
+        Value::Null => return Ok(Value::Null),
+        Value::Uuid(id) => return Ok(Value::Uuid(*id)),
+        Value::Text(text) => uuid::Uuid::parse_str(text).map_err(|error| {
+            coerce_error(format!("column type `uuid` requires a UUID literal: `{text}` is not one ({error})"))
+        })?,
+        other => {
+            return Err(coerce_error(format!("column type `uuid` requires a UUID literal, got `{}`", other.kind())));
+        }
+    };
+    Ok(Value::Uuid(parsed))
 }
 
 fn coerce_to(value: Value, target: ScalarTarget) -> Result<Value> {

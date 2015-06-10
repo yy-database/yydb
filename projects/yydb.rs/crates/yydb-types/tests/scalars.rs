@@ -148,6 +148,7 @@ fn decimal_encoding_is_fixed_width_order_preserving_and_shape_checked() {
 #[test]
 fn tagged_json_roundtrips_without_loss_and_rejects_unknown_tags() {
     let values = [
+        yydb_types::Value::Uuid(uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap()),
         yydb_types::Value::Date(Date::parse_iso("2024-02-29").unwrap()),
         yydb_types::Value::Time(Time::parse_iso("23:59:59.999999999").unwrap()),
         yydb_types::Value::Timestamp(Timestamp::parse_iso("9999-12-31T23:59:59.999999Z").unwrap()),
@@ -166,6 +167,8 @@ fn tagged_json_roundtrips_without_loss_and_rejects_unknown_tags() {
     assert!(matches!(scalar::tagged_value_from_json(&odd_length).unwrap(), Err(ScalarError::Malformed { kind: "bytes", .. })));
     let non_hex = serde_json::json!({ "$yydb": "bytes", "hex": "0g" });
     assert!(matches!(scalar::tagged_value_from_json(&non_hex).unwrap(), Err(ScalarError::Malformed { kind: "bytes", .. })));
+    let bad_uuid = serde_json::json!({ "$yydb": "uuid", "value": "not-a-uuid" });
+    assert!(matches!(scalar::tagged_value_from_json(&bad_uuid).unwrap(), Err(ScalarError::Malformed { kind: "uuid", .. })));
     let unknown = serde_json::json!({ "$yydb": "money" });
     assert!(scalar::tagged_value_from_json(&unknown).unwrap().is_err());
     let wrong_type = serde_json::json!({ "$yydb": "timestamp", "utcMicros": 1 });

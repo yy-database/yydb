@@ -6,7 +6,7 @@ use vos::types::ResolvedContract;
 use yydb_query::{
     Dialect, Pred, QueryKind, QueryOp, SetOpKind, WriteOp, execute_sql, prepare_sql, resolved_contract_from_document,
 };
-use yydb_types::{Error, TableUniqueConstraint, UniqueConstraint, Value};
+use yydb_types::{Date, Decimal, Error, TableUniqueConstraint, Time, Timestamp, UniqueConstraint, Value};
 
 const SCHEMA: &str = r#"
 table Account {
@@ -2873,14 +2873,67 @@ fn uuid_column_round_trip_through_sql_parameters() {
     )
     .expect("uuid insert");
 
-    // Note: the lowering/write path does not yet enforce schema type checks on
-    // parameter bindings — the UUID Value gets serialized through the row
-    // storage layer which may encode it as text bytes. We verify only that
-    // the round-trip is coherent (not that the wire type is preserved).
-    let outcome = execute_sql("SELECT user_name FROM User WHERE user_name = 'ada'", &[], &contract, &[], &mut records)
+    // The `uuid` column coerces the parameter through `coerce`, so the row
+    // keeps the UUID scalar and projects it back as `Value::Uuid` instead of
+    // degrading into text.
+    let outcome = execute_sql("SELECT user_id, user_name FROM User WHERE user_name = 'ada'", &[], &contract, &[], &mut records)
         .expect("verify insert landed");
     assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].get("user_id"), Some(&Value::Uuid(id)));
     assert_eq!(outcome.rows[0].get("user_name"), Some(&Value::Text("ada".into())));
+}
+
+#[test]
+fn uuid_column_projects_compares_and_sorts_as_a_uuid() {
+    use uuid::Uuid;
+
+    let contract = resolved_contract_from_document(UUID_SCHEMA).expect("uuid schema");
+    let mut records = BTreeMap::new();
+    let ada = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("ada");
+    let linus = Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("linus");
+
+    // A UUID parameter and a canonical lowercase text literal normalize to the
+    // same exact scalar.
+    exec("INSERT INTO User (user_id, user_name, active) VALUES (?, 'ada', true)", &[Value::Uuid(ada)], &contract, &mut records);
+    exec(
+        "INSERT INTO User (user_id, user_name, active) VALUES ('11111111-1111-1111-1111-111111111111', 'linus', true)",
+        &[],
+        &contract,
+        &mut records,
+    );
+
+    let rows = execute_sql("SELECT user_id FROM User ORDER BY user_id", &[], &contract, &[], &mut records)
+        .expect("uuid projection")
+        .rows;
+    // `1111…` sorts before `550e…`, and both project as `Value::Uuid`.
+    let projected: Vec<Option<Value>> = rows.iter().map(|row| row.get("user_id").cloned()).collect();
+    assert_eq!(projected, vec![Some(Value::Uuid(linus)), Some(Value::Uuid(ada))]);
+
+    let matched =
+        execute_sql("SELECT user_name FROM User WHERE user_id = ?", &[Value::Uuid(ada)], &contract, &[], &mut records)
+            .expect("uuid equality")
+            .rows;
+    assert_eq!(matched.len(), 1);
+    assert_eq!(matched[0].get("user_name"), Some(&Value::Text("ada".into())));
+
+    // Storage keeps the tagged scalar so a reload cannot degrade it into text.
+    let stored = records.values().filter_map(|bytes| std::str::from_utf8(bytes).ok()).collect::<Vec<_>>().join("\n");
+    assert!(stored.contains("\"$yydb\":\"uuid\""), "unexpected stored rows: {stored}");
+}
+
+#[test]
+fn uuid_column_rejects_text_and_numbers_that_are_not_uuids() {
+    let contract = resolved_contract_from_document(UUID_SCHEMA).expect("uuid schema");
+    for (sql, values, expected) in [
+        ("INSERT INTO User (user_id, user_name, active) VALUES ('not-a-uuid', 'ada', true)", Vec::new(), "is not one"),
+        ("INSERT INTO User (user_id, user_name, active) VALUES (?, 'ada', true)", vec![Value::I64(7)], "got `i64`"),
+    ] {
+        let mut records = BTreeMap::new();
+        let error = execute_sql(sql, &values, &contract, &[], &mut records).expect_err("a non-UUID value must reject");
+        let message = format!("{error}");
+        assert!(message.contains(expected), "unexpected: {message}");
+        assert!(records.is_empty(), "a rejected uuid write must not publish rows");
+    }
 }
 
 #[test]
@@ -5905,4 +5958,220 @@ fn explicit_cast_text_to_blob_is_the_only_text_to_blob_conversion() {
     .rows;
     assert_eq!(rows[0].get("payload"), Some(&Value::Bytes(b"ab".to_vec())));
     assert_eq!(rows[0].get("payload_len"), Some(&Value::I64(2)));
+}
+
+// ─── temporal and decimal columns (`date`, `time`, `datetime`, `Decimal`) ───
+//
+// Each column stores an exact scalar: projection returns the scalar value,
+// comparison and sorting use the scalar order instead of text or floating
+// point, and a literal outside the declared scalar is rejected before the row
+// is published.
+
+const TYPED_SCHEMA: &str = r#"
+table Event {
+    @@event_id: i64,
+    label: utf8,
+    happened_on: date,
+    at_time: time,
+    created_at: datetime,
+    amount: Decimal<12, 2>,
+}
+"#;
+
+fn typed_contract() -> ResolvedContract {
+    resolved_contract_from_document(TYPED_SCHEMA).expect("event schema resolves")
+}
+
+fn seed_events(contract: &ResolvedContract, records: &mut BTreeMap<String, Vec<u8>>) {
+    exec(
+        "INSERT INTO Event (event_id, label, happened_on, at_time, created_at, amount) VALUES \
+         (1, 'leap', '2024-02-29', '12:00:00', '2024-02-29T12:00:00Z', '1.50'), \
+         (2, 'old', '1999-12-31', '23:59:59', '2024-06-01T00:00:00Z', '10.00'), \
+         (3, 'new', '2024-01-01', '00:00:00', '2023-12-31T23:59:59Z', '-2.25')",
+        &[],
+        contract,
+        records,
+    );
+}
+
+fn event_ids(rows: &[BTreeMap<String, Value>]) -> Vec<i64> {
+    rows.iter()
+        .map(|row| match row.get("event_id") {
+            Some(Value::I64(id)) => *id,
+            other => panic!("unexpected event_id {other:?}"),
+        })
+        .collect()
+}
+
+#[test]
+fn typed_columns_project_exact_scalars() {
+    let contract = typed_contract();
+    let mut records = BTreeMap::new();
+    seed_events(&contract, &mut records);
+
+    let rows = execute_sql(
+        "SELECT happened_on, at_time, created_at, amount FROM Event WHERE event_id = 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("typed projection")
+    .rows;
+    assert_eq!(rows[0].get("happened_on"), Some(&Value::Date(Date::parse_iso("2024-02-29").expect("date"))));
+    assert_eq!(rows[0].get("at_time"), Some(&Value::Time(Time::parse_iso("12:00:00").expect("time"))));
+    assert_eq!(
+        rows[0].get("created_at"),
+        Some(&Value::Timestamp(Timestamp::parse_iso("2024-02-29T12:00:00Z").expect("timestamp")))
+    );
+    assert_eq!(rows[0].get("amount"), Some(&Value::Decimal(Decimal::parse("1.50", 12, 2).expect("decimal"))));
+
+    // Storage keeps tagged scalar objects, so a reload never degrades them into
+    // text or a number.
+    let stored = records.values().filter_map(|bytes| std::str::from_utf8(bytes).ok()).collect::<Vec<_>>().join("\n");
+    for tag in ["\"$yydb\":\"date\"", "\"$yydb\":\"time\"", "\"$yydb\":\"timestamp\"", "\"$yydb\":\"decimal\""] {
+        assert!(stored.contains(tag), "stored rows must keep `{tag}`: {stored}");
+    }
+}
+
+#[test]
+fn typed_columns_compare_and_sort_by_their_exact_scalar() {
+    let contract = typed_contract();
+    let mut records = BTreeMap::new();
+    seed_events(&contract, &mut records);
+
+    for (sql, expected) in [
+        ("SELECT event_id FROM Event ORDER BY happened_on", vec![2, 3, 1]),
+        ("SELECT event_id FROM Event ORDER BY at_time", vec![3, 1, 2]),
+        ("SELECT event_id FROM Event ORDER BY created_at", vec![3, 1, 2]),
+        // `-2.25 < 1.50 < 10.00`, so ordering proves the values are not
+        // compared as their text spellings.
+        ("SELECT event_id FROM Event ORDER BY amount", vec![3, 1, 2]),
+    ] {
+        let rows = execute_sql(sql, &[], &contract, &[], &mut records).expect("typed sort").rows;
+        assert_eq!(event_ids(&rows), expected, "`{sql}`");
+    }
+
+    let by_timestamp = execute_sql(
+        "SELECT event_id FROM Event WHERE created_at > ? ORDER BY event_id",
+        &[Value::Timestamp(Timestamp::parse_iso("2024-01-01T00:00:00Z").expect("timestamp"))],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("timestamp comparison")
+    .rows;
+    assert_eq!(event_ids(&by_timestamp), vec![1, 2]);
+
+    let by_time = execute_sql(
+        "SELECT event_id FROM Event WHERE at_time < ? ORDER BY event_id",
+        &[Value::Time(Time::parse_iso("23:00:00").expect("time"))],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("time comparison")
+    .rows;
+    assert_eq!(event_ids(&by_time), vec![1, 3]);
+
+    let by_date = execute_sql(
+        "SELECT event_id FROM Event WHERE happened_on >= ? ORDER BY event_id",
+        &[Value::Date(Date::parse_iso("2024-01-01").expect("date"))],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("date comparison")
+    .rows;
+    assert_eq!(event_ids(&by_date), vec![1, 3]);
+
+    let by_decimal = execute_sql(
+        "SELECT event_id FROM Event WHERE amount < ? ORDER BY event_id",
+        &[Value::Decimal(Decimal::parse("2", 12, 2).expect("decimal"))],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("decimal comparison")
+    .rows;
+    assert_eq!(event_ids(&by_decimal), vec![1, 3]);
+}
+
+#[test]
+fn decimal_comparison_is_exact_across_declared_scales() {
+    let contract = typed_contract();
+    let mut records = BTreeMap::new();
+    seed_events(&contract, &mut records);
+
+    // `1.5` at scale 1 and the stored `1.50` at scale 2 are the same number, so
+    // equality is exact across scales rather than comparing unscaled integers.
+    let rows = execute_sql(
+        "SELECT event_id FROM Event WHERE amount = ?",
+        &[Value::Decimal(Decimal::parse("1.5", 12, 1).expect("decimal"))],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("cross-scale decimal equality")
+    .rows;
+    assert_eq!(event_ids(&rows), vec![1]);
+
+    let missing = execute_sql(
+        "SELECT event_id FROM Event WHERE amount = ?",
+        &[Value::Decimal(Decimal::parse("1.51", 12, 2).expect("decimal"))],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("decimal inequality")
+    .rows;
+    assert!(missing.is_empty(), "a different decimal must not match");
+}
+
+#[test]
+fn typed_columns_never_compare_equal_to_text_or_numbers() {
+    let contract = typed_contract();
+    let mut records = BTreeMap::new();
+    seed_events(&contract, &mut records);
+
+    // A text spelling of the same visible content is a different kind family,
+    // so it never matches instead of being parsed with an assumed format.
+    for sql in [
+        "SELECT event_id FROM Event WHERE happened_on = '2024-02-29'",
+        "SELECT event_id FROM Event WHERE at_time = '12:00:00'",
+        "SELECT event_id FROM Event WHERE created_at = '2024-02-29T12:00:00Z'",
+        "SELECT event_id FROM Event WHERE amount = '1.50'",
+        "SELECT event_id FROM Event WHERE amount = 2",
+    ] {
+        let rows = execute_sql(sql, &[], &contract, &[], &mut records).expect("cross-kind comparison").rows;
+        assert!(rows.is_empty(), "`{sql}` must not match a temporal or decimal column");
+    }
+}
+
+#[test]
+fn typed_column_writes_reject_values_outside_the_declared_scalar() {
+    let contract = typed_contract();
+    let mut records = BTreeMap::new();
+    let valid = [
+        ("happened_on", "'2024-01-01'"),
+        ("at_time", "'00:00:00'"),
+        ("created_at", "'2024-01-01T00:00:00Z'"),
+        ("amount", "'1.00'"),
+    ];
+    for (column, literal, expected) in [
+        ("happened_on", "'2024-02-30'", "date"),
+        ("at_time", "'25:00:00'", "time"),
+        ("created_at", "'2024-01-01T00:00:00+08:00'", "timestamp"),
+        ("amount", "'1.234'", "decimal"),
+    ] {
+        let values =
+            valid.iter().map(|(name, value)| if *name == column { literal } else { *value }).collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "INSERT INTO Event (event_id, label, happened_on, at_time, created_at, amount) VALUES (1, 'bad', {values})"
+        );
+        let error = execute_sql(&sql, &[], &contract, &[], &mut records).expect_err("an out-of-scalar write must reject");
+        let message = format!("{error}");
+        assert!(message.contains(expected), "unexpected error for `{column}`: {message}");
+        assert!(records.is_empty(), "a rejected scalar write must not publish rows");
+    }
 }
