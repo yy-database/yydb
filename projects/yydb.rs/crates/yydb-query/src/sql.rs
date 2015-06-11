@@ -1233,6 +1233,19 @@ fn lower_bound_value(expr: &Expression, parameters: &[ParameterDescriptor]) -> R
             Ok(BoundValue::Literal(negate_number(numeric_literal(text)?)))
         }
         Expression::Identifier(identifier) => name_to_slot(&identifier.name, parameters),
+        // A `CAST` over a literal is a constant, so it folds into the literal the
+        // cast produces. Folding here keeps a comparison against
+        // `CAST('…' AS BLOB)` identical to the same value written as a parameter.
+        // A `CAST` over a placeholder is not folded: YYDB decides that shape at
+        // execution time, and a comparison value is baked into the plan, so the
+        // open form is rejected instead of being silently dropped.
+        Expression::Cast { expr: inner, target, .. } => {
+            let BoundValue::Literal(value) = lower_bound_value(inner, parameters)?
+            else {
+                return Err(sql_error("CAST over a parameter cannot be used as a comparison value"));
+            };
+            Ok(BoundValue::Literal(super::exec::eval_cast(&value, target)?))
+        }
         _ => Err(sql_error("unsupported SQL value expression")),
     }
 }
@@ -1291,6 +1304,12 @@ fn lower_expr(expr: &Expression, parameters: &[ParameterDescriptor], ctes: &CteS
         // and also `NOW` written without parentheses. Lower them to the clock
         // scalar functions so the executor can freeze them at query start.
         Expression::Identifier(identifier) => {
+            // A rewritten placeholder (`__yydb_param_<index>`) is a bound value,
+            // never a column: `CAST(? AS BLOB)` casts the bound value instead of
+            // reading a column whose name happens to look like a placeholder.
+            if identifier.name.starts_with(PARAM_PREFIX) {
+                return Ok(Expr::Bound(name_to_slot(&identifier.name, parameters)?));
+            }
             if let Some(clock) = try_lower_clock_register(identifier) {
                 return Ok(clock);
             }

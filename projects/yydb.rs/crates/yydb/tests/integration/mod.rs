@@ -7,6 +7,7 @@ mod main_snapshot;
 mod scalar_mapping;
 mod schema_metadata;
 mod schema_pragma;
+mod sql_binary;
 mod sql_query;
 mod vos_query;
 mod vos_transaction;

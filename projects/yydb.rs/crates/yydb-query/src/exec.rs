@@ -1411,7 +1411,7 @@ fn function_name(function: ScalarFunction) -> &'static str {
 /// Returns an `Err` when the conversion is not representable (e.g. text that
 /// does not parse as integer) so the caller can surface a diagnostic rather
 /// than silently producing an incorrect value. Casting `NULL` preserves NULL.
-fn eval_cast(value: &Value, target: &str) -> Result<Value> {
+pub(crate) fn eval_cast(value: &Value, target: &str) -> Result<Value> {
     // NULL stays NULL regardless of target type.
     if matches!(value, Value::Null) {
         return Ok(Value::Null);
