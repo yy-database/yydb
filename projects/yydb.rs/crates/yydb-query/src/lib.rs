@@ -22,6 +22,7 @@ mod lower;
 mod ops;
 mod params;
 mod resolve;
+mod result;
 mod sql;
 mod store;
 mod write;
@@ -45,6 +46,7 @@ pub use params::{
 pub use params::{Dialect, prepare_sql};
 #[doc(hidden)]
 pub use sql::SqlPlan;
+pub use result::{ColumnMeta, EncodedResult, ResultCell, ResultFormat, encode_result};
 pub use store::upsert_row;
 pub use write::WriteOutcome;
 

@@ -250,6 +250,14 @@ pub enum Error {
         /// Columns covered by the constraint.
         columns: Vec<String>,
     },
+    /// A result row cannot be rendered in the requested format without
+    /// inventing a representation for the value.
+    ResultFormat {
+        /// Result column that cannot be represented.
+        column: String,
+        /// Scalar kind the format cannot carry (for example `bytes`).
+        kind: &'static str,
+    },
 }
 
 impl fmt::Display for Error {
@@ -309,6 +317,9 @@ impl fmt::Display for Error {
             Self::UniqueViolation { table, constraint, columns } => {
                 write!(f, "unique constraint `{constraint}` violated on table `{table}` (columns: {})", columns.join(", "))
             }
+            Self::ResultFormat { column, kind } => {
+                write!(f, "result format: column `{column}` carries `{kind}` values that the requested format cannot represent")
+            }
         }
     }
 }
@@ -351,6 +362,7 @@ impl Error {
             Self::Remote { code, .. } => code,
             Self::Scalar { .. } => "yydb.scalar.invalid",
             Self::UniqueViolation { .. } => "yydb.unique.violation",
+            Self::ResultFormat { .. } => "yydb.result.format",
         }
     }
 
@@ -384,6 +396,7 @@ impl Error {
             | Self::AuthInsufficientPermission { .. } => "auth",
             Self::SchemaInvalidated { .. } => "query",
             Self::Scalar { .. } | Self::UniqueViolation { .. } => "query",
+            Self::ResultFormat { .. } => "query",
             Self::Remote { .. } => "remote",
         }
     }
@@ -439,6 +452,7 @@ impl Error {
             Self::UniqueViolation { table, constraint, columns } => {
                 vec![("table", table.clone()), ("constraint", constraint.clone()), ("columns", columns.join(","))]
             }
+            Self::ResultFormat { column, kind } => vec![("column", column.clone()), ("kind", (*kind).to_owned())],
         };
         Some(p)
     }
