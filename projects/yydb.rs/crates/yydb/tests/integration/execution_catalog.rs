@@ -86,6 +86,17 @@ fn rejects_invalid_schema_and_unsupported_types_without_coercion() {
 }
 
 #[test]
+fn refuses_file_and_vector_fields_instead_of_degrading_them() {
+    for ty in ["file", "vector<3>"] {
+        let source = format!("table User {{ @@id: i64, payload: {ty} }}");
+        assert!(
+            matches!(execution_catalog(&source), Err(Error::Unsupported(_))),
+            "declared `{ty}` field did not reach a stable unsupported rejection"
+        );
+    }
+}
+
+#[test]
 fn refuses_invalid_vos_before_publishing_schema() {
     let conn = Connection::open_in_memory().unwrap();
     assert!(matches!(conn.ensure_schema("table User { id: i64 }"), Err(Error::Schema { .. })));
