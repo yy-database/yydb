@@ -10,7 +10,7 @@ license = "MPL-2.0"
 repository = "https://github.com/yy-database/yydb"
 
 [workspace.dependencies]
-vos = { git = "https://github.com/voml/vos-language.git", rev = "1423d656d61ac27cca9ebc2016ffc9ded4b0f5c8" }
+vos = { git = "https://github.com/voml/vos-language.git", rev = "387d9fc3c9a556ddb8a433c627a866a2918d0186" }
 # SQL frontend parser (Oak). The SQL AST feeds `yydb-query`'s lowering pass.
 oak-sql = { git = "https://github.com/yggdrasil-language/oaks.git", rev = "8c85395188b882cef129f32cf5e8588bb91f1186", package = "oak-sql" }
 # Engine (bottom → mid; depend on yydb facade in apps)
