@@ -237,7 +237,11 @@ pub fn prepare_sql(source: &str) -> Result<PreparedStatement> {
 /// * `named` contains a parameter name the statement never references.
 /// * A bound value does not match the declared `slot_ty`.
 pub fn bind_named(stmt: &PreparedStatement, named: &BTreeMap<String, Value>) -> Result<Vec<Value>> {
-    let param_names: BTreeSet<&String> = stmt.parameters.iter().map(|p| &p.name).collect();
+    bind_values(&stmt.parameters, named)
+}
+
+fn bind_values(parameters: &[ParameterDescriptor], named: &BTreeMap<String, Value>) -> Result<Vec<Value>> {
+    let param_names: BTreeSet<&String> = parameters.iter().map(|p| &p.name).collect();
     for supplied in named.keys() {
         if !param_names.contains(supplied) {
             return Err(Error::QueryBind {
@@ -247,8 +251,8 @@ pub fn bind_named(stmt: &PreparedStatement, named: &BTreeMap<String, Value>) -> 
         }
     }
 
-    let mut values: Vec<Value> = vec![Value::Null; stmt.parameters.len()];
-    for param in &stmt.parameters {
+    let mut values: Vec<Value> = vec![Value::Null; parameters.len()];
+    for param in parameters {
         let Some(value) = named.get(&param.name)
         else {
             return Err(Error::QueryBind {
@@ -275,6 +279,30 @@ pub fn bind_named(stmt: &PreparedStatement, named: &BTreeMap<String, Value>) -> 
         values[param.index as usize] = value.clone();
     }
     Ok(values)
+}
+
+/// A VOS write program rewritten for parameter binding.
+pub struct BoundWrite {
+    /// Program text where every `$name` became a `__yydb_param_<index>` identifier.
+    pub source: String,
+    /// Bound values in ascending slot order.
+    pub values: Vec<Value>,
+}
+
+/// Rewrite `$name` parameters in a VOS write program and bind `named` values.
+///
+/// Write programs lower through `dml` rather than the operator pipeline, so they
+/// need the rewritten source text: the executor resolves each slot identifier
+/// against `values` while initializing a field. Refuses a program that is not a
+/// write so a read pipeline never enters the DML executor.
+pub fn bind_vos_write(source: &str, named: &BTreeMap<String, Value>) -> Result<BoundWrite> {
+    let (parameters, rewritten) = scan_and_rewrite(source, Dialect::Vos)?;
+    let program = vos::parse_program(&rewritten).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
+    if !super::dml::has_insert_expr(&program) {
+        return Err(Error::Unsupported("VOS parameter binding for writes requires an insert program"));
+    }
+    let values = bind_values(&parameters, named)?;
+    Ok(BoundWrite { source: rewritten, values })
 }
 
 /// Bind a prepared statement to an ordered value slice.

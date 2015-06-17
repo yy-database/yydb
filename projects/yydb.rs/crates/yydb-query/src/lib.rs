@@ -39,15 +39,15 @@ pub use ops::{
     WindowFunction, WindowOrderKey, WindowSpec, WriteAssignment, WriteField, WriteOp,
 };
 pub use params::{
-    BoundStatement, ParameterDescriptor, PreparedStatement, QueryKind, bind_named, bind_ordered, execute_prepared,
-    execute_write_prepared, fingerprint, prepare,
+    BoundStatement, BoundWrite, ParameterDescriptor, PreparedStatement, QueryKind, bind_named, bind_ordered, bind_vos_write,
+    execute_prepared, execute_write_prepared, fingerprint, prepare,
 };
 #[doc(hidden)]
 pub use params::{Dialect, prepare_sql};
 #[doc(hidden)]
 pub use sql::SqlPlan;
 pub use result::{ColumnMeta, EncodedResult, ResultCell, ResultFormat, encode_result};
-pub use store::upsert_row;
+pub use store::{BytesPlacementHook, ObjectResolver, upsert_row, with_bytes_placement, with_object_resolver};
 pub use write::WriteOutcome;
 
 /// Execute a VOS read pipeline against stored table rows.
@@ -78,6 +78,21 @@ pub fn execute_write_with_constraints(
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> yydb_types::Result<()> {
     dml::execute_with_constraints(source, contract, declared, schema_document, records)
+}
+
+/// Execute a VOS write program whose `__yydb_param_<index>` slots read `params`.
+///
+/// `source` is the rewritten program produced by [`bind_vos_write`]; the values
+/// line up with the slot indices in that text.
+pub fn execute_write_with_params(
+    source: &str,
+    contract: &ResolvedContract,
+    declared: &[yydb_types::TableUniqueConstraint],
+    schema_document: Option<&str>,
+    records: &mut BTreeMap<String, Vec<u8>>,
+    params: &[Value],
+) -> yydb_types::Result<()> {
+    dml::execute_with_params(source, contract, declared, schema_document, records, params)
 }
 
 /// Run a single `Type::insert({ … })` program and return the stored row when recognized.

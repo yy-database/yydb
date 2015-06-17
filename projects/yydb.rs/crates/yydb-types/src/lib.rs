@@ -690,6 +690,14 @@ impl HashAlgo {
             Self::Blake3 => "blake3",
         }
     }
+
+    /// Parses a name produced by [`Self::as_str`].
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "blake3" => Some(Self::Blake3),
+            _ => None,
+        }
+    }
 }
 
 /// What a CAS object represents (same path layout for all kinds).
@@ -702,6 +710,27 @@ pub enum ObjectKind {
     VectorPayload,
     /// Rebuildable ANN graph segment.
     AnnSegment,
+}
+
+impl ObjectKind {
+    /// Stable name used by tagged JSON and diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Blob => "blob",
+            Self::VectorPayload => "vector-payload",
+            Self::AnnSegment => "ann-segment",
+        }
+    }
+
+    /// Parses a name produced by [`Self::as_str`].
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "blob" => Some(Self::Blob),
+            "vector-payload" => Some(Self::VectorPayload),
+            "ann-segment" => Some(Self::AnnSegment),
+            _ => None,
+        }
+    }
 }
 
 /// Runtime residency hint (cache policy; not a second on-disk format).
@@ -869,7 +898,10 @@ impl Value {
             Self::Decimal(decimal) => {
                 format!("m:{}:{}:{}", decimal.precision(), decimal.scale(), decimal.unscaled())
             }
-            Self::Row(_) | Self::Vector(_) | Self::Object(_) | Self::File(_) => {
+            Self::Object(object) => {
+                format!("o:{}:{}:{}", object.algo.as_str(), object.hash_hex(), object.size)
+            }
+            Self::Row(_) | Self::Vector(_) | Self::File(_) => {
                 format!("x:{}", self.kind())
             }
         }

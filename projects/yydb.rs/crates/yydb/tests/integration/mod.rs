@@ -9,6 +9,7 @@ mod schema_metadata;
 mod schema_pragma;
 mod sql_binary;
 mod sql_query;
+mod vos_bytes;
 mod vos_query;
 mod vos_transaction;
 mod wire_dispatch;

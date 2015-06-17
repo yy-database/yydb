@@ -3,15 +3,26 @@
 //! Two frontends reach the same executor: VOS (`prepare_vos`, `query_vos`,
 //! `execute_vos_write`) and SQL (`prepare_sql`, `query_sql`, `execute_sql_write`).
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
-use crate::{Error, Result};
+use crate::{
+    bytes::{ObjectStoreResolver, YydbBytesPolicy},
+    Error, Result,
+};
 use yydb_query::{PreparedStatement, QueryRow, fingerprint as fp, prepare as prepare_source};
 use yydb_types::Value;
 
 use super::Connection;
 
 impl Connection {
+    fn object_resolver(&self) -> Arc<dyn yydb_query::ObjectResolver> {
+        Arc::new(ObjectStoreResolver::new(Arc::clone(&self.objects)))
+    }
+
+    fn bytes_policy(&self) -> Arc<dyn yydb_query::BytesPlacementHook> {
+        Arc::new(YydbBytesPolicy::new(Arc::clone(&self.objects), !self.is_single_file_yydb()))
+    }
+
     /// Prepare a VOS read pipeline into a reusable query plan.
     ///
     /// The returned [`PreparedStatement`] carries the lowered op tree, named
@@ -83,7 +94,9 @@ impl Connection {
         self.check_schema_drift(stmt, &state)?;
 
         let contract = resolved_contract(&state)?;
-        yydb_query::execute_prepared(stmt, values, Some(&contract), &state.records)
+        yydb_query::with_object_resolver(Some(self.object_resolver()), || {
+            yydb_query::execute_prepared(stmt, values, Some(&contract), &state.records)
+        })
     }
 
     fn check_schema_drift(&self, stmt: &PreparedStatement, state: &super::State) -> Result<()> {
@@ -160,13 +173,44 @@ impl Connection {
         self.mutate_active_state_unlocked(|state| {
             let contract = resolved_contract(state)?;
             let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
-            yydb_query::execute_write_with_constraints(
-                source,
-                &contract,
-                &state.unique_constraints,
-                schema_document,
-                &mut state.records,
-            )
+            yydb_query::with_object_resolver(Some(self.object_resolver()), || {
+                yydb_query::execute_write_with_constraints(
+                    source,
+                    &contract,
+                    &state.unique_constraints,
+                    schema_document,
+                    &mut state.records,
+                )
+            })
+        })
+    }
+
+    /// Execute a VOS insert program with named `$name` parameter bindings.
+    ///
+    /// Parameters reach a field initializer as host values, so a `bytes`
+    /// parameter moves the octets straight into the column: values above the
+    /// storage's inline boundary become a content-addressed object reference in
+    /// the row, at or below it stay inline. Mutations follow the same
+    /// transaction rules as [`Self::execute_vos_write`].
+    pub fn execute_vos_write_with_params(&self, source: &str, named: &BTreeMap<String, Value>) -> Result<()> {
+        self.guard_session_alive()?;
+        let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.mutate_active_state_unlocked(|state| {
+            let plan = yydb_query::bind_vos_write(source, named)?;
+            let contract = resolved_contract(state)?;
+            let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
+            yydb_query::with_object_resolver(Some(self.object_resolver()), || {
+                yydb_query::with_bytes_placement(Some(self.bytes_policy()), || {
+                    yydb_query::execute_write_with_params(
+                        &plan.source,
+                        &contract,
+                        &state.unique_constraints,
+                        schema_document,
+                        &mut state.records,
+                        &plan.values,
+                    )
+                })
+            })
         })
     }
 
@@ -187,8 +231,9 @@ impl Connection {
         self.mutate_active_state_unlocked(|state| {
             self.check_schema_drift(&stmt, state)?;
             let contract = resolved_contract(state)?;
-            let outcome =
-                yydb_query::execute_write_prepared(&stmt, &values, &contract, &state.unique_constraints, &mut state.records)?;
+            let outcome = yydb_query::with_object_resolver(Some(self.object_resolver()), || {
+                yydb_query::execute_write_prepared(&stmt, &values, &contract, &state.unique_constraints, &mut state.records)
+            })?;
             affected = outcome.affected;
             Ok(())
         })?;

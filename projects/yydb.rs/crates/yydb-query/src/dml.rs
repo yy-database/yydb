@@ -57,9 +57,27 @@ pub fn execute_with_constraints(
     schema_document: Option<&str>,
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<()> {
+    execute_with_params(source, contract, declared, schema_document, records, &[])
+}
+
+/// Execute a write program whose `__yydb_param_<index>` slots read `params`.
+///
+/// The caller rewrote `$name` parameters before parsing, so the program text
+/// already carries slot identifiers and this function only resolves them. A
+/// slot value is coerced against its declared field type exactly like a
+/// literal, which is how a host-supplied `bytes` value reaches a `bytes`
+/// column without a text detour.
+pub fn execute_with_params(
+    source: &str,
+    contract: &ResolvedContract,
+    declared: &[TableUniqueConstraint],
+    schema_document: Option<&str>,
+    records: &mut BTreeMap<String, Vec<u8>>,
+    params: &[Value],
+) -> Result<()> {
     let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
     let constraints = constraints::merge(constraints::from_contract(contract)?, declared);
-    execute_program_with_constraints(&program, contract, &constraints, schema_document, records)
+    execute_program_with_constraints(&program, contract, &constraints, schema_document, records, params)
 }
 
 /// If `source` is a single `Type::insert({ … })` program, run it and return the stored row.
@@ -76,7 +94,7 @@ pub fn try_insert_returning(
     if is_macro_call(result) || is_typed_object_insert(result) {
         return Ok(None);
     }
-    let (table, row) = match lower_insert(result, contract, &[]) {
+    let (table, row) = match lower_insert(result, contract, &[], &[]) {
         Ok(value) => value,
         Err(_) => return Ok(None),
     };
@@ -91,6 +109,7 @@ fn execute_program_with_constraints(
     constraints: &[TableUniqueConstraint],
     schema_document: Option<&str>,
     records: &mut BTreeMap<String, Vec<u8>>,
+    params: &[Value],
 ) -> Result<()> {
     let expanded = expand_program(program, schema_document)?;
     let mut bindings: Vec<(String, VosExpr)> = Vec::new();
@@ -100,7 +119,7 @@ fn execute_program_with_constraints(
         match stmt {
             VosStmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
             VosStmt::Expr(expr) => {
-                apply_insert(expr, contract, constraints, records, &bindings)?;
+                apply_insert(expr, contract, constraints, records, &bindings, params)?;
                 wrote = true;
             }
         }
@@ -110,7 +129,7 @@ fn execute_program_with_constraints(
         if is_macro_call(result) {
             return Err(dml_error("macro call could not be expanded (schema document required)"));
         }
-        apply_insert(result, contract, constraints, records, &bindings)?;
+        apply_insert(result, contract, constraints, records, &bindings, params)?;
         wrote = true;
     }
 
@@ -199,6 +218,25 @@ fn find_macro_body(document: &VosRoot, name: &str) -> Option<VosProgram> {
         .and_then(|declaration| declaration.body_program.clone())
 }
 
+/// Whether a program contains at least one `.insert(...)` expression.
+///
+/// Used by parameter binding to refuse a read pipeline before it can enter the
+/// DML executor. Broader than [`is_write_program`], which only recognizes the
+/// zero-argument `Type { … }.insert()` shape consumed by `prepare`.
+pub(crate) fn has_insert_expr(program: &VosProgram) -> bool {
+    let is_insert = |expr: &VosExpr| {
+        matches!(
+            expr,
+            VosExpr::Call {
+                callee,
+                ..
+            } if matches!(callee.as_ref(), VosExpr::Member { name, .. } if name == "insert")
+        )
+    };
+    program.statements.iter().any(|stmt| matches!(stmt, VosStmt::Expr(expr) if is_insert(expr)))
+        || program.result.as_ref().is_some_and(is_insert)
+}
+
 fn is_macro_call(expr: &VosExpr) -> bool {
     matches!(
         expr,
@@ -231,8 +269,9 @@ fn apply_insert(
     constraints: &[TableUniqueConstraint],
     records: &mut BTreeMap<String, Vec<u8>>,
     bindings: &[(String, VosExpr)],
+    params: &[Value],
 ) -> Result<()> {
-    let (table, row) = lower_insert(expr, contract, bindings)?;
+    let (table, row) = lower_insert(expr, contract, bindings, params)?;
     upsert_row_for_table(contract, constraints, records, &table, &row)?;
     Ok(())
 }
@@ -254,7 +293,12 @@ fn upsert_row_for_table(
     Ok(row.clone())
 }
 
-fn lower_insert(expr: &VosExpr, contract: &ResolvedContract, bindings: &[(String, VosExpr)]) -> Result<(String, QueryRow)> {
+fn lower_insert(
+    expr: &VosExpr,
+    contract: &ResolvedContract,
+    bindings: &[(String, VosExpr)],
+    params: &[Value],
+) -> Result<(String, QueryRow)> {
     let VosExpr::Call { callee, args, .. } = expr
     else {
         return Err(dml_error("Phase 1 execute expects an insert expression"));
@@ -274,7 +318,7 @@ fn lower_insert(expr: &VosExpr, contract: &ResolvedContract, bindings: &[(String
         else {
             return Err(dml_error("Phase 1 execute expects `Type::insert({ … })` with an object literal"));
         };
-        let row = lower_field_inits(entry, &fields)?;
+        let row = lower_field_inits(entry, &fields, params)?;
         return Ok((table, row));
     }
     if !args.is_empty() {
@@ -287,7 +331,7 @@ fn lower_insert(expr: &VosExpr, contract: &ResolvedContract, bindings: &[(String
         return Err(dml_error("Phase 1 execute supports `Type { … }.insert()` or `Type::insert({ … })`"));
     };
     let entry = table_type_by_name(contract, &ty)?;
-    let row = lower_field_inits(entry, &fields)?;
+    let row = lower_field_inits(entry, &fields, params)?;
     Ok((ty, row))
 }
 
@@ -303,19 +347,19 @@ fn table_display_name(entry: &ResolvedTypeContract) -> String {
     entry.canonical_path.join("::")
 }
 
-fn lower_field_inits(entry: &ResolvedTypeContract, fields: &[VosFieldInit]) -> Result<QueryRow> {
+fn lower_field_inits(entry: &ResolvedTypeContract, fields: &[VosFieldInit], params: &[Value]) -> Result<QueryRow> {
     let mut row = QueryRow::new();
     for init in fields {
         let slot = field_on_table(entry, &init.name)
             .map_err(|_| dml_error(format!("unknown field `{}` on `{}`", init.name, table_display_name(entry))))?;
         let value =
             init.value.as_ref().ok_or_else(|| dml_error(format!("field `{}` requires an explicit initializer", init.name)))?;
-        row.insert(init.name.clone(), eval_literal(value, &slot.canonical_type)?);
+        row.insert(init.name.clone(), eval_literal(value, &slot.canonical_type, params)?);
     }
     Ok(row)
 }
 
-fn eval_literal(expr: &VosExpr, ty: &ResolvedCanonicalType) -> Result<Value> {
+fn eval_literal(expr: &VosExpr, ty: &ResolvedCanonicalType, params: &[Value]) -> Result<Value> {
     match expr {
         VosExpr::Literal(literal) => {
             let raw = match literal {
@@ -329,7 +373,19 @@ fn eval_literal(expr: &VosExpr, ty: &ResolvedCanonicalType) -> Result<Value> {
             };
             coerce::value_to_scalar(raw, ty)
         }
-        _ => Err(dml_error("Phase 1 execute only supports literal field initializers")),
+        VosExpr::Name { name, .. } => {
+            let Some(slot) = name.strip_prefix(super::params::PARAM_PREFIX)
+            else {
+                return Err(dml_error("Phase 1 execute only supports literal field initializers and bound parameters"));
+            };
+            let index: usize =
+                slot.parse().map_err(|_| dml_error(format!("malformed parameter slot `{name}`")))?;
+            let value = params
+                .get(index)
+                .ok_or_else(|| dml_error(format!("parameter slot {index} has no bound value")))?;
+            coerce::value_to_scalar(value.clone(), ty)
+        }
+        _ => Err(dml_error("Phase 1 execute only supports literal field initializers and bound parameters")),
     }
 }
 

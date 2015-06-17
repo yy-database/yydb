@@ -90,7 +90,10 @@ pub(crate) fn value_to_scalar(value: Value, ty: &ResolvedCanonicalType) -> Resul
     // reinterpreted as text or a number.
     if let Value::Bytes(_) = &value {
         return match scalar_target(ty) {
-            Some(ScalarTarget::Bytes) => coerce_to(value, ScalarTarget::Bytes),
+            Some(ScalarTarget::Bytes) => match value {
+                Value::Bytes(octets) => super::store::place_bytes(octets),
+                other => Ok(other),
+            },
             _ => Err(coerce_error(
                 "BLOB value cannot be stored: the target column is not `bytes` and YYDB never converts BLOB into an \
                  integer, bool, text, uuid, date, time, timestamp or decimal column",
@@ -146,7 +149,8 @@ fn coerce_to(value: Value, target: ScalarTarget) -> Result<Value> {
         (Value::Text(_) | Value::Bool(_), ScalarTarget::Real) => {
             Err(coerce_error("column type `f64` requires an integer or REAL numeric literal"))
         }
-        (Value::Bytes(bytes), ScalarTarget::Bytes) => Ok(Value::Bytes(bytes)),
+        (Value::Bytes(bytes), ScalarTarget::Bytes) => super::store::place_bytes(bytes),
+        (Value::Object(object), ScalarTarget::Bytes) => Ok(Value::Object(object)),
         (Value::Text(_), ScalarTarget::Bytes) => Err(coerce_error(
             "column type `bytes` requires a BLOB value: YYDB never converts text into BLOB implicitly, use \
              `CAST(... AS BLOB)` for an explicit conversion",

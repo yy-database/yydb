@@ -1,13 +1,99 @@
 //! Table row persistence inside the YYDB record map.
 
-use std::collections::BTreeMap;
+use std::{
+    cell::RefCell,
+    collections::BTreeMap,
+    sync::Arc,
+};
 
 use serde_json::{Map, Value as JsonValue};
-use yydb_types::{Error, Result, Value, scalar};
+use yydb_types::{Error, ObjectRef, Result, Value, scalar};
 
 use super::ops::QueryRow;
 
 const ROW_PREFIX: &str = "__yydb/v0/row/";
+
+/// Reads the octets behind an out-of-line `bytes` object reference.
+///
+/// The storage host owns placement, so the row codec asks it to resolve a
+/// reference instead of knowing how objects are kept.
+pub trait ObjectResolver: Send + Sync {
+    /// Returns the stored octets, failing closed when the object is missing or corrupt.
+    fn resolve(&self, object: &ObjectRef) -> Result<Vec<u8>>;
+}
+
+type SharedResolver = Arc<dyn ObjectResolver>;
+
+/// Storage hook that decides where a written `bytes` value is kept.
+///
+/// The octet threshold is a physical property of the host, so the query layer
+/// never picks one: the host installs a hook and receives either the original
+/// inline octets or an object reference it created itself.
+pub trait BytesPlacementHook: Send + Sync {
+    /// Returns the value to store: inline octets or a reference into the host object store.
+    fn place(&self, octets: Vec<u8>) -> Result<Value>;
+}
+
+type SharedPlacementHook = Arc<dyn BytesPlacementHook>;
+
+thread_local! {
+    /// Resolver installed for the duration of one statement execution on this thread.
+    static OBJECT_RESOLVER: RefCell<Option<SharedResolver>> = RefCell::new(None);
+    /// Placement hook installed for the duration of one write execution on this thread.
+    static BYTES_PLACEMENT: RefCell<Option<SharedPlacementHook>> = RefCell::new(None);
+}
+
+struct ResolverGuard(Option<SharedResolver>);
+
+impl Drop for ResolverGuard {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        OBJECT_RESOLVER.with(|slot| {
+            slot.replace(previous);
+        });
+    }
+}
+
+/// Runs `body` with `resolver` installed for row decoding on this thread.
+///
+/// Rows whose `bytes` values were placed in the host object store cannot be
+/// decoded without a resolver, so a host that stores references always installs
+/// one. Without it, decoding a reference returns [`Error::Unsupported`] instead
+/// of guessing or downgrading the value to text.
+pub fn with_object_resolver<T>(resolver: Option<SharedResolver>, body: impl FnOnce() -> T) -> T {
+    let previous = OBJECT_RESOLVER.with(|slot| slot.replace(resolver));
+    let _guard = ResolverGuard(previous);
+    body()
+}
+
+struct PlacementGuard(Option<SharedPlacementHook>);
+
+impl Drop for PlacementGuard {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        BYTES_PLACEMENT.with(|slot| {
+            slot.replace(previous);
+        });
+    }
+}
+
+/// Runs `body` with `hook` installed for `bytes` placement on this thread.
+///
+/// Without a hook every `bytes` value stays inline, which is what a host with
+/// no object store can actually keep.
+pub fn with_bytes_placement<T>(hook: Option<SharedPlacementHook>, body: impl FnOnce() -> T) -> T {
+    let previous = BYTES_PLACEMENT.with(|slot| slot.replace(hook));
+    let _guard = PlacementGuard(previous);
+    body()
+}
+
+/// Places one `bytes` value through the installed hook.
+pub(crate) fn place_bytes(octets: Vec<u8>) -> Result<Value> {
+    BYTES_PLACEMENT.with(|slot| match slot.borrow().as_ref() {
+        Some(hook) => hook.place(octets),
+        None => Ok(Value::Bytes(octets)),
+    })
+}
 
 /// Build the storage key for one table row.
 pub fn row_key(table: &str, pk: &str) -> String {
@@ -90,13 +176,20 @@ fn encode_value(value: &Value) -> Result<JsonValue> {
             )
         }
         Value::Text(s) => JsonValue::String(s.clone()),
-        Value::Uuid(_) | Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Decimal(_) | Value::Bytes(_) => {
-            scalar::tagged_value_json(value).expect("uuid, temporal, decimal, and binary values always have a tagged form")
+        Value::Uuid(_)
+        | Value::Date(_)
+        | Value::Time(_)
+        | Value::Timestamp(_)
+        | Value::Decimal(_)
+        | Value::Bytes(_)
+        | Value::Object(_) => {
+            scalar::tagged_value_json(value)
+                .expect("uuid, temporal, decimal, binary, and object-reference values always have a tagged form")
         }
         _ => {
             return Err(Error::Unsupported(
-                "query row encoding supports null, bool, i64, real, text, uuid, bytes, date, time, timestamp, and decimal \
-                 only",
+                "query row encoding supports null, bool, i64, real, text, uuid, bytes, date, time, timestamp, decimal, and \
+                 bytes object references only",
             ));
         }
     })
@@ -123,11 +216,12 @@ fn decode_value(value: &JsonValue) -> Result<Value> {
         }
         JsonValue::String(s) => Value::Text(s.clone()),
         JsonValue::Object(_) => match scalar::tagged_value_from_json(value) {
-            Some(Ok(value)) => value,
+            Some(Ok(parsed)) => resolve_object_reference(parsed)?,
             Some(Err(error)) => return Err(error.into()),
             None => {
                 return Err(Error::Unsupported(
-                    "query row decoding supports tagged uuid, date, time, timestamp, decimal, and bytes objects only",
+                    "query row decoding supports tagged uuid, date, time, timestamp, decimal, bytes, and object references \
+                     only",
                 ));
             }
         },
@@ -135,4 +229,14 @@ fn decode_value(value: &JsonValue) -> Result<Value> {
             return Err(Error::Unsupported("query row decoding does not support JSON arrays"));
         }
     })
+}
+
+fn resolve_object_reference(value: Value) -> Result<Value> {
+    match value {
+        Value::Object(object) => OBJECT_RESOLVER.with(|slot| match slot.borrow().as_ref() {
+            Some(resolver) => resolver.resolve(&object).map(Value::Bytes),
+            None => Err(Error::Unsupported("a stored bytes object reference needs an object store to decode")),
+        }),
+        other => Ok(other),
+    }
 }

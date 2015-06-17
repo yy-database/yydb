@@ -8,6 +8,8 @@
 
 /// Batched write operations.
 pub mod batch;
+/// `bytes` placement at the inline boundary and object-reference row decoding.
+pub mod bytes;
 /// VOS catalog publication and contract resolution.
 pub mod catalog;
 /// Durable connection handle and statement surface.
@@ -23,6 +25,7 @@ mod kv;
 mod storage;
 
 pub use batch::Batch;
+pub use bytes::{ObjectStoreResolver, YydbBytesPolicy};
 pub use connection::Connection;
 pub use journal::{JournalMode, OpenFlags};
 pub use objects::ObjectStore;

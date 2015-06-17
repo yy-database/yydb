@@ -750,6 +750,13 @@ pub fn tagged_value_json(value: &crate::Value) -> Option<serde_json::Value> {
             "$yydb": "bytes",
             "hex": crate::hex::encode_vec(bytes),
         })),
+        crate::Value::Object(object) => Some(serde_json::json!({
+            "$yydb": "object",
+            "algo": object.algo.as_str(),
+            "hash": object.hash_hex(),
+            "size": object.size,
+            "kind": object.kind.as_str(),
+        })),
         _ => None,
     }
 }
@@ -817,6 +824,26 @@ fn parse_tagged_value(json: &serde_json::Value, tag: &serde_json::Value) -> Resu
             let hex = object.get("hex").and_then(serde_json::Value::as_str).ok_or_else(|| malformed("bytes"))?;
             let bytes = decode_hex(hex).ok_or_else(|| malformed("bytes"))?;
             Ok(crate::Value::Bytes(bytes))
+        }
+        "object" => {
+            let algo = object
+                .get("algo")
+                .and_then(serde_json::Value::as_str)
+                .and_then(crate::HashAlgo::from_name)
+                .ok_or_else(|| malformed("object"))?;
+            let hash = object
+                .get("hash")
+                .and_then(serde_json::Value::as_str)
+                .and_then(decode_hex)
+                .and_then(|digest| <[u8; 32]>::try_from(digest).ok())
+                .ok_or_else(|| malformed("object"))?;
+            let size = object.get("size").and_then(serde_json::Value::as_u64).ok_or_else(|| malformed("object"))?;
+            let kind = object
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                .and_then(crate::ObjectKind::from_name)
+                .ok_or_else(|| malformed("object"))?;
+            Ok(crate::Value::Object(crate::ObjectRef { algo, hash, size, kind }))
         }
         other => Err(ScalarError::Malformed { kind: "scalar", input: format!("unknown tag `{other}`") }),
     }
