@@ -23,6 +23,16 @@ from yydb import Database, YydbError
 from yydb.errors import DATABASE_CLOSED, INVALID_ARGUMENT, NATIVE_ERROR
 
 SCHEMA = "table Project { @@id: uuid, title: utf8 }"
+BYTES_SCHEMA = """
+table Blob {
+    @@blob_id: i64,
+    label: utf8,
+    body: bytes,
+}
+"""
+BYTES_INSERT = "Blob::insert({ blob_id: $id, label: $label, body: $body })"
+BYTES_READ = "Blob.all().collect()"
+INLINE_BYTES_MAX = 4096
 NATIVE_REASON = yydb.native_unavailable_reason() or "yydb_pyo3 is not available"
 
 
@@ -100,6 +110,73 @@ class NativeTest(unittest.TestCase):
                 with self.assertRaises(YydbError) as schema_error:
                     database.ensure_schema("table {")
                 self.assertEqual(schema_error.exception.code, NATIVE_ERROR)
+            finally:
+                database.close()
+
+    def test_bytes_round_trip_verbatim_through_the_public_handle(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            path = Path(directory) / "blobs.yydb"
+            vectors = {
+                1: b"",
+                2: b"\x00\x00\x00",
+                3: b"\xff\xfe\x00\x80",
+                4: bytes(range(256)) * 2,
+            }
+            database = Database.open(path)
+            try:
+                database.ensure_schema(BYTES_SCHEMA)
+                for blob_id, payload in vectors.items():
+                    database.execute(BYTES_INSERT, {"id": blob_id, "label": f"row-{blob_id}", "body": payload})
+                rows = {row["blob_id"]: row for row in database.query(BYTES_READ)}
+                self.assertEqual(sorted(rows), sorted(vectors))
+                for blob_id, payload in vectors.items():
+                    stored = rows[blob_id]["body"]
+                    self.assertIsInstance(stored, bytes)
+                    self.assertEqual(stored, payload)
+                    self.assertEqual(stored.hex(), payload.hex())
+            finally:
+                database.close()
+
+            reopened = Database.open(path)
+            try:
+                rows = {row["blob_id"]: row for row in reopened.query(BYTES_READ)}
+                self.assertEqual(rows[3]["body"], vectors[3])
+            finally:
+                reopened.close()
+
+    def test_bytes_above_the_inline_boundary_read_back_from_objects(self) -> None:
+        # 4097 = INLINE_BYTES_MAX + 1, and the octets cover NUL plus invalid UTF-8.
+        payload = bytes((index * 7) % 256 for index in range(INLINE_BYTES_MAX + 1))
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            path = Path(directory) / "blobs.yydx"
+            database = Database.open(path)
+            try:
+                database.ensure_schema(BYTES_SCHEMA)
+                database.execute(BYTES_INSERT, {"id": 1, "label": "big", "body": payload})
+            finally:
+                database.close()
+
+            reopened = Database.open(path)
+            try:
+                rows = reopened.query(BYTES_READ)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["body"], payload)
+                self.assertEqual(rows[0]["body"].hex(), payload.hex())
+            finally:
+                reopened.close()
+
+    def test_bytes_above_the_inline_boundary_are_refused_in_single_file_mode(self) -> None:
+        payload = b"\xff" * (INLINE_BYTES_MAX + 1)
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            path = Path(directory) / "blobs.yydb"
+            database = Database.open(path)
+            try:
+                database.ensure_schema(BYTES_SCHEMA)
+                with self.assertRaises(YydbError) as raised:
+                    database.execute(BYTES_INSERT, {"id": 1, "label": "big", "body": payload})
+                self.assertEqual(raised.exception.code, NATIVE_ERROR)
+                self.assertIn("INLINE_BYTES_MAX", raised.exception.message)
+                self.assertEqual(database.query(BYTES_READ), [])
             finally:
                 database.close()
 

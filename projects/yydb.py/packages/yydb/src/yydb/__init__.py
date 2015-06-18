@@ -1,8 +1,9 @@
 """Python bindings for the YYDB VOS database.
 
 The public surface stays thin on purpose: version lookup, an embedded
-database handle, and VOS schema file reads. SQL execution is not exposed
-here, the YYDB engine owns the VOS authoring surface.
+database handle with one VOS read pipeline and one parameterized VOS write,
+and VOS schema file reads. SQL execution is not exposed here, the YYDB
+engine owns the VOS authoring surface.
 """
 
 from __future__ import annotations
@@ -118,6 +119,30 @@ class Database:
             raise YydbError(INVALID_ARGUMENT, "schema document must be a str")
         native = _require_native()
         _call("ensure_schema", native.init_db, self._path, document)
+
+    def execute(self, source: str, params: dict[str, Any] | None = None) -> None:
+        """Run one VOS write statement with named parameters.
+
+        A :class:`bytes` parameter is handed to the engine as raw octets and
+        never spelled as text, so NUL bytes and invalid UTF-8 survive.
+        """
+        self._ensure_open()
+        if not isinstance(source, str):
+            raise YydbError(INVALID_ARGUMENT, "source must be a str")
+        native = _require_native()
+        _call("execute", native.execute_vos_write, self._path, source, dict(params or {}))
+
+    def query(self, source: str) -> list[dict[str, Any]]:
+        """Run one VOS read pipeline and return one dict per row.
+
+        A ``bytes`` column is returned as :class:`bytes` holding the stored
+        octets, not as text.
+        """
+        self._ensure_open()
+        if not isinstance(source, str):
+            raise YydbError(INVALID_ARGUMENT, "source must be a str")
+        native = _require_native()
+        return _call("query", native.query_vos, self._path, source)
 
     def info(self) -> str:
         """Return multi-line database diagnostics."""

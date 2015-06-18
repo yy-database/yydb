@@ -4,12 +4,55 @@
 
 #![deny(missing_docs)]
 
-use std::{fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path};
 
-use pyo3::{exceptions::PyRuntimeError, prelude::*};
+use pyo3::{
+    exceptions::{PyRuntimeError, PyTypeError},
+    prelude::*,
+    types::{PyBool, PyBytes, PyDict, PyString},
+    IntoPyObjectExt,
+};
+use yydb::Value;
 
 fn map_err(error: impl ToString) -> PyErr {
     PyRuntimeError::new_err(error.to_string())
+}
+
+/// Host value accepted by [`execute_vos_write_with_params`].
+///
+/// `bytes` stays `bytes` in both directions: it is never decoded as text and
+/// never re-encoded, so a payload that no text spelling can carry survives the
+/// host boundary unchanged.
+fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+    if value.is_none() {
+        return Ok(Value::Null);
+    }
+    if let Ok(payload) = value.cast::<PyBytes>() {
+        return Ok(Value::Bytes(payload.as_bytes().to_vec()));
+    }
+    if value.cast::<PyBool>().is_ok() {
+        return Ok(Value::Bool(value.extract::<bool>()?));
+    }
+    if let Ok(text) = value.cast::<PyString>() {
+        return Ok(Value::Text(text.to_str()?.to_owned()));
+    }
+    if let Ok(number) = value.extract::<i64>() {
+        return Ok(Value::I64(number));
+    }
+    Err(PyTypeError::new_err(format!("unsupported parameter value {value:?}")))
+}
+
+/// Reads one result value back into the matching Python object.
+fn value_to_py(py: Python<'_>, value: Value) -> PyResult<Py<PyAny>> {
+    match value {
+        Value::Null => Ok(py.None()),
+        Value::Bool(flag) => flag.into_py_any(py),
+        Value::I64(number) => number.into_py_any(py),
+        Value::F64(number) => number.into_py_any(py),
+        Value::Text(text) => text.into_py_any(py),
+        Value::Bytes(octets) => PyBytes::new(py, &octets).into_py_any(py),
+        other => Err(PyTypeError::new_err(format!("unsupported result value `{}`", other.kind()))),
+    }
 }
 
 /// Embedded `yydb` engine version string.
@@ -71,6 +114,40 @@ fn read_schema_file(schema_path: String) -> PyResult<String> {
     fs::read_to_string(&schema_path).map_err(map_err)
 }
 
+/// Execute a VOS read pipeline and return one dict per row.
+///
+/// A `bytes` cell is returned as Python `bytes` holding the stored octets, not
+/// as text: no host-side decoding happens, so a payload that is not valid UTF-8
+/// survives the boundary unchanged.
+#[pyfunction]
+fn query_vos(py: Python<'_>, db_path: String, source: String) -> PyResult<Vec<Py<PyAny>>> {
+    let conn = yydb::Connection::open(&db_path).map_err(map_err)?;
+    let rows = conn.query_vos(&source).map_err(map_err)?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let dict = PyDict::new(py);
+        for (column, value) in row {
+            dict.set_item(column, value_to_py(py, value)?)?;
+        }
+        out.push(dict.into_any().unbind());
+    }
+    Ok(out)
+}
+
+/// Execute one VOS write statement with named parameters.
+///
+/// `bytes` parameters stay `bytes`: they are handed to the engine as octets and
+/// never pass through a text spelling.
+#[pyfunction]
+fn execute_vos_write(db_path: String, source: String, params: &Bound<'_, PyDict>) -> PyResult<()> {
+    let conn = yydb::Connection::open(&db_path).map_err(map_err)?;
+    let mut named = BTreeMap::new();
+    for (key, value) in params.iter() {
+        named.insert(key.extract::<String>()?, py_to_value(&value)?);
+    }
+    conn.execute_vos_write_with_params(&source, &named).map_err(map_err)
+}
+
 fn summarize_document(document: &str) -> String {
     let trimmed = document.trim();
     if trimmed.is_empty() {
@@ -92,5 +169,7 @@ fn yydb_pyo3(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(init_db, m)?)?;
     m.add_function(wrap_pyfunction!(info_text, m)?)?;
     m.add_function(wrap_pyfunction!(read_schema_file, m)?)?;
+    m.add_function(wrap_pyfunction!(query_vos, m)?)?;
+    m.add_function(wrap_pyfunction!(execute_vos_write, m)?)?;
     Ok(())
 }
