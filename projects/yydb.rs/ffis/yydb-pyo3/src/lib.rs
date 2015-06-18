@@ -7,10 +7,10 @@
 use std::{collections::BTreeMap, fs, path::Path};
 
 use pyo3::{
+    IntoPyObjectExt,
     exceptions::{PyRuntimeError, PyTypeError},
     prelude::*,
     types::{PyBool, PyBytes, PyDict, PyString},
-    IntoPyObjectExt,
 };
 use yydb::Value;
 

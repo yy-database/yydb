@@ -8,8 +8,8 @@
 
 use std::{collections::BTreeMap, fs};
 
-use yydb::{Connection, Error, INLINE_BYTES_MAX, Value};
 use crate::fixtures::yydb::{cleanup, open_temp_yydx, temp_yydx};
+use yydb::{Connection, Error, INLINE_BYTES_MAX, Value};
 
 const BLOB_SCHEMA: &str = r#"
 table Blob {

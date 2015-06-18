@@ -4,11 +4,7 @@
 //! those octets without a UTF-8 or `String` detour, so a payload that no text
 //! spelling can represent still stores, compares, and returns verbatim.
 
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::PathBuf,
-};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use yydb::{Connection, INLINE_BYTES_MAX, Value};
 
@@ -104,11 +100,9 @@ fn blob_parameter_keeps_empty_nul_and_non_utf8_payloads_distinct() {
     assert!(ids(&conn, "SELECT payload_id FROM Payload WHERE body = ?", &[Value::Null]).is_empty());
     assert_eq!(ids(&conn, "SELECT payload_id FROM Payload WHERE body IS NULL", &[]), vec![4]);
 
-    let lengths = conn
-        .query_sql("SELECT payload_id, LENGTH(body) AS body_len FROM Payload ORDER BY payload_id")
-        .expect("lengths");
-    let lengths: Vec<(Value, Value)> =
-        lengths.iter().map(|row| (row["payload_id"].clone(), row["body_len"].clone())).collect();
+    let lengths =
+        conn.query_sql("SELECT payload_id, LENGTH(body) AS body_len FROM Payload ORDER BY payload_id").expect("lengths");
+    let lengths: Vec<(Value, Value)> = lengths.iter().map(|row| (row["payload_id"].clone(), row["body_len"].clone())).collect();
     assert_eq!(
         lengths,
         vec![
@@ -319,11 +313,8 @@ fn blob_rows_carry_no_text_copy_in_the_record_map() {
 
     // The stored row keeps a tagged `bytes` object with the lowercase hex of the
     // original octets, which proves the write path never decoded them.
-    let records: BTreeMap<String, Vec<u8>> = conn
-        .scan_prefix("__yydb/v0/row/Payload/", None, 16)
-        .expect("scan rows")
-        .into_iter()
-        .collect();
+    let records: BTreeMap<String, Vec<u8>> =
+        conn.scan_prefix("__yydb/v0/row/Payload/", None, 16).expect("scan rows").into_iter().collect();
     assert_eq!(records.len(), 1, "one payload row must be stored");
     let raw = records.values().next().expect("payload row stored");
     let raw = std::str::from_utf8(raw).expect("row json is utf-8");

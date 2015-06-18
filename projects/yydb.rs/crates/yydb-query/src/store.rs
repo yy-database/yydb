@@ -1,10 +1,6 @@
 //! Table row persistence inside the YYDB record map.
 
-use std::{
-    cell::RefCell,
-    collections::BTreeMap,
-    sync::Arc,
-};
+use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 use serde_json::{Map, Value as JsonValue};
 use yydb_types::{Error, ObjectRef, Result, Value, scalar};
@@ -182,10 +178,8 @@ fn encode_value(value: &Value) -> Result<JsonValue> {
         | Value::Timestamp(_)
         | Value::Decimal(_)
         | Value::Bytes(_)
-        | Value::Object(_) => {
-            scalar::tagged_value_json(value)
-                .expect("uuid, temporal, decimal, binary, and object-reference values always have a tagged form")
-        }
+        | Value::Object(_) => scalar::tagged_value_json(value)
+            .expect("uuid, temporal, decimal, binary, and object-reference values always have a tagged form"),
         _ => {
             return Err(Error::Unsupported(
                 "query row encoding supports null, bool, i64, real, text, uuid, bytes, date, time, timestamp, decimal, and \

@@ -10,17 +10,17 @@ use oak_sql::ast::{
     Assignment, BinaryOperator, DeleteStatement, Expression, GroupByClause, GroupByItem, Identifier, InsertSource,
     InsertStatement, JoinClause, JoinType, LimitClause, Literal, OnConflictAction, OrderByItem, SelectItem, SelectStatement,
     SetOperationStatement, SetOperator, SqlRoot, SqlStatement, TableName, TableSource, TransactionAction, UnaryOperator,
-    UpdateStatement, WindowFrame as AstWindowFrame, WindowFrameBound as AstWindowFrameBound, WindowFrameUnit as AstWindowFrameUnit,
-    WindowOrderItem, WindowSpec as AstWindowSpec, WithClause,
+    UpdateStatement, WindowFrame as AstWindowFrame, WindowFrameBound as AstWindowFrameBound,
+    WindowFrameUnit as AstWindowFrameUnit, WindowOrderItem, WindowSpec as AstWindowSpec, WithClause,
 };
 use yydb_types::{Error, Result, Value};
 
 use super::{
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, CountExpr, Expr, JoinKind,
-        OUTER_ROW_MARKER, Pred, ProjectExpr, ProjectField, QueryOp, ReturningProjection, ScalarFunction,
-        SessionOp, SetOpKind, SortKey, WindowField, WindowFrame, WindowFrameBound, WindowFunction, WindowOrderKey,
-        WindowSpec, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
+        OUTER_ROW_MARKER, Pred, ProjectExpr, ProjectField, QueryOp, ReturningProjection, ScalarFunction, SessionOp, SetOpKind,
+        SortKey, WindowField, WindowFrame, WindowFrameBound, WindowFunction, WindowOrderKey, WindowSpec, WriteAssignment,
+        WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     params::{PARAM_PREFIX, ParameterDescriptor, name_to_slot},
 };
@@ -893,16 +893,8 @@ fn lower_sort_key(item: &OrderByItem, parameters: &[ParameterDescriptor], scope:
     }
     let ascending = !matches!(item.direction, oak_sql::ast::OrderDirection::Desc);
     match &item.expr {
-        Expression::Identifier(identifier) => Ok(SortKey {
-            field: identifier.name.to_string(),
-            expr: None,
-            ascending,
-        }),
-        other => Ok(SortKey {
-            field: "expr".to_string(),
-            expr: Some(lower_expr(other, parameters, scope)?),
-            ascending,
-        }),
+        Expression::Identifier(identifier) => Ok(SortKey { field: identifier.name.to_string(), expr: None, ascending }),
+        other => Ok(SortKey { field: "expr".to_string(), expr: Some(lower_expr(other, parameters, scope)?), ascending }),
     }
 }
 
@@ -966,7 +958,9 @@ fn expr_has_column_ref(expr: &Expression) -> bool {
     match expr {
         Expression::Identifier(_) => !matches!(expr, Expression::Identifier(ident) if ident.name.starts_with("__yydb_param_")),
         Expression::Binary { left, right, .. } => expr_has_column_ref(left) || expr_has_column_ref(right),
-        Expression::Unary { expr: inner, .. } | Expression::IsNull { expr: inner, .. } | Expression::IsTruth { expr: inner, .. } => expr_has_column_ref(inner),
+        Expression::Unary { expr: inner, .. }
+        | Expression::IsNull { expr: inner, .. }
+        | Expression::IsTruth { expr: inner, .. } => expr_has_column_ref(inner),
         Expression::FunctionCall { args, .. } => args.iter().any(expr_has_column_ref),
         Expression::Cast { expr: inner, .. } => expr_has_column_ref(inner),
         Expression::Case { branches, else_branch, .. } => {
@@ -976,9 +970,7 @@ fn expr_has_column_ref(expr: &Expression) -> bool {
         Expression::Between { expr: inner, low, high, .. } => {
             expr_has_column_ref(inner) || expr_has_column_ref(low) || expr_has_column_ref(high)
         }
-        Expression::InList { expr: inner, list, .. } => {
-            expr_has_column_ref(inner) || list.iter().any(expr_has_column_ref)
-        }
+        Expression::InList { expr: inner, list, .. } => expr_has_column_ref(inner) || list.iter().any(expr_has_column_ref),
         Expression::InSubquery { expr: inner, .. } => expr_has_column_ref(inner),
         _ => false,
     }
@@ -2083,8 +2075,12 @@ fn check_select_references(select: &SelectStatement, scope: &CteScope) -> Result
                     for set in inner {
                         for sub in set {
                             match sub {
-                                GroupByItem::Column(identifier) => check_identifier(identifier, scope, RefSite::WholeResult("GROUP BY"))?,
-                                GroupByItem::Expression(expr) => check_reference(expr, scope, RefSite::WholeResult("GROUP BY"))?,
+                                GroupByItem::Column(identifier) => {
+                                    check_identifier(identifier, scope, RefSite::WholeResult("GROUP BY"))?
+                                }
+                                GroupByItem::Expression(expr) => {
+                                    check_reference(expr, scope, RefSite::WholeResult("GROUP BY"))?
+                                }
                                 _ => {}
                             }
                         }
@@ -2093,7 +2089,9 @@ fn check_select_references(select: &SelectStatement, scope: &CteScope) -> Result
                 GroupByItem::Rollup(inner) | GroupByItem::Cube(inner) => {
                     for sub in inner {
                         match sub {
-                            GroupByItem::Column(identifier) => check_identifier(identifier, scope, RefSite::WholeResult("GROUP BY"))?,
+                            GroupByItem::Column(identifier) => {
+                                check_identifier(identifier, scope, RefSite::WholeResult("GROUP BY"))?
+                            }
                             GroupByItem::Expression(expr) => check_reference(expr, scope, RefSite::WholeResult("GROUP BY"))?,
                             _ => {}
                         }

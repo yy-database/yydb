@@ -1,8 +1,10 @@
 //! Execute Phase 1 query ops against stored table rows.
 
-use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use vos::types::ResolvedContract;
 use yydb_types::{Error, Result, Timestamp, Value};
@@ -27,9 +29,7 @@ thread_local! {
 /// Freeze the query-start clock from `SystemTime::now()`. Panics if called while
 /// a clock is already set (nested top-level executes share one clock).
 fn freeze_query_start_clock() -> Timestamp {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock is before UNIX epoch");
+    let duration = SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock is before UNIX epoch");
     let micros = duration.as_micros() as i64;
     let ts = Timestamp::from_unix_micros(micros).expect("current UTC instant fits in the YYDB timestamp range");
     QUERY_START_CLOCK.with(|cell| {
@@ -54,9 +54,7 @@ fn query_start_timestamp() -> Timestamp {
         if let Some(ts) = *cell.borrow() {
             return ts;
         }
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock is before UNIX epoch");
+        let duration = SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock is before UNIX epoch");
         let micros = duration.as_micros() as i64;
         Timestamp::from_unix_micros(micros).expect("current UTC instant fits in the YYDB timestamp range")
     })
@@ -608,9 +606,7 @@ fn eval_pred_in(
             eval_pred_in(left, row, table, contract, records, bound_values, outer),
             eval_pred_in(right, row, table, contract, records, bound_values, outer),
         ),
-        Pred::Not(inner) => {
-            eval_pred_in(inner, row, table, contract, records, bound_values, outer).map(|truth| !truth)
-        }
+        Pred::Not(inner) => eval_pred_in(inner, row, table, contract, records, bound_values, outer).map(|truth| !truth),
         Pred::InSet { path, values, negated } => {
             let left = read_path(path, row, table, contract, records, outer);
             in_set_truth(&left, values).map(|truth| truth != *negated)
@@ -1272,12 +1268,8 @@ fn eval_function(
         // clock when executed outside a top-level execute pipeline, e.g.
         // in a unit test). Every call within one query returns the same value.
         ScalarFunction::Now | ScalarFunction::CurrentTimestamp => Value::Timestamp(query_start_timestamp()),
-        ScalarFunction::CurrentDate => {
-            Value::Date(query_start_timestamp().to_parts().0)
-        }
-        ScalarFunction::CurrentTime => {
-            Value::Time(query_start_timestamp().to_parts().1)
-        }
+        ScalarFunction::CurrentDate => Value::Date(query_start_timestamp().to_parts().0),
+        ScalarFunction::CurrentTime => Value::Time(query_start_timestamp().to_parts().1),
     })
 }
 
@@ -1720,11 +1712,7 @@ fn execute_full_join(
 
 /// `CROSS JOIN` — the Cartesian product of both row sets. Every left row is
 /// paired with every right row, and no `ON` predicate is evaluated.
-fn execute_cross_join(
-    left_rows: &[QueryRow],
-    right_rows: &[QueryRow],
-    prefix: &str,
-) -> Result<Vec<QueryRow>> {
+fn execute_cross_join(left_rows: &[QueryRow], right_rows: &[QueryRow], prefix: &str) -> Result<Vec<QueryRow>> {
     let capacity = left_rows.len().saturating_mul(right_rows.len());
     let mut out: Vec<QueryRow> = Vec::with_capacity(capacity);
     for left_row in left_rows {

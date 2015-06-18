@@ -44,9 +44,9 @@ pub use params::{
 };
 #[doc(hidden)]
 pub use params::{Dialect, prepare_sql};
+pub use result::{ColumnMeta, EncodedResult, ResultCell, ResultFormat, encode_result};
 #[doc(hidden)]
 pub use sql::SqlPlan;
-pub use result::{ColumnMeta, EncodedResult, ResultCell, ResultFormat, encode_result};
 pub use store::{BytesPlacementHook, ObjectResolver, upsert_row, with_bytes_placement, with_object_resolver};
 pub use write::WriteOutcome;
 

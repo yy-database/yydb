@@ -486,9 +486,7 @@ fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Typ
     match ty {
         ResolvedCanonicalType::Scalar(scalar) => execution_type_for_scalar(*scalar),
         ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => decimal_type_from_arguments(arguments),
-        ResolvedCanonicalType::File => {
-            Err(Error::Unsupported("VOS `file` fields are not in the YYDB execution slice yet"))
-        }
+        ResolvedCanonicalType::File => Err(Error::Unsupported("VOS `file` fields are not in the YYDB execution slice yet")),
         ResolvedCanonicalType::Vector { .. } => {
             Err(Error::Unsupported("VOS `vector<N>` fields are not in the YYDB execution slice yet"))
         }

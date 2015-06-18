@@ -68,9 +68,7 @@ impl Connection {
         };
         let mut savepoints = self.savepoints.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if savepoints.iter().any(|(existing, _)| existing == name) {
-            return Err(Error::Schema {
-                message: format!("savepoint `{name}` already exists"),
-            });
+            return Err(Error::Schema { message: format!("savepoint `{name}` already exists") });
         }
         let state = txn_slot.as_ref().expect("txn slot just proved Some").clone();
         savepoints.push((name.to_owned(), state));
@@ -93,9 +91,7 @@ impl Connection {
         let index = savepoints
             .iter()
             .rposition(|(existing, _)| existing == name)
-            .ok_or_else(|| Error::Schema {
-                message: format!("savepoint `{name}` does not exist"),
-            })?;
+            .ok_or_else(|| Error::Schema { message: format!("savepoint `{name}` does not exist") })?;
         let (_, snapshot) = savepoints.remove(index);
         // Drop every savepoint strictly above the named one so later rollback-to
         // cannot jump past its own restore barrier.
@@ -120,9 +116,7 @@ impl Connection {
         let index = savepoints
             .iter()
             .rposition(|(existing, _)| existing == name)
-            .ok_or_else(|| Error::Schema {
-                message: format!("savepoint `{name}` does not exist"),
-            })?;
+            .ok_or_else(|| Error::Schema { message: format!("savepoint `{name}` does not exist") })?;
         savepoints.remove(index);
         Ok(())
     }

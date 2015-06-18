@@ -6,8 +6,8 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
-    bytes::{ObjectStoreResolver, YydbBytesPolicy},
     Error, Result,
+    bytes::{ObjectStoreResolver, YydbBytesPolicy},
 };
 use yydb_query::{PreparedStatement, QueryRow, fingerprint as fp, prepare as prepare_source};
 use yydb_types::Value;

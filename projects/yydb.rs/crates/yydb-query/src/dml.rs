@@ -378,11 +378,8 @@ fn eval_literal(expr: &VosExpr, ty: &ResolvedCanonicalType, params: &[Value]) ->
             else {
                 return Err(dml_error("Phase 1 execute only supports literal field initializers and bound parameters"));
             };
-            let index: usize =
-                slot.parse().map_err(|_| dml_error(format!("malformed parameter slot `{name}`")))?;
-            let value = params
-                .get(index)
-                .ok_or_else(|| dml_error(format!("parameter slot {index} has no bound value")))?;
+            let index: usize = slot.parse().map_err(|_| dml_error(format!("malformed parameter slot `{name}`")))?;
+            let value = params.get(index).ok_or_else(|| dml_error(format!("parameter slot {index} has no bound value")))?;
             coerce::value_to_scalar(value.clone(), ty)
         }
         _ => Err(dml_error("Phase 1 execute only supports literal field initializers and bound parameters")),

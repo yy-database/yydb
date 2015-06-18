@@ -240,24 +240,15 @@ fn wal_recovery_restores_committed_rows_after_reopen() {
         conn.ensure_schema(SCHEMA).expect("schema");
 
         conn.begin().expect("begin txn 1");
-        conn.execute_sql_write(
-            "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@example.test', 10)",
-            &[],
-        )
-        .expect("insert 1");
-        conn.execute_sql_write(
-            "INSERT INTO Account (account_id, email, score) VALUES (2, 'linus@example.test', 30)",
-            &[],
-        )
-        .expect("insert 2");
+        conn.execute_sql_write("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@example.test', 10)", &[])
+            .expect("insert 1");
+        conn.execute_sql_write("INSERT INTO Account (account_id, email, score) VALUES (2, 'linus@example.test', 30)", &[])
+            .expect("insert 2");
         conn.commit().expect("commit txn 1");
 
         conn.begin().expect("begin txn 2");
-        conn.execute_sql_write(
-            "INSERT INTO Account (account_id, email, score) VALUES (3, 'grace@example.test', 20)",
-            &[],
-        )
-        .expect("insert 3");
+        conn.execute_sql_write("INSERT INTO Account (account_id, email, score) VALUES (3, 'grace@example.test', 20)", &[])
+            .expect("insert 3");
         conn.commit().expect("commit txn 2");
     }
     // conn dropped — simulates crash, no clean close/checkpoint.
@@ -273,7 +264,10 @@ fn wal_recovery_restores_committed_rows_after_reopen() {
     let rows = reopened.query_sql("SELECT account_id FROM Account ORDER BY account_id").expect("reopen query");
     assert_eq!(
         rows.iter()
-            .map(|r| match r.get("account_id") { Some(Value::I64(id)) => *id, other => panic!("{other:?}") })
+            .map(|r| match r.get("account_id") {
+                Some(Value::I64(id)) => *id,
+                other => panic!("{other:?}"),
+            })
             .collect::<Vec<_>>(),
         vec![1, 2, 3],
         "WAL recovery must surface all committed rows",
@@ -297,21 +291,15 @@ fn rollback_after_begin_does_not_affect_wal_recovery() {
         conn.ensure_schema(SCHEMA).expect("schema");
 
         conn.begin().expect("begin");
-        conn.execute_sql_write(
-            "INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@example.test', 10)",
-            &[],
-        )
-        .expect("insert");
+        conn.execute_sql_write("INSERT INTO Account (account_id, email, score) VALUES (1, 'ada@example.test', 10)", &[])
+            .expect("insert");
         conn.rollback().expect("rollback");
         // Row must not be visible after rollback.
         assert!(conn.query_sql("SELECT account_id FROM Account").unwrap().is_empty());
 
         conn.begin().expect("begin again");
-        conn.execute_sql_write(
-            "INSERT INTO Account (account_id, email, score) VALUES (7, 'committed@example.test', 70)",
-            &[],
-        )
-        .expect("insert committed");
+        conn.execute_sql_write("INSERT INTO Account (account_id, email, score) VALUES (7, 'committed@example.test', 70)", &[])
+            .expect("insert committed");
         conn.commit().expect("commit");
     }
 

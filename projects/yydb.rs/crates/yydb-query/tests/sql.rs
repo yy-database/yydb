@@ -736,14 +736,8 @@ fn is_null_accepts_scalar_expression_on_the_left() {
     seed(&contract, &mut records);
 
     // All seed rows have non-empty email, so LENGTH(email) is never NULL.
-    let empty = execute_sql(
-        "SELECT account_id FROM Account WHERE LENGTH(email) IS NULL",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("expr IS NULL");
+    let empty = execute_sql("SELECT account_id FROM Account WHERE LENGTH(email) IS NULL", &[], &contract, &[], &mut records)
+        .expect("expr IS NULL");
     assert!(ids(&empty.rows).is_empty(), "all emails are populated");
 
     let not_null = execute_sql(
@@ -804,7 +798,6 @@ fn in_list_accepts_scalar_expression_on_the_left() {
     .expect("expr NOT IN (list)");
     assert_eq!(ids(&not_in.rows), vec![2, 3]);
 }
-
 
 #[test]
 fn select_with_between_reversed_endpoints_is_semantically_empty() {
@@ -1689,7 +1682,10 @@ fn order_by_accepts_scalar_expressions() {
     ] {
         let stmt = prepare_sql(sql).expect("scalar expr sort key now lowers: `{sql}`");
         let has_expr = stmt.ops.iter().any(|op| {
-            let QueryOp::Sort { keys } = op else { return false };
+            let QueryOp::Sort { keys } = op
+            else {
+                return false;
+            };
             keys.iter().any(|k| k.expr.is_some())
         });
         assert!(has_expr, "order by expr `{sql}` must produce a Sort with expr keys");
@@ -1702,25 +1698,13 @@ fn order_by_scalar_expression_executes_per_row() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account ORDER BY LOWER(email)",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("LOWER(email) ORDER BY must execute");
+    let outcome = execute_sql("SELECT account_id FROM Account ORDER BY LOWER(email)", &[], &contract, &[], &mut records)
+        .expect("LOWER(email) ORDER BY must execute");
     // ada@example.test < grace@example.test < linus@example.test
     assert_eq!(ids(&outcome.rows), vec![1, 3, 2]);
 
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account ORDER BY score + 1 DESC",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("arithmetic ORDER BY DESC must execute");
+    let outcome = execute_sql("SELECT account_id FROM Account ORDER BY score + 1 DESC", &[], &contract, &[], &mut records)
+        .expect("arithmetic ORDER BY DESC must execute");
     // score + 1 DESC => 31 (linus=30), 21 (grace=20), 11 (ada=10)
     assert_eq!(ids(&outcome.rows), vec![2, 3, 1]);
 }
@@ -1856,14 +1840,9 @@ fn clock_functions_return_frozen_values_at_query_start() {
 
     // Execute twice in quick succession — the frozen instant means both rows
     // carry the same timestamp within one query.
-    let outcome = execute_sql(
-        "SELECT NOW() AS a, NOW() AS b, CURRENT_TIMESTAMP AS c FROM Account",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("clock executes");
+    let outcome =
+        execute_sql("SELECT NOW() AS a, NOW() AS b, CURRENT_TIMESTAMP AS c FROM Account", &[], &contract, &[], &mut records)
+            .expect("clock executes");
     assert_eq!(outcome.rows.len(), 3);
     for row in &outcome.rows {
         let a = row.get("a").expect("col a");
@@ -1890,11 +1869,9 @@ fn clock_date_and_time_match_the_frozen_timestamp_parts() {
     )
     .expect("date and time execute");
     let row = &outcome.rows[0];
-    if let (Value::Timestamp(ts), Value::Date(date), Value::Time(time)) = (
-        row.get("n").expect("now"),
-        row.get("d").expect("current_date"),
-        row.get("t").expect("current_time"),
-    ) {
+    if let (Value::Timestamp(ts), Value::Date(date), Value::Time(time)) =
+        (row.get("n").expect("now"), row.get("d").expect("current_date"), row.get("t").expect("current_time"))
+    {
         let (expected_date, expected_time) = ts.to_parts();
         assert_eq!(date, &expected_date, "CURRENT_DATE must match NOW() date part");
         assert_eq!(time, &expected_time, "CURRENT_TIME must match NOW() time part");
@@ -1914,10 +1891,7 @@ fn clock_functions_reject_arguments_at_prepare_time() {
     ] {
         let err = prepare_sql(sql).expect_err("clock functions take no arguments");
         let msg = format!("{err}");
-        assert!(
-            msg.contains("takes no arguments"),
-            "`{sql}` must reject with 'takes no arguments', got: {msg}"
-        );
+        assert!(msg.contains("takes no arguments"), "`{sql}` must reject with 'takes no arguments', got: {msg}");
     }
 }
 
@@ -2469,8 +2443,8 @@ fn comparison_with_null_is_unknown_instead_of_true() {
         assert!(outcome.rows.is_empty(), "`{sql}` must be unknown and drop every row");
     }
 
-    let nulls = execute_sql("SELECT account_id FROM Account WHERE tenant IS NULL", &[], &contract, &[], &mut records)
-        .expect("is null");
+    let nulls =
+        execute_sql("SELECT account_id FROM Account WHERE tenant IS NULL", &[], &contract, &[], &mut records).expect("is null");
     assert_eq!(ids(&nulls.rows), vec![1]);
 
     let present = execute_sql("SELECT account_id FROM Account WHERE tenant IS NOT NULL", &[], &contract, &[], &mut records)
@@ -2485,14 +2459,16 @@ fn and_or_and_not_propagate_unknown() {
 
     // ada has tenant NULL and score 10: `tenant = 't1'` is unknown, so the
     // conjunction is unknown even though `score = 10` is TRUE.
-    let conjunction = execute_sql("SELECT account_id FROM Account WHERE tenant = 't1' AND score = 10", &[], &contract, &[], &mut records)
-        .expect("unknown and true");
+    let conjunction =
+        execute_sql("SELECT account_id FROM Account WHERE tenant = 't1' AND score = 10", &[], &contract, &[], &mut records)
+            .expect("unknown and true");
     assert!(conjunction.rows.is_empty(), "unknown AND TRUE must stay unknown");
 
     // A TRUE operand decides the disjunction regardless of the unknown side:
     // ada passes through `score = 10` and linus through `tenant = 't1'`.
-    let disjunction = execute_sql("SELECT account_id FROM Account WHERE tenant = 't1' OR score = 10", &[], &contract, &[], &mut records)
-        .expect("unknown or true");
+    let disjunction =
+        execute_sql("SELECT account_id FROM Account WHERE tenant = 't1' OR score = 10", &[], &contract, &[], &mut records)
+            .expect("unknown or true");
     assert_eq!(ids(&disjunction.rows), vec![1, 2]);
 
     // Negating unknown stays unknown, so ada is dropped instead of matched.
@@ -2506,22 +2482,26 @@ fn in_list_with_null_follows_three_valued_logic() {
     let contract = contract();
     let mut records = seed_with_null_tenant(&contract);
 
-    let match_one = execute_sql("SELECT account_id FROM Account WHERE tenant IN ('t1', NULL)", &[], &contract, &[], &mut records)
-        .expect("in with null");
+    let match_one =
+        execute_sql("SELECT account_id FROM Account WHERE tenant IN ('t1', NULL)", &[], &contract, &[], &mut records)
+            .expect("in with null");
     assert_eq!(ids(&match_one.rows), vec![2], "only a definite match passes");
 
-    let match_two = execute_sql("SELECT account_id FROM Account WHERE tenant IN ('t1', 't2', NULL)", &[], &contract, &[], &mut records)
-        .expect("in with null and two matches");
+    let match_two =
+        execute_sql("SELECT account_id FROM Account WHERE tenant IN ('t1', 't2', NULL)", &[], &contract, &[], &mut records)
+            .expect("in with null and two matches");
     assert_eq!(ids(&match_two.rows), vec![2, 3]);
 
     // A non-match against a set that contains NULL is unknown, so `NOT IN`
     // cannot keep grace's row and ada's NULL stays unknown too.
-    let negated = execute_sql("SELECT account_id FROM Account WHERE tenant NOT IN ('t1', NULL)", &[], &contract, &[], &mut records)
-        .expect("not in with null");
+    let negated =
+        execute_sql("SELECT account_id FROM Account WHERE tenant NOT IN ('t1', NULL)", &[], &contract, &[], &mut records)
+            .expect("not in with null");
     assert!(negated.rows.is_empty(), "unknown NOT IN must drop every row");
 
-    let negated_null_value = execute_sql("SELECT account_id FROM Account WHERE tenant NOT IN ('t1', 't2')", &[], &contract, &[], &mut records)
-        .expect("not in over a null field");
+    let negated_null_value =
+        execute_sql("SELECT account_id FROM Account WHERE tenant NOT IN ('t1', 't2')", &[], &contract, &[], &mut records)
+            .expect("not in over a null field");
     assert!(negated_null_value.rows.is_empty(), "a NULL field is unknown for NOT IN");
 
     let only_null = execute_sql("SELECT account_id FROM Account WHERE tenant IN (NULL)", &[], &contract, &[], &mut records)
@@ -2545,12 +2525,14 @@ fn between_with_null_operands_is_unknown() {
 
     // A NULL field is unknown even when the bounds are present, while a
     // non-matching row still satisfies the negated form.
-    let null_field = execute_sql("SELECT account_id FROM Account WHERE tenant BETWEEN 'a' AND 'z'", &[], &contract, &[], &mut records)
-        .expect("between null field");
+    let null_field =
+        execute_sql("SELECT account_id FROM Account WHERE tenant BETWEEN 'a' AND 'z'", &[], &contract, &[], &mut records)
+            .expect("between null field");
     assert_eq!(ids(&null_field.rows), vec![2, 3]);
 
-    let negated = execute_sql("SELECT account_id FROM Account WHERE score NOT BETWEEN 1 AND 5", &[], &contract, &[], &mut records)
-        .expect("not between decided");
+    let negated =
+        execute_sql("SELECT account_id FROM Account WHERE score NOT BETWEEN 1 AND 5", &[], &contract, &[], &mut records)
+            .expect("not between decided");
     assert_eq!(ids(&negated.rows), vec![1, 2, 3]);
 }
 
@@ -2561,8 +2543,8 @@ fn is_true_and_is_not_true_are_decided_for_null() {
     seed(&contract, &mut records);
     exec("UPDATE Account SET active = NULL WHERE account_id = 1", &[], &contract, &mut records);
 
-    let is_true = execute_sql("SELECT account_id FROM Account WHERE active IS TRUE", &[], &contract, &[], &mut records)
-        .expect("is true");
+    let is_true =
+        execute_sql("SELECT account_id FROM Account WHERE active IS TRUE", &[], &contract, &[], &mut records).expect("is true");
     assert_eq!(ids(&is_true.rows), vec![3]);
 
     let is_not_true = execute_sql("SELECT account_id FROM Account WHERE active IS NOT TRUE", &[], &contract, &[], &mut records)
@@ -2573,8 +2555,9 @@ fn is_true_and_is_not_true_are_decided_for_null() {
         .expect("is false");
     assert_eq!(ids(&is_false.rows), vec![2]);
 
-    let is_not_false = execute_sql("SELECT account_id FROM Account WHERE active IS NOT FALSE", &[], &contract, &[], &mut records)
-        .expect("is not false");
+    let is_not_false =
+        execute_sql("SELECT account_id FROM Account WHERE active IS NOT FALSE", &[], &contract, &[], &mut records)
+            .expect("is not false");
     assert_eq!(ids(&is_not_false.rows), vec![1, 3]);
 
     // Comparing a NULL boolean is unknown, and `NOT` cannot rescue it, so ada
@@ -2583,8 +2566,9 @@ fn is_true_and_is_not_true_are_decided_for_null() {
         .expect("bool comparison");
     assert_eq!(ids(&comparison.rows), vec![3]);
 
-    let negated_comparison = execute_sql("SELECT account_id FROM Account WHERE NOT (active = true)", &[], &contract, &[], &mut records)
-        .expect("negated bool comparison");
+    let negated_comparison =
+        execute_sql("SELECT account_id FROM Account WHERE NOT (active = true)", &[], &contract, &[], &mut records)
+            .expect("negated bool comparison");
     assert_eq!(ids(&negated_comparison.rows), vec![2]);
 }
 
@@ -2742,8 +2726,8 @@ fn real_column_round_trips_exact_values() {
     assert_eq!(outcome.rows[2].get("ratio"), Some(&Value::F64(3.0)));
 
     // A fresh read decodes the stored row again, so precision survives storage.
-    let reread = execute_sql("SELECT ratio FROM Metric WHERE metric_id = 1", &[], &contract, &[], &mut records)
-        .expect("re-read real");
+    let reread =
+        execute_sql("SELECT ratio FROM Metric WHERE metric_id = 1", &[], &contract, &[], &mut records).expect("re-read real");
     assert_eq!(reread.rows[0].get("ratio"), Some(&Value::F64(1.5)));
 }
 
@@ -2766,8 +2750,9 @@ fn real_column_supports_comparison_ordering_and_aggregates() {
     let mut records = BTreeMap::new();
     seed_metrics(&contract, &mut records);
 
-    let filtered = execute_sql("SELECT metric_id FROM Metric WHERE ratio > 1.0 ORDER BY metric_id", &[], &contract, &[], &mut records)
-        .expect("real comparison");
+    let filtered =
+        execute_sql("SELECT metric_id FROM Metric WHERE ratio > 1.0 ORDER BY metric_id", &[], &contract, &[], &mut records)
+            .expect("real comparison");
     let filtered_ids: Vec<i64> = filtered
         .rows
         .iter()
@@ -2790,8 +2775,9 @@ fn real_column_supports_comparison_ordering_and_aggregates() {
         .collect();
     assert_eq!(ordered_ids, vec![3, 1, 2]);
 
-    let aggregates = execute_sql("SELECT SUM(ratio) AS total, AVG(ratio) AS mean FROM Metric", &[], &contract, &[], &mut records)
-        .expect("real aggregates");
+    let aggregates =
+        execute_sql("SELECT SUM(ratio) AS total, AVG(ratio) AS mean FROM Metric", &[], &contract, &[], &mut records)
+            .expect("real aggregates");
     assert_eq!(aggregates.rows[0].get("total"), Some(&Value::F64(2.25)));
     assert_eq!(aggregates.rows[0].get("mean"), Some(&Value::F64(0.75)));
 }

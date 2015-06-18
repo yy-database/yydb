@@ -37,12 +37,7 @@ impl YydbBytesPolicy {
 
 impl BytesPlacementPolicy for YydbBytesPolicy {
     fn placement_for(&self, octets: &[u8]) -> BytesPlacement {
-        if octets.len() <= INLINE_BYTES_MAX {
-            BytesPlacement::Inline
-        }
-        else {
-            BytesPlacement::ObjectReference
-        }
+        if octets.len() <= INLINE_BYTES_MAX { BytesPlacement::Inline } else { BytesPlacement::ObjectReference }
     }
 }
 
@@ -53,9 +48,7 @@ impl BytesPlacementHook for YydbBytesPolicy {
             BytesPlacement::ObjectReference if !self.persistent_objects => Err(Error::Unsupported(
                 "CAS payloads larger than INLINE_BYTES_MAX require a .yydx layout in single-file .yydb mode",
             )),
-            BytesPlacement::ObjectReference => {
-                self.store.put_chunk(ObjectKind::Blob, &octets).map(Value::Object)
-            }
+            BytesPlacement::ObjectReference => self.store.put_chunk(ObjectKind::Blob, &octets).map(Value::Object),
         }
     }
 }
