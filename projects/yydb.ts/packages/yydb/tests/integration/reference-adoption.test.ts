@@ -27,7 +27,7 @@ test("reference corpus simple table is adopted into @yydb/yydb", { timeout: 60_0
         const database = await Database.open(join(directory, "adopted.yydb"));
         await database.ensureSchema(SIMPLE_SCHEMA);
         for (const program of buildSimpleAdoptionPrograms(fixture.path)) {
-            await database.execute(program);
+            await database.execute(program.source, program.params);
         }
         const rows = (await database.query("Simple.all().collect()") as Array<{ id: number; name: string; note: string }>)
             .sort((left, right) => left.id - right.id);
@@ -48,21 +48,24 @@ test("reference corpus types table is adopted with blobs and edge integers", { t
     assert.ok(fixture);
     const directory = mkdtempSync(join(tmpdir(), "yydb-adopt-types-"));
     try {
-        const database = await Database.open(join(directory, "types.yydb"));
+        // The reference blob exceeds `INLINE_BYTES_MAX`, so this corpus needs the
+        // `.yydx` layout with its sibling object root instead of a single file.
+        const database = await Database.open(join(directory, "types.yydx"));
         await database.ensureSchema(TYPES_SCHEMA);
         for (const program of buildTypesAdoptionPrograms(fixture.path)) {
-            await database.execute(program);
+            await database.execute(program.source, program.params);
         }
         const rows = await database.query("TypesRow.all().collect()") as Array<{
             id: number;
             txt: string;
             n: number;
-            payload: Uint8Array | number[];
+            payload: Uint8Array;
         }>;
         assert.equal(rows.length, 3);
         assert.equal(rows[0].txt, "00042");
         assert.equal(rows[1].n, -9223372036854775808);
-        assert.ok((rows[1].payload instanceof Uint8Array ? rows[1].payload.length : rows[1].payload.length) > 5000);
+        assert.ok(rows[1].payload instanceof Uint8Array, "the blob column must decode to octets");
+        assert.ok(rows[1].payload.length > 5000, "the adopted blob must keep its length");
         await database.close();
     } finally {
         disposeReferenceFixture(fixture);

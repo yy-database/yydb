@@ -369,7 +369,9 @@ fn eval_literal(expr: &VosExpr, ty: &ResolvedCanonicalType, params: &[Value]) ->
                     Value::I64(text.parse().map_err(|_| dml_error(format!("invalid integer literal `{text}`")))?)
                 }
                 VosLiteral::String(text) => Value::Text(text.clone()),
-                VosLiteral::Float(text) => Value::Text(text.clone()),
+                VosLiteral::Float(text) => {
+                    Value::F64(text.parse().map_err(|_| dml_error(format!("invalid REAL literal `{text}`")))?)
+                }
             };
             coerce::value_to_scalar(raw, ty)
         }

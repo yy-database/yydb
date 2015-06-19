@@ -66,31 +66,10 @@ fn parse_params_json(json: &str) -> Result<BTreeMap<String, yydb::Value>> {
         value.as_object().ok_or_else(|| napi::Error::from_reason("parameters must be a JSON object {name: value, ...}"))?;
     let mut map = BTreeMap::new();
     for (key, val) in obj {
-        let yydb_val = json_to_value_ref(val)?;
+        let yydb_val = json_to_value(val.clone())?;
         map.insert(key.clone(), yydb_val);
     }
     Ok(map)
-}
-
-fn json_to_value_ref(v: &serde_json::Value) -> Result<yydb::Value> {
-    use yydb::Value;
-    Ok(match v {
-        serde_json::Value::Null => Value::Null,
-        serde_json::Value::Bool(b) => Value::Bool(*b),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Value::I64(i)
-            }
-            else if let Some(f) = n.as_f64() {
-                Value::F64(f)
-            }
-            else {
-                return Err(napi::Error::from_reason(format!("unsupported JSON number: {n}")));
-            }
-        }
-        serde_json::Value::String(s) => Value::Text(s.clone()),
-        _ => return Err(napi::Error::from_reason(format!("unsupported JSON value type: {v:?}"))),
-    })
 }
 
 /// Embedded `yydb` engine version string.
@@ -301,9 +280,18 @@ impl Database {
     }
 
     /// Execute a VOS write program (INSERT / schema macros).
+    ///
+    /// `params_json` is `{ "paramName": <value>, ... }` or `null` when the
+    /// program takes no parameters. Values may use the tagged scalar form
+    /// (`{"$yydb":"bytes","hex":...}` and the other exact scalars) so octets and
+    /// exact calendar values cross the host boundary unmodified.
     #[napi]
-    pub fn execute_vos_write(&self, source: String) -> Result<()> {
-        self.connection.execute_vos_write(&source).map_err(reason)
+    pub fn execute_vos_write(&self, source: String, params_json: Option<String>) -> Result<()> {
+        let named = match params_json {
+            Some(json) if !json.trim().is_empty() && json.trim() != "null" => parse_params_json(&json)?,
+            _ => BTreeMap::new(),
+        };
+        self.connection.execute_vos_write_with_params(&source, &named).map_err(reason)
     }
 
     /// Prepare a VOS read pipeline into a reusable query plan.

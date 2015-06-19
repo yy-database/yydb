@@ -44,8 +44,8 @@ export interface NativeDatabase {
     rollback(): void;
     /** Execute a VOS read pipeline; returns JSON rows. */
     queryVos(source: string): string;
-    /** Execute a VOS write program. */
-    executeVosWrite(source: string): void;
+    /** Execute a VOS write program with optional JSON parameters. */
+    executeVosWrite(source: string, paramsJson?: string | null): void;
     /** Prepare a VOS read pipeline into a reusable plan; returns a native Statement handle. */
     prepare(source: string): NativeStatement;
     /** Execute a previously prepared statement with optional JSON parameters. */

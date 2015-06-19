@@ -98,6 +98,82 @@ export interface CompactReport {
 /** Declared type for a prepared statement parameter slot. */
 export type SlotType = 'any' | 'bool' | 'i64' | 'text' | 'null';
 
+/** Tagged JSON form of raw octets on the host wire: `{"$yydb":"bytes","hex":"..."}`. */
+interface TaggedBytes {
+    readonly $yydb: 'bytes';
+    readonly hex: string;
+}
+
+/**
+ * Serializes one parameter value to its JSON wire text.
+ *
+ * The wire is JSON, so a `bigint` is written as a bare integer literal instead
+ * of going through `Number`, which would round an `i64` outside ±2^53. Octets
+ * use the tagged `bytes` form because JSON has no binary literal.
+ */
+function encodeParamValue(value: unknown): string {
+    if (value === null || value === undefined) {
+        return 'null';
+    }
+    if (typeof value === 'boolean') {
+        return value ? 'true' : 'false';
+    }
+    if (typeof value === 'bigint') {
+        return value.toString();
+    }
+    if (typeof value === 'string') {
+        return JSON.stringify(value);
+    }
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) {
+            throw new YydbError('yydb.query.bind', `parameter \`${value}\` is not a finite number`);
+        }
+        return JSON.stringify(value);
+    }
+    if (value instanceof Uint8Array) {
+        return JSON.stringify({ $yydb: 'bytes', hex: Buffer.from(value).toString('hex') } satisfies TaggedBytes);
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map(encodeParamValue).join(',')}]`;
+    }
+    if (typeof value === 'object') {
+        return `{${Object.entries(value as Record<string, unknown>)
+            .map(([key, item]) => `${JSON.stringify(key)}:${encodeParamValue(item)}`)
+            .join(',')}}`;
+    }
+    throw new YydbError('yydb.query.bind', `parameter of type \`${typeof value}\` cannot cross the wire`);
+}
+
+function encodeParams(params: Record<string, unknown> | null | undefined): string | null {
+    if (params === undefined || params === null) {
+        return null;
+    }
+    return `{${Object.entries(params)
+        .map(([name, value]) => `${JSON.stringify(name)}:${encodeParamValue(value)}`)
+        .join(',')}}`;
+}
+
+function decodeRowValue(value: unknown): unknown {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return value;
+    }
+    const tagged = value as Partial<TaggedBytes>;
+    if (tagged.$yydb === 'bytes' && typeof tagged.hex === 'string') {
+        return new Uint8Array(Buffer.from(tagged.hex, 'hex'));
+    }
+    return value;
+}
+
+function decodeRows<T>(rowsJson: string): T[] {
+    const rows = JSON.parse(rowsJson) as Record<string, unknown>[];
+    for (const row of rows) {
+        for (const key of Object.keys(row)) {
+            row[key] = decodeRowValue(row[key]);
+        }
+    }
+    return rows as T[];
+}
+
 /**
  * Tagged JSON form of an exact `date` value (days since the Unix epoch,
  * proleptic Gregorian calendar, UTC-free).
@@ -250,9 +326,9 @@ export class Statement {
         if (this.closed) {
             throw new YydbError('yydb.statement.closed', 'statement has been closed');
         }
-        const paramsJson = params !== undefined && params !== null ? JSON.stringify(params) : null;
+        const paramsJson = encodeParams(params);
         const rowsJson = (this.db as any).queryPrepared(this.native, paramsJson);
-        return JSON.parse(rowsJson) as T[];
+        return decodeRows<T>(rowsJson);
     }
 
     /** Release this statement's plan from the native registry. */
@@ -298,9 +374,11 @@ export class TransactionHandle {
         return this.native.compareExchange(key, toBytes(expected), toBytes(replacement));
     }
     async query<T = Record<string, unknown>>(source: string): Promise<T[]> {
-        return JSON.parse(this.native.queryVos(source)) as T[];
+        return decodeRows<T>(this.native.queryVos(source));
     }
-    async execute(source: string): Promise<void> { this.native.executeVosWrite(source); }
+    async execute(source: string, params?: Record<string, unknown>): Promise<void> {
+        this.native.executeVosWrite(source, encodeParams(params));
+    }
 }
 
 /**
@@ -512,13 +590,17 @@ export class Database {
 
     /** Execute a VOS read pipeline and return typed rows. */
     async query<T = Record<string, unknown>>(source: string): Promise<T[]> {
-        const rowsJson = this.native.queryVos(source);
-        return JSON.parse(rowsJson) as T[];
+        return decodeRows<T>(this.native.queryVos(source));
     }
 
-    /** Execute a VOS write program. */
-    async execute(source: string): Promise<void> {
-        this.native.executeVosWrite(source);
+    /**
+     * Execute a VOS write program with optional named parameters.
+     *
+     * `Uint8Array` parameters cross as the tagged `bytes` wire form, so octets
+     * reach a `bytes` column verbatim.
+     */
+    async execute(source: string, params?: Record<string, unknown>): Promise<void> {
+        this.native.executeVosWrite(source, encodeParams(params));
     }
 
     /**
