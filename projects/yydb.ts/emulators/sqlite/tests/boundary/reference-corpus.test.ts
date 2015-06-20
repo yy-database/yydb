@@ -44,12 +44,14 @@ test("reference corpus overflow payloads honor per-row payload limits", { timeou
     assert.ok(fixture);
     try {
         const database = SqliteDatabase.open(fixture.path);
+        // Every named-table read scans `sqlite_schema` first, so the row budget
+        // must cover the schema objects as well as the requested table.
         assert.throws(
-            () => database.table("types", { maxPages: 64, maxRows: 8, maxPayloadBytes: 100 }),
+            () => database.table("types", { maxPages: 64, maxRows: 64, maxPayloadBytes: 100 }),
             /payload limit/,
         );
 
-        const rows = database.tableRaw("types", { maxPages: 64, maxRows: 8, maxPayloadBytes: 1_048_576 });
+        const rows = database.tableRaw("types", { maxPages: 64, maxRows: 64, maxPayloadBytes: 1_048_576 });
         const decoded = decodeRecord(rows[1].payload);
         const reference = fixture.manifest.tables.find((table) => table.name === "types")!.rows[1];
         for (const [index, column] of decoded.entries()) {

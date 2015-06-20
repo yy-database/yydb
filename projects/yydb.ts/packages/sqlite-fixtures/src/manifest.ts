@@ -18,8 +18,8 @@ export interface ReferenceColumn {
 
 export type ReferenceValue =
     | { kind: "null" }
-    | { kind: "integer"; value: number }
-    | { kind: "real"; bits: number }
+    | { kind: "integer"; value: bigint }
+    | { kind: "real"; bits: bigint }
     | { kind: "text"; value: string }
     | { kind: "blob"; value: Buffer };
 
@@ -181,9 +181,9 @@ function parseValue(field: string): ReferenceValue {
         case "n":
             return { kind: "null" };
         case "i":
-            return { kind: "integer", value: Number.parseInt(field.slice(1), 10) };
+            return { kind: "integer", value: BigInt(field.slice(1)) };
         case "f":
-            return { kind: "real", bits: Number.parseInt(field.slice(1), 16) };
+            return { kind: "real", bits: BigInt(`0x${field.slice(1)}`) };
         case "t":
             return { kind: "text", value: hexText(field.slice(1)) };
         case "b": {

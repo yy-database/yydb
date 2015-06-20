@@ -8,7 +8,7 @@ import { SqliteDatabase, SqliteSnapshot, decodeRecord } from "@yydb/sqlite";
 
 import { createLimitationFixture } from "./fixtures/node-limitations.ts";
 import { createNodeSamplesFixture } from "./fixtures/node-samples.ts";
-import { MAGIC, READ_LIMITS } from "./fixtures/shared.ts";
+import { READ_LIMITS } from "./fixtures/shared.ts";
 
 test("@yydb/sqlite snapshot and file readers stay equivalent on samples", () => {
     const fixture = createNodeSamplesFixture();

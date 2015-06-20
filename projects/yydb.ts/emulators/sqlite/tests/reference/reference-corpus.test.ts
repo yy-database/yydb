@@ -104,7 +104,7 @@ test("affinity exposes on-disk integer storage rather than SQL-projected REAL", 
     try {
         const reference = fixture.manifest.tables.find((table) => table.name === "affinity");
         assert.ok(reference);
-        assert.deepEqual(reference.rows[0].values[1], { kind: "real", bits: 0 });
+        assert.deepEqual(reference.rows[0].values[1], { kind: "real", bits: 0n });
 
         const rows = SqliteDatabase.open(fixture.path).table("affinity", READ_LIMITS);
         assert.equal(rows[0].columns[1].kind, "integer");
@@ -122,20 +122,24 @@ test("affinity exposes on-disk integer storage rather than SQL-projected REAL", 
 test("node:sqlite reads the same corpus rows as @yydb/sqlite", { timeout: 60_000, skip: SKIP_NO_PYTHON }, () => {
     const fixture = generateReferenceFixture(4096);
     assert.ok(fixture);
+    const node = new DatabaseSync(fixture.path, { readOnly: true });
     try {
         const yyds = SqliteDatabase.open(fixture.path);
-        const node = new DatabaseSync(fixture.path, { readOnly: true });
 
         for (const tableName of ["simple", "types"] as const) {
             const yydsRows = yyds.table(tableName, READ_LIMITS);
-            const nodeRows = node.prepare(`SELECT id AS rowid, * FROM "${tableName}" ORDER BY rowid`).all() as Array<Record<string, unknown>>;
+            // The corpus stores `i64::MIN` and `i64::MAX`, which `node:sqlite`
+            // only returns as BigInt values.
+            const statement = node.prepare(`SELECT id AS rowid, * FROM "${tableName}" ORDER BY rowid`);
+            statement.setReadBigInts(true);
+            const nodeRows = statement.all() as Array<Record<string, unknown>>;
             assert.equal(yydsRows.length, nodeRows.length, tableName);
             for (const [index, row] of yydsRows.entries()) {
-                assert.equal(Number(row.rowid), nodeRows[index].rowid, `${tableName} rowid ${index}`);
+                assert.equal(row.rowid, nodeRows[index].rowid, `${tableName} rowid ${index}`);
             }
         }
-        node.close();
     } finally {
+        node.close();
         disposeReferenceFixture(fixture);
     }
 });

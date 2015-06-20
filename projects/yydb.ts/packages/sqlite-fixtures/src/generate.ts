@@ -110,7 +110,10 @@ try:
         [
             (1, "00042", "007", -0.5, b"", None, ""),
             (2, None, "", 0.25, bytes([0, 255]) * 3000, -9223372036854775808, None),
-            (3, "line\\nbreak\\tend", "000", 1e300, bytes([0]) * 3000, 9223372036854775807, ""),
+            # A durable YYDB row cell holds only a small inline payload, so the
+            # second blob stays the small inline case while the 6000-byte one
+            # above exercises the object-reference placement.
+            (3, "line\\nbreak\\tend", "000", 1e300, bytes([0]) * 96, 9223372036854775807, ""),
         ],
     )
     db.executemany(
