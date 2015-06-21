@@ -52,9 +52,9 @@ async function rejectSql(database: Database): Promise<void> {
 }
 
 async function main(): Promise<void> {
-    await initWasm({
-        module: await fetch("/yydb_wasm_bg.wasm").then((response) => response.arrayBuffer()),
-    });
+    // No explicit module: the binding resolves its own bundled `yydb_wasm_bg.wasm`
+    // asset, which Vite fingerprints into `dist/assets`.
+    await initWasm();
 
     await run("@yydb/light-db rejects SQL and only accepts VOS programs", async () => {
         const database = await Database.open("sql-negative", { memory: true });
