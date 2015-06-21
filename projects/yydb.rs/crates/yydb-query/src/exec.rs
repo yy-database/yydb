@@ -3,8 +3,10 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap},
-    time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use vos::types::ResolvedContract;
 use yydb_types::{Error, Result, Timestamp, Value};
@@ -26,12 +28,27 @@ thread_local! {
     static QUERY_START_CLOCK: RefCell<Option<Timestamp>> = RefCell::new(None);
 }
 
-/// Freeze the query-start clock from `SystemTime::now()`. Panics if called while
+/// Wall-clock microseconds since UNIX epoch.
+///
+/// Native: `SystemTime::now().duration_since(UNIX_EPOCH)`.
+/// WASM (browser): `js_sys::Date::now()` — `SystemTime::now` panics on browser
+/// WASM targets because the std time backend is disabled there.
+fn now_micros() -> i64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let duration = SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock is before UNIX epoch");
+        duration.as_micros() as i64
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        (js_sys::Date::now() * 1_000.0) as i64
+    }
+}
+
+/// Freeze the query-start clock. Panics if called while
 /// a clock is already set (nested top-level executes share one clock).
 fn freeze_query_start_clock() -> Timestamp {
-    let duration = SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock is before UNIX epoch");
-    let micros = duration.as_micros() as i64;
-    let ts = Timestamp::from_unix_micros(micros).expect("current UTC instant fits in the YYDB timestamp range");
+    let ts = Timestamp::from_unix_micros(now_micros()).expect("current UTC instant fits in the YYDB timestamp range");
     QUERY_START_CLOCK.with(|cell| {
         let mut slot = cell.borrow_mut();
         debug_assert!(slot.is_none(), "query-start clock already set — nested execute_ops calls share one clock");
@@ -47,16 +64,14 @@ fn clear_query_start_clock() {
     });
 }
 
-/// Read the frozen query-start clock, or the live `SystemTime::now()` when the
+/// Read the frozen query-start clock, or the live wall clock when the
 /// clock was not set (tests, isolated eval_expr calls).
 fn query_start_timestamp() -> Timestamp {
     QUERY_START_CLOCK.with(|cell| {
         if let Some(ts) = *cell.borrow() {
             return ts;
         }
-        let duration = SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock is before UNIX epoch");
-        let micros = duration.as_micros() as i64;
-        Timestamp::from_unix_micros(micros).expect("current UTC instant fits in the YYDB timestamp range")
+        Timestamp::from_unix_micros(now_micros()).expect("current UTC instant fits in the YYDB timestamp range")
     })
 }
 
