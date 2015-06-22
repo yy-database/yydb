@@ -19,8 +19,13 @@ pub mod udf;
 pub use constraint::{TableUniqueConstraint, UniqueConstraint, UniqueConstraintError};
 pub use scalar::{Date, Decimal, ScalarError, Time, Timestamp};
 
-/// Soft recommendation: prefer CAS above this size instead of row-inline bytes.
-pub const INLINE_BYTES_MAX: usize = 4 * 1024;
+/// Largest `bytes` payload kept inside a row cell instead of the object store.
+///
+/// A row must fit one leaf page payload and row storage encodes octets as hex,
+/// so a payload occupies twice its size on disk plus its key and cell header.
+/// Payloads above this boundary are placed in the content-addressed object
+/// store and referenced from the row, which keeps every stored row storable.
+pub const INLINE_BYTES_MAX: usize = 1024;
 
 /// Default chunk size for chunked file writes (1 MiB).
 pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;

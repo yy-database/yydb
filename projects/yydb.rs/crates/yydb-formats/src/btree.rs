@@ -5,7 +5,7 @@ use yydb_types::{Error, Result};
 use crate::{
     internal::{InternalEntry, InternalPage},
     key::{TREE_RECORD, TreeKey},
-    leaf::LeafPage,
+    leaf::{LeafCell, LeafPage},
     page::{PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF, PageHeader},
     pager::PageStore,
 };
@@ -138,17 +138,12 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
             self.pager.put_page(page_id, leaf.encode()?)?;
             return Ok(LeafInsert { page_id, split: None });
         }
-        let (separator, mut right) = leaf.split()?;
+        // A replacement that grew past the page keeps its key, so drop the old
+        // cell before the size-aware split re-inserts the new value.
+        leaf.delete(&key);
+        let (separator, mut right) = leaf.split_for_insert(LeafCell { key, value })?;
         let right_id = self.pager.alloc_page_id()?;
         right.page_id = right_id;
-        if key >= separator {
-            if !right.upsert(key, value)? {
-                return Err(Error::Corrupt("right leaf full after split"));
-            }
-        }
-        else if !leaf.upsert(key, value)? {
-            return Err(Error::Corrupt("left leaf full after split"));
-        }
         self.pager.put_page(page_id, leaf.encode()?)?;
         self.pager.put_page(right_id, right.encode()?)?;
         Ok(LeafInsert { page_id, split: Some((separator, right_id)) })

@@ -682,9 +682,15 @@ export class Database {
         return JSON.parse(resultJson);
     }
 
-    /** Release the native handle (best-effort; the engine also drops on GC). */
+    /**
+     * Release the native file handle and its writer lock.
+     *
+     * The handle is also released when the object is garbage-collected, but
+     * callers that must reopen the same file in the same process (or hand it
+     * to another process) need this deterministic release point. Methods
+     * called after `close()` fail with a closed-handle error.
+     */
     async close(): Promise<void> {
-        // Native connections drop cleanly when the handle is garbage-collected.
-        // No explicit close() is exposed from yydb::Connection.
+        this.native.close();
     }
 }

@@ -18,7 +18,9 @@ use crate::ObjectStore;
 ///
 /// Octets at or below [`INLINE_BYTES_MAX`] stay in the row; larger payloads
 /// become a content-addressed object the row references. The threshold is a
-/// physical property of this store and is not part of the VOS contract.
+/// physical property of this store: row storage hex-encodes octets inside a
+/// single leaf cell, so a larger inline payload would not fit a stored row and
+/// is not part of the VOS contract.
 pub struct YydbBytesPolicy {
     store: Arc<ObjectStore>,
     persistent_objects: bool,

@@ -12,7 +12,10 @@
 
 #![deny(missing_docs)]
 
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 
 use napi::bindgen_prelude::{Buffer, Result};
 use napi_derive::napi;
@@ -91,7 +94,19 @@ pub fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> Resu
 /// Handle to one open `.yydb` file.
 #[napi]
 pub struct Database {
-    connection: yydb::Connection,
+    /// The connection is released on [`Database::close`] so the host can drop
+    /// the file and writer lock without waiting for garbage collection.
+    connection: Mutex<Option<Arc<yydb::Connection>>>,
+}
+
+impl Database {
+    fn handle(&self) -> Result<Arc<yydb::Connection>> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .ok_or_else(|| napi::Error::from_reason("database handle has been closed"))
+    }
 }
 
 #[napi]
@@ -99,93 +114,107 @@ impl Database {
     /// Open (create when missing) the database at `db_path`.
     #[napi(factory)]
     pub fn open(db_path: String) -> Result<Self> {
-        Ok(Self { connection: yydb::Connection::open(&db_path).map_err(reason)? })
+        let connection = yydb::Connection::open(&db_path).map_err(reason)?;
+        Ok(Self { connection: Mutex::new(Some(Arc::new(connection))) })
+    }
+
+    /// Release the file handle and its writer lock.
+    ///
+    /// Returns `true` when this call released the handle. Later calls on the
+    /// same JS object fail with a closed-handle error, and a second `close()`
+    /// returns `false`.
+    #[napi]
+    pub fn close(&self) -> bool {
+        self.connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().is_some()
     }
 
     /// Absolute path of the database file.
     #[napi]
     pub fn path(&self) -> Option<String> {
-        self.connection.path().map(|path| path.display().to_string())
+        let handle = self.handle().ok()?;
+        handle.path().map(|path| path.display().to_string())
     }
 
     /// Path of the `-wal` sidecar for file-backed databases.
     #[napi]
     pub fn wal_path(&self) -> Option<String> {
-        self.connection.wal_path().map(|path| path.display().to_string())
+        let handle = self.handle().ok()?;
+        handle.wal_path().map(|path| path.display().to_string())
     }
 
     /// Path of the `-shm` sidecar for file-backed databases.
     #[napi]
     pub fn shm_path(&self) -> Option<String> {
-        self.connection.shm_path().map(|path| path.display().to_string())
+        let handle = self.handle().ok()?;
+        handle.shm_path().map(|path| path.display().to_string())
     }
 
     /// Published schema version, or `null` before the first schema.
     #[napi]
     pub fn schema_version(&self) -> Result<Option<u32>> {
-        Ok(self.connection.schema().map_err(reason)?.map(|schema| schema.version))
+        Ok(self.handle()?.schema().map_err(reason)?.map(|schema| schema.version))
     }
 
     /// Published VOS schema document, or `null` before the first schema.
     #[napi]
     pub fn schema_document(&self) -> Result<Option<String>> {
-        Ok(self.connection.schema().map_err(reason)?.map(|schema| schema.document))
+        Ok(self.handle()?.schema().map_err(reason)?.map(|schema| schema.document))
     }
 
     /// Validate and publish a VOS schema document.
     #[napi]
     pub fn ensure_schema(&self, document: String) -> Result<()> {
-        self.connection.ensure_schema(&document).map_err(reason)
+        self.handle()?.ensure_schema(&document).map_err(reason)
     }
 
     /// Number of user records in the database.
     #[napi]
     pub fn record_count(&self) -> Result<u32> {
-        let count = self.connection.record_count().map_err(reason)?;
+        let count = self.handle()?.record_count().map_err(reason)?;
         Ok(u32::try_from(count).unwrap_or(u32::MAX))
     }
 
     /// Current journal mode (`delete` or `wal`).
     #[napi]
-    pub fn journal_mode(&self) -> String {
-        self.connection.journal_mode().as_str().to_owned()
+    pub fn journal_mode(&self) -> Result<String> {
+        Ok(self.handle()?.journal_mode().as_str().to_owned())
     }
 
     /// Switch the journal mode.
     #[napi]
     pub fn set_journal_mode(&self, mode: String) -> Result<()> {
         let mode = yydb::JournalMode::parse(&mode).map_err(reason)?;
-        self.connection.set_journal_mode(mode).map_err(reason)
+        self.handle()?.set_journal_mode(mode).map_err(reason)
     }
 
     /// Fold the WAL into the main file and truncate the sidecar.
     #[napi]
     pub fn checkpoint(&self) -> Result<()> {
-        self.connection.checkpoint().map_err(reason)
+        self.handle()?.checkpoint().map_err(reason)
     }
 
     /// Number of frames currently in the WAL.
     #[napi]
     pub fn wal_frame_count(&self) -> Result<u32> {
-        self.connection.wal_frame_count().map_err(reason)
+        self.handle()?.wal_frame_count().map_err(reason)
     }
 
     /// Read one record, or `null` when the key is absent.
     #[napi]
     pub fn get(&self, key: String) -> Result<Option<Buffer>> {
-        Ok(self.connection.get(&key).map_err(reason)?.map(Buffer::from))
+        Ok(self.handle()?.get(&key).map_err(reason)?.map(Buffer::from))
     }
 
     /// Write one record.
     #[napi]
     pub fn put(&self, key: String, value: Buffer) -> Result<()> {
-        self.connection.put(key, value.as_ref()).map_err(reason)
+        self.handle()?.put(key, value.as_ref()).map_err(reason)
     }
 
     /// Delete one record. Idempotent — absent keys silently succeed.
     #[napi]
     pub fn delete(&self, key: String) -> Result<()> {
-        self.connection.write_batch(&[(key, None)]).map_err(reason)
+        self.handle()?.write_batch(&[(key, None)]).map_err(reason)
     }
 
     /// Scan keys in lexical order with `prefix` (use `""` for all keys).
@@ -193,7 +222,7 @@ impl Database {
     /// Returns a JSON array string: `[{ "key": "...", "value": [...] }, ...]`.
     #[napi]
     pub fn scan_prefix(&self, prefix: String, after: Option<String>, limit: u32) -> Result<String> {
-        let rows = self.connection.scan_prefix(&prefix, after.as_deref(), limit as usize).map_err(reason)?;
+        let rows = self.handle()?.scan_prefix(&prefix, after.as_deref(), limit as usize).map_err(reason)?;
         let json_rows: Vec<serde_json::Value> = rows
             .into_iter()
             .map(|(k, v)| {
@@ -232,7 +261,7 @@ impl Database {
             };
             parsed.push((key, value));
         }
-        self.connection.write_batch(&parsed).map_err(reason)
+        self.handle()?.write_batch(&parsed).map_err(reason)
     }
 
     /// Compare-and-swap: replace or delete `key` only if it currently matches `expected`.
@@ -240,32 +269,32 @@ impl Database {
     /// Returns `true` on success, `false` if the current value did not match.
     #[napi]
     pub fn compare_exchange(&self, key: String, expected: Option<Buffer>, replacement: Option<Buffer>) -> Result<bool> {
-        self.connection.compare_exchange(&key, expected.as_deref(), replacement.as_deref()).map_err(reason)
+        self.handle()?.compare_exchange(&key, expected.as_deref(), replacement.as_deref()).map_err(reason)
     }
 
     /// Begin an explicit transaction. Must be balanced with `commit` or `rollback`.
     /// The Node facade wraps these with a callback-style `transaction()` helper.
     #[napi]
     pub fn begin(&self) -> Result<()> {
-        self.connection.begin().map_err(reason)
+        self.handle()?.begin().map_err(reason)
     }
 
     /// Commit the current transaction.
     #[napi]
     pub fn commit(&self) -> Result<()> {
-        self.connection.commit().map_err(reason)
+        self.handle()?.commit().map_err(reason)
     }
 
     /// Roll back the current transaction.
     #[napi]
     pub fn rollback(&self) -> Result<()> {
-        self.connection.rollback().map_err(reason)
+        self.handle()?.rollback().map_err(reason)
     }
 
     /// Execute a VOS read pipeline and return the resulting rows.
     #[napi]
     pub fn query_vos(&self, source: String) -> Result<String> {
-        let rows = self.connection.query_vos(&source).map_err(reason)?;
+        let rows = self.handle()?.query_vos(&source).map_err(reason)?;
         let mapped: Vec<serde_json::Value> = rows
             .into_iter()
             .map(|row| {
@@ -291,7 +320,7 @@ impl Database {
             Some(json) if !json.trim().is_empty() && json.trim() != "null" => parse_params_json(&json)?,
             _ => BTreeMap::new(),
         };
-        self.connection.execute_vos_write_with_params(&source, &named).map_err(reason)
+        self.handle()?.execute_vos_write_with_params(&source, &named).map_err(reason)
     }
 
     /// Prepare a VOS read pipeline into a reusable query plan.
@@ -305,7 +334,7 @@ impl Database {
     /// Requires no schema binding — plan building is a pure parse + lower pass.
     #[napi]
     pub fn prepare(&self, source: String) -> Result<Statement> {
-        let stmt = self.connection.prepare_vos(&source).map_err(reason)?;
+        let stmt = self.handle()?.prepare_vos(&source).map_err(reason)?;
         let id = register_stmt(stmt);
         Ok(Statement { statement_id: id })
     }
@@ -322,7 +351,7 @@ impl Database {
             Some(json) if !json.trim().is_empty() && json.trim() != "null" => parse_params_json(&json)?,
             _ => BTreeMap::new(),
         };
-        let rows = with_stmt(&statement.statement_id, |stmt| self.connection.query_prepared(stmt, &named).map_err(reason))?;
+        let rows = with_stmt(&statement.statement_id, |stmt| self.handle()?.query_prepared(stmt, &named).map_err(reason))?;
         let mapped: Vec<serde_json::Value> = rows
             .into_iter()
             .map(|row| {
@@ -372,7 +401,7 @@ impl Database {
                 }
             }
         }
-        self.connection.migrate_schema(&document, &renames).map_err(reason)
+        self.handle()?.migrate_schema(&document, &renames).map_err(reason)
     }
 
     /// Checkpoint then copy a self-contained `.yydb` main file to `dest`.
@@ -382,7 +411,7 @@ impl Database {
     /// nothing to copy.
     #[napi]
     pub fn backup(&self, dest: String) -> Result<()> {
-        self.connection.backup_to(&dest).map_err(reason)
+        self.handle()?.backup_to(&dest).map_err(reason)
     }
 
     /// Copy the main file and any present `-wal` / `-shm` sidecars without
@@ -390,13 +419,13 @@ impl Database {
     /// image.
     #[napi]
     pub fn backup_with_wal(&self, dest: String) -> Result<()> {
-        self.connection.backup_with_wal_to(&dest).map_err(reason)
+        self.handle()?.backup_with_wal_to(&dest).map_err(reason)
     }
 
     /// Run read-only consistency probes. Returns the `DoctorReport` as JSON.
     #[napi]
     pub fn doctor(&self) -> Result<String> {
-        let report = self.connection.doctor().map_err(reason)?;
+        let report = self.handle()?.doctor().map_err(reason)?;
         serde_json::to_string(&report).map_err(|e| napi::Error::from_reason(format!("serialize doctor report: {e}")))
     }
 
@@ -404,7 +433,7 @@ impl Database {
     /// Returns the `CompactReport` as JSON.
     #[napi]
     pub fn compact_yydx(&self) -> Result<String> {
-        let report = self.connection.compact_yydx().map_err(reason)?;
+        let report = self.handle()?.compact_yydx().map_err(reason)?;
         serde_json::to_string(&report).map_err(|e| napi::Error::from_reason(format!("serialize compact report: {e}")))
     }
 
@@ -438,7 +467,7 @@ impl Database {
             fp_bytes,
         )
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        self.connection.register_host_micro(definition).map_err(reason)
+        self.handle()?.register_host_micro(definition).map_err(reason)
     }
 
     /// Invoke a registered scalar UDF.
@@ -449,7 +478,7 @@ impl Database {
         let args: Vec<serde_json::Value> =
             serde_json::from_str(&args_json).map_err(|e| napi::Error::from_reason(format!("invalid args JSON: {e}")))?;
         let values: Vec<yydb::Value> = args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
-        let result = self.connection.call_scalar_version(&name, version, &values).map_err(reason)?;
+        let result = self.handle()?.call_scalar_version(&name, version, &values).map_err(reason)?;
         serde_json::to_string(&value_to_json(result)).map_err(|e| napi::Error::from_reason(format!("encode result: {e}")))
     }
 }

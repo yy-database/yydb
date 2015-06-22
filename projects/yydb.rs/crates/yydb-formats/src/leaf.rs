@@ -136,9 +136,15 @@ impl LeafPage {
 
     /// Insert or replace a key. Returns `false` when the page has no space.
     pub fn upsert(&mut self, key: TreeKey, value: Vec<u8>) -> Result<bool> {
-        if let Some(cell) = self.cells.iter_mut().find(|cell| cell.key == key) {
-            cell.value = value;
-            return Ok(self.encode_payload().is_ok());
+        if let Some(index) = self.cells.iter().position(|cell| cell.key == key) {
+            let previous = std::mem::replace(&mut self.cells[index].value, value);
+            if self.encode_payload().is_ok() {
+                return Ok(true);
+            }
+            // Keep the in-memory leaf identical to the page on disk so the caller
+            // can split and retry instead of silently dropping the stored value.
+            self.cells[index].value = previous;
+            return Ok(false);
         }
         let insert_at = self.cells.iter().position(|cell| cell.key > key).unwrap_or(self.cells.len());
         self.cells.insert(insert_at, LeafCell { key, value });
@@ -189,6 +195,49 @@ impl LeafPage {
         let right = LeafPage { page_id: 0, page_generation: self.page_generation, tree_id: self.tree_id, cells: right_cells };
         Ok((separator, right))
     }
+
+    /// Insert `incoming` and split into two leaves that both encode.
+    ///
+    /// Cell sizes vary by orders of magnitude: a row holding a large `bytes`
+    /// payload is much larger than an integer cell. Splitting at the cell-count
+    /// midpoint can therefore leave a half that cannot hold the incoming cell
+    /// even when the same cell fits an otherwise empty page. This picks the most
+    /// byte-balanced split point among those where both halves fit, and refuses
+    /// the record when no leaf can hold it.
+    pub fn split_for_insert(&mut self, incoming: LeafCell) -> Result<(TreeKey, LeafPage)> {
+        let insert_at = self.cells.iter().position(|cell| cell.key > incoming.key).unwrap_or(self.cells.len());
+        self.cells.insert(insert_at, incoming);
+
+        let mut best: Option<(usize, usize)> = None;
+        for split_at in 1..self.cells.len() {
+            let left = payload_usage(&self.cells[..split_at])?;
+            let right = payload_usage(&self.cells[split_at..])?;
+            if left > PAGE_PAYLOAD_LEN || right > PAGE_PAYLOAD_LEN {
+                continue;
+            }
+            let imbalance = left.abs_diff(right);
+            if best.is_none_or(|(_, current)| imbalance <= current) {
+                best = Some((split_at, imbalance));
+            }
+        }
+        let Some((split_at, _)) = best else {
+            return Err(Error::Unsupported("record is too large for one leaf page"));
+        };
+
+        let right_cells = self.cells.split_off(split_at);
+        let separator = right_cells[0].key.clone();
+        let right = LeafPage { page_id: 0, page_generation: self.page_generation, tree_id: self.tree_id, cells: right_cells };
+        Ok((separator, right))
+    }
+}
+
+/// Payload bytes used by `cells`, including their directory slots.
+fn payload_usage(cells: &[LeafCell]) -> Result<usize> {
+    let mut total = DIRECTORY_BYTES + cells.len() * 4;
+    for cell in cells {
+        total += encode_cell(&cell.key, &cell.value)?.len();
+    }
+    Ok(total)
 }
 
 fn encode_cell(key: &TreeKey, value: &[u8]) -> Result<Vec<u8>> {

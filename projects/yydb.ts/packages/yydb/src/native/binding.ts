@@ -11,6 +11,8 @@ export interface NativeSchemaVersion {
 
 /** One open `.yydb` handle exposed by the native binding. */
 export interface NativeDatabase {
+    /** Release the file handle and writer lock; returns true when this call released it. */
+    close(): boolean;
     path(): string | null;
     walPath(): string | null;
     shmPath(): string | null;
