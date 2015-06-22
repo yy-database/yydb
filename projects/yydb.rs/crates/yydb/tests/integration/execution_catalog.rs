@@ -1,7 +1,7 @@
 use yydb::{
     Connection, Error,
     catalog::execution_catalog,
-    execution::{Node, Program, RecordValue, Type, ValidatedProgram, Value},
+    execution::{Node, Program, RecordValue, Type, ValidatedProgram, Value, VectorMetric},
 };
 
 fn resolved_user_contract() -> yydb::vos::ResolvedContract {
@@ -86,14 +86,27 @@ fn rejects_invalid_schema_and_unsupported_types_without_coercion() {
 }
 
 #[test]
-fn refuses_file_and_vector_fields_instead_of_degrading_them() {
-    for ty in ["file", "vector<3>"] {
-        let source = format!("table User {{ @@id: i64, payload: {ty} }}");
-        assert!(
-            matches!(execution_catalog(&source), Err(Error::Unsupported(_))),
-            "declared `{ty}` field did not reach a stable unsupported rejection"
-        );
-    }
+fn refuses_file_fields_instead_of_degrading_them() {
+    let source = "table User { @@id: i64, payload: file }";
+    assert!(
+        matches!(execution_catalog(source), Err(Error::Unsupported(_))),
+        "a declared `file` field must reach a stable unsupported rejection"
+    );
+}
+
+#[test]
+fn lowers_vector_fields_with_the_declared_dimension() {
+    let catalog = execution_catalog("table Doc { @@id: i64, embedding: vector<3> }").expect("vector field lowers");
+    let table = &catalog.types[0];
+    assert_eq!(table.fields[1].name, "embedding");
+    assert_eq!(table.fields[1].handle.ty(), Type::Vector { dimension: 3, metric: VectorMetric::Cosine });
+
+    // A zero dimension is not a vector, so it is rejected instead of lowered
+    // into an empty embedding.
+    assert!(
+        matches!(execution_catalog("table Doc { @@id: i64, embedding: vector<0> }"), Err(Error::Schema { .. })),
+        "a zero-dimension vector must not lower"
+    );
 }
 
 #[test]

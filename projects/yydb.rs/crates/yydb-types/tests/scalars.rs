@@ -174,3 +174,59 @@ fn tagged_json_roundtrips_without_loss_and_rejects_unknown_tags() {
     let wrong_type = serde_json::json!({ "$yydb": "timestamp", "utcMicros": 1 });
     assert!(scalar::tagged_value_from_json(&wrong_type).unwrap().is_err());
 }
+
+#[test]
+fn tagged_vector_json_keeps_component_bits_and_rejects_bad_shapes() {
+    // Component bits survive exactly, including the sign of zero and the f32
+    // extremes a text spelling could not reproduce.
+    let components = vec![f32::MIN, -0.0, f32::from_bits(1), f32::MAX, 1.0 / 3.0];
+    let vector = yydb_types::Vector::new(components.clone()).expect("vector");
+    let value = yydb_types::Value::Vector(vector);
+    let json = scalar::tagged_value_json(&value).expect("tagged");
+    assert_eq!(json["dimension"], serde_json::json!(components.len()));
+    let decoded = scalar::tagged_value_from_json(&json).expect("object").expect("valid");
+    let yydb_types::Value::Vector(decoded) = decoded else { panic!("vector must decode as a vector") };
+    assert_eq!(decoded.dim, components.len() as u32);
+    assert_eq!(
+        decoded.data.iter().map(|component| component.to_bits()).collect::<Vec<_>>(),
+        components.iter().map(|component| component.to_bits()).collect::<Vec<_>>(),
+    );
+
+    // A component count that disagrees with the declared dimension is refused
+    // rather than decoded into an embedding of another shape.
+    let truncated = serde_json::json!({ "$yydb": "vector", "dimension": 3, "components": "0000803f" });
+    assert!(matches!(
+        scalar::tagged_value_from_json(&truncated).unwrap(),
+        Err(ScalarError::InvalidLength { kind: "vector", expected: 12, got: 4 })
+    ));
+    // An empty vector and a zero dimension are not values.
+    let zero_dimension = serde_json::json!({ "$yydb": "vector", "dimension": 0, "components": "" });
+    assert!(matches!(
+        scalar::tagged_value_from_json(&zero_dimension).unwrap(),
+        Err(ScalarError::Malformed { kind: "vector", .. })
+    ));
+    // NaN and infinity cannot be stored under a shape that claims finite
+    // components. `0000c07f` is the little-endian bit pattern of a quiet NaN.
+    let nan = serde_json::json!({ "$yydb": "vector", "dimension": 1, "components": "0000c07f" });
+    assert!(matches!(
+        scalar::tagged_value_from_json(&nan).unwrap(),
+        Err(ScalarError::Malformed { kind: "vector", .. })
+    ));
+    // An unknown member would let a payload smuggle a second meaning.
+    let extra_member = serde_json::json!({
+        "$yydb": "vector",
+        "dimension": 1,
+        "components": "0000803f",
+        "metric": "cosine",
+    });
+    assert!(matches!(
+        scalar::tagged_value_from_json(&extra_member).unwrap(),
+        Err(ScalarError::Malformed { kind: "vector", .. })
+    ));
+    // A component payload that is not hex is not octets.
+    let non_hex = serde_json::json!({ "$yydb": "vector", "dimension": 1, "components": "0g000000" });
+    assert!(matches!(
+        scalar::tagged_value_from_json(&non_hex).unwrap(),
+        Err(ScalarError::Malformed { kind: "vector", .. })
+    ));
+}

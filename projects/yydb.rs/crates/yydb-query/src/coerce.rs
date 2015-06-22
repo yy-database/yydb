@@ -69,8 +69,8 @@ pub(crate) fn scalar_target(ty: &ResolvedCanonicalType) -> Option<ScalarTarget> 
 /// being stored untyped, so a declared `utf16` or narrow integer never degrades
 /// into text or a wider integer. A `uuid` column keeps the canonical lowercase
 /// spelling, so a UUID value and a UUID text literal normalize to the same
-/// value. Columns without a scalar target (records and user types) accept the
-/// value unchanged.
+/// value. A `vector<N>` column keeps exactly `N` finite components. Columns
+/// without a scalar target (records and user types) accept the value unchanged.
 pub(crate) fn value_to_scalar(value: Value, ty: &ResolvedCanonicalType) -> Result<Value> {
     use vos::types::CanonicalScalar;
     // A REAL value belongs in an `f64` column. Every other declared column
@@ -100,6 +100,18 @@ pub(crate) fn value_to_scalar(value: Value, ty: &ResolvedCanonicalType) -> Resul
             )),
         };
     }
+    // A VECTOR value belongs in a `vector<N>` column of the same dimension.
+    // Every other target keeps an exact value, so a vector is rejected before
+    // staging instead of being reinterpreted as text, bytes or a number.
+    if matches!(&value, Value::Vector(_)) {
+        return match ty {
+            ResolvedCanonicalType::Vector { dimension, .. } => coerce_vector(value, *dimension),
+            _ => Err(coerce_error(
+                "VECTOR value cannot be stored: the target column is not `vector<N>` and YYDB never converts a vector \
+                 into an integer, bool, text, bytes, uuid, date, time, timestamp or decimal column",
+            )),
+        };
+    }
     match ty {
         ResolvedCanonicalType::Scalar(CanonicalScalar::Uuid) => coerce_uuid(value),
         ResolvedCanonicalType::Scalar(CanonicalScalar::I64 | CanonicalScalar::Bool | CanonicalScalar::Utf8) => Ok(value),
@@ -113,7 +125,38 @@ pub(crate) fn value_to_scalar(value: Value, ty: &ResolvedCanonicalType) -> Resul
                 .ok_or_else(|| coerce_error("`Decimal` requires two literal arguments: precision and scale"))?;
             coerce_to(value, target)
         }
+        ResolvedCanonicalType::Vector { dimension, .. } => coerce_vector(value, *dimension),
         _ => Ok(value),
+    }
+}
+
+/// Check a vector value against the dimension the column declares.
+///
+/// The declared dimension is part of the column contract, so a vector with
+/// another component count cannot be stored as if it were the declared one, and
+/// a non-finite component is refused before the write is staged instead of
+/// landing a value that no comparison or distance can interpret.
+fn coerce_vector(value: Value, dimension: u32) -> Result<Value> {
+    match value {
+        Value::Null => Ok(Value::Null),
+        Value::Vector(vector) => {
+            if vector.dim != dimension {
+                return Err(coerce_error(format!(
+                    "column type `vector<{dimension}>` requires {dimension} components, got {}",
+                    vector.dim
+                )));
+            }
+            if let Some(index) = vector.data.iter().position(|component| !component.is_finite()) {
+                return Err(coerce_error(format!(
+                    "column type `vector<{dimension}>` requires finite components, component {index} is not finite"
+                )));
+            }
+            Ok(Value::Vector(vector))
+        }
+        other => Err(coerce_error(format!(
+            "column type `vector<{dimension}>` requires a vector value, got `{}`",
+            other.kind()
+        ))),
     }
 }
 

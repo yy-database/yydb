@@ -727,7 +727,8 @@ fn parse_digits(bytes: &[u8]) -> Option<u32> {
 /// JSON member marking a tagged scalar object on query-row and wire surfaces.
 pub const TAGGED_JSON_KEY: &str = "$yydb";
 
-/// Tagged JSON form for UUID, temporal, decimal, and binary values.
+/// Tagged JSON form for UUID, temporal, decimal, binary, vector, and object
+/// values.
 ///
 /// Returns `None` for every other [`crate::Value`] variant so callers keep
 /// their existing encoding for booleans, integers, and text.
@@ -749,6 +750,11 @@ pub fn tagged_value_json(value: &crate::Value) -> Option<serde_json::Value> {
         crate::Value::Bytes(bytes) => Some(serde_json::json!({
             "$yydb": "bytes",
             "hex": crate::hex::encode_vec(bytes),
+        })),
+        crate::Value::Vector(vector) => Some(serde_json::json!({
+            "$yydb": "vector",
+            "dimension": vector.dim,
+            "components": crate::hex::encode_vec(&vector.to_le_bytes()),
         })),
         crate::Value::Object(object) => Some(serde_json::json!({
             "$yydb": "object",
@@ -824,6 +830,45 @@ fn parse_tagged_value(json: &serde_json::Value, tag: &serde_json::Value) -> Resu
             let hex = object.get("hex").and_then(serde_json::Value::as_str).ok_or_else(|| malformed("bytes"))?;
             let bytes = decode_hex(hex).ok_or_else(|| malformed("bytes"))?;
             Ok(crate::Value::Bytes(bytes))
+        }
+        "vector" => {
+            // A vector keeps its declared dimension next to the exact component
+            // bits, so a truncated or padded payload is rejected instead of
+            // decoding into an embedding of another shape.
+            let members = ["dimension", "components"];
+            if object.len() != members.len() + 1 || !members.iter().all(|member| object.contains_key(*member)) {
+                return Err(malformed("vector"));
+            }
+            let dimension = object
+                .get("dimension")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok())
+                .filter(|dimension| *dimension > 0)
+                .ok_or_else(|| malformed("vector"))?;
+            let components = object
+                .get("components")
+                .and_then(serde_json::Value::as_str)
+                .and_then(decode_hex)
+                .ok_or_else(|| malformed("vector"))?;
+            let expected = (dimension as usize)
+                .checked_mul(4)
+                .ok_or_else(|| malformed("vector"))?;
+            if components.len() != expected {
+                return Err(ScalarError::InvalidLength { kind: "vector", expected, got: components.len() });
+            }
+            let mut data = Vec::with_capacity(dimension as usize);
+            for (index, component_bytes) in components.as_chunks::<4>().0.iter().enumerate() {
+                let component = f32::from_le_bytes(*component_bytes);
+                if !component.is_finite() {
+                    return Err(ScalarError::Malformed {
+                        kind: "vector",
+                        input: format!("{json}: component {index} is not finite"),
+                    });
+                }
+                data.push(component);
+            }
+            let vector = crate::Vector::new(data).map_err(|_| malformed("vector"))?;
+            Ok(crate::Value::Vector(vector))
         }
         "object" => {
             let algo = object

@@ -16,7 +16,7 @@ use vos::{
         IdentityManifest, ResolvedContract, SchemaProjection, TypeIdentity,
     },
 };
-use yydb_execution::{FieldHandle, LayoutField, RecordLayout, RecordLayoutError, Type};
+use yydb_execution::{FieldHandle, LayoutField, RecordLayout, RecordLayoutError, Type, VectorMetric};
 use yydb_types::{Error, Result, UniqueConstraint};
 
 /// Canonical remote used by this workspace for shared VOS semantics.
@@ -481,14 +481,20 @@ pub fn remap_unique_constraints(
         .collect()
 }
 
+/// Lowers one resolved VOS canonical type into an execution type.
+///
+/// A `vector<N>` becomes the execution vector of the declared dimension. VOS
+/// fixes the element precision and the dimension but deliberately leaves
+/// distance metrics to query capabilities, so the catalog binds [`VectorMetric::Cosine`]
+/// as the execution metric until a contract carries one.
 fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Type> {
     use vos::types::ResolvedCanonicalType;
     match ty {
         ResolvedCanonicalType::Scalar(scalar) => execution_type_for_scalar(*scalar),
         ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => decimal_type_from_arguments(arguments),
         ResolvedCanonicalType::File => Err(Error::Unsupported("VOS `file` fields are not in the YYDB execution slice yet")),
-        ResolvedCanonicalType::Vector { .. } => {
-            Err(Error::Unsupported("VOS `vector<N>` fields are not in the YYDB execution slice yet"))
+        ResolvedCanonicalType::Vector { dimension, .. } => {
+            Ok(Type::Vector { dimension: *dimension, metric: VectorMetric::Cosine })
         }
         ResolvedCanonicalType::Optional(_)
         | ResolvedCanonicalType::Reference(_)

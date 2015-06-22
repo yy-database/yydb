@@ -6,6 +6,10 @@ backup, and the UDF session bridge.
 This crate owns runtime behaviour. The [`yydb`](https://crates.io/crates/yydb) facade re-exports it without growing
 implementations of its own, so application code should depend on the facade.
 
+Catalog publication lowers a `vector<N>` field to an execution vector type carrying the declared dimension, so query
+capabilities see the same shape the schema declares. VOS binary payload fields (`file`) are still outside the execution
+slice and are refused at catalog time instead of degrading into bytes.
+
 | Layer      | Crate                                      |
 |------------|--------------------------------------------|
 | Formats    | `yydb-formats`                             |
