@@ -12,17 +12,6 @@ pub use yydb_types::{Date, Decimal, Time, Timestamp, UniqueConstraint};
 /// A node identifier in an execution Program.
 pub type NodeId = u32;
 
-/// Metric used to interpret a vector value or vector index.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VectorMetric {
-    /// Cosine distance or similarity.
-    Cosine,
-    /// Euclidean distance.
-    Euclidean,
-    /// Inner product.
-    Dot,
-}
-
 /// Runtime types supported by the execution model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
@@ -51,12 +40,10 @@ pub enum Type {
         /// Exact number of fractional digits (`0..=precision`).
         scale: u8,
     },
-    /// Fixed-dimension vector with an explicit metric.
+    /// Fixed-dimension vector.
     Vector {
         /// Number of vector components.
         dimension: u32,
-        /// Metric used by vector operations and indexes.
-        metric: VectorMetric,
     },
     /// Schema-identified record with a fixed number of fields.
     Record {
@@ -78,19 +65,16 @@ pub struct FileRef {
     pub byte_len: u64,
 }
 
-/// A vector value with an explicit metric and finite components.
+/// A vector value with finite components.
 #[derive(Debug, Clone)]
 pub struct VectorValue {
     /// Vector components in logical order.
     values: Vec<f32>,
-    /// Metric used to interpret this vector.
-    metric: VectorMetric,
 }
 
 impl PartialEq for VectorValue {
     fn eq(&self, other: &Self) -> bool {
-        self.metric == other.metric
-            && self.values.len() == other.values.len()
+        self.values.len() == other.values.len()
             && self.values.iter().zip(&other.values).all(|(left, right)| left.to_bits() == right.to_bits())
     }
 }
@@ -99,14 +83,14 @@ impl Eq for VectorValue {}
 
 impl VectorValue {
     /// Creates a vector after rejecting non-finite components.
-    pub fn new(values: Vec<f32>, metric: VectorMetric) -> Result<Self, VectorValueError> {
+    pub fn new(values: Vec<f32>) -> Result<Self, VectorValueError> {
         if values.is_empty() || u32::try_from(values.len()).is_err() {
             return Err(VectorValueError::InvalidDimension);
         }
         if let Some(index) = values.iter().position(|value| !value.is_finite()) {
             return Err(VectorValueError::NonFiniteComponent { index });
         }
-        Ok(Self { values, metric })
+        Ok(Self { values })
     }
 
     /// Returns the vector dimension.
@@ -117,11 +101,6 @@ impl VectorValue {
     /// Returns the finite vector components.
     pub fn values(&self) -> &[f32] {
         &self.values
-    }
-
-    /// Returns the vector metric.
-    pub fn metric(&self) -> VectorMetric {
-        self.metric
     }
 }
 
@@ -343,7 +322,7 @@ impl Value {
             Self::Time(_) => Type::Time,
             Self::Timestamp(_) => Type::Timestamp,
             Self::Decimal(value) => Type::Decimal { precision: value.precision(), scale: value.scale() },
-            Self::Vector(value) => Type::Vector { dimension: value.dimension(), metric: value.metric },
+            Self::Vector(value) => Type::Vector { dimension: value.dimension() },
             Self::Record(value) => Type::Record {
                 schema_id: value.schema_id,
                 field_count: value.fields.len().try_into().expect("validated record field count"),

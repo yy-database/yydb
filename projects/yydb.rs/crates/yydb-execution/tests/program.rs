@@ -1,6 +1,6 @@
 use yydb_execution::{
     EvalError, FieldHandle, FileRef, LayoutField, Node, Program, RecordLayout, RecordValue, Type, Udf, UdfEffect, UdfPlacement,
-    ValidatedProgram, ValidationError, Value, VectorMetric, VectorValue, VectorValueError,
+    ValidatedProgram, ValidationError, Value, VectorValue, VectorValueError,
 };
 
 #[test]
@@ -95,9 +95,9 @@ fn preserves_file_and_vector_value_identity() {
     let file = Value::File(FileRef { object_id: "asset-1".into(), generation: 3, byte_len: 4096 });
     assert_eq!(file.ty(), Type::File);
 
-    let vector = VectorValue::new(vec![0.25, 0.5, 0.75], VectorMetric::Cosine).expect("finite vector is valid");
+    let vector = VectorValue::new(vec![0.25, 0.5, 0.75]).expect("finite vector is valid");
     assert_eq!(vector.dimension(), 3);
-    assert_eq!(Value::Vector(vector).ty(), Type::Vector { dimension: 3, metric: VectorMetric::Cosine });
+    assert_eq!(Value::Vector(vector).ty(), Type::Vector { dimension: 3 });
 }
 
 #[test]
@@ -194,10 +194,7 @@ fn rejects_a_field_handle_that_disagrees_with_layout_type() {
 
 #[test]
 fn rejects_non_finite_vector_components() {
-    assert_eq!(
-        VectorValue::new(vec![1.0, f32::NAN], VectorMetric::Dot),
-        Err(VectorValueError::NonFiniteComponent { index: 1 })
-    );
+    assert_eq!(VectorValue::new(vec![1.0, f32::NAN]), Err(VectorValueError::NonFiniteComponent { index: 1 }));
 }
 
 #[test]

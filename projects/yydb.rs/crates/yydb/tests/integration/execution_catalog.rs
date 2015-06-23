@@ -1,7 +1,7 @@
 use yydb::{
     Connection, Error,
     catalog::execution_catalog,
-    execution::{Node, Program, RecordValue, Type, ValidatedProgram, Value, VectorMetric},
+    execution::{Node, Program, RecordValue, Type, ValidatedProgram, Value},
 };
 
 fn resolved_user_contract() -> yydb::vos::ResolvedContract {
@@ -99,7 +99,7 @@ fn lowers_vector_fields_with_the_declared_dimension() {
     let catalog = execution_catalog("table Doc { @@id: i64, embedding: vector<3> }").expect("vector field lowers");
     let table = &catalog.types[0];
     assert_eq!(table.fields[1].name, "embedding");
-    assert_eq!(table.fields[1].handle.ty(), Type::Vector { dimension: 3, metric: VectorMetric::Cosine });
+    assert_eq!(table.fields[1].handle.ty(), Type::Vector { dimension: 3 });
 
     // A zero dimension is not a vector, so it is rejected instead of lowered
     // into an empty embedding.

@@ -185,7 +185,10 @@ fn tagged_vector_json_keeps_component_bits_and_rejects_bad_shapes() {
     let json = scalar::tagged_value_json(&value).expect("tagged");
     assert_eq!(json["dimension"], serde_json::json!(components.len()));
     let decoded = scalar::tagged_value_from_json(&json).expect("object").expect("valid");
-    let yydb_types::Value::Vector(decoded) = decoded else { panic!("vector must decode as a vector") };
+    let yydb_types::Value::Vector(decoded) = decoded
+    else {
+        panic!("vector must decode as a vector")
+    };
     assert_eq!(decoded.dim, components.len() as u32);
     assert_eq!(
         decoded.data.iter().map(|component| component.to_bits()).collect::<Vec<_>>(),
@@ -208,16 +211,13 @@ fn tagged_vector_json_keeps_component_bits_and_rejects_bad_shapes() {
     // NaN and infinity cannot be stored under a shape that claims finite
     // components. `0000c07f` is the little-endian bit pattern of a quiet NaN.
     let nan = serde_json::json!({ "$yydb": "vector", "dimension": 1, "components": "0000c07f" });
-    assert!(matches!(
-        scalar::tagged_value_from_json(&nan).unwrap(),
-        Err(ScalarError::Malformed { kind: "vector", .. })
-    ));
+    assert!(matches!(scalar::tagged_value_from_json(&nan).unwrap(), Err(ScalarError::Malformed { kind: "vector", .. })));
     // An unknown member would let a payload smuggle a second meaning.
     let extra_member = serde_json::json!({
         "$yydb": "vector",
         "dimension": 1,
         "components": "0000803f",
-        "metric": "cosine",
+        "units": "degrees",
     });
     assert!(matches!(
         scalar::tagged_value_from_json(&extra_member).unwrap(),
@@ -225,8 +225,5 @@ fn tagged_vector_json_keeps_component_bits_and_rejects_bad_shapes() {
     ));
     // A component payload that is not hex is not octets.
     let non_hex = serde_json::json!({ "$yydb": "vector", "dimension": 1, "components": "0g000000" });
-    assert!(matches!(
-        scalar::tagged_value_from_json(&non_hex).unwrap(),
-        Err(ScalarError::Malformed { kind: "vector", .. })
-    ));
+    assert!(matches!(scalar::tagged_value_from_json(&non_hex).unwrap(), Err(ScalarError::Malformed { kind: "vector", .. })));
 }

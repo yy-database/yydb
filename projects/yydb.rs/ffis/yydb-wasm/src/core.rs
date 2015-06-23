@@ -4,7 +4,7 @@ use serde_json::{Value as JsonValue, json};
 use yydb::{
     Connection, Error, Result, SchemaVersion, Value,
     catalog::{self, ExecutionTypeKind},
-    execution::{Type, VectorMetric},
+    execution::Type,
 };
 
 /// Build the full diagnostic contract JSON object for any error branch.
@@ -193,15 +193,7 @@ fn execution_type_json(ty: Type) -> JsonValue {
         Type::Time => json!({ "kind": "time", "unit": "nanosecond", "timezone": "none" }),
         Type::Timestamp => json!({ "kind": "timestamp", "unit": "microsecond", "timezone": "utc" }),
         Type::Decimal { precision, scale } => json!({ "kind": "decimal", "precision": precision, "scale": scale }),
-        Type::Vector { dimension, metric } => json!({
-            "kind": "vector",
-            "dimension": dimension,
-            "metric": match metric {
-                VectorMetric::Cosine => "cosine",
-                VectorMetric::Euclidean => "euclidean",
-                VectorMetric::Dot => "dot",
-            },
-        }),
+        Type::Vector { dimension } => json!({ "kind": "vector", "dimension": dimension }),
         Type::Record { schema_id, field_count } => {
             json!({ "kind": "record", "schemaId": schema_id, "fieldCount": field_count })
         }

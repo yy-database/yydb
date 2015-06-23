@@ -40,7 +40,7 @@ export type SchemaFieldType =
     | { readonly kind: 'time'; readonly unit: 'nanosecond'; readonly timezone: 'none' }
     | { readonly kind: 'timestamp'; readonly unit: 'microsecond'; readonly timezone: 'utc' }
     | { readonly kind: 'decimal'; readonly precision: number; readonly scale: number }
-    | { readonly kind: 'vector'; readonly dimension: number; readonly metric: 'cosine' | 'euclidean' | 'dot' }
+    | { readonly kind: 'vector'; readonly dimension: number }
     | { readonly kind: 'record'; readonly schemaId: number; readonly fieldCount: number };
 
 /** One uniqueness rule published by the catalog. */

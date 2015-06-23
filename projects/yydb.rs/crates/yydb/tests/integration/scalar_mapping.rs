@@ -3,7 +3,7 @@
 use yydb::{
     Error,
     catalog::{canonical_scalar_for_execution_type, execution_type_for_scalar},
-    execution::{Type, VectorMetric},
+    execution::Type,
     types::{Decimal, ScalarError, Timestamp},
     vos::types::CanonicalScalar,
 };
@@ -72,12 +72,7 @@ fn decimal_maps_to_the_i128_unscaled_form_without_floating_point() {
 
 #[test]
 fn composite_execution_types_have_no_canonical_scalar() {
-    let composites = [
-        Type::Null,
-        Type::File,
-        Type::Vector { dimension: 3, metric: VectorMetric::Cosine },
-        Type::Record { schema_id: 1, field_count: 2 },
-    ];
+    let composites = [Type::Null, Type::File, Type::Vector { dimension: 3 }, Type::Record { schema_id: 1, field_count: 2 }];
     for ty in composites {
         let error = canonical_scalar_for_execution_type(&ty).expect_err("composite has no canonical scalar");
         assert!(matches!(error, Error::Schema { .. }), "unexpected error for {ty:?}: {error}");
