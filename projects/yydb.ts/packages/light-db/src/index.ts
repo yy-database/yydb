@@ -26,6 +26,8 @@ export type {
     BatchChange,
     DateScalar,
     DecimalScalar,
+    FileManifestReference,
+    FileScalar,
     LightDatabase,
     MigrateOptions,
     OpenOptions,

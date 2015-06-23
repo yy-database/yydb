@@ -126,7 +126,21 @@ pub(crate) fn value_to_scalar(value: Value, ty: &ResolvedCanonicalType) -> Resul
             coerce_to(value, target)
         }
         ResolvedCanonicalType::Vector { dimension, .. } => coerce_vector(value, *dimension),
+        ResolvedCanonicalType::File => coerce_file(value),
         _ => Ok(value),
+    }
+}
+
+/// Check a `file` column value against the descriptor shape it must keep.
+///
+/// A file column stores a descriptor and a manifest reference, never inline
+/// octets or a truncation of them, so every other value kind is rejected before
+/// the write is staged.
+fn coerce_file(value: Value) -> Result<Value> {
+    match value {
+        Value::Null => Ok(Value::Null),
+        Value::File(_) => Ok(value),
+        other => Err(coerce_error(format!("column type `file` requires a file descriptor, got `{}`", other.kind()))),
     }
 }
 

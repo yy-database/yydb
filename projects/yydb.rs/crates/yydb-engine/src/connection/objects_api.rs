@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{ChunkManifest, Error, ObjectKind, ObjectRef, Result, Tier, Vector};
+use crate::{ChunkManifest, Error, FileDescriptor, ObjectKind, ObjectRef, Result, Tier, Vector};
 
 use super::Connection;
 
@@ -25,6 +25,24 @@ impl Connection {
     /// Read CAS bytes (fault-in to hot tier when needed).
     pub fn get_object(&self, object: &ObjectRef) -> Result<Arc<[u8]>> {
         self.objects.get_object(object)
+    }
+
+    /// Publish a logical `file` value: chunks first, then the manifest object.
+    ///
+    /// Only `.yydx` layouts keep the object tree a descriptor depends on, so a
+    /// single-file `.yydb` rejects the write instead of inlining octets or
+    /// truncating them to the inline boundary.
+    pub fn put_file(
+        &self,
+        reader: impl std::io::Read,
+        chunk_size: usize,
+        name: Option<String>,
+        media_type: Option<String>,
+    ) -> Result<FileDescriptor> {
+        if self.is_single_file_yydb() {
+            return Err(Error::Unsupported("`file` values require a .yydx layout; .yydb single-file mode rejects them"));
+        }
+        self.objects.put_file(reader, chunk_size, name, media_type)
     }
 
     /// Chunk a logical file into CAS objects.

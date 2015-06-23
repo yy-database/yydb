@@ -31,8 +31,21 @@ export type DecimalScalar = {
     readonly unscaled: string;
 };
 
+/** Content-addressed reference to the chunk manifest object behind a `file` value. */
+export type FileManifestReference = { readonly hash: string; readonly size: number };
+
+/** Tagged JSON form of an immutable `file` value: identity digest plus manifest reference. */
+export type FileScalar = {
+    readonly $yydb: 'file';
+    readonly digest: string;
+    readonly octets: number;
+    readonly name?: string;
+    readonly mediaType?: string;
+    readonly manifest: FileManifestReference;
+};
+
 /** Every exact scalar crossing the WASM JSON boundary uses this tagged form. */
-export type ScalarValue = DateScalar | TimeScalar | TimestampScalar | DecimalScalar;
+export type ScalarValue = DateScalar | TimeScalar | TimestampScalar | DecimalScalar | FileScalar;
 
 /** Declared execution type of a catalog field. */
 export type SchemaFieldType =

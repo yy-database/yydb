@@ -1,6 +1,6 @@
 use yydb_execution::{
-    EvalError, FieldHandle, FileRef, LayoutField, Node, Program, RecordLayout, RecordValue, Type, Udf, UdfEffect, UdfPlacement,
-    ValidatedProgram, ValidationError, Value, VectorValue, VectorValueError,
+    EvalError, FieldHandle, FileDescriptor, FileManifestRef, LayoutField, Node, Program, RecordLayout, RecordValue, Type, Udf,
+    UdfEffect, UdfPlacement, ValidatedProgram, ValidationError, Value, VectorValue, VectorValueError,
 };
 
 #[test]
@@ -92,7 +92,13 @@ fn validates_and_evaluates_a_typed_udf() {
 
 #[test]
 fn preserves_file_and_vector_value_identity() {
-    let file = Value::File(FileRef { object_id: "asset-1".into(), generation: 3, byte_len: 4096 });
+    let file = Value::File(FileDescriptor {
+        digest: "ab".repeat(32),
+        octets: 4096,
+        name: Some("asset.bin".into()),
+        media_type: Some("application/octet-stream".into()),
+        manifest: FileManifestRef { hash: [0x11; 32], size: 96 },
+    });
     assert_eq!(file.ty(), Type::File);
 
     let vector = VectorValue::new(vec![0.25, 0.5, 0.75]).expect("finite vector is valid");

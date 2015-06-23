@@ -3,6 +3,8 @@ export {
     Statement,
     type DateScalar,
     type DecimalScalar,
+    type FileManifestReference,
+    type FileScalar,
     type OpenOptions,
     type ParameterDescriptor,
     type QueryKind,

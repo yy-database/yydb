@@ -86,12 +86,12 @@ fn rejects_invalid_schema_and_unsupported_types_without_coercion() {
 }
 
 #[test]
-fn refuses_file_fields_instead_of_degrading_them() {
+fn lowers_file_fields_to_the_file_execution_type() {
     let source = "table User { @@id: i64, payload: file }";
-    assert!(
-        matches!(execution_catalog(source), Err(Error::Unsupported(_))),
-        "a declared `file` field must reach a stable unsupported rejection"
-    );
+    let catalog = execution_catalog(source).expect("a declared `file` field lowers");
+    let table = &catalog.types[0];
+    assert_eq!(table.fields[1].name, "payload");
+    assert_eq!(table.fields[1].handle.ty(), Type::File);
 }
 
 #[test]

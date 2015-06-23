@@ -179,12 +179,13 @@ fn encode_value(value: &Value) -> Result<JsonValue> {
         | Value::Decimal(_)
         | Value::Bytes(_)
         | Value::Vector(_)
-        | Value::Object(_) => scalar::tagged_value_json(value)
-            .expect("uuid, temporal, decimal, binary, vector, and object-reference values always have a tagged form"),
+        | Value::Object(_)
+        | Value::File(_) => scalar::tagged_value_json(value)
+            .expect("uuid, temporal, decimal, binary, vector, object-reference, and file values always have a tagged form"),
         _ => {
             return Err(Error::Unsupported(
                 "query row encoding supports null, bool, i64, real, text, uuid, bytes, vector, date, time, timestamp, \
-                 decimal, and bytes object references only",
+                 decimal, bytes object references, and file descriptors only",
             ));
         }
     })
@@ -215,8 +216,8 @@ fn decode_value(value: &JsonValue) -> Result<Value> {
             Some(Err(error)) => return Err(error.into()),
             None => {
                 return Err(Error::Unsupported(
-                    "query row decoding supports tagged uuid, date, time, timestamp, decimal, bytes, vector, and object \
-                     references only",
+                    "query row decoding supports tagged uuid, date, time, timestamp, decimal, bytes, vector, object \
+                     references, and file descriptors only",
                 ));
             }
         },

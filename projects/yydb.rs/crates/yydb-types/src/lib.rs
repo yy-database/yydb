@@ -713,6 +713,8 @@ pub enum ObjectKind {
     Blob,
     /// Encoded vector payload.
     VectorPayload,
+    /// Immutable chunk manifest of a logical file.
+    FileManifest,
     /// Rebuildable ANN graph segment.
     AnnSegment,
 }
@@ -723,6 +725,7 @@ impl ObjectKind {
         match self {
             Self::Blob => "blob",
             Self::VectorPayload => "vector-payload",
+            Self::FileManifest => "file-manifest",
             Self::AnnSegment => "ann-segment",
         }
     }
@@ -732,6 +735,7 @@ impl ObjectKind {
         match name {
             "blob" => Some(Self::Blob),
             "vector-payload" => Some(Self::VectorPayload),
+            "file-manifest" => Some(Self::FileManifest),
             "ann-segment" => Some(Self::AnnSegment),
             _ => None,
         }
@@ -781,6 +785,152 @@ pub struct ChunkManifest {
     pub total_size: u64,
     /// Chunks in order; each points at `objects/hash-2/*.bytes`.
     pub chunks: Vec<ObjectRef>,
+}
+
+impl ChunkManifest {
+    /// Strict JSON payload published under [`ObjectKind::FileManifest`].
+    ///
+    /// The payload names only chunk identity and length: chunk layout is a
+    /// storage detail and never enters the file's content identity.
+    pub fn to_payload_bytes(&self) -> Result<Vec<u8>> {
+        let chunks = self
+            .chunks
+            .iter()
+            .map(|chunk| serde_json::json!({ "hash": chunk.hash_hex(), "size": chunk.size }))
+            .collect::<Vec<_>>();
+        serde_json::to_vec(&serde_json::json!({
+            "chunk_size": self.chunk_size,
+            "total_size": self.total_size,
+            "chunks": chunks,
+        }))
+        .map_err(|_| Error::Corrupt("file manifest payload encode failed"))
+    }
+
+    /// Decodes and validates a manifest payload.
+    ///
+    /// A manifest is accepted whole or rejected whole: unknown members, a
+    /// non-positive `chunk_size`, a short non-final chunk, a chunk whose length
+    /// exceeds `chunk_size`, or chunk lengths that do not add up to
+    /// `total_size` are all corruption instead of a partially usable manifest.
+    pub fn from_payload_bytes(bytes: &[u8]) -> Result<Self> {
+        let json: serde_json::Value = serde_json::from_slice(bytes)
+            .map_err(|_| Error::ObjectCorrupt { message: "file manifest payload is not valid JSON".into() })?;
+        let object = json
+            .as_object()
+            .ok_or_else(|| Error::ObjectCorrupt { message: "file manifest payload must be a JSON object".into() })?;
+        let members = ["chunk_size", "total_size", "chunks"];
+        if object.len() != members.len() || !members.iter().all(|member| object.contains_key(*member)) {
+            return Err(Error::ObjectCorrupt { message: "file manifest has unknown or missing members".into() });
+        }
+        let chunk_size = object
+            .get("chunk_size")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .filter(|value| *value > 0)
+            .ok_or_else(|| Error::ObjectCorrupt { message: "file manifest chunk_size must be a positive u32".into() })?;
+        let total_size = object
+            .get("total_size")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| Error::ObjectCorrupt { message: "file manifest total_size must be a u64".into() })?;
+        let chunk_entries = object
+            .get("chunks")
+            .and_then(serde_json::Value::as_array)
+            .filter(|entries| !entries.is_empty())
+            .ok_or_else(|| Error::ObjectCorrupt { message: "file manifest requires at least one chunk".into() })?;
+        let mut chunks = Vec::with_capacity(chunk_entries.len());
+        let mut sum = 0_u64;
+        for (index, entry) in chunk_entries.iter().enumerate() {
+            let chunk = entry
+                .as_object()
+                .filter(|chunk| chunk.len() == 2 && chunk.contains_key("hash") && chunk.contains_key("size"))
+                .ok_or_else(|| Error::ObjectCorrupt { message: format!("file manifest chunk {index} is malformed") })?;
+            let hash =
+                chunk.get("hash").and_then(serde_json::Value::as_str).and_then(hex::decode_lower_32).ok_or_else(|| {
+                    Error::ObjectCorrupt {
+                        message: format!("file manifest chunk {index} hash must be 64 lowercase hex digits"),
+                    }
+                })?;
+            let size = chunk
+                .get("size")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| Error::ObjectCorrupt { message: format!("file manifest chunk {index} size must be a u64") })?;
+            let is_last = index + 1 == chunk_entries.len();
+            if size > u64::from(chunk_size) || (!is_last && size != u64::from(chunk_size)) {
+                return Err(Error::ObjectCorrupt {
+                    message: format!("file manifest chunk {index} length {size} does not match chunk_size {chunk_size}"),
+                });
+            }
+            sum = sum
+                .checked_add(size)
+                .ok_or_else(|| Error::ObjectCorrupt { message: "file manifest chunk lengths overflow".into() })?;
+            chunks.push(ObjectRef { algo: HashAlgo::Blake3, hash, size, kind: ObjectKind::Blob });
+        }
+        if sum != total_size {
+            return Err(Error::ObjectCorrupt {
+                message: format!("file manifest chunk lengths add up to {sum}, expected total_size {total_size}"),
+            });
+        }
+        Ok(Self { chunk_size, total_size, chunks })
+    }
+}
+
+/// Reference to the immutable manifest object that lists a file's chunks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileManifestRef {
+    /// BLAKE3 digest of the manifest payload.
+    pub hash: [u8; 32],
+    /// Manifest payload size in bytes.
+    pub size: u64,
+}
+
+impl FileManifestRef {
+    /// Lowercase hex encoding of the manifest digest.
+    pub fn hash_hex(&self) -> String {
+        hex::encode(self.hash)
+    }
+}
+
+/// Row value of a `file` column: content identity, metadata, and manifest.
+///
+/// Identity and metadata are independent: renaming a file or relabelling its
+/// media type keeps [`Self::digest`], [`Self::octets`] and the manifest, while
+/// two descriptors with the same digest share one manifest and one chunk set.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileDescriptor {
+    /// Lowercase hexadecimal SHA-256 over the complete file octets.
+    pub digest: String,
+    /// Total octet count of the complete file.
+    pub octets: u64,
+    /// Original file name; never part of the identity.
+    pub name: Option<String>,
+    /// Declared media type; never part of the identity.
+    pub media_type: Option<String>,
+    /// Immutable chunk manifest published under [`ObjectKind::FileManifest`].
+    pub manifest: FileManifestRef,
+}
+
+impl FileDescriptor {
+    /// Object reference of the manifest payload.
+    pub fn manifest_object(&self) -> ObjectRef {
+        ObjectRef { algo: HashAlgo::Blake3, hash: self.manifest.hash, size: self.manifest.size, kind: ObjectKind::FileManifest }
+    }
+
+    /// Whether an offset starts at or beyond end of file.
+    pub fn is_eof(&self, offset: u64) -> bool {
+        offset >= self.octets
+    }
+
+    /// Resolves a read request against the file length.
+    ///
+    /// A request starting before end of file is clamped to the remaining
+    /// octets, and a request starting at or beyond end of file yields an empty
+    /// window at that offset instead of reading past the end.
+    pub fn resolve_window(&self, offset: u64, length: u64) -> (u64, u64) {
+        if self.is_eof(offset) {
+            return (offset, 0);
+        }
+        (offset, length.min(self.octets - offset))
+    }
 }
 
 /// Fixed-dimension float vector (logical value; prefer CAS for persistence).
@@ -847,8 +997,8 @@ pub enum Value {
     Vector(Vector),
     /// CAS handle under `<hash-prefix>/<chunk_hash>.blob`.
     Object(ObjectRef),
-    /// Chunked logical file.
-    File(ChunkManifest),
+    /// Chunked logical file described by its descriptor and manifest object.
+    File(FileDescriptor),
     /// Nested row embedded in query projection results (not persisted inline).
     Row(BTreeMap<String, Value>),
     /// Calendar date without time or zone.
@@ -932,6 +1082,26 @@ mod hex {
             out.push(HEX[(byte & 0xf) as usize] as char);
         }
         out
+    }
+
+    /// Decodes exactly 64 lowercase hex digits into a 32-byte digest.
+    pub fn decode_lower_32(text: &str) -> Option<[u8; 32]> {
+        if text.len() != 64 {
+            return None;
+        }
+        let mut digest = [0_u8; 32];
+        for (index, pair) in text.as_bytes().chunks(2).enumerate() {
+            digest[index] = (lower_digit(pair[0])? << 4) | lower_digit(pair[1])?;
+        }
+        Some(digest)
+    }
+
+    fn lower_digit(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            _ => None,
+        }
     }
 }
 

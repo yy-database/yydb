@@ -7,7 +7,7 @@
 
 #![deny(missing_docs)]
 
-pub use yydb_types::{Date, Decimal, Time, Timestamp, UniqueConstraint};
+pub use yydb_types::{Date, Decimal, FileDescriptor, FileManifestRef, Time, Timestamp, UniqueConstraint};
 
 /// A node identifier in an execution Program.
 pub type NodeId = u32;
@@ -52,17 +52,6 @@ pub enum Type {
         /// Number of positional fields in the record.
         field_count: u32,
     },
-}
-
-/// Immutable reference to a published file or object manifest.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileRef {
-    /// Stable object identity supplied by the catalog.
-    pub object_id: String,
-    /// Published manifest generation.
-    pub generation: u64,
-    /// Logical byte length of the referenced object.
-    pub byte_len: u64,
 }
 
 /// A vector value with finite components.
@@ -292,8 +281,8 @@ pub enum Value {
     Text(String),
     /// Opaque bytes.
     Bytes(Vec<u8>),
-    /// Immutable file or object reference.
-    File(FileRef),
+    /// Immutable file descriptor published by the object store.
+    File(FileDescriptor),
     /// Calendar date without time or zone.
     Date(Date),
     /// Wall-clock time with nanosecond resolution, no zone.

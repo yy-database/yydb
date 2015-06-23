@@ -2,6 +2,7 @@ mod catalog_ledger;
 mod connection_smoke;
 mod execution_catalog;
 mod execution_udf;
+mod file_fields;
 mod host_micro_udf;
 mod main_snapshot;
 mod scalar_mapping;

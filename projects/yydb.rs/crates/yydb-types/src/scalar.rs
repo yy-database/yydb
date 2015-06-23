@@ -727,8 +727,8 @@ fn parse_digits(bytes: &[u8]) -> Option<u32> {
 /// JSON member marking a tagged scalar object on query-row and wire surfaces.
 pub const TAGGED_JSON_KEY: &str = "$yydb";
 
-/// Tagged JSON form for UUID, temporal, decimal, binary, vector, and object
-/// values.
+/// Tagged JSON form for UUID, temporal, decimal, binary, vector, object, and
+/// file values.
 ///
 /// Returns `None` for every other [`crate::Value`] variant so callers keep
 /// their existing encoding for booleans, integers, and text.
@@ -763,6 +763,20 @@ pub fn tagged_value_json(value: &crate::Value) -> Option<serde_json::Value> {
             "size": object.size,
             "kind": object.kind.as_str(),
         })),
+        crate::Value::File(file) => {
+            let mut json = serde_json::Map::new();
+            json.insert("$yydb".into(), serde_json::Value::from("file"));
+            json.insert("digest".into(), serde_json::Value::from(file.digest.as_str()));
+            json.insert("octets".into(), serde_json::Value::from(file.octets));
+            if let Some(name) = &file.name {
+                json.insert("name".into(), serde_json::Value::from(name.as_str()));
+            }
+            if let Some(media_type) = &file.media_type {
+                json.insert("mediaType".into(), serde_json::Value::from(media_type.as_str()));
+            }
+            json.insert("manifest".into(), serde_json::json!({ "hash": file.manifest.hash_hex(), "size": file.manifest.size }));
+            Some(serde_json::Value::Object(json))
+        }
         _ => None,
     }
 }
@@ -887,6 +901,51 @@ fn parse_tagged_value(json: &serde_json::Value, tag: &serde_json::Value) -> Resu
                 .and_then(crate::ObjectKind::from_name)
                 .ok_or_else(|| malformed("object"))?;
             Ok(crate::Value::Object(crate::ObjectRef { algo, hash, size, kind }))
+        }
+        "file" => {
+            // A file descriptor is accepted whole or rejected whole: the digest
+            // spelling, the manifest shape, and the member set are all part of
+            // the stored value, so a truncated or padded descriptor never
+            // decodes into a file that claims another identity.
+            const ALLOWED: [&str; 6] = ["$yydb", "digest", "octets", "name", "mediaType", "manifest"];
+            if object.keys().any(|member| !ALLOWED.contains(&member.as_str()))
+                || !["digest", "octets", "manifest"].iter().all(|member| object.contains_key(*member))
+            {
+                return Err(malformed("file"));
+            }
+            let digest = object
+                .get("digest")
+                .and_then(serde_json::Value::as_str)
+                .filter(|text| crate::hex::decode_lower_32(text).is_some())
+                .ok_or_else(|| malformed("file"))?;
+            let octets = object.get("octets").and_then(serde_json::Value::as_u64).ok_or_else(|| malformed("file"))?;
+            let label = |member: &str| -> Option<Option<String>> {
+                match object.get(member) {
+                    None | Some(serde_json::Value::Null) => Some(None),
+                    Some(serde_json::Value::String(text)) if !text.trim().is_empty() => Some(Some(text.clone())),
+                    Some(_) => None,
+                }
+            };
+            let name = label("name").ok_or_else(|| malformed("file"))?;
+            let media_type = label("mediaType").ok_or_else(|| malformed("file"))?;
+            let manifest = object
+                .get("manifest")
+                .and_then(serde_json::Value::as_object)
+                .filter(|manifest| manifest.len() == 2 && manifest.contains_key("hash") && manifest.contains_key("size"))
+                .ok_or_else(|| malformed("file"))?;
+            let hash = manifest
+                .get("hash")
+                .and_then(serde_json::Value::as_str)
+                .and_then(crate::hex::decode_lower_32)
+                .ok_or_else(|| malformed("file"))?;
+            let size = manifest.get("size").and_then(serde_json::Value::as_u64).ok_or_else(|| malformed("file"))?;
+            Ok(crate::Value::File(crate::FileDescriptor {
+                digest: digest.to_owned(),
+                octets,
+                name,
+                media_type,
+                manifest: crate::FileManifestRef { hash, size },
+            }))
         }
         other => Err(ScalarError::Malformed { kind: "scalar", input: format!("unknown tag `{other}`") }),
     }

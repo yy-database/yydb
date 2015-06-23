@@ -12,6 +12,8 @@ export type {
     DateScalar,
     DecimalScalar,
     DoctorReport,
+    FileManifestReference,
+    FileScalar,
     LightDatabase,
     MigrateOptions,
     OpenOptions,

@@ -27,3 +27,4 @@ yydb-server = { workspace = true }
 
 [dev-dependencies]
 yydb-formats = { workspace = true }
+serde_json = { workspace = true }

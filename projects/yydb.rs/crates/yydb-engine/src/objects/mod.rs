@@ -21,9 +21,11 @@ enum ObjectStoreRoot {
     OnDisk(BlobStore),
 }
 
+use sha2::{Digest, Sha256};
 use yydb_storage::{BlobChunkRef, BlobStore, blob_chunk_hash};
 use yydb_types::{
-    ChunkManifest, DEFAULT_CHUNK_SIZE, Error, HashAlgo, INLINE_BYTES_MAX, ObjectKind, ObjectRef, Result, Tier, Vector,
+    ChunkManifest, DEFAULT_CHUNK_SIZE, Error, FileDescriptor, FileManifestRef, HashAlgo, INLINE_BYTES_MAX, ObjectKind,
+    ObjectRef, Result, Tier, Vector,
 };
 
 /// Soft inline size guidance (re-exported for callers).
@@ -247,6 +249,35 @@ impl ObjectStore {
         Ok(ChunkManifest { chunk_size: chunk_size_u32, total_size, chunks })
     }
 
+    /// Publish a logical file as chunks plus an immutable manifest.
+    ///
+    /// Chunks are written first, then the manifest object, and the returned
+    /// descriptor only refers to both: the row that stores it commits afterwards,
+    /// so a rollback leaves unreferenced objects for `reclaim_orphans` instead of
+    /// deleting content another row may already share. The SHA-256 digest covers
+    /// the complete octets, so a rename or media-type change never alters the
+    /// content identity.
+    pub fn put_file(
+        &self,
+        reader: impl Read,
+        chunk_size: usize,
+        name: Option<String>,
+        media_type: Option<String>,
+    ) -> Result<FileDescriptor> {
+        let mut hashing = HashingReader { inner: reader, hasher: Sha256::new() };
+        let manifest = self.put_file_chunked(&mut hashing, chunk_size)?;
+        let digest = hex_lower(&hashing.hasher.finalize());
+        let payload = manifest.to_payload_bytes()?;
+        let manifest_object = self.put_chunk(ObjectKind::FileManifest, &payload)?;
+        Ok(FileDescriptor {
+            digest,
+            octets: manifest.total_size,
+            name,
+            media_type,
+            manifest: FileManifestRef { hash: manifest_object.hash, size: manifest_object.size },
+        })
+    }
+
     /// Read a byte range from a chunked file without assembling the whole file.
     pub fn read_file_range(&self, manifest: &ChunkManifest, offset: u64, len: usize) -> Result<Vec<u8>> {
         if len == 0 {
@@ -319,6 +350,30 @@ impl ObjectStore {
         self.pinned.lock().unwrap_or_else(|p| p.into_inner()).remove(&object.hash);
         Ok(())
     }
+}
+
+/// Reader adapter that hashes every octet it hands to the chunker.
+struct HashingReader<R> {
+    inner: R,
+    hasher: Sha256,
+}
+
+impl<R: Read> Read for HashingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        self.hasher.update(&buf[..read]);
+        Ok(read)
+    }
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0xf) as usize] as char);
+    }
+    out
 }
 
 fn decode_hash_hex(hash_hex: &str) -> Result<[u8; 32]> {

@@ -39,9 +39,9 @@ pub use yydb_execution as execution;
 pub use yydb_query::QueryRow;
 pub use yydb_types::{
     self, ChunkManifest, CommitSequence, CompactReport, DEFAULT_CHUNK_SIZE, DoctorIssue, DoctorReport, DoctorSeverity, Error,
-    EvictBudget, EvictReport, EvictionPolicy, HashAlgo, INLINE_BYTES_MAX, LeaseExpectation, LeaseToken, NamespaceQuota,
-    NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion, ReleaseOutcome, Result, SchemaVersion, Tier, Value,
-    Vector,
+    EvictBudget, EvictReport, EvictionPolicy, FileDescriptor, FileManifestRef, HashAlgo, INLINE_BYTES_MAX, LeaseExpectation,
+    LeaseToken, NamespaceQuota, NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion, ReleaseOutcome, Result,
+    SchemaVersion, Tier, Value, Vector,
 };
 pub use yydb_udf;
 

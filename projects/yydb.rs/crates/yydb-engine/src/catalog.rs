@@ -483,15 +483,16 @@ pub fn remap_unique_constraints(
 
 /// Lowers one resolved VOS canonical type into an execution type.
 ///
-/// A `vector<N>` becomes the execution vector of the declared dimension. VOS
-/// fixes the element precision and the dimension and leaves distance metrics to
-/// query capabilities, so no metric is bound here.
+/// A `file` keeps its descriptor-and-manifest value shape, and a `vector<N>`
+/// becomes the execution vector of the declared dimension. VOS fixes the
+/// element precision and the dimension and leaves distance metrics to query
+/// capabilities, so no metric is bound here.
 fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Type> {
     use vos::types::ResolvedCanonicalType;
     match ty {
         ResolvedCanonicalType::Scalar(scalar) => execution_type_for_scalar(*scalar),
         ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => decimal_type_from_arguments(arguments),
-        ResolvedCanonicalType::File => Err(Error::Unsupported("VOS `file` fields are not in the YYDB execution slice yet")),
+        ResolvedCanonicalType::File => Ok(Type::File),
         ResolvedCanonicalType::Vector { dimension, .. } => Ok(Type::Vector { dimension: *dimension }),
         ResolvedCanonicalType::Optional(_)
         | ResolvedCanonicalType::Reference(_)

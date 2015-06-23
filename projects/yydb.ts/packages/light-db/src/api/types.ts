@@ -120,8 +120,28 @@ export interface DecimalScalar {
     readonly unscaled: string;
 }
 
+/** Content-addressed reference to the chunk manifest object behind a `file` value. */
+export interface FileManifestReference {
+    /** Lowercase 64-digit blake3 hex of the manifest object. */
+    readonly hash: string;
+    /** Manifest payload size in octets. */
+    readonly size: number;
+}
+
+/** Tagged JSON form of an immutable `file` value: identity digest plus manifest reference. */
+export interface FileScalar {
+    readonly $yydb: 'file';
+    /** Lowercase 64-digit SHA-256 hex over the complete file octets. */
+    readonly digest: string;
+    /** Exact file length in octets. */
+    readonly octets: number;
+    readonly name?: string;
+    readonly mediaType?: string;
+    readonly manifest: FileManifestReference;
+}
+
 /** Every exact scalar crossing the WASM JSON boundary uses this tagged form. */
-export type ScalarValue = DateScalar | TimeScalar | TimestampScalar | DecimalScalar;
+export type ScalarValue = DateScalar | TimeScalar | TimestampScalar | DecimalScalar | FileScalar;
 
 /** Declared execution type of a catalog field. */
 export type SchemaFieldType =
