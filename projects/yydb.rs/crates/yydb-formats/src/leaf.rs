@@ -220,7 +220,8 @@ impl LeafPage {
                 best = Some((split_at, imbalance));
             }
         }
-        let Some((split_at, _)) = best else {
+        let Some((split_at, _)) = best
+        else {
             return Err(Error::Unsupported("record is too large for one leaf page"));
         };
 

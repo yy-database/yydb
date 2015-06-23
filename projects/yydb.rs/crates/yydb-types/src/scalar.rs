@@ -850,9 +850,7 @@ fn parse_tagged_value(json: &serde_json::Value, tag: &serde_json::Value) -> Resu
                 .and_then(serde_json::Value::as_str)
                 .and_then(decode_hex)
                 .ok_or_else(|| malformed("vector"))?;
-            let expected = (dimension as usize)
-                .checked_mul(4)
-                .ok_or_else(|| malformed("vector"))?;
+            let expected = (dimension as usize).checked_mul(4).ok_or_else(|| malformed("vector"))?;
             if components.len() != expected {
                 return Err(ScalarError::InvalidLength { kind: "vector", expected, got: components.len() });
             }

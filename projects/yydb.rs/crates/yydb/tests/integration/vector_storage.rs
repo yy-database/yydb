@@ -64,11 +64,7 @@ fn open_memory() -> Connection {
 #[test]
 fn vos_vector_roundtrips_component_bits_and_dimension() {
     let conn = open_memory();
-    let embeddings = [
-        [f32::MIN, 0.0, f32::MAX],
-        [-0.0, f32::from_bits(1), 1.0 / 3.0],
-        [f32::EPSILON, -1.5, 16_777_216.0],
-    ];
+    let embeddings = [[f32::MIN, 0.0, f32::MAX], [-0.0, f32::from_bits(1), 1.0 / 3.0], [f32::EPSILON, -1.5, 16_777_216.0]];
     for (offset, embedding) in embeddings.iter().enumerate() {
         insert(&conn, offset as i64 + 1, vector(embedding)).expect("insert vector");
     }
@@ -196,11 +192,7 @@ fn vos_vector_rollback_leaves_no_visible_row() {
 fn vos_vector_survives_close_and_reopen() {
     let path = temp_db("vos-vector-reopen");
     cleanup(&path);
-    let embeddings = [
-        [f32::MIN, 0.0, f32::MAX],
-        [-0.0, f32::from_bits(1), 1.0 / 3.0],
-        [f32::EPSILON, -1.5, 16_777_216.0],
-    ];
+    let embeddings = [[f32::MIN, 0.0, f32::MAX], [-0.0, f32::from_bits(1), 1.0 / 3.0], [f32::EPSILON, -1.5, 16_777_216.0]];
     {
         let conn = Connection::open(&path).expect("open");
         conn.ensure_schema(DOC_SCHEMA).expect("schema");
