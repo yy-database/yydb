@@ -278,38 +278,122 @@ impl ObjectStore {
         })
     }
 
-    /// Read a byte range from a chunked file without assembling the whole file.
-    pub fn read_file_range(&self, manifest: &ChunkManifest, offset: u64, len: usize) -> Result<Vec<u8>> {
-        if len == 0 {
+    /// Load and verify the manifest a `file` descriptor points at.
+    ///
+    /// The manifest object is content-addressed, so both its stored length and
+    /// its BLAKE3 digest must match the reference before its chunk list is
+    /// trusted. A manifest whose `total_size` disagrees with the descriptor is
+    /// corruption, not a short read.
+    pub fn load_file_manifest(&self, descriptor: &FileDescriptor) -> Result<ChunkManifest> {
+        let object = descriptor.manifest_object();
+        let payload = self.get_object(&object)?;
+        if payload.len() as u64 != object.size {
+            return Err(Error::ObjectCorrupt { message: "file manifest length does not match its reference".into() });
+        }
+        if blob_chunk_hash(payload.as_ref()) != object.hash {
+            return Err(Error::ObjectCorrupt { message: "file manifest hash does not match its reference".into() });
+        }
+        let manifest = ChunkManifest::from_payload_bytes(&payload)?;
+        if manifest.total_size != descriptor.octets {
+            return Err(Error::ObjectCorrupt {
+                message: format!(
+                    "file manifest total size {} disagrees with descriptor octets {}",
+                    manifest.total_size, descriptor.octets
+                ),
+            });
+        }
+        Ok(manifest)
+    }
+
+    /// Read one resolved VOS `FileReadWindow` of a `file` value.
+    ///
+    /// The window follows VOS semantics: an offset at or past end of file yields
+    /// an empty window, and a request starting before end of file is truncated
+    /// to the remaining octets, so a read past the end is a short read instead
+    /// of an error. Every chunk the window touches is verified against the
+    /// manifest hash and length before its octets are returned.
+    pub fn read_file_window(&self, descriptor: &FileDescriptor, offset: u64, length: u64) -> Result<Vec<u8>> {
+        let manifest = self.load_file_manifest(descriptor)?;
+        let (offset, length) = descriptor.resolve_window(offset, length);
+        if length == 0 {
             return Ok(Vec::new());
         }
-        if offset > manifest.total_size {
-            return Err(Error::ObjectCorrupt { message: "read offset past end of file".into() });
+        self.read_chunks_window(&manifest, offset, length)
+    }
+
+    /// Read the complete octets of a `file` value and verify its content digest.
+    ///
+    /// The SHA-256 digest covers every octet, so a descriptor whose digest was
+    /// rewritten or whose chunks were reordered fails instead of returning
+    /// plausible-looking bytes.
+    pub fn read_file(&self, descriptor: &FileDescriptor) -> Result<Vec<u8>> {
+        let octets = self.read_file_window(descriptor, 0, descriptor.octets)?;
+        if octets.len() as u64 != descriptor.octets {
+            return Err(Error::ObjectCorrupt {
+                message: format!("file read produced {} octets, expected {}", octets.len(), descriptor.octets),
+            });
         }
-        let end = offset
-            .checked_add(len as u64)
-            .ok_or(Error::ObjectCorrupt { message: "read range overflow".into() })?
-            .min(manifest.total_size);
-        let need = (end - offset) as usize;
-        let chunk_size = manifest.chunk_size as u64;
+        if hex_lower(&Sha256::digest(&octets)) != descriptor.digest {
+            return Err(Error::ObjectCorrupt { message: "file digest does not match the descriptor".into() });
+        }
+        Ok(octets)
+    }
+
+    /// Read a byte range from a chunked file without assembling the whole file.
+    ///
+    /// A range that starts at or past the manifest total is an empty range, not
+    /// an error. Each addressed chunk is hash- and length-checked first.
+    pub fn read_file_range(&self, manifest: &ChunkManifest, offset: u64, len: usize) -> Result<Vec<u8>> {
+        if len == 0 || offset >= manifest.total_size {
+            return Ok(Vec::new());
+        }
+        let length = (len as u64).min(manifest.total_size - offset);
+        self.read_chunks_window(manifest, offset, length)
+    }
+
+    /// Copy one verified window out of the manifest's chunks.
+    fn read_chunks_window(&self, manifest: &ChunkManifest, offset: u64, length: u64) -> Result<Vec<u8>> {
+        let chunk_size = u64::from(manifest.chunk_size);
         if chunk_size == 0 {
             return Err(Error::ObjectCorrupt { message: "manifest chunk_size is zero".into() });
         }
-        let mut out = Vec::with_capacity(need);
+        let end = offset.checked_add(length).ok_or(Error::ObjectCorrupt { message: "read range overflow".into() })?;
+        let mut out = Vec::with_capacity(length as usize);
         let mut cursor = offset;
         while cursor < end {
             let index = (cursor / chunk_size) as usize;
-            let chunk = manifest.chunks.get(index).ok_or(Error::ObjectCorrupt { message: format!("missing chunk {index}") })?;
-            let data = self.get_object(chunk)?;
+            let chunk = manifest.chunks.get(index).ok_or_else(|| Error::ObjectCorrupt {
+                message: format!("missing chunk {index} for read at offset {cursor}"),
+            })?;
+            let data = self.verify_chunk(chunk)?;
             let into_chunk = (cursor % chunk_size) as usize;
             if into_chunk >= data.len() {
-                return Err(Error::ObjectCorrupt { message: "chunk shorter than expected".into() });
+                return Err(Error::ObjectCorrupt { message: format!("chunk {index} is shorter than the manifest declares") });
             }
             let take = ((end - cursor) as usize).min(data.len() - into_chunk);
             out.extend_from_slice(&data[into_chunk..into_chunk + take]);
             cursor += take as u64;
         }
         Ok(out)
+    }
+
+    /// Load one manifest chunk and verify its hash and declared length.
+    fn verify_chunk(&self, chunk: &ObjectRef) -> Result<Arc<[u8]>> {
+        if chunk.kind != ObjectKind::Blob {
+            return Err(Error::ObjectCorrupt { message: "file manifest chunk is not a blob object".into() });
+        }
+        let data = self.get_object(chunk)?;
+        if data.len() as u64 != chunk.size {
+            return Err(Error::ObjectCorrupt {
+                message: format!("chunk {} length does not match the manifest", chunk.hash_hex()),
+            });
+        }
+        if blob_chunk_hash(data.as_ref()) != chunk.hash {
+            return Err(Error::ObjectCorrupt {
+                message: format!("chunk {} hash does not match its stored payload", chunk.hash_hex()),
+            });
+        }
+        Ok(data)
     }
 
     /// Enumerate every `.blob` segment under the store root.

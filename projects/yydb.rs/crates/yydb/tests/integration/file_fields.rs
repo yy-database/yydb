@@ -130,3 +130,111 @@ fn reopen_keeps_the_descriptor_and_manifest_objects() {
     assert!(reopened.objects().path_for(&file.manifest_object()).exists());
     cleanup(&path);
 }
+
+#[test]
+fn reads_windows_with_vos_eof_semantics() {
+    use yydb::vos::types::FileReadWindow;
+
+    let (conn, path) = open_temp_yydx("file-windows");
+    let octets = payload(1000);
+    let file = conn.put_file(Cursor::new(octets.clone()), 256, None, None).unwrap();
+
+    let read = |offset: u64, length: u64| conn.read_file_window(&file, FileReadWindow::new(offset, length)).unwrap();
+
+    assert_eq!(read(0, 1000), octets);
+    assert_eq!(read(0, 100), octets[..100]);
+    assert_eq!(read(200, 200), octets[200..400]);
+    assert_eq!(read(256, 256), octets[256..512]);
+    assert_eq!(read(900, 500), octets[900..]);
+
+    assert!(read(0, 0).is_empty());
+    assert!(read(1000, 10).is_empty(), "an offset at end of file is an empty window");
+    assert!(read(1500, 10).is_empty(), "an offset past end of file is an empty window");
+
+    let manifest = conn.objects().load_file_manifest(&file).unwrap();
+    assert_eq!(conn.read_file_range(&manifest, 200, 200).unwrap(), octets[200..400]);
+    assert!(conn.read_file_range(&manifest, 2000, 100).unwrap().is_empty());
+    cleanup(&path);
+}
+
+#[test]
+fn reads_zero_octet_files_and_exact_chunk_multiples() {
+    use yydb::vos::types::FileReadWindow;
+
+    let (conn, path) = open_temp_yydx("file-boundaries");
+
+    let empty = conn.put_file(Cursor::new(Vec::new()), 256, None, None).unwrap();
+    assert_eq!(empty.octets, 0);
+    assert_eq!(empty.digest, yydb::vos::types::FileManifestIdentity::from_octets(&[]).digest);
+    assert!(conn.read_file(&empty).unwrap().is_empty());
+    assert!(conn.read_file_window(&empty, FileReadWindow::new(0, 8)).unwrap().is_empty());
+    assert!(conn.read_file_window(&empty, FileReadWindow::new(4, 8)).unwrap().is_empty());
+
+    let octets = payload(512);
+    let exact = conn.put_file(Cursor::new(octets.clone()), 256, None, None).unwrap();
+    assert_eq!(conn.read_file(&exact).unwrap(), octets);
+    assert_eq!(
+        conn.read_file_window(&exact, FileReadWindow::new(256, 256)).unwrap(),
+        octets[256..],
+        "a window starting exactly at a chunk boundary reads the following chunk"
+    );
+    assert!(conn.read_file_window(&exact, FileReadWindow::new(512, 16)).unwrap().is_empty());
+    cleanup(&path);
+}
+
+#[test]
+fn reads_the_complete_file_and_verifies_the_digest() {
+    let (conn, path) = open_temp_yydx("file-digest");
+    let octets = payload(1000);
+    let file = conn.put_file(Cursor::new(octets.clone()), 256, None, None).unwrap();
+    assert_eq!(conn.read_file(&file).unwrap(), octets);
+
+    let mut wrong = file.clone();
+    wrong.digest = "0f".repeat(32);
+    let error = conn.read_file(&wrong).unwrap_err();
+    assert!(matches!(error, Error::ObjectCorrupt { .. }), "a rewritten digest must fail: {error:?}");
+    cleanup(&path);
+}
+
+#[test]
+fn reports_missing_objects_instead_of_empty_content() {
+    use yydb::vos::types::FileReadWindow;
+
+    let (conn, path) = open_temp_yydx("file-missing");
+    let file = conn.put_file(Cursor::new(payload(300)), 256, None, None).unwrap();
+
+    conn.objects().remove_object(&file.manifest_object()).unwrap();
+    let error = conn.read_file_window(&file, FileReadWindow::new(0, 10)).unwrap_err();
+    assert!(matches!(error, Error::ObjectNotFound { .. }), "a missing manifest must not read as empty: {error:?}");
+
+    // Republishing the same octets restores the manifest, so removing one chunk
+    // then exercises the missing-chunk path instead of the missing-manifest one.
+    let file = conn.put_file(Cursor::new(payload(300)), 256, None, None).unwrap();
+    let manifest = conn.objects().load_file_manifest(&file).unwrap();
+    conn.objects().remove_object(&manifest.chunks[0]).unwrap();
+    let error = conn.read_file_window(&file, FileReadWindow::new(0, 10)).unwrap_err();
+    assert!(matches!(error, Error::ObjectNotFound { .. }), "a missing chunk must not read as empty: {error:?}");
+    cleanup(&path);
+}
+
+#[test]
+fn detects_a_tampered_chunk_after_reopen() {
+    use yydb::vos::types::FileReadWindow;
+
+    let (conn, path) = open_temp_yydx("file-tamper");
+    let octets = payload(600);
+    let file = conn.put_file(Cursor::new(octets), 256, None, None).unwrap();
+    drop(conn);
+
+    let reopened = reopen(&path);
+    let manifest = reopened.objects().load_file_manifest(&file).unwrap();
+    let chunk = manifest.chunks[0].clone();
+    let chunk_path = reopened.objects().path_for(&chunk);
+    let mut tampered = std::fs::read(&chunk_path).unwrap();
+    tampered[0] ^= 0xff;
+    std::fs::write(&chunk_path, &tampered).unwrap();
+
+    let error = reopened.read_file_window(&file, FileReadWindow::new(0, 10)).unwrap_err();
+    assert!(matches!(error, Error::ObjectCorrupt { .. }), "a tampered chunk must fail its hash check: {error:?}");
+    cleanup(&path);
+}

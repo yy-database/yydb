@@ -58,6 +58,22 @@ impl Connection {
         self.objects.read_file_range(manifest, offset, len)
     }
 
+    /// Read one VOS [`FileReadWindow`](vos::types::FileReadWindow) of a `file` value.
+    ///
+    /// The window follows VOS semantics: an offset at or past end of file yields
+    /// an empty window, a request starting before end of file is truncated to the
+    /// remaining octets, and a read past the end is a short read instead of an
+    /// error. Every touched chunk is verified against the manifest, and a missing
+    /// or tampered object is a structured error rather than empty content.
+    pub fn read_file_window(&self, descriptor: &FileDescriptor, window: vos::types::FileReadWindow) -> Result<Vec<u8>> {
+        self.objects.read_file_window(descriptor, window.offset, window.length)
+    }
+
+    /// Read the complete octets of a `file` value and verify its content digest.
+    pub fn read_file(&self, descriptor: &FileDescriptor) -> Result<Vec<u8>> {
+        self.objects.read_file(descriptor)
+    }
+
     /// Pin an object in the hot tier.
     pub fn pin_object(&self, object: &ObjectRef) -> Result<Tier> {
         self.objects.pin_object(object)
