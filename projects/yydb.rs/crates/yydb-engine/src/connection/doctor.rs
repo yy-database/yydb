@@ -7,7 +7,7 @@ impl Connection {
     pub fn scan_orphans(&self, namespace_prefix: &str) -> Result<Vec<ObjectRef>> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let state = self.read_state()?;
-        let referenced = refs::referenced_hashes(&state.records, namespace_prefix);
+        let referenced = refs::referenced_hashes(&state.records, namespace_prefix, &self.objects)?;
         Ok(self.objects.list_objects()?.into_iter().filter(|object| !referenced.contains(&object.hash)).collect())
     }
 
@@ -26,7 +26,7 @@ impl Connection {
     pub fn reclaim_orphans(&self, objects: &[ObjectRef]) -> Result<ReclaimReport> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let state = self.read_state()?;
-        let referenced = refs::referenced_hashes(&state.records, "");
+        let referenced = refs::referenced_hashes(&state.records, "", &self.objects)?;
         let mut report = ReclaimReport::default();
         for object in objects {
             if referenced.contains(&object.hash) {

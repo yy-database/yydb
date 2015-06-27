@@ -7,7 +7,11 @@ use yydb_types::{Error, ObjectRef, Result, Value, scalar};
 
 use super::ops::QueryRow;
 
-const ROW_PREFIX: &str = "__yydb/v0/row/";
+/// Record-map key prefix that owns table rows.
+///
+/// Row keys are `__yydb/v0/row/<table>/<pk>`, and their JSON values carry
+/// tagged object and file references that garbage collection must count.
+pub const ROW_PREFIX: &str = "__yydb/v0/row/";
 
 /// Reads the octets behind an out-of-line `bytes` object reference.
 ///

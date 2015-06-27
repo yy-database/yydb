@@ -238,3 +238,123 @@ fn detects_a_tampered_chunk_after_reopen() {
     assert!(matches!(error, Error::ObjectCorrupt { .. }), "a tampered chunk must fail its hash check: {error:?}");
     cleanup(&path);
 }
+
+const ASSET_SCHEMA: &str = r#"
+table Asset {
+    @@asset_id: i64,
+    payload: file,
+}
+"#;
+
+const INSERT_ASSET: &str = "Asset::insert({ asset_id: $id, payload: $payload })";
+
+fn insert_asset(conn: &yydb::Connection, id: i64, file: &FileDescriptor) -> yydb::Result<()> {
+    conn.execute_vos_write_with_params(
+        INSERT_ASSET,
+        &std::collections::BTreeMap::from([
+            ("id".to_string(), Value::I64(id)),
+            ("payload".to_string(), Value::File(file.clone())),
+        ]),
+    )
+}
+
+fn delete_asset(conn: &yydb::Connection, id: i64) -> yydb::Result<usize> {
+    conn.execute_sql_write("DELETE FROM Asset WHERE asset_id = ?", &[Value::I64(id)])
+}
+
+fn file_objects(conn: &yydb::Connection, file: &FileDescriptor) -> Vec<yydb::ObjectRef> {
+    let manifest = conn.objects().load_file_manifest(file).unwrap();
+    let mut objects = vec![file.manifest_object()];
+    objects.extend(manifest.chunks);
+    objects
+}
+
+#[test]
+fn row_references_keep_objects_until_the_row_is_deleted() {
+    use yydb::vos::types::FileReadWindow;
+
+    let (conn, path) = open_temp_yydx("file-row-refs");
+    conn.ensure_schema(ASSET_SCHEMA).unwrap();
+    let octets = payload(700);
+    let file = conn.put_file(Cursor::new(octets), 256, Some("kept.bin".into()), None).unwrap();
+    insert_asset(&conn, 1, &file).unwrap();
+
+    assert!(conn.scan_orphans("").unwrap().is_empty(), "a committed row pins the manifest and its chunks");
+    assert_eq!(file_objects(&conn, &file).len(), 4, "one manifest plus three chunks");
+
+    delete_asset(&conn, 1).unwrap();
+    let orphans = conn.scan_orphans("").unwrap();
+    assert_eq!(orphans.len(), 4, "deleting the row only releases the reference");
+    assert_eq!(conn.reclaim_orphans(&orphans).unwrap().reclaimed_objects, 4);
+
+    let error = conn.read_file_window(&file, FileReadWindow::new(0, 10)).unwrap_err();
+    assert!(matches!(error, Error::ObjectNotFound { .. }), "reclaimed content must not read as empty: {error:?}");
+    cleanup(&path);
+}
+
+#[test]
+fn shared_digest_is_reclaimed_only_after_the_last_reference() {
+    let (conn, path) = open_temp_yydx("file-shared");
+    conn.ensure_schema(ASSET_SCHEMA).unwrap();
+    let octets = payload(700);
+    let first =
+        conn.put_file(Cursor::new(octets.clone()), 256, Some("a.bin".into()), Some("application/octet-stream".into())).unwrap();
+    let renamed = conn.put_file(Cursor::new(octets.clone()), 256, Some("b.bin".into()), None).unwrap();
+
+    assert_eq!(first.digest, renamed.digest, "metadata never changes content identity");
+    assert_eq!(first.manifest, renamed.manifest, "renaming reuses the same manifest object");
+    insert_asset(&conn, 1, &first).unwrap();
+    insert_asset(&conn, 2, &renamed).unwrap();
+
+    delete_asset(&conn, 1).unwrap();
+    assert!(conn.scan_orphans("").unwrap().is_empty(), "the remaining row still pins the shared content");
+    let objects = file_objects(&conn, &first);
+    assert_eq!(conn.reclaim_orphans(&objects).unwrap().reclaimed_objects, 0);
+    assert_eq!(conn.read_file(&renamed).unwrap(), octets);
+
+    delete_asset(&conn, 2).unwrap();
+    assert_eq!(conn.reclaim_orphans(&objects).unwrap().reclaimed_objects, objects.len() as u64);
+    cleanup(&path);
+}
+
+#[test]
+fn rollback_leaves_file_objects_for_reclaim() {
+    let (conn, path) = open_temp_yydx("file-rollback");
+    conn.ensure_schema(ASSET_SCHEMA).unwrap();
+    let file = conn.put_file(Cursor::new(payload(700)), 256, None, None).unwrap();
+
+    conn.begin().unwrap();
+    insert_asset(&conn, 1, &file).unwrap();
+    conn.rollback().unwrap();
+
+    assert!(conn.query_vos("Asset.all().collect()").unwrap().is_empty(), "a rolled back row is not published");
+    let orphans = conn.scan_orphans("").unwrap();
+    assert_eq!(orphans.len(), 4, "a rollback leaves objects instead of deleting shared content");
+    assert_eq!(conn.reclaim_orphans(&orphans).unwrap().reclaimed_objects, 4);
+    cleanup(&path);
+}
+
+#[test]
+fn backup_and_restore_read_the_file_through_the_copied_object_tree() {
+    let (conn, path) = open_temp_yydx("file-backup");
+    conn.ensure_schema(ASSET_SCHEMA).unwrap();
+    let octets = payload(900);
+    let file = conn.put_file(Cursor::new(octets.clone()), 256, Some("asset.bin".into()), None).unwrap();
+    insert_asset(&conn, 1, &file).unwrap();
+
+    let dest = crate::fixtures::yydb::temp_yydx("file-backup-dest");
+    conn.backup_yydx_to(&dest).unwrap();
+    drop(conn);
+
+    let restored = yydb::Connection::open_yydx(&dest).unwrap();
+    let rows = restored.query_vos("Asset.all().collect()").unwrap();
+    let stored = match rows[0].get("payload") {
+        Some(Value::File(stored)) => stored.clone(),
+        other => panic!("restored payload must be a file descriptor, got {other:?}"),
+    };
+    assert_eq!(stored, file);
+    assert_eq!(restored.read_file(&stored).unwrap(), octets, "restore must copy the object tree, not just the main file");
+
+    cleanup(&path);
+    cleanup(&dest);
+}

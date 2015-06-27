@@ -55,7 +55,7 @@ pub(crate) fn diagnose(
         });
     }
 
-    let referenced = refs::referenced_hashes(records, "");
+    let referenced = refs::referenced_hashes(records, "", objects)?;
     if objects.persist_to_disk() {
         for (key, value) in records {
             if key.starts_with("__yydb/") {
