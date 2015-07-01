@@ -128,6 +128,7 @@ fn reopen_keeps_the_descriptor_and_manifest_objects() {
     let manifest = ChunkManifest::from_payload_bytes(&reopened.get_object(&file.manifest_object()).unwrap()).unwrap();
     assert_eq!(manifest.total_size, octets.len() as u64);
     assert!(reopened.objects().path_for(&file.manifest_object()).exists());
+    assert_eq!(reopened.read_file(&file).unwrap(), octets, "reopen relocates and re-checks every chunk");
     cleanup(&path);
 }
 
@@ -179,6 +180,12 @@ fn reads_zero_octet_files_and_exact_chunk_multiples() {
         "a window starting exactly at a chunk boundary reads the following chunk"
     );
     assert!(conn.read_file_window(&exact, FileReadWindow::new(512, 16)).unwrap().is_empty());
+
+    let short = payload(100);
+    let single = conn.put_file(Cursor::new(short.clone()), 256, None, None).unwrap();
+    assert_eq!(conn.objects().load_file_manifest(&single).unwrap().chunks.len(), 1);
+    assert_eq!(conn.read_file(&single).unwrap(), short);
+    assert_eq!(conn.read_file_window(&single, FileReadWindow::new(40, 200)).unwrap(), short[40..]);
     cleanup(&path);
 }
 
