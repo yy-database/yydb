@@ -365,3 +365,38 @@ fn backup_and_restore_read_the_file_through_the_copied_object_tree() {
     cleanup(&path);
     cleanup(&dest);
 }
+
+#[test]
+fn doctor_reports_missing_blob_for_file_chunks() {
+    let (conn, path) = open_temp_yydx("file-doctor");
+    conn.ensure_schema(ASSET_SCHEMA).unwrap();
+    let octets = payload(700);
+    let file = conn.put_file(Cursor::new(octets), 256, None, None).unwrap();
+    insert_asset(&conn, 1, &file).unwrap();
+
+    let doctor_before = conn.doctor().unwrap();
+    assert!(
+        !doctor_before.issues.iter().any(|i| i.code == "yydb.doctor.missing_blob"),
+        "clean database must not report missing blobs, got {:?}",
+        doctor_before.issues.iter().map(|i| &i.code).collect::<Vec<_>>()
+    );
+
+    // Delete one chunk blob from disk — the manifest still lists it and the row
+    // still pins the manifest, so an orphan scan wouldn't notice the gap.
+    let manifest = conn.objects().load_file_manifest(&file).unwrap();
+    let victim = manifest.chunks[0].clone();
+    let victim_path = conn.objects().path_for(&victim);
+    assert!(victim_path.exists(), "chunk must exist before deletion");
+    drop(conn);
+    std::fs::remove_file(&victim_path).unwrap();
+
+    let reopened = reopen(&path);
+    let doctor_after = reopened.doctor().unwrap();
+    assert!(
+        doctor_after.issues.iter().any(|i| i.code == "yydb.doctor.missing_blob"),
+        "doctor must report missing chunk, got {:?}",
+        doctor_after.issues
+    );
+
+    cleanup(&path);
+}

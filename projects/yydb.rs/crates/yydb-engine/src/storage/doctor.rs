@@ -57,6 +57,9 @@ pub(crate) fn diagnose(
 
     let referenced = refs::referenced_hashes(records, "", objects)?;
     if objects.persist_to_disk() {
+        // 1. Raw `yydb:object:` prefixes — carry the owning key as a hint so
+        //    operators can jump straight to the broken record.
+        let mut reported_missing = BTreeSet::new();
         for (key, value) in records {
             if key.starts_with("__yydb/") {
                 continue;
@@ -64,6 +67,7 @@ pub(crate) fn diagnose(
             if let Some(hex) = value.strip_prefix(refs::OBJECT_REF_PREFIX) {
                 let hash_hex = std::str::from_utf8(hex).unwrap_or("");
                 if hash_hex.len() == 64 && !objects.path_for_hash(hash_hex).exists() {
+                    reported_missing.insert(hash_hex.to_owned());
                     issues.push(DoctorIssue {
                         severity: DoctorSeverity::Error,
                         code: "yydb.doctor.missing_blob".into(),
@@ -71,6 +75,24 @@ pub(crate) fn diagnose(
                         key_hint: Some(key.clone()),
                     });
                 }
+            }
+        }
+        // 2. Tagged JSON references: `$yydb:object` row values and the manifest
+        //    + every chunk that a committed `$yydb:file` descriptor points at.
+        //    `referenced_hashes` already unified those with the raw prefix path,
+        //    so anything new here was only discoverable by decoding the JSON.
+        for hash in &referenced {
+            let hash_hex = hex_lower(hash);
+            if reported_missing.contains(&hash_hex) {
+                continue;
+            }
+            if !objects.path_for_hash(&hash_hex).exists() {
+                issues.push(DoctorIssue {
+                    severity: DoctorSeverity::Error,
+                    code: "yydb.doctor.missing_blob".into(),
+                    message: format!("committed reference points to missing blob {}", hash_hex),
+                    key_hint: None,
+                });
             }
         }
     }
@@ -154,4 +176,14 @@ fn decode_quota(bytes: &[u8]) -> Result<NamespaceQuota> {
         _ => return Err(yydb_types::Error::Corrupt("unknown eviction policy tag")),
     };
     Ok(NamespaceQuota { max_bytes, max_records, eviction_policy })
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0xf) as usize] as char);
+    }
+    out
 }
