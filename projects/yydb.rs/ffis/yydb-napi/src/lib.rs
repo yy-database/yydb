@@ -470,6 +470,58 @@ impl Database {
         self.handle()?.register_host_micro(definition).map_err(reason)
     }
 
+    /// Publish a logical `file` value: chunks first, then the manifest object.
+    ///
+    /// Only `.yydx` layouts keep the object tree a descriptor depends on.
+    /// Returns the descriptor as a tagged JSON object with the shape
+    /// `{"$yydb":"file",…}` that can be round-tripped through VOS write
+    /// parameters or `read_file_window`.
+    #[napi]
+    pub fn put_file(
+        &self,
+        payload: Buffer,
+        chunk_size: u32,
+        name: Option<String>,
+        media_type: Option<String>,
+    ) -> Result<String> {
+        use std::io::Cursor;
+        let chunk_size = usize::try_from(chunk_size)
+            .map_err(|_| napi::Error::from_reason("chunk_size exceeds platform pointer width"))?;
+        let descriptor = self
+            .handle()?
+            .put_file(Cursor::new(payload.as_ref()), chunk_size, name, media_type)
+            .map_err(reason)?;
+        let json = yydb::types::scalar::tagged_value_json(&yydb::Value::File(descriptor))
+            .expect("`Value::File` always has a tagged form");
+        serde_json::to_string(&json).map_err(|e| napi::Error::from_reason(format!("encode file descriptor: {e}")))
+    }
+
+    /// Read one VOS window of a committed `file` value.
+    ///
+    /// `descriptor_json` must be a tagged JSON `{"$yydb":"file",…}` produced by
+    /// [`Self::put_file`] or queried from a VOS `file` column.
+    /// Every touched chunk is verified against the manifest.
+    #[napi]
+    pub fn read_file_window(&self, descriptor_json: String, offset: i64, length: i64) -> Result<Buffer> {
+        let descriptor = parse_file_descriptor(&descriptor_json)?;
+        let offset = u64::try_from(offset)
+            .map_err(|_| napi::Error::from_reason("offset must be non-negative"))?;
+        let length = u64::try_from(length)
+            .map_err(|_| napi::Error::from_reason("length must be non-negative"))?;
+        let window = yydb::vos::types::FileReadWindow::new(offset, length);
+        let octets = self.handle()?.read_file_window(&descriptor, window).map_err(reason)?;
+        Ok(Buffer::from(octets))
+    }
+
+    /// Read the complete octets of a committed `file` value and verify its
+    /// content digest.
+    #[napi]
+    pub fn read_file(&self, descriptor_json: String) -> Result<Buffer> {
+        let descriptor = parse_file_descriptor(&descriptor_json)?;
+        let octets = self.handle()?.read_file(&descriptor).map_err(reason)?;
+        Ok(Buffer::from(octets))
+    }
+
     /// Invoke a registered scalar UDF.
     ///
     /// `args_json` is a JSON array of scalar values. Returns result as JSON.
@@ -718,5 +770,75 @@ fn value_to_json(value: yydb::Value) -> serde_json::Value {
         }
         yydb::Value::Text(s) => serde_json::Value::String(s),
         other => serde_json::Value::String(format!("{other:?}")),
+    }
+}
+
+fn parse_file_descriptor(json: &str) -> Result<yydb::FileDescriptor> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| napi::Error::from_reason(format!("invalid file descriptor JSON: {e}")))?;
+    let decoded = yydb::types::scalar::tagged_value_from_json(&value)
+        .ok_or_else(|| napi::Error::from_reason("not a tagged value JSON"))?
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    match decoded {
+        yydb::Value::File(descriptor) => Ok(descriptor),
+        other => Err(napi::Error::from_reason(format!("expected `$yydb:file`, got `{}`", other.kind()))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_descriptor() -> yydb::FileDescriptor {
+        yydb::FileDescriptor {
+            digest: "0f".repeat(32),
+            octets: 17,
+            name: Some("report.txt".into()),
+            media_type: None,
+            manifest: yydb::FileManifestRef { hash: [0x22; 32], size: 40 },
+        }
+    }
+
+    #[test]
+    fn file_descriptor_tagged_json_roundtrip() {
+        let descriptor = sample_descriptor();
+        let value = yydb::Value::File(descriptor.clone());
+        let json = yydb::types::scalar::tagged_value_json(&value).expect("has tagged form");
+        let json_str = serde_json::to_string(&json).unwrap();
+
+        let parsed = parse_file_descriptor(&json_str).expect("descriptor must parse");
+        assert_eq!(parsed, descriptor);
+    }
+
+    #[test]
+    fn parse_file_descriptor_rejects_non_file_tag() {
+        let json = r#"{"$yydb":"bytes","hex":"0a0b"}"#;
+        assert!(parse_file_descriptor(json).is_err(), "bytes tag must not decode as file");
+    }
+
+    #[test]
+    fn put_file_and_read_roundtrip_through_database() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let dir = std::env::temp_dir().join(format!(
+            "yydb-napi-file-test-{}",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("host-file.yydx");
+        let db = Database::open(db_path.to_string_lossy().to_string()).unwrap();
+
+        let payload = vec![1_u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+        let descriptor_json = db
+            .put_file(Buffer::from(payload.as_slice()), 8, Some("tiny.bin".into()), None)
+            .expect("put_file must succeed on .yydx layout");
+
+        let full = db.read_file(descriptor_json.clone()).expect("read_file must succeed");
+        assert_eq!(full.as_ref(), payload.as_slice());
+
+        let window = db.read_file_window(descriptor_json, 4, 7).expect("read_file_window must succeed");
+        assert_eq!(window.as_ref(), &payload[4..11]);
+
+        db.close();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
