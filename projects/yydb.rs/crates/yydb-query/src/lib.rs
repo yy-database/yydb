@@ -47,7 +47,10 @@ pub use params::{Dialect, prepare_sql};
 pub use result::{ColumnMeta, EncodedResult, ResultCell, ResultFormat, encode_result};
 #[doc(hidden)]
 pub use sql::SqlPlan;
-pub use store::{BytesPlacementHook, ObjectResolver, ROW_PREFIX, upsert_row, with_bytes_placement, with_object_resolver};
+pub use store::{
+    BytesPlacementHook, ObjectResolver, ROW_PREFIX, upsert_row, with_bytes_placement, with_object_resolver,
+    with_vector_placement, VectorPlacementHook,
+};
 pub use write::WriteOutcome;
 
 /// Execute a VOS read pipeline against stored table rows.

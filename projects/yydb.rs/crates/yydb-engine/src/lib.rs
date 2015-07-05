@@ -25,7 +25,7 @@ mod kv;
 mod storage;
 
 pub use batch::Batch;
-pub use bytes::{ObjectStoreResolver, YydbBytesPolicy};
+pub use bytes::{ObjectStoreResolver, YydbBytesPolicy, YydbVectorPolicy};
 pub use connection::Connection;
 pub use journal::{JournalMode, OpenFlags};
 pub use objects::ObjectStore;

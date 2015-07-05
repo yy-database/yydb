@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     Error, Result,
-    bytes::{ObjectStoreResolver, YydbBytesPolicy},
+    bytes::{ObjectStoreResolver, YydbBytesPolicy, YydbVectorPolicy},
 };
 use yydb_query::{PreparedStatement, QueryRow, fingerprint as fp, prepare as prepare_source};
 use yydb_types::Value;
@@ -21,6 +21,10 @@ impl Connection {
 
     fn bytes_policy(&self) -> Arc<dyn yydb_query::BytesPlacementHook> {
         Arc::new(YydbBytesPolicy::new(Arc::clone(&self.objects), !self.is_single_file_yydb()))
+    }
+
+    fn vector_policy(&self) -> Arc<dyn yydb_query::VectorPlacementHook> {
+        Arc::new(YydbVectorPolicy::new(Arc::clone(&self.objects), !self.is_single_file_yydb()))
     }
 
     /// Prepare a VOS read pipeline into a reusable query plan.
@@ -174,13 +178,17 @@ impl Connection {
             let contract = resolved_contract(state)?;
             let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
             yydb_query::with_object_resolver(Some(self.object_resolver()), || {
-                yydb_query::execute_write_with_constraints(
-                    source,
-                    &contract,
-                    &state.unique_constraints,
-                    schema_document,
-                    &mut state.records,
-                )
+                yydb_query::with_bytes_placement(Some(self.bytes_policy()), || {
+                    yydb_query::with_vector_placement(Some(self.vector_policy()), || {
+                        yydb_query::execute_write_with_constraints(
+                            source,
+                            &contract,
+                            &state.unique_constraints,
+                            schema_document,
+                            &mut state.records,
+                        )
+                    })
+                })
             })
         })
     }
@@ -202,14 +210,16 @@ impl Connection {
             let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
             yydb_query::with_object_resolver(Some(self.object_resolver()), || {
                 yydb_query::with_bytes_placement(Some(self.bytes_policy()), || {
-                    yydb_query::execute_write_with_params(
-                        &plan.source,
-                        &contract,
-                        &state.unique_constraints,
-                        schema_document,
-                        &mut state.records,
-                        &plan.values,
-                    )
+                    yydb_query::with_vector_placement(Some(self.vector_policy()), || {
+                        yydb_query::execute_write_with_params(
+                            &plan.source,
+                            &contract,
+                            &state.unique_constraints,
+                            schema_document,
+                            &mut state.records,
+                            &plan.values,
+                        )
+                    })
                 })
             })
         })
@@ -234,7 +244,17 @@ impl Connection {
             self.check_schema_drift(&stmt, state)?;
             let contract = resolved_contract(state)?;
             let outcome = yydb_query::with_object_resolver(Some(self.object_resolver()), || {
-                yydb_query::execute_write_prepared(&stmt, &values, &contract, &state.unique_constraints, &mut state.records)
+                yydb_query::with_bytes_placement(Some(self.bytes_policy()), || {
+                    yydb_query::with_vector_placement(Some(self.vector_policy()), || {
+                        yydb_query::execute_write_prepared(
+                            &stmt,
+                            &values,
+                            &contract,
+                            &state.unique_constraints,
+                            &mut state.records,
+                        )
+                    })
+                })
             })?;
             affected = outcome.affected;
             Ok(())

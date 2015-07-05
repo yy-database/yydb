@@ -149,7 +149,9 @@ fn coerce_file(value: Value) -> Result<Value> {
 /// The declared dimension is part of the column contract, so a vector with
 /// another component count cannot be stored as if it were the declared one, and
 /// a non-finite component is refused before the write is staged instead of
-/// landing a value that no comparison or distance can interpret.
+/// landing a value that no comparison or distance can interpret. After
+/// validation the host's vector placement hook decides whether the value stays
+/// inline or becomes a CAS `VectorPayload` reference.
 fn coerce_vector(value: Value, dimension: u32) -> Result<Value> {
     match value {
         Value::Null => Ok(Value::Null),
@@ -165,7 +167,7 @@ fn coerce_vector(value: Value, dimension: u32) -> Result<Value> {
                     "column type `vector<{dimension}>` requires finite components, component {index} is not finite"
                 )));
             }
-            Ok(Value::Vector(vector))
+            super::store::place_vector(vector)
         }
         other => {
             Err(coerce_error(format!("column type `vector<{dimension}>` requires a vector value, got `{}`", other.kind())))

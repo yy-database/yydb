@@ -3,7 +3,7 @@
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 use serde_json::{Map, Value as JsonValue};
-use yydb_types::{Error, ObjectRef, Result, Value, scalar};
+use yydb_types::{Error, ObjectKind, ObjectRef, Result, Value, Vector, scalar};
 
 use super::ops::QueryRow;
 
@@ -34,13 +34,28 @@ pub trait BytesPlacementHook: Send + Sync {
     fn place(&self, octets: Vec<u8>) -> Result<Value>;
 }
 
+/// Storage hook that decides where a written `vector<N>` value is kept.
+///
+/// Small vectors stay inline in the row's tagged JSON form; larger ones become
+/// a content-addressed object reference (`ObjectKind::VectorPayload`). The
+/// dimension threshold belongs to the host (same design as `bytes`), so the
+/// query layer never picks one.
+pub trait VectorPlacementHook: Send + Sync {
+    /// Returns the value to store: inline `Value::Vector` or `Value::Object`
+    /// referencing a `VectorPayload` in the host object store.
+    fn place(&self, vector: Vector) -> Result<Value>;
+}
+
 type SharedPlacementHook = Arc<dyn BytesPlacementHook>;
+type SharedVectorHook = Arc<dyn VectorPlacementHook>;
 
 thread_local! {
     /// Resolver installed for the duration of one statement execution on this thread.
     static OBJECT_RESOLVER: RefCell<Option<SharedResolver>> = RefCell::new(None);
     /// Placement hook installed for the duration of one write execution on this thread.
     static BYTES_PLACEMENT: RefCell<Option<SharedPlacementHook>> = RefCell::new(None);
+    /// Vector placement hook installed for the duration of one write execution on this thread.
+    static VECTOR_PLACEMENT: RefCell<Option<SharedVectorHook>> = RefCell::new(None);
 }
 
 struct ResolverGuard(Option<SharedResolver>);
@@ -77,6 +92,17 @@ impl Drop for PlacementGuard {
     }
 }
 
+struct VectorPlacementGuard(Option<SharedVectorHook>);
+
+impl Drop for VectorPlacementGuard {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        VECTOR_PLACEMENT.with(|slot| {
+            slot.replace(previous);
+        });
+    }
+}
+
 /// Runs `body` with `hook` installed for `bytes` placement on this thread.
 ///
 /// Without a hook every `bytes` value stays inline, which is what a host with
@@ -87,11 +113,32 @@ pub fn with_bytes_placement<T>(hook: Option<SharedPlacementHook>, body: impl FnO
     body()
 }
 
+/// Runs `body` with `hook` installed for `vector<N>` placement on this thread.
+///
+/// Without a hook every vector stays inline in the row's tagged JSON form,
+/// which matches hosts with no object store.
+pub fn with_vector_placement<T>(hook: Option<SharedVectorHook>, body: impl FnOnce() -> T) -> T {
+    let previous = VECTOR_PLACEMENT.with(|slot| slot.replace(hook));
+    let _guard = VectorPlacementGuard(previous);
+    body()
+}
+
 /// Places one `bytes` value through the installed hook.
 pub(crate) fn place_bytes(octets: Vec<u8>) -> Result<Value> {
     BYTES_PLACEMENT.with(|slot| match slot.borrow().as_ref() {
         Some(hook) => hook.place(octets),
         None => Ok(Value::Bytes(octets)),
+    })
+}
+
+/// Places one `vector<N>` value through the installed hook.
+///
+/// Without a hook the vector stays inline as `Value::Vector`; a hook may
+/// return a `Value::Object` referencing a CAS `VectorPayload`.
+pub(crate) fn place_vector(vector: Vector) -> Result<Value> {
+    VECTOR_PLACEMENT.with(|slot| match slot.borrow().as_ref() {
+        Some(hook) => hook.place(vector),
+        None => Ok(Value::Vector(vector)),
     })
 }
 
@@ -234,8 +281,14 @@ fn decode_value(value: &JsonValue) -> Result<Value> {
 fn resolve_object_reference(value: Value) -> Result<Value> {
     match value {
         Value::Object(object) => OBJECT_RESOLVER.with(|slot| match slot.borrow().as_ref() {
-            Some(resolver) => resolver.resolve(&object).map(Value::Bytes),
-            None => Err(Error::Unsupported("a stored bytes object reference needs an object store to decode")),
+            Some(resolver) => {
+                let bytes = resolver.resolve(&object)?;
+                match object.kind {
+                    ObjectKind::VectorPayload => Vector::from_le_bytes(&bytes).map(Value::Vector),
+                    _ => Ok(Value::Bytes(bytes)),
+                }
+            }
+            None => Err(Error::Unsupported("a stored object reference needs an object store to decode")),
         }),
         other => Ok(other),
     }
