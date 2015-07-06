@@ -233,10 +233,7 @@ fn decode_descriptor_dict(dict: &Bound<'_, PyDict>) -> PyResult<yydb::FileDescri
         .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
     match decoded {
         Value::File(descriptor) => Ok(descriptor),
-        other => Err(PyRuntimeError::new_err(format!(
-            "expected `$yydb:file`, got `{}`",
-            other.kind()
-        ))),
+        other => Err(PyRuntimeError::new_err(format!("expected `$yydb:file`, got `{}`", other.kind()))),
     }
 }
 
@@ -253,13 +250,11 @@ fn put_file(
     media_type: Option<String>,
 ) -> PyResult<Py<PyAny>> {
     let conn = yydb::Connection::open(&db_path).map_err(map_err)?;
-    let chunk_size = usize::try_from(chunk_size)
-        .map_err(|_| PyRuntimeError::new_err("chunk_size exceeds platform pointer width"))?;
-    let descriptor = conn
-        .put_file(std::io::Cursor::new(payload), chunk_size, name, media_type)
-        .map_err(map_err)?;
-    let json = yydb::types::scalar::tagged_value_json(&Value::File(descriptor))
-        .expect("`Value::File` always has a tagged form");
+    let chunk_size =
+        usize::try_from(chunk_size).map_err(|_| PyRuntimeError::new_err("chunk_size exceeds platform pointer width"))?;
+    let descriptor = conn.put_file(std::io::Cursor::new(payload), chunk_size, name, media_type).map_err(map_err)?;
+    let json =
+        yydb::types::scalar::tagged_value_json(&Value::File(descriptor)).expect("`Value::File` always has a tagged form");
     json_to_py(py, &json)
 }
 
@@ -280,9 +275,7 @@ fn read_file_window(
     let descriptor = decode_descriptor_dict(descriptor)?;
     let offset = u64::try_from(offset).map_err(|_| PyRuntimeError::new_err("offset must be non-negative"))?;
     let length = u64::try_from(length).map_err(|_| PyRuntimeError::new_err("length must be non-negative"))?;
-    let octets = conn
-        .read_file_window(&descriptor, yydb::vos::types::FileReadWindow::new(offset, length))
-        .map_err(map_err)?;
+    let octets = conn.read_file_window(&descriptor, yydb::vos::types::FileReadWindow::new(offset, length)).map_err(map_err)?;
     Ok(PyBytes::new(py, &octets).into())
 }
 
