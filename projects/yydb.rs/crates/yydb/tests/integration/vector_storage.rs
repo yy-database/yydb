@@ -451,3 +451,106 @@ table Embeddings {
     drop(reopened);
     cleanup(&path);
 }
+
+// ---------------------------------------------------------------------------
+// Vector dimension upper bound (schema-level validation, 方案 A)
+// ---------------------------------------------------------------------------
+
+use yydb_types::MAX_VECTOR_DIM;
+
+/// Schema with a vector column at exactly the YYDB maximum dimension.
+const MAX_DIM_SCHEMA: &str = r#"
+table Maxed {
+    @@id: i64,
+    embedding: vector<16384>,
+}
+"#;
+
+/// Schema with a vector column one dimension over the YYDB maximum.
+const OVER_DIM_SCHEMA: &str = r#"
+table OverMax {
+    @@id: i64,
+    embedding: vector<16385>,
+}
+"#;
+
+#[test]
+fn vos_vector_max_dimension_boundary_is_accepted_by_schema() {
+    // 16384 = MAX_VECTOR_DIM 边界值，ensure_schema 必须接受。
+    let conn = Connection::open_in_memory().expect("open");
+    let result = conn.ensure_schema(MAX_DIM_SCHEMA);
+    match result {
+        Ok(()) => {}
+        Err(error) => panic!("vector<16384> at boundary must be accepted, got error: {error}"),
+    }
+
+    // 写入验证：构造 16384 维全 0 向量。
+    let data: Vec<f32> = vec![0.0_f32; MAX_VECTOR_DIM as usize];
+    let value = Value::Vector(Vector::new(data).expect("vector"));
+    conn.execute_vos_write_with_params(
+        "Maxed::insert({ id: $id, embedding: $embedding })",
+        &BTreeMap::from([("id".to_string(), Value::I64(1)), ("embedding".to_string(), value)]),
+    )
+    .expect("insert boundary vector");
+
+    let rows = conn.query_vos("Maxed.all().collect()").expect("read boundary vector");
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn vos_vector_one_dimension_over_maximum_is_rejected_at_schema_declaration() {
+    // 16385 = MAX_VECTOR_DIM + 1，ensure_schema 必须在声明阶段直接拒绝。
+    let conn = Connection::open_in_memory().expect("open");
+    let error = conn.ensure_schema(OVER_DIM_SCHEMA).expect_err("vector<16385> must be rejected");
+    assert!(
+        matches!(error, Error::VectorDimensionExceeded { dimension: 16385, max: 16384 }),
+        "expected VectorDimensionExceeded(16385, 16384), got: {error}"
+    );
+    assert!(
+        format!("{error}").contains("exceeds YYDB maximum"),
+        "error message should mention YYDB maximum: {error}"
+    );
+}
+
+#[test]
+fn vos_vector_excessive_dimension_is_rejected_at_schema_declaration() {
+    // 用户声明一个离谱的大维度，schema 阶段立即拒绝。
+    let conn = Connection::open_in_memory().expect("open");
+    let doc = r#"
+table Huge {
+    @@id: i64,
+    embedding: vector<100000>,
+}
+"#;
+    let error = conn.ensure_schema(doc).expect_err("vector<100000> must be rejected");
+    assert!(
+        matches!(error, Error::VectorDimensionExceeded { dimension: 100000, max: 16384 }),
+        "expected VectorDimensionExceeded(100000, 16384), got: {error}"
+    );
+}
+
+#[test]
+fn vos_vector_excessive_dimension_error_persists_across_reopen() {
+    // 超界 schema 根本无法落库，重开后也不会出现半发布状态。
+    let (conn, path) = open_temp_db("vos-vector-overmax");
+    let error = conn.ensure_schema(OVER_DIM_SCHEMA).expect_err("must reject at ensure_schema");
+    assert!(
+        matches!(error, Error::VectorDimensionExceeded { .. }),
+        "error kind must be VectorDimensionExceeded, got: {error}"
+    );
+    drop(conn);
+
+    // 重开数据库，不应该有残留的 schema 状态。
+    let reopened = Connection::open(&path).expect("reopen");
+    // 正常 schema（vector<3>）应该可以成功。
+    reopened.ensure_schema(DOC_SCHEMA).expect("after reject, normal schema must still work");
+    drop(reopened);
+    cleanup(&path);
+}
+
+#[test]
+fn vos_vector_small_dimension_schema_still_works() {
+    // 确认 vector<3> 这类小维度 schema 继续通过（不回归）。
+    let conn = Connection::open_in_memory().expect("open");
+    conn.ensure_schema(DOC_SCHEMA).expect("vector<3> must pass schema validation");
+}

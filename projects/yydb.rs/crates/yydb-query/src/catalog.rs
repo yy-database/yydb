@@ -7,10 +7,39 @@ use vos::{
         ResolvedFieldContract, ResolvedTypeContract, SchemaProjection, TypeContractKind, TypeIdentity,
     },
 };
-use yydb_types::{Error, Result};
+use yydb_types::{Error, MAX_VECTOR_DIM, Result};
 
 fn catalog_error(message: impl Into<String>) -> Error {
     Error::Schema { message: message.into() }
+}
+
+/// Recursively validates one resolved canonical type.
+fn validate_canonical_type(ty: &ResolvedCanonicalType) -> Result<()> {
+    match ty {
+        ResolvedCanonicalType::Vector { dimension, .. } => {
+            if *dimension > MAX_VECTOR_DIM {
+                return Err(Error::VectorDimensionExceeded { dimension: *dimension, max: MAX_VECTOR_DIM });
+            }
+        }
+        ResolvedCanonicalType::Optional(inner) | ResolvedCanonicalType::Reference(inner) => {
+            validate_canonical_type(inner)?;
+        }
+        ResolvedCanonicalType::List(inner) => validate_canonical_type(inner)?,
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Walks every field of every declared type and enforces YYDB product-level
+/// constraints on resolved canonical types. Currently validates `vector<N>`
+/// dimensions against [`MAX_VECTOR_DIM`].
+fn validate_contract_types(contract: &ResolvedContract) -> Result<()> {
+    for ty in &contract.types {
+        for field in &ty.fields {
+            validate_canonical_type(&field.canonical_type)?;
+        }
+    }
+    Ok(())
 }
 
 /// Assigns durable identities to an unreleased projection in document order.
@@ -46,8 +75,10 @@ pub fn resolved_contract_from_document(document: &str) -> Result<ResolvedContrac
     let manifest = allocate_initial_manifest(&projection);
     let bound = bind_identity(&projection, &manifest)
         .map_err(|diagnostics| Error::Schema { message: format!("VOS identity binding failed: {diagnostics:?}") })?;
-    resolve_contract_from_bound(&bound)
-        .map_err(|diagnostics| Error::Schema { message: format!("VOS name resolution failed: {diagnostics:?}") })
+    let contract = resolve_contract_from_bound(&bound)
+        .map_err(|diagnostics| Error::Schema { message: format!("VOS name resolution failed: {diagnostics:?}") })?;
+    validate_contract_types(&contract)?;
+    Ok(contract)
 }
 
 /// Short storage key for a resolved table type (last canonical path segment).

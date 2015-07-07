@@ -17,7 +17,7 @@ use vos::{
     },
 };
 use yydb_execution::{FieldHandle, LayoutField, RecordLayout, RecordLayoutError, Type};
-use yydb_types::{Error, Result, UniqueConstraint};
+use yydb_types::{Error, MAX_VECTOR_DIM, Result, UniqueConstraint};
 
 /// Canonical remote used by this workspace for shared VOS semantics.
 pub const VOS_GIT_DEV: &str = "https://github.com/voml/vos-language.git#branch=dev";
@@ -112,8 +112,31 @@ pub(crate) fn evolve(previous: &IdentityHistory, current: IdentityBoundProjectio
 
 /// Resolves an already-bound projection into the strict YYDB-consumed contract.
 pub(crate) fn resolve_contract(bound: &IdentityBoundProjection) -> Result<ResolvedContract> {
-    vos_resolve_contract(bound)
-        .map_err(|diagnostics| Error::Schema { message: format!("VOS name resolution failed: {diagnostics:?}") })
+    let contract = vos_resolve_contract(bound)
+        .map_err(|diagnostics| Error::Schema { message: format!("VOS name resolution failed: {diagnostics:?}") })?;
+    validate_contract_dimensions(&contract)?;
+    Ok(contract)
+}
+
+/// Walks every resolved VOS field and enforces YYDB product-level constraints
+/// that the language contract intentionally leaves open.
+///
+/// Currently validates `vector<N>` dimensions against [`MAX_VECTOR_DIM`]. This
+/// catches schema declarations that VOS accepts but YYDB as a runtime host
+/// cannot safely execute. The inline/object placement boundary
+/// ([`INLINE_VECTOR_DIM_MAX`]) is independent and enforced at write time.
+fn validate_contract_dimensions(contract: &ResolvedContract) -> Result<()> {
+    use vos::types::ResolvedCanonicalType;
+    for ty in &contract.types {
+        for field in &ty.fields {
+            if let ResolvedCanonicalType::Vector { dimension, .. } = &field.canonical_type {
+                if *dimension > MAX_VECTOR_DIM {
+                    return Err(Error::VectorDimensionExceeded { dimension: *dimension, max: MAX_VECTOR_DIM });
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A type-qualified field path used by [`RenameMap`].
@@ -493,7 +516,12 @@ fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Typ
         ResolvedCanonicalType::Scalar(scalar) => execution_type_for_scalar(*scalar),
         ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => decimal_type_from_arguments(arguments),
         ResolvedCanonicalType::File => Ok(Type::File),
-        ResolvedCanonicalType::Vector { dimension, .. } => Ok(Type::Vector { dimension: *dimension }),
+        ResolvedCanonicalType::Vector { dimension, .. } => {
+            if *dimension > MAX_VECTOR_DIM {
+                return Err(Error::VectorDimensionExceeded { dimension: *dimension, max: MAX_VECTOR_DIM });
+            }
+            Ok(Type::Vector { dimension: *dimension })
+        }
         ResolvedCanonicalType::Optional(_)
         | ResolvedCanonicalType::Reference(_)
         | ResolvedCanonicalType::List(_)

@@ -27,6 +27,18 @@ pub use scalar::{Date, Decimal, ScalarError, Time, Timestamp};
 /// store and referenced from the row, which keeps every stored row storable.
 pub const INLINE_BYTES_MAX: usize = 1024;
 
+/// Maximum dimension accepted by YYDB for a declared `vector<N>` column.
+///
+/// This is a **YYDB product constraint**, not a VOS language contract. VOS
+/// permits any positive `u32` dimension; YYDB as a runtime host must refuse
+/// dimensions it cannot safely execute. At `16384` components the wire payload
+/// is ~64 KiB of `f32`, well above the inline budget and still well below the
+/// ~4 GiB that a `Vec<f32>` could theoretically hold before exhausting a
+/// process address space. The inline/object placement boundary
+/// ([`yydb-engine::INLINE_VECTOR_DIM_MAX`] = 120) is independent and handled at
+/// write time.
+pub const MAX_VECTOR_DIM: u32 = 16384;
+
 /// Default chunk size for chunked file writes (1 MiB).
 pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
 
@@ -263,6 +275,13 @@ pub enum Error {
         /// Scalar kind the format cannot carry (for example `bytes`).
         kind: &'static str,
     },
+    /// A declared `vector<N>` column exceeds the YYDB product maximum dimension.
+    VectorDimensionExceeded {
+        /// Dimension the schema declared.
+        dimension: u32,
+        /// Maximum YYDB accepts for a `vector<N>` column.
+        max: u32,
+    },
 }
 
 impl fmt::Display for Error {
@@ -325,6 +344,12 @@ impl fmt::Display for Error {
             Self::ResultFormat { column, kind } => {
                 write!(f, "result format: column `{column}` carries `{kind}` values that the requested format cannot represent")
             }
+            Self::VectorDimensionExceeded { dimension, max } => {
+                write!(
+                    f,
+                    "vector dimension {dimension} exceeds YYDB maximum {max} — split into multiple vectors or use object storage"
+                )
+            }
         }
     }
 }
@@ -368,6 +393,7 @@ impl Error {
             Self::Scalar { .. } => "yydb.scalar.invalid",
             Self::UniqueViolation { .. } => "yydb.unique.violation",
             Self::ResultFormat { .. } => "yydb.result.format",
+            Self::VectorDimensionExceeded { .. } => "yydb.schema.vector_dimension_exceeded",
         }
     }
 
@@ -402,6 +428,7 @@ impl Error {
             Self::SchemaInvalidated { .. } => "query",
             Self::Scalar { .. } | Self::UniqueViolation { .. } => "query",
             Self::ResultFormat { .. } => "query",
+            Self::VectorDimensionExceeded { .. } => "schema",
             Self::Remote { .. } => "remote",
         }
     }
@@ -458,6 +485,10 @@ impl Error {
                 vec![("table", table.clone()), ("constraint", constraint.clone()), ("columns", columns.join(","))]
             }
             Self::ResultFormat { column, kind } => vec![("column", column.clone()), ("kind", (*kind).to_owned())],
+            Self::VectorDimensionExceeded { dimension, max } => vec![
+                ("dimension", dimension.to_string()),
+                ("max", max.to_string()),
+            ],
         };
         Some(p)
     }
