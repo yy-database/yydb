@@ -485,12 +485,10 @@ impl Database {
         media_type: Option<String>,
     ) -> Result<String> {
         use std::io::Cursor;
-        let chunk_size = usize::try_from(chunk_size)
-            .map_err(|_| napi::Error::from_reason("chunk_size exceeds platform pointer width"))?;
-        let descriptor = self
-            .handle()?
-            .put_file(Cursor::new(payload.as_ref()), chunk_size, name, media_type)
-            .map_err(reason)?;
+        let chunk_size =
+            usize::try_from(chunk_size).map_err(|_| napi::Error::from_reason("chunk_size exceeds platform pointer width"))?;
+        let descriptor =
+            self.handle()?.put_file(Cursor::new(payload.as_ref()), chunk_size, name, media_type).map_err(reason)?;
         let json = yydb::types::scalar::tagged_value_json(&yydb::Value::File(descriptor))
             .expect("`Value::File` always has a tagged form");
         serde_json::to_string(&json).map_err(|e| napi::Error::from_reason(format!("encode file descriptor: {e}")))
@@ -504,10 +502,8 @@ impl Database {
     #[napi]
     pub fn read_file_window(&self, descriptor_json: String, offset: i64, length: i64) -> Result<Buffer> {
         let descriptor = parse_file_descriptor(&descriptor_json)?;
-        let offset = u64::try_from(offset)
-            .map_err(|_| napi::Error::from_reason("offset must be non-negative"))?;
-        let length = u64::try_from(length)
-            .map_err(|_| napi::Error::from_reason("length must be non-negative"))?;
+        let offset = u64::try_from(offset).map_err(|_| napi::Error::from_reason("offset must be non-negative"))?;
+        let length = u64::try_from(length).map_err(|_| napi::Error::from_reason("length must be non-negative"))?;
         let window = yydb::vos::types::FileReadWindow::new(offset, length);
         let octets = self.handle()?.read_file_window(&descriptor, window).map_err(reason)?;
         Ok(Buffer::from(octets))
@@ -819,10 +815,8 @@ mod tests {
     #[test]
     fn put_file_and_read_roundtrip_through_database() {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let dir = std::env::temp_dir().join(format!(
-            "yydb-napi-file-test-{}",
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
-        ));
+        let dir = std::env::temp_dir()
+            .join(format!("yydb-napi-file-test-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::create_dir_all(&dir).unwrap();
         let db_path = dir.join("host-file.yydx");
         let db = Database::open(db_path.to_string_lossy().to_string()).unwrap();
