@@ -485,10 +485,9 @@ impl Error {
                 vec![("table", table.clone()), ("constraint", constraint.clone()), ("columns", columns.join(","))]
             }
             Self::ResultFormat { column, kind } => vec![("column", column.clone()), ("kind", (*kind).to_owned())],
-            Self::VectorDimensionExceeded { dimension, max } => vec![
-                ("dimension", dimension.to_string()),
-                ("max", max.to_string()),
-            ],
+            Self::VectorDimensionExceeded { dimension, max } => {
+                vec![("dimension", dimension.to_string()), ("max", max.to_string())]
+            }
         };
         Some(p)
     }

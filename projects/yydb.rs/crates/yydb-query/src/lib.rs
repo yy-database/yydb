@@ -48,8 +48,8 @@ pub use result::{ColumnMeta, EncodedResult, ResultCell, ResultFormat, encode_res
 #[doc(hidden)]
 pub use sql::SqlPlan;
 pub use store::{
-    BytesPlacementHook, ObjectResolver, ROW_PREFIX, upsert_row, with_bytes_placement, with_object_resolver,
-    with_vector_placement, VectorPlacementHook,
+    BytesPlacementHook, ObjectResolver, ROW_PREFIX, VectorPlacementHook, upsert_row, with_bytes_placement,
+    with_object_resolver, with_vector_placement,
 };
 pub use write::WriteOutcome;
 

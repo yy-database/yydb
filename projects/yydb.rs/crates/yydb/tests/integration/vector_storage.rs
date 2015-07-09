@@ -297,8 +297,7 @@ fn vos_vector_large_dimension_roundtrips_via_yydx_object_store() {
     conn.ensure_schema(LARGE_DIM_SCHEMA).expect("schema");
 
     let expected: Vec<f32> = (0..121).map(|i| (i as f32) * 0.5 + 0.25).collect();
-    insert_large(&conn, 1, Value::Vector(Vector::new(expected.clone()).expect("vector")))
-        .expect("insert 121-dim vector");
+    insert_large(&conn, 1, Value::Vector(Vector::new(expected.clone()).expect("vector"))).expect("insert 121-dim vector");
 
     // 读回确认。
     let rows = conn.query_vos("BigDoc.all().collect()").expect("read");
@@ -346,10 +345,7 @@ fn vos_vector_single_file_yydb_rejects_large_vector() {
 
     let error = insert_large(&conn, 1, large_vector(121)).expect_err("single-file .yydb must reject large vectors");
     assert!(matches!(error, Error::Unsupported(_)), "unexpected error: {error}");
-    assert!(
-        format!("{error}").contains(".yydx"),
-        "single-file .yydb error should mention .yydx layout requirement: {error}"
-    );
+    assert!(format!("{error}").contains(".yydx"), "single-file .yydb error should mention .yydx layout requirement: {error}");
     assert!(stored_row_json_for_table(&conn, "BigDoc").is_empty(), "no row may be written");
 
     drop(conn);
@@ -374,10 +370,7 @@ fn vos_vector_large_dimension_rollback_leaves_no_visible_row() {
     conn.rollback().expect("rollback");
 
     // rollback 后 row 消失。
-    assert!(
-        stored_row_json_for_table(&conn, "BigDoc").is_empty(),
-        "aborted row must not be visible"
-    );
+    assert!(stored_row_json_for_table(&conn, "BigDoc").is_empty(), "aborted row must not be visible");
 
     drop(conn);
     cleanup(&path);
@@ -388,12 +381,14 @@ fn vos_vector_max_dimension_large_object_payload() {
     // 768 维（常见 embedding 维度）远超过 inline 阈值，必须走 CAS object。
     let path = temp_yydx("vos-vector-768d");
     let conn = Connection::open_yydx(&path).expect("open");
-    conn.ensure_schema(r#"
+    conn.ensure_schema(
+        r#"
 table Embeddings {
     @@id: i64,
     vec: vector<768>,
 }
-"#)
+"#,
+    )
     .expect("schema");
 
     let data: Vec<f32> = (0..768).map(|i| (i as f32).sin()).collect();
@@ -430,13 +425,16 @@ table Embeddings {
     // 重开后继续一致。
     drop(conn);
     let reopened = Connection::open_yydx(&path).expect("reopen");
-    reopened.ensure_schema(r#"
+    reopened
+        .ensure_schema(
+            r#"
 table Embeddings {
     @@id: i64,
     vec: vector<768>,
 }
-"#)
-    .expect("schema");
+"#,
+        )
+        .expect("schema");
     let result = reopened.query_vos("Embeddings.all().collect()").expect("read after reopen");
     assert_eq!(result.len(), 1);
     let read_vec = match result[0].get("vec") {
@@ -506,10 +504,7 @@ fn vos_vector_one_dimension_over_maximum_is_rejected_at_schema_declaration() {
         matches!(error, Error::VectorDimensionExceeded { dimension: 16385, max: 16384 }),
         "expected VectorDimensionExceeded(16385, 16384), got: {error}"
     );
-    assert!(
-        format!("{error}").contains("exceeds YYDB maximum"),
-        "error message should mention YYDB maximum: {error}"
-    );
+    assert!(format!("{error}").contains("exceeds YYDB maximum"), "error message should mention YYDB maximum: {error}");
 }
 
 #[test]
@@ -534,10 +529,7 @@ fn vos_vector_excessive_dimension_error_persists_across_reopen() {
     // 超界 schema 根本无法落库，重开后也不会出现半发布状态。
     let (conn, path) = open_temp_db("vos-vector-overmax");
     let error = conn.ensure_schema(OVER_DIM_SCHEMA).expect_err("must reject at ensure_schema");
-    assert!(
-        matches!(error, Error::VectorDimensionExceeded { .. }),
-        "error kind must be VectorDimensionExceeded, got: {error}"
-    );
+    assert!(matches!(error, Error::VectorDimensionExceeded { .. }), "error kind must be VectorDimensionExceeded, got: {error}");
     drop(conn);
 
     // 重开数据库，不应该有残留的 schema 状态。
