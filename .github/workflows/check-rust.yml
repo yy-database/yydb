@@ -45,5 +45,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: projects/yydb.rs
-      - run: cargo test --workspace
+      # `yydb-napi` is cdylib-only and needs Node `napi_*` symbols at link time.
+      # Cover it with `cargo build` below; host behaviour is asserted in TypeScript.
+      - run: cargo test --workspace --exclude yydb-napi
       - run: cargo build -p yydb-napi --release

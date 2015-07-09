@@ -20,6 +20,9 @@
         "placeholder:trust": "nifty trust"
     },
     "packageManager": "pnpm@10.18.3",
+    "engines": {
+        "node": ">=24.12.0"
+    },
     "devDependencies": {
         "@doki-land/nifty": "^0.1.10"
     }
