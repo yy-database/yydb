@@ -17,7 +17,8 @@
         "u": "cargo upgrade --pinned",
         "placeholder": "nifty publish --placeholder --dry-run",
         "placeholder:publish": "nifty publish --placeholder",
-        "placeholder:trust": "nifty trust"
+        "placeholder:trust": "nifty trust",
+        "build:homepage": "pnpm --filter @yydb/yydb-homepage build"
     },
     "packageManager": "pnpm@10.18.3",
     "engines": {
