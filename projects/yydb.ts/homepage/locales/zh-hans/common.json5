@@ -2,6 +2,8 @@
   brandShort: 'YYDB',
   brandFull: 'YY Database',
   navHome: '概览',
+  navWelcome: '欢迎',
+  navPlayground: '在线试用',
   navInstall: '安装',
   navDocs: '文档',
   navWire: '线协议',
@@ -18,6 +20,7 @@
   titleInstall: '安装 · YYDB',
   titleWire: '线协议 · YYDB',
   titleWelcome: '欢迎 · YYDB',
+  titlePlayground: '在线试用 · YYDB',
 
   homeEyebrow: '本地优先 · 单文件 · MPL-2.0',
   homeTitle: 'YYDB',
@@ -186,6 +189,8 @@
   footerResources: '资源',
   footerCommunity: '社区',
   footerHome: '概览',
+  footerWelcome: '欢迎',
+  footerPlayground: '在线试用',
   footerInstall: '安装',
   footerOverviewDocs: '用户文档',
   footerWire: '线协议演示',
@@ -302,5 +307,21 @@
   welcomeEnter: '进入产品站',
   welcomeDocs: '阅读文档',
   welcomeWire: '帧编解码演示',
-  welcomeNote: '默认不连接 live serve。需要权限与审计时使用 YYDS。'
+  welcomeNote: '默认不连接 live serve。需要权限与审计时使用 YYDS。',
+
+  playgroundEyebrow: '在线试用',
+  playgroundTitle: 'VOS 试验场预览',
+  playgroundLede: '在这里起草 VOS 读写语句，熟悉语法写法。浏览器内执行尚未接入本站，试验场不会伪造任何结果。想看真正在浏览器内运行的演示，请打开线协议编解码；要在真实文件上执行 VOS，请安装 YYDB。',
+  playgroundPanelTitle: '语句编辑器',
+  playgroundInput: 'VOS 语句',
+  playgroundPlaceholder: 'User.all().collect()',
+  playgroundRun: '运行',
+  playgroundClear: '清空',
+  playgroundOutput: '输出',
+  playgroundOutputEmpty: '暂无输出。当前预览不执行语句。',
+  playgroundRunNotice: '未执行任何语句，也没有伪造结果。浏览器内 VOS 执行尚未接入本预览。想看完全在浏览器内运行的编解码演示，请打开线协议演示；要在本地执行 VOS，请安装 YYDB。',
+  playgroundPreviewNote: '本页面是预览外壳。这里输入的语句不会发送到任何地方，输出区只展示如实提示。',
+  playgroundWireLink: '打开线协议演示',
+  playgroundDocsLink: '阅读文档',
+  playgroundInstallLink: '安装 YYDB'
 }
