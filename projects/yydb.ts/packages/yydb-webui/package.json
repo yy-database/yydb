@@ -6,7 +6,6 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "postinstall": "node ./scripts/fix-ui-icons-registry.mjs",
         "check": "vmz check .",
         "dev": "vmz dev .",
         "build": "vmz build . --release --profile static",
@@ -30,14 +29,14 @@
         "url": "https://github.com/yy-database/yydb/issues"
     },
     "dependencies": {
-        "@vmz/core": "0.3.8",
-        "@vmz/plugin": "0.3.8",
-        "@vmz/ui": "0.3.8",
-        "@vmz/ui-icons": "0.3.8",
+        "@vmz/core": "0.3.12",
+        "@vmz/plugin": "0.3.12",
+        "@vmz/ui": "0.3.12",
+        "@vmz/ui-icons": "0.3.12",
         "@yydb/yydb-client": "workspace:*"
     },
     "devDependencies": {
-        "@vmz/vmz": "0.3.8",
+        "@vmz/vmz": "0.3.12",
         "typescript": "^5.9.2"
     }
 }
