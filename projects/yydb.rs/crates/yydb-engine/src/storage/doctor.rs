@@ -55,7 +55,10 @@ pub(crate) fn diagnose(
         });
     }
 
-    let referenced = refs::referenced_hashes(records, "", objects)?;
+    // Tolerant scan: an unreadable manifest still contributes its own hash, so
+    // the gap below is reported as `missing_blob` instead of failing the probe.
+    // Reclamation keeps the strict scan and refuses to delete anything.
+    let referenced = refs::referenced_hashes_tolerant(records, "", objects)?;
     if objects.persist_to_disk() {
         // 1. Raw `yydb:object:` prefixes — carry the owning key as a hint so
         //    operators can jump straight to the broken record.
