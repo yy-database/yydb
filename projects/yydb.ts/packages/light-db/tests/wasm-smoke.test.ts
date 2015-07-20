@@ -76,19 +76,19 @@ describe('prepareJson + queryPreparedJson', () => {
     it('prepareJson returns StatementInfo with the expected keys', () => {
         const raw = JSON.parse(sess.prepareJson(filterSql)) as Record<string, unknown>;
         expect(raw.ok).toBe(true);
-        expect(raw.statement_id).toMatch(/^stmt-\d+$/);
-        expect(raw.query_kind).toBe('Read');
+        expect(raw.statementId).toMatch(/^stmt-\d+$/);
+        expect(raw.queryKind).toBe('Read');
         expect(raw.parameters).toEqual([]);
-        expect(raw.read_set).toEqual(['User']);
-        expect(raw.write_set).toEqual([]);
-        expect(raw.source_fingerprint).toBeTruthy();
+        expect(raw.readSet).toEqual(['User']);
+        expect(raw.writeSet).toEqual([]);
+        expect(raw.sourceFingerprint).toBeTruthy();
         expect(raw.source).toContain('User');
     });
 
     it('queryPreparedJson executes the cached plan and returns typed rows', () => {
         sess.executeVosWrite(insertSql);
         const prepared = JSON.parse(sess.prepareJson(filterSql));
-        const id = prepared.statement_id;
+        const id = prepared.statementId;
 
         const raw = JSON.parse(sess.queryPreparedJson(JSON.stringify({ statementId: id, params: null })));
         expect(raw.ok).toBe(true);
@@ -102,7 +102,7 @@ describe('prepareJson + queryPreparedJson', () => {
 
     it('closeStatement releases the plan; subsequent queries refuse', () => {
         const prepared = JSON.parse(sess.prepareJson(filterSql));
-        const id = prepared.statement_id as string;
+        const id = prepared.statementId as string;
 
         const closed = sess.closeStatement(id);
         expect(closed).toBe(true);

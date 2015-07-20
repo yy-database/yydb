@@ -61,15 +61,15 @@ test("a prepared statement exposes its plan metadata and reuses across execution
         try {
             assert.equal(statement.isClosed, false);
             assert.match(statement.statementId, /^stmt-[0-9a-f]+$/);
-            assert.deepEqual(statement.parameters, [{ name: "limit", index: 0, slot_ty: "Any", usage_count: 1 }]);
+            assert.deepEqual(statement.parameters, [{ name: "limit", index: 0, slotTy: "any", usageCount: 1 }]);
 
             const info = statement.info as Record<string, unknown>;
             assert.equal(info.dialect, "Vos");
             assert.equal(info.source, source);
-            assert.equal(info.query_kind, "Read");
-            assert.deepEqual(info.read_set, ["P"]);
-            assert.deepEqual(info.write_set, []);
-            assert.equal(info.statement_id, statement.statementId);
+            assert.equal(info.queryKind, "Read");
+            assert.deepEqual(info.readSet, ["P"]);
+            assert.deepEqual(info.writeSet, []);
+            assert.equal(info.statementId, statement.statementId);
 
             const first = await statement.execute<{ p_id: number }>({ limit: 1 });
             assert.equal(first.length, 1);

@@ -40,6 +40,7 @@ pub enum Dialect {
 
 /// One named parameter extracted during prepare.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ParameterDescriptor {
     /// Canonical parameter name (no leading `$`).
     pub name: String,
@@ -75,6 +76,7 @@ pub enum QueryKind {
 /// Pure [`prepare`] calls (for tests or offline use) leave these fields at
 /// their empty / zero values; the engine path always fills them.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PreparedStatement {
     /// Unique synthetic ID for this prepared statement (monotonic within a
     /// connection, stable fingerprint otherwise).

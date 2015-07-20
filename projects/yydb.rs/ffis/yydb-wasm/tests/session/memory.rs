@@ -90,7 +90,7 @@ fn memory_session_query_prepared_rejects_after_close() {
 
     let prepare = parse_json(&session.prepare_json("User.all().collect()"));
     assert_eq!(prepare.get("ok"), Some(&JsonValue::Bool(true)), "prepare must succeed");
-    let stmt_id = prepare.get("statement_id").and_then(|v| v.as_str()).expect("statement_id present").to_owned();
+    let stmt_id = prepare.get("statementId").and_then(|v| v.as_str()).expect("statementId present").to_owned();
 
     // Before close — execution succeeds.
     let before = parse_json(&session.query_prepared_json(&json!({ "statementId": stmt_id, "params": {} }).to_string()));

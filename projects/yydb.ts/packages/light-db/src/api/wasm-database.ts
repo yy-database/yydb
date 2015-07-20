@@ -495,12 +495,12 @@ export class Database implements LightDatabase {
         const raw = JSON.parse(this.session.prepareJson(source)) as WasmResult & Partial<StatementInfo>;
         if (!raw.ok) throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
         const info: StatementInfo = {
-            statement_id: raw.statement_id!,
-            query_kind: raw.query_kind!,
+            statementId: raw.statementId!,
+            queryKind: raw.queryKind!,
             parameters: raw.parameters!,
-            read_set: raw.read_set!,
-            write_set: raw.write_set!,
-            source_fingerprint: raw.source_fingerprint!,
+            readSet: raw.readSet!,
+            writeSet: raw.writeSet!,
+            sourceFingerprint: raw.sourceFingerprint!,
             source: raw.source!,
         };
         return new Statement(this.session, info);
@@ -515,7 +515,7 @@ export class Database implements LightDatabase {
  * A pre-parsed, pre-lowered VOS query plan (WASM variant).
  *
  * The lowered op tree lives in the session's internal registry keyed by
- * `statement_id`; this class is a thin JS handle. Bind parameters and
+ * `statementId`; this class is a thin JS handle. Bind parameters and
  * re-execute via {@link Statement.execute} without re-parsing or re-lowering.
  *
  * ```ts
@@ -537,7 +537,7 @@ export class Statement {
 
     /** The unique id for this prepared statement (WASM-assigned). */
     get statementId(): string {
-        return this.infoObj.statement_id;
+        return this.infoObj.statementId;
     }
 
     /** Parameter descriptors — empty array when the statement takes no parameters. */
@@ -570,7 +570,7 @@ export class Statement {
             throw new Error('yydb.statement.closed: statement has been closed');
         }
         const json = JSON.stringify({
-            statementId: this.infoObj.statement_id,
+            statementId: this.infoObj.statementId,
             params: params ?? null,
         });
         const raw = JSON.parse(this.session.queryPreparedJson(json)) as WasmResult;
@@ -583,7 +583,7 @@ export class Statement {
     /** Release this statement's plan from the WASM session registry. Idempotent. */
     close(): void {
         if (!this.closed) {
-            this.session.closeStatement(this.infoObj.statement_id);
+            this.session.closeStatement(this.infoObj.statementId);
             this.closed = true;
         }
     }
