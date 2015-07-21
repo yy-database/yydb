@@ -115,6 +115,18 @@ interface TaggedBytes {
 }
 
 /**
+ * Tagged JSON form of an integer beyond the host-exact width (±2^53−1):
+ * `{"$yydb":"i64","value":"..."}` / `{"$yydb":"u64","value":"..."}`.
+ *
+ * `value` is a decimal string so the full 64-bit magnitude survives the JSON
+ * round trip; row decoding converts it back to a `bigint`.
+ */
+interface TaggedWideInteger {
+    readonly $yydb: 'i64' | 'u64';
+    readonly value: string;
+}
+
+/**
  * Serializes one parameter value to its JSON wire text.
  *
  * The wire is JSON, so a `bigint` is written as a bare integer literal instead
@@ -167,9 +179,12 @@ function decodeRowValue(value: unknown): unknown {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
         return value;
     }
-    const tagged = value as Partial<TaggedBytes>;
+    const tagged = value as Partial<TaggedBytes> & Partial<TaggedWideInteger>;
     if (tagged.$yydb === 'bytes' && typeof tagged.hex === 'string') {
         return new Uint8Array(Buffer.from(tagged.hex, 'hex'));
+    }
+    if ((tagged.$yydb === 'i64' || tagged.$yydb === 'u64') && typeof tagged.value === 'string') {
+        return BigInt(tagged.value);
     }
     return value;
 }

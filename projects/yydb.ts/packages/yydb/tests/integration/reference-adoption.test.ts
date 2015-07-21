@@ -58,12 +58,14 @@ test("reference corpus types table is adopted with blobs and edge integers", { t
         const rows = await database.query("TypesRow.all().collect()") as Array<{
             id: number;
             txt: string;
-            n: number;
+            n: number | bigint;
             payload: Uint8Array;
         }>;
         assert.equal(rows.length, 3);
         assert.equal(rows[0].txt, "00042");
-        assert.equal(rows[1].n, -9223372036854775808);
+        // `i64::MIN` exceeds the host-exact width, so the wire tags it and the
+        // row decode yields the exact `bigint` instead of a rounded double.
+        assert.equal(rows[1].n, -9223372036854775808n);
         assert.ok(rows[1].payload instanceof Uint8Array, "the blob column must decode to octets");
         assert.ok(rows[1].payload.length > 5000, "the adopted blob must keep its length");
         await database.close();

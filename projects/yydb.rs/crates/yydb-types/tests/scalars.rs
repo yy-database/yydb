@@ -176,6 +176,36 @@ fn tagged_json_roundtrips_without_loss_and_rejects_unknown_tags() {
 }
 
 #[test]
+fn integers_beyond_the_host_exact_width_cross_tagged_and_roundtrip_exactly() {
+    // In-range integers stay bare JSON numbers so hosts read them unwrapped.
+    assert!(scalar::tagged_value_json(&yydb_types::Value::I64(scalar::HOST_EXACT_I64_MAX)).is_none());
+    assert!(scalar::tagged_value_json(&yydb_types::Value::I64(scalar::HOST_EXACT_I64_MIN)).is_none());
+    assert!(scalar::tagged_value_json(&yydb_types::Value::U64(scalar::HOST_EXACT_U64_MAX)).is_none());
+
+    for value in [
+        yydb_types::Value::I64(scalar::HOST_EXACT_I64_MAX + 1),
+        yydb_types::Value::I64(scalar::HOST_EXACT_I64_MIN - 1),
+        yydb_types::Value::I64(i64::MIN),
+        yydb_types::Value::I64(i64::MAX),
+        yydb_types::Value::U64(scalar::HOST_EXACT_U64_MAX + 1),
+        yydb_types::Value::U64(u64::MAX),
+    ] {
+        let json = scalar::tagged_value_json(&value).expect("tagged");
+        let decoded = scalar::tagged_value_from_json(&json).expect("object").expect("valid");
+        assert_eq!(decoded, value);
+    }
+
+    let tagged = serde_json::json!({ "$yydb": "i64", "value": "9007199254740993" });
+    assert_eq!(scalar::tagged_value_from_json(&tagged).unwrap().unwrap(), yydb_types::Value::I64(9_007_199_254_740_993));
+    let overflow_i64 = serde_json::json!({ "$yydb": "i64", "value": "9223372036854775808" });
+    assert!(matches!(scalar::tagged_value_from_json(&overflow_i64).unwrap(), Err(ScalarError::Malformed { kind: "i64", .. })));
+    let negative_u64 = serde_json::json!({ "$yydb": "u64", "value": "-1" });
+    assert!(matches!(scalar::tagged_value_from_json(&negative_u64).unwrap(), Err(ScalarError::Malformed { kind: "u64", .. })));
+    let number_member = serde_json::json!({ "$yydb": "i64", "value": 9_007_199_254_740_993_i64 });
+    assert!(scalar::tagged_value_from_json(&number_member).unwrap().is_err());
+}
+
+#[test]
 fn tagged_vector_json_keeps_component_bits_and_rejects_bad_shapes() {
     // Component bits survive exactly, including the sign of zero and the f32
     // extremes a text spelling could not reproduce.
