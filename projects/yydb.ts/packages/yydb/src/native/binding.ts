@@ -44,6 +44,12 @@ export interface NativeDatabase {
     commit(): void;
     /** Roll back the current transaction. */
     rollback(): void;
+    /** Create a named savepoint inside the open transaction. */
+    savepoint(name: string): void;
+    /** Roll the open transaction back to a named savepoint. */
+    rollbackToSavepoint(name: string): void;
+    /** Release a named savepoint so it can no longer be rolled back to. */
+    releaseSavepoint(name: string): void;
     /** Execute a VOS read pipeline; returns JSON rows. */
     queryVos(source: string): string;
     /** Execute a VOS write program with optional JSON parameters. */

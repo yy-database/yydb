@@ -434,6 +434,12 @@ export class TransactionHandle {
     async execute(source: string, params?: Record<string, unknown>): Promise<void> {
         this.native.executeVosWrite(source, encodeParams(params));
     }
+    /** Create a named savepoint inside this transaction. */
+    async savepoint(name: string): Promise<void> { this.native.savepoint(name); }
+    /** Roll back to a named savepoint, discarding later writes and nested savepoints. */
+    async rollbackToSavepoint(name: string): Promise<void> { this.native.rollbackToSavepoint(name); }
+    /** Release a named savepoint so it can no longer be rolled back to. */
+    async releaseSavepoint(name: string): Promise<void> { this.native.releaseSavepoint(name); }
 }
 
 /**
