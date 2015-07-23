@@ -37,6 +37,8 @@ export const MsgType = {
     MicroHostInvokeOk: 16,
     ScalarCall: 17,
     ScalarCallOk: 18,
+    Authenticate: 19,
+    AuthenticateOk: 20,
     Error: 255,
 } as const;
 
@@ -166,6 +168,20 @@ export function encodeKvGet(key: string): Uint8Array {
     const out: number[] = [];
     pushBytes(out, new TextEncoder().encode(key));
     return Uint8Array.from(out);
+}
+
+/** Encode an `Authenticate` request body: raw bearer token (opaque). */
+export function encodeAuthenticate(token: string): Uint8Array {
+    const out: number[] = [];
+    pushBytes(out, new TextEncoder().encode(token));
+    return Uint8Array.from(out);
+}
+
+/** Decode an `AuthenticateOk` reply body: the session token. */
+export function decodeAuthenticateOk(body: Uint8Array): string {
+    const offset = { n: 0 };
+    const len = readU32At(body, offset);
+    return new TextDecoder().decode(readBytesAt(body, offset, len));
 }
 
 export interface MicroRegisterPayload {

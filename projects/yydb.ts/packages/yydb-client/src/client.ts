@@ -1,8 +1,10 @@
 import {
+    decodeAuthenticateOk,
     decodeErrorBody,
     decodeKvGetOk,
     decodeScalarCallOk,
     decodeSchemaGetOk,
+    encodeAuthenticate,
     encodeKvGet,
     encodeKvPut,
     encodeMicroRegister,
@@ -30,18 +32,33 @@ export type {
     WireUdfScalarValue,
 } from './wire.js';
 export type { MicroHostHandler } from './transport.js';
-export { MsgType, encodeFrame, decodeFrame, encodeErrorBody, decodeErrorBody } from './wire.js';
+export {
+    MsgType,
+    encodeFrame,
+    decodeFrame,
+    encodeAuthenticate,
+    decodeAuthenticateOk,
+    encodeErrorBody,
+    decodeErrorBody,
+} from './wire.js';
 export { YydbError, YydbErrorCodes, YydbClientErrorCodes, isYydbError } from './errors.js';
 export type { YydbErrorCode, YydbErrorOptions } from './errors.js';
 
 export interface ConnectOptions {
     /** `ws://127.0.0.1:7700/wire` or `127.0.0.1:7700` (upgraded to `/wire`). */
     endpoint: string;
+    /**
+     * Bearer token sent in the `Authenticate` frame right after Hello.
+     * Omit to stay unauthenticated — `yydb serve` rejects every other frame
+     * with `yydb.auth.token_invalid` until an `Authenticate` succeeds.
+     */
+    token?: string;
 }
 
 /** Expected reply type and operation label per request type. */
 const REQUESTS: Record<number, { operation: string; ok: number }> = {
     [MsgType.Hello]: { operation: 'hello', ok: MsgType.HelloOk },
+    [MsgType.Authenticate]: { operation: 'authenticate', ok: MsgType.AuthenticateOk },
     [MsgType.Info]: { operation: 'info', ok: MsgType.InfoOk },
     [MsgType.SchemaGet]: { operation: 'schemaGet', ok: MsgType.SchemaGetOk },
     [MsgType.SchemaEnsure]: { operation: 'schemaEnsure', ok: MsgType.SchemaEnsureOk },
@@ -72,9 +89,10 @@ export class Client {
         return new Client(endpoint, transport);
     }
 
-    /** Open WebSocket to `yydb serve` `/wire` and Hello-handshake. */
+    /** Open WebSocket to `yydb serve` `/wire`, Hello-handshake and optional Authenticate. */
     static async connect(options: ConnectOptions | string): Promise<Client> {
         const endpoint = typeof options === 'string' ? options : options.endpoint;
+        const token = typeof options === 'string' ? undefined : options.token;
         if (!endpoint.trim()) {
             throw new YydbError(YydbErrorCodes.clientInvalidEndpoint, 'empty serve endpoint', {
                 operation: 'connect',
@@ -92,6 +110,9 @@ export class Client {
         }
         const client = new Client(endpoint, transport);
         await client.hello();
+        if (token !== undefined) {
+            await client.authenticate(token);
+        }
         return client;
     }
 
@@ -112,6 +133,12 @@ export class Client {
     async hello(): Promise<string> {
         const response = await this.roundtrip(MsgType.Hello, new Uint8Array());
         return new TextDecoder().decode(response.body);
+    }
+
+    /** Send the `Authenticate` frame; resolves with the session token. */
+    async authenticate(token: string): Promise<string> {
+        const response = await this.roundtrip(MsgType.Authenticate, encodeAuthenticate(token));
+        return decodeAuthenticateOk(response.body);
     }
 
     async serverVersion(): Promise<string> {

@@ -12,6 +12,8 @@ export {
     MsgType,
     encodeFrame,
     decodeFrame,
+    encodeAuthenticate,
+    decodeAuthenticateOk,
     encodeSchemaEnsure,
     encodeKvGet,
     encodeKvPut,

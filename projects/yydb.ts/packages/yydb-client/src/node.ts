@@ -10,6 +10,8 @@ export {
     MsgType,
     encodeFrame,
     decodeFrame,
+    encodeAuthenticate,
+    decodeAuthenticateOk,
     encodeSchemaEnsure,
     encodeKvGet,
     encodeKvPut,
@@ -28,9 +30,10 @@ function wantsWebSocket(endpoint: string): boolean {
     return trimmed.startsWith('ws://') || trimmed.startsWith('wss://');
 }
 
-/** Node entry: TCP by default; `ws://` uses WebSocket. */
+/** Node entry: TCP by default; `ws://` uses WebSocket. Hello plus optional Authenticate. */
 export async function connect(options: ConnectOptions | string): Promise<Client> {
     const endpoint = typeof options === 'string' ? options : options.endpoint;
+    const token = typeof options === 'string' ? undefined : options.token;
     if (!endpoint.trim()) {
         throw new YydbError(YydbErrorCodes.clientInvalidEndpoint, 'empty serve endpoint', {
             operation: 'connect',
@@ -44,5 +47,8 @@ export async function connect(options: ConnectOptions | string): Promise<Client>
     }
     const client = Client.fromTransport(wantsWebSocket(endpoint) ? normalizeWsUrl(endpoint) : endpoint, transport);
     await client.hello();
+    if (token !== undefined) {
+        await client.authenticate(token);
+    }
     return client;
 }
