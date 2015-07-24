@@ -5725,6 +5725,228 @@ fn bare_scalar_subquery_as_bool_predicate() {
     assert_eq!(ids(&rows), vec![1, 2, 3]);
 }
 
+// ─── scalar subqueries in `ORDER BY` / `LIMIT` positions ────────────────
+
+#[test]
+fn order_by_constant_scalar_subquery_keeps_scan_order() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // The subquery folds to one value for every row, so all rows tie on the
+    // single key and the stable sort keeps the scan order.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account ORDER BY (SELECT MAX(score) FROM Account)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("scalar subquery as the only sort key")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+}
+
+#[test]
+fn order_by_uncorrelated_scalar_subquery_sorts_after_the_folded_value() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // The first key is the folded value `30` on every row, so it ties and the
+    // second key decides the order.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account \
+         ORDER BY (SELECT score FROM Account WHERE account_id = 2), account_id DESC",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("scalar subquery as the leading sort key")
+    .rows;
+    assert_eq!(ids(&rows), vec![3, 2, 1]);
+}
+
+#[test]
+fn order_by_empty_scalar_subquery_sorts_by_null() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // A zero-row subquery yields `NULL`; `NULL` ties with `NULL`, so the second
+    // key again decides and the result stays well-defined.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account \
+         ORDER BY (SELECT score FROM Account WHERE account_id = 99), account_id DESC",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("empty scalar subquery as a sort key")
+    .rows;
+    assert_eq!(ids(&rows), vec![3, 2, 1]);
+}
+
+#[test]
+fn limit_and_offset_accept_scalar_subquery_counts() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // `COUNT(*)` over tenant `t1` is 2, so the cap keeps the first two ids.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account ORDER BY account_id LIMIT (SELECT COUNT(*) FROM Account WHERE tenant = 't1')",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("limit from a scalar subquery")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2]);
+
+    // `COUNT(*)` over tenant `t2` is 1, so one row is skipped.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account ORDER BY account_id OFFSET (SELECT COUNT(*) FROM Account WHERE tenant = 't2')",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("offset from a scalar subquery")
+    .rows;
+    assert_eq!(ids(&rows), vec![2, 3]);
+
+    // A subquery count composes with a literal in the other position.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account ORDER BY account_id LIMIT 2 OFFSET (SELECT COUNT(*) FROM Account WHERE tenant = 't2')",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("literal limit with a subquery offset")
+    .rows;
+    assert_eq!(ids(&rows), vec![2, 3]);
+}
+
+#[test]
+fn limit_empty_scalar_subquery_is_no_limit() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // A zero-row subquery yields `NULL`, and a `NULL` count behaves like
+    // omitting the clause: no cap, no skip.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account ORDER BY account_id LIMIT (SELECT score FROM Account WHERE account_id = 99)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("a NULL limit keeps every row")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+
+    let rows = execute_sql(
+        "SELECT account_id FROM Account ORDER BY account_id OFFSET (SELECT score FROM Account WHERE account_id = 99) LIMIT 3",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("a NULL offset skips nothing")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2, 3]);
+}
+
+#[test]
+fn order_by_rejects_a_multi_row_scalar_subquery() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let error =
+        execute_sql("SELECT account_id FROM Account ORDER BY (SELECT score FROM Account)", &[], &contract, &[], &mut records)
+            .expect_err("a multi-row sort key is not a scalar");
+    let message = format!("{error}");
+    assert!(message.contains("at most one row"), "unexpected error: {message}");
+}
+
+#[test]
+fn order_by_rejects_a_multi_column_scalar_subquery() {
+    let error = prepare_sql("SELECT account_id FROM Account ORDER BY (SELECT account_id, score FROM Account)")
+        .expect_err("a two-column subquery is not a value");
+    let message = format!("{error}");
+    assert!(message.contains("single column"), "unexpected error: {message}");
+}
+
+#[test]
+fn order_by_rejects_a_correlated_scalar_subquery() {
+    // The subquery reads the aliased enclosing row, so its value would change
+    // per row while `ORDER BY` decides the order of the whole result.
+    let error =
+        prepare_sql("SELECT a.account_id FROM Account AS a ORDER BY (SELECT score FROM Account WHERE tenant = a.tenant)")
+            .expect_err("a correlated sort key is rejected explicitly");
+    let message = format!("{error}");
+    assert!(message.contains("correlated scalar subquery"), "unexpected error: {message}");
+}
+
+#[test]
+fn limit_rejects_a_correlated_scalar_subquery() {
+    let error = prepare_sql("SELECT a.account_id FROM Account AS a LIMIT (SELECT score FROM Account WHERE tenant = a.tenant)")
+        .expect_err("a correlated row cap is rejected explicitly");
+    let message = format!("{error}");
+    assert!(message.contains("correlated scalar subquery"), "unexpected error: {message}");
+}
+
+#[test]
+fn limit_rejects_a_correlated_subquery_inside_an_expression() {
+    // Arithmetic hides the correlation from the direct subquery arm, but the
+    // lowered expression still reads the enclosing row.
+    let error =
+        prepare_sql("SELECT a.account_id FROM Account AS a LIMIT (SELECT score FROM Account WHERE tenant = a.tenant) + 1")
+            .expect_err("a correlated expression cannot set the row cap");
+    let message = format!("{error}");
+    assert!(message.contains("correlated scalar subquery"), "unexpected error: {message}");
+}
+
+#[test]
+fn limit_rejects_non_scalar_and_non_integer_subquery_results() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let error =
+        execute_sql("SELECT account_id FROM Account LIMIT (SELECT score FROM Account)", &[], &contract, &[], &mut records)
+            .expect_err("a multi-row limit is rejected at execution");
+    let message = format!("{error}");
+    assert!(message.contains("at most one row"), "unexpected error: {message}");
+
+    let error = execute_sql(
+        "SELECT account_id FROM Account LIMIT (SELECT email FROM Account WHERE account_id = 1)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("a text limit is rejected at execution");
+    let message = format!("{error}");
+    assert!(message.contains("integer or NULL"), "unexpected error: {message}");
+}
+
+#[test]
+fn limit_rejects_a_reference_to_an_unknown_qualifier() {
+    // The subquery names a qualifier no statement in scope exposes.
+    let error = prepare_sql("SELECT account_id FROM Account LIMIT (SELECT score FROM Account WHERE tenant = missing.tenant)")
+        .expect_err("a dangling qualifier is not a row source");
+    let message = format!("{error}");
+    assert!(message.contains("not a row source"), "unexpected error: {message}");
+}
+
 #[test]
 fn correlated_subqueries_reject_more_than_one_level() {
     // The innermost statement reaches past its enclosing statement, which has no

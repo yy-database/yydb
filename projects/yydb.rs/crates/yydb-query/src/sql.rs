@@ -894,7 +894,36 @@ fn lower_sort_key(item: &OrderByItem, parameters: &[ParameterDescriptor], scope:
     let ascending = !matches!(item.direction, oak_sql::ast::OrderDirection::Desc);
     match &item.expr {
         Expression::Identifier(identifier) => Ok(SortKey { field: identifier.name.to_string(), expr: None, ascending }),
-        other => Ok(SortKey { field: "expr".to_string(), expr: Some(lower_expr(other, parameters, scope)?), ascending }),
+        other => {
+            let expr = lower_expr(other, parameters, scope)?;
+            // `ORDER BY` decides the order of the whole result, so a correlated
+            // subquery there would re-run and change the comparison key for
+            // every outer row. The same rejection `LIMIT`/`OFFSET` already
+            // applies; an uncorrelated scalar subquery is folded once at
+            // execution and stays accepted.
+            if expr_has_correlated_subquery(&expr) {
+                return Err(sql_error(
+                    "a correlated scalar subquery cannot appear in `ORDER BY`: it would re-run and change the sort key for every outer row",
+                ));
+            }
+            Ok(SortKey { field: "expr".to_string(), expr: Some(expr), ascending })
+        }
+    }
+}
+
+/// Whether a lowered expression still reads the row of the statement that
+/// encloses it through a correlated [`Expr::Subquery`].
+fn expr_has_correlated_subquery(expr: &Expr) -> bool {
+    match expr {
+        Expr::Subquery { correlated, .. } => *correlated,
+        Expr::Column { .. } | Expr::Bound(_) => false,
+        Expr::Case { branches, else_branch } => {
+            branches.iter().any(|(when, then)| expr_has_correlated_subquery(when) || expr_has_correlated_subquery(then))
+                || else_branch.as_ref().is_some_and(|els| expr_has_correlated_subquery(els))
+        }
+        Expr::Cast { expr: inner, .. } | Expr::Not(inner) => expr_has_correlated_subquery(inner),
+        Expr::Binary { left, right, .. } => expr_has_correlated_subquery(left) || expr_has_correlated_subquery(right),
+        Expr::Function { args, .. } => args.iter().any(expr_has_correlated_subquery),
     }
 }
 
@@ -954,7 +983,16 @@ fn lower_limit_value(expr: &Expression, parameters: &[ParameterDescriptor], scop
                     "`LIMIT`/`OFFSET` does not support expressions that read table columns: use a literal, parameter or scalar subquery instead",
                 ));
             }
-            Ok(CountExpr::Expr(Box::new(lower_expr(other, parameters, scope)?)))
+            let expr = lower_expr(other, parameters, scope)?;
+            // A correlated subquery nested inside a wider expression (arithmetic,
+            // `CASE`, a scalar function) is the same per-row row-count change the
+            // direct `Subquery` arm rejects, so it is refused here too.
+            if expr_has_correlated_subquery(&expr) {
+                return Err(sql_error(
+                    "a correlated scalar subquery cannot set `LIMIT`/`OFFSET`: it would re-run and change the row count for every outer row",
+                ));
+            }
+            Ok(CountExpr::Expr(Box::new(expr)))
         }
     }
 }

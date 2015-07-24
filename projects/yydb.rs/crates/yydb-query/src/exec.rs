@@ -239,9 +239,19 @@ fn execute_ops_in(
             QueryOp::Sort { keys } => {
                 // Precompute a per-row sort-key value vector so the comparator can
                 // stay pure. Each SortKey either reads a named output column or
-                // computes a scalar expression per row.
+                // computes a scalar expression per row. An uncorrelated subquery
+                // inside a key is folded once before the rows are sorted, exactly
+                // like a projection: its value does not depend on any row, so
+                // re-running it per row would only repeat the same storage read.
                 let table = current_table.as_deref().unwrap_or("");
-                let row_exprs: Vec<Option<&Expr>> = keys.iter().map(|k| k.expr.as_ref()).collect();
+                let folded_keys: Vec<Option<Expr>> = keys
+                    .iter()
+                    .map(|key| match &key.expr {
+                        Some(expr) => resolve_scalar_subqueries(expr, contract, records, bound_values).map(Some),
+                        None => Ok(None),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let row_exprs: Vec<Option<&Expr>> = folded_keys.iter().map(|expr| expr.as_ref()).collect();
                 let asc: Vec<bool> = keys.iter().map(|k| k.ascending).collect();
                 let fields: Vec<&str> = keys.iter().map(|k| k.field.as_str()).collect();
                 let mut indexed: Vec<(Vec<Value>, BTreeMap<String, Value>)> = rows
@@ -273,12 +283,14 @@ fn execute_ops_in(
                 rows = indexed.into_iter().map(|(_, row)| row).collect();
             }
             QueryOp::Skip { count } => {
-                let count = resolve_count_expr(count, contract, records, bound_values)?;
-                rows = rows.into_iter().skip(count).collect();
+                if let Some(count) = resolve_count_expr(count, contract, records, bound_values)? {
+                    rows = rows.into_iter().skip(count).collect();
+                }
             }
             QueryOp::Take { count } => {
-                let count = resolve_count_expr(count, contract, records, bound_values)?;
-                rows.truncate(count);
+                if let Some(count) = resolve_count_expr(count, contract, records, bound_values)? {
+                    rows.truncate(count);
+                }
             }
             QueryOp::Collect => {}
         }
@@ -290,25 +302,30 @@ fn query_runtime_error(message: impl Into<String>) -> Error {
     Error::Schema { message: message.into() }
 }
 
-/// Resolve a CountExpr (Skip/Take count) to a usize, rejecting non-integer values.
+/// Resolve a CountExpr (Skip/Take count) to an optional row count.
+///
+/// `NULL` — a written `LIMIT NULL` or a zero-row scalar subquery — resolves to
+/// `None`, which behaves exactly like omitting the clause: no cap, no skip.
+/// A non-integer, non-`NULL` value is rejected rather than coerced.
 fn resolve_count_expr(
     count: &CountExpr,
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
-) -> Result<usize> {
+) -> Result<Option<usize>> {
     let value = match count {
         CountExpr::Bound(bv) => resolve_bound_value(bv, bound_values)?,
         CountExpr::Expr(inner) => resolve_standalone_expr(inner, contract, records, bound_values)?,
     };
     match value {
+        Value::Null => Ok(None),
         Value::I64(n) => {
             if n < 0 {
                 return Err(query_runtime_error("LIMIT/OFFSET must be non-negative"));
             }
-            Ok(n as usize)
+            Ok(Some(n as usize))
         }
-        _ => Err(query_runtime_error("LIMIT/OFFSET count must be an integer")),
+        _ => Err(query_runtime_error("LIMIT/OFFSET count must be an integer or NULL")),
     }
 }
 
