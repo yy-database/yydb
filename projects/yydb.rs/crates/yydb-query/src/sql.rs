@@ -695,9 +695,11 @@ fn lower_windows(select: &SelectStatement, parameters: &[ParameterDescriptor], c
 /// Lower one window function call.
 ///
 /// The function name decides the arity: the ranking functions take no argument,
-/// `COUNT(*)` takes the wildcard, and every other accepted function takes
-/// exactly one expression. An unimplemented function is rejected by name rather
-/// than being approximated by a nearby ranking function.
+/// `NTILE` takes the bucket count, `LAG` / `LEAD` take a value expression with
+/// an optional row offset and absent default, `COUNT(*)` takes the wildcard,
+/// and every other accepted function takes exactly one expression. An
+/// unimplemented function is rejected by name rather than being approximated by
+/// a nearby ranking function.
 fn lower_window_field(
     name: &Identifier,
     args: &[Expression],
@@ -712,6 +714,9 @@ fn lower_window_field(
         "ROW_NUMBER" => WindowFunction::RowNumber,
         "RANK" => WindowFunction::Rank,
         "DENSE_RANK" => WindowFunction::DenseRank,
+        "NTILE" => WindowFunction::Ntile,
+        "LAG" => WindowFunction::Lag,
+        "LEAD" => WindowFunction::Lead,
         "SUM" => WindowFunction::Sum,
         "COUNT" => WindowFunction::Count,
         "AVG" => WindowFunction::Avg,
@@ -720,7 +725,7 @@ fn lower_window_field(
         other => {
             return Err(sql_error(format!(
                 "window function `{other}` is not supported by YYDB \
-                 (supported: `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `SUM`, `COUNT`, `AVG`, `MIN`, `MAX`)"
+                 (supported: `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `NTILE`, `LAG`, `LEAD`, `SUM`, `COUNT`, `AVG`, `MIN`, `MAX`)"
             )));
         }
     };
@@ -729,22 +734,93 @@ fn lower_window_field(
             "`{fn_name}(DISTINCT …) OVER (...)` is not supported by YYDB: remove DISTINCT from the window call"
         )));
     }
-    let argument = match function {
+    let spec = lower_window_spec(window, ctes)?;
+    if function.requires_order() && spec.order_by.is_empty() {
+        return Err(sql_error(format!(
+            "`{fn_name}` requires an `ORDER BY` in its window: without an order there is no defined bucket or neighbouring row"
+        )));
+    }
+    let (argument, buckets, offset, absent) = match function {
         WindowFunction::RowNumber | WindowFunction::Rank | WindowFunction::DenseRank => {
             if !args.is_empty() {
                 return Err(sql_error(format!("`{fn_name}` takes no arguments, got {}", args.len())));
             }
-            None
+            (None, None, None, None)
         }
-        WindowFunction::Count if matches!(args, [Expression::Wildcard { .. }]) => None,
+        WindowFunction::Ntile => {
+            if args.len() != 1 {
+                return Err(sql_error(format!("`{fn_name}` requires exactly one bucket count, got {}", args.len())));
+            }
+            let buckets = lower_window_count(&args[0], &fn_name, "bucket count", 1)?;
+            if buckets > i64::MAX as u64 {
+                return Err(sql_error(format!("`{fn_name}` bucket count {buckets} is outside the signed 64-bit range")));
+            }
+            (None, Some(buckets), None, None)
+        }
+        WindowFunction::Lag | WindowFunction::Lead => {
+            if args.is_empty() || args.len() > 3 {
+                return Err(sql_error(format!(
+                    "`{fn_name}` takes 1 to 3 arguments (value expression, row offset, absent default), got {}",
+                    args.len()
+                )));
+            }
+            let argument = Some(lower_project_expr(&args[0], parameters, ctes)?);
+            let offset = match args.get(1) {
+                Some(expr) => Some(lower_window_count(expr, &fn_name, "row offset", 0)?),
+                None => None,
+            };
+            let absent = match args.get(2) {
+                Some(expr) => Some(lower_window_constant(expr, parameters, ctes, &fn_name)?),
+                None => None,
+            };
+            (argument, None, offset, absent)
+        }
+        WindowFunction::Count if matches!(args, [Expression::Wildcard { .. }]) => (None, None, None, None),
         _ => {
             if args.len() != 1 {
                 return Err(sql_error(format!("`{fn_name}` requires exactly one argument, got {}", args.len())));
             }
-            Some(lower_project_expr(&args[0], parameters, ctes)?)
+            (Some(lower_project_expr(&args[0], parameters, ctes)?), None, None, None)
         }
     };
-    Ok(WindowField { name: output, function, argument, spec: lower_window_spec(window, ctes)? })
+    Ok(WindowField { name: output, function, argument, buckets, offset, absent, spec })
+}
+
+/// Lower an integer constant argument of a window function (`NTILE`'s bucket
+/// count, `LAG` / `LEAD`'s row offset). The argument must be written as a plain
+/// numeric literal, so the plan carries a fixed count instead of re-deriving it
+/// from the rows the window is about to read.
+fn lower_window_count(expr: &Expression, fn_name: &str, role: &str, minimum: u64) -> Result<u64> {
+    let Expression::Literal(Literal::Number(text, _)) = expr
+    else {
+        return Err(sql_error(format!(
+            "`{fn_name}` {role} must be a plain non-negative integer constant of at least {minimum}"
+        )));
+    };
+    let value: u64 =
+        text.parse().map_err(|_| sql_error(format!("`{fn_name}` {role} `{text}` is not a non-negative integer constant")))?;
+    if value < minimum {
+        return Err(sql_error(format!("`{fn_name}` {role} must be at least {minimum}, got {value}")));
+    }
+    Ok(value)
+}
+
+/// Lower the absent default of `LAG` / `LEAD`. The default must be a constant
+/// literal: reading a column of the current row would mix two rows into one
+/// value, which is exactly what the offset lookup is deciding.
+fn lower_window_constant(
+    expr: &Expression,
+    parameters: &[ParameterDescriptor],
+    ctes: &CteScope,
+    fn_name: &str,
+) -> Result<ProjectExpr> {
+    let lowered = lower_project_expr(expr, parameters, ctes)?;
+    if !matches!(&lowered, ProjectExpr::Computed(inner) if matches!(**inner, Expr::Bound(BoundValue::Literal(_)))) {
+        return Err(sql_error(format!(
+            "`{fn_name}` absent default must be a constant literal, not a column reference or a computed expression"
+        )));
+    }
+    Ok(lowered)
 }
 
 /// Lower an `OVER (...)` clause into the shared [`WindowSpec`].

@@ -634,8 +634,8 @@ impl AggregateField {
 
 /// Window function one [`WindowField`] computes.
 ///
-/// The ranking functions ignore the frame; the aggregates evaluate it, so they
-/// follow the same type rules as the plain [`AggregateField`] path.
+/// The ranking and value functions ignore the frame; the aggregates evaluate
+/// it, so they follow the same type rules as the plain [`AggregateField`] path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowFunction {
     /// `ROW_NUMBER()`: 1-based position inside the ordered partition.
@@ -644,6 +644,15 @@ pub enum WindowFunction {
     Rank,
     /// `DENSE_RANK()`: 1-based peer group number with no gaps.
     DenseRank,
+    /// `NTILE(n)`: 1-based bucket number spreading the partition over `n`
+    /// buckets, the larger buckets first.
+    Ntile,
+    /// `LAG(expr [, offset [, default]])`: `expr` of the row `offset` rows
+    /// before the current row in the window order.
+    Lag,
+    /// `LEAD(expr [, offset [, default]])`: `expr` of the row `offset` rows
+    /// after the current row in the window order.
+    Lead,
     /// `SUM(expr)` over the frame.
     Sum,
     /// `COUNT(*)` or `COUNT(expr)` over the frame.
@@ -663,6 +672,9 @@ impl WindowFunction {
             Self::RowNumber => "ROW_NUMBER",
             Self::Rank => "RANK",
             Self::DenseRank => "DENSE_RANK",
+            Self::Ntile => "NTILE",
+            Self::Lag => "LAG",
+            Self::Lead => "LEAD",
             Self::Sum => "SUM",
             Self::Count => "COUNT",
             Self::Avg => "AVG",
@@ -673,9 +685,15 @@ impl WindowFunction {
 
     /// Whether the function reads a value expression from each row.
     ///
-    /// The ranking functions do not, and neither does `COUNT(*)`.
+    /// The ranking functions do not, neither does `COUNT(*)`, and `NTILE`
+    /// takes only its bucket count, which is not read per row.
     pub fn reads_argument(self) -> bool {
-        !matches!(self, Self::RowNumber | Self::Rank | Self::DenseRank)
+        !matches!(self, Self::RowNumber | Self::Rank | Self::DenseRank | Self::Ntile)
+    }
+
+    /// Whether the function needs an `ORDER BY` so its row position is defined.
+    pub fn requires_order(self) -> bool {
+        matches!(self, Self::Ntile | Self::Lag | Self::Lead)
     }
 }
 
@@ -746,9 +764,17 @@ pub struct WindowField {
     pub name: String,
     /// Function to compute.
     pub function: WindowFunction,
-    /// Value expression per row. `None` only for the ranking functions and
-    /// `COUNT(*)`.
+    /// Value expression per row. `None` only for the ranking functions,
+    /// `NTILE` and `COUNT(*)`.
     pub argument: Option<ProjectExpr>,
+    /// Bucket count of `NTILE(n)`. `None` for every other function.
+    pub buckets: Option<u64>,
+    /// Row offset of `LAG` / `LEAD`. `None` for every other function; the SQL
+    /// default is 1.
+    pub offset: Option<u64>,
+    /// Value `LAG` / `LEAD` substitute when the offset reaches beyond the
+    /// partition. `None` yields `NULL`, which is also the SQL default.
+    pub absent: Option<ProjectExpr>,
     /// Window the function is evaluated over.
     pub spec: WindowSpec,
 }

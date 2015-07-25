@@ -359,6 +359,90 @@ fn window_rows_frame_outside_the_partition_is_empty() {
     assert_eq!(cell(&rows[4], "lowest"), Value::Null);
 }
 
+// ─── value functions ────────────────────────────────────────────────────
+
+#[test]
+fn window_ntile_spreads_the_partition_over_buckets() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    let rows = rows(
+        "SELECT sale_id, \
+                NTILE(2) OVER (ORDER BY amount, sale_id) AS b, \
+                NTILE(2) OVER (PARTITION BY region ORDER BY amount, sale_id) AS rb \
+         FROM Sale ORDER BY sale_id",
+        &contract,
+        &mut records,
+    );
+
+    // Five rows over two buckets put the larger bucket first; `east` holds
+    // three rows and `west` two.
+    let expected = [(1_i64, 1_i64, 1_i64), (2, 2, 1), (3, 2, 2), (4, 1, 1), (5, 1, 2)];
+    assert_eq!(rows.len(), expected.len());
+    for (row, (id, b, rb)) in rows.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "b"), Value::I64(b));
+        assert_eq!(cell(row, "rb"), Value::I64(rb));
+    }
+}
+
+#[test]
+fn window_lag_and_lead_read_the_neighbouring_rows() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    let rows = rows(
+        "SELECT sale_id, \
+                LAG(amount) OVER (PARTITION BY region ORDER BY amount, sale_id) AS prev, \
+                LEAD(amount) OVER (PARTITION BY region ORDER BY amount, sale_id) AS next \
+         FROM Sale ORDER BY sale_id",
+        &contract,
+        &mut records,
+    );
+
+    // The partition edge has no neighbour, so the default `NULL` is produced.
+    let expected: [(i64, Value, Value); 5] = [
+        (1, Value::Null, Value::I64(20)),
+        (2, Value::I64(10), Value::I64(20)),
+        (3, Value::I64(20), Value::Null),
+        (4, Value::Null, Value::I64(15)),
+        (5, Value::I64(5), Value::Null),
+    ];
+    assert_eq!(rows.len(), expected.len());
+    for (row, (id, prev, next)) in rows.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "prev"), prev);
+        assert_eq!(cell(row, "next"), next);
+    }
+}
+
+#[test]
+fn window_lag_offset_and_default_apply_at_the_partition_edge() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    // Global order by amount: 5(id4), 10(id1), 15(id5), 20(id2), 20(id3).
+    let rows = rows(
+        "SELECT sale_id, \
+                LAG(amount, 2, -1) OVER (ORDER BY amount, sale_id) AS back2, \
+                LEAD(amount, 3, 0) OVER (ORDER BY amount, sale_id) AS ahead3 \
+         FROM Sale ORDER BY sale_id",
+        &contract,
+        &mut records,
+    );
+
+    let expected = [(1_i64, -1_i64, 20_i64), (2, 10, 0), (3, 15, 0), (4, -1, 20), (5, 5, 0)];
+    assert_eq!(rows.len(), expected.len());
+    for (row, (id, back2, ahead3)) in rows.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "back2"), Value::I64(back2));
+        assert_eq!(cell(row, "ahead3"), Value::I64(ahead3));
+    }
+}
+
 // ─── rejections ─────────────────────────────────────────────────────────
 
 #[test]
@@ -403,11 +487,44 @@ fn window_inside_aggregate_argument_is_rejected() {
 
 #[test]
 fn window_unimplemented_functions_are_rejected() {
-    for call in ["NTILE(2)", "LAG(amount)", "LEAD(amount)", "FIRST_VALUE(amount)", "LAST_VALUE(amount)"] {
+    for call in ["FIRST_VALUE(amount)", "LAST_VALUE(amount)"] {
         let sql = format!("SELECT {call} OVER (PARTITION BY region ORDER BY amount) AS w FROM Sale");
         let error = prepare_sql(&sql).expect_err("an unimplemented window function must be rejected");
         assert!(format!("{error}").contains("is not supported by YYDB"), "unexpected function error: {error}");
     }
+}
+
+#[test]
+fn window_ntile_requires_an_order_and_a_positive_constant() {
+    let error = prepare_sql("SELECT NTILE(2) OVER (PARTITION BY region) AS b FROM Sale")
+        .expect_err("NTILE without ORDER BY must be rejected");
+    assert!(format!("{error}").contains("requires an `ORDER BY`"), "unexpected order error: {error}");
+
+    let error = prepare_sql("SELECT NTILE(0) OVER (ORDER BY amount) AS b FROM Sale").expect_err("NTILE(0) must be rejected");
+    assert!(format!("{error}").contains("at least 1"), "unexpected bucket error: {error}");
+
+    let error = prepare_sql("SELECT NTILE(amount) OVER (ORDER BY amount) AS b FROM Sale")
+        .expect_err("a column bucket count must be rejected");
+    assert!(format!("{error}").contains("plain non-negative integer constant"), "unexpected constant error: {error}");
+}
+
+#[test]
+fn window_lag_and_lead_validate_their_arguments() {
+    let error = prepare_sql("SELECT LAG(amount) OVER (PARTITION BY region) AS l FROM Sale")
+        .expect_err("LAG without ORDER BY must be rejected");
+    assert!(format!("{error}").contains("requires an `ORDER BY`"), "unexpected order error: {error}");
+
+    let error = prepare_sql("SELECT LEAD(amount, -1) OVER (ORDER BY amount) AS l FROM Sale")
+        .expect_err("a negative offset must be rejected");
+    assert!(format!("{error}").contains("row offset"), "unexpected offset error: {error}");
+
+    let error = prepare_sql("SELECT LAG(amount, 1, region) OVER (ORDER BY amount) AS l FROM Sale")
+        .expect_err("a column default must be rejected");
+    assert!(format!("{error}").contains("constant literal"), "unexpected default error: {error}");
+
+    let error = prepare_sql("SELECT LEAD(amount, 1, 2, 3) OVER (ORDER BY amount) AS l FROM Sale")
+        .expect_err("four arguments must be rejected");
+    assert!(format!("{error}").contains("1 to 3 arguments"), "unexpected arity error: {error}");
 }
 
 #[test]
