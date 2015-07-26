@@ -443,16 +443,161 @@ fn window_lag_offset_and_default_apply_at_the_partition_edge() {
     }
 }
 
+// ─── range frames ───────────────────────────────────────────────────────
+
+#[test]
+fn window_range_preceding_frame_compares_values_not_rows() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    // `1 PRECEDING` is a value distance: the two `east` 20s sit within 1 of
+    // each other, while 10 is 10 away and stays out of their frame.
+    let rows = rows(
+        "SELECT sale_id, \
+                SUM(amount) OVER (PARTITION BY region ORDER BY amount RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS s \
+         FROM Sale ORDER BY sale_id",
+        &contract,
+        &mut records,
+    );
+
+    let expected = [(1_i64, 10_i64), (2, 40), (3, 40), (4, 5), (5, 15)];
+    assert_eq!(rows.len(), expected.len());
+    for (row, (id, sum)) in rows.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "s"), Value::I64(sum));
+    }
+}
+
+#[test]
+fn window_range_following_frame_reaches_forward_values() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    // Global order by amount: 5, 10, 15, 20, 20. `5 FOLLOWING` keeps each row's
+    // frame inside the value window, so 15 sees both 20s.
+    let rows = rows(
+        "SELECT sale_id, \
+                SUM(amount) OVER (ORDER BY amount RANGE BETWEEN CURRENT ROW AND 5 FOLLOWING) AS s \
+         FROM Sale ORDER BY sale_id",
+        &contract,
+        &mut records,
+    );
+
+    let expected = [(1_i64, 25_i64), (2, 40), (3, 40), (4, 15), (5, 55)];
+    assert_eq!(rows.len(), expected.len());
+    for (row, (id, sum)) in rows.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "s"), Value::I64(sum));
+    }
+}
+
+#[test]
+fn window_range_descending_offsets_follow_the_sort_direction() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    // In a descending order the preceding rows hold larger values, so
+    // `15 PRECEDING` of the `east` 10 reaches 25 and pulls in both 20s.
+    let rows = rows(
+        "SELECT sale_id, \
+                SUM(amount) OVER (PARTITION BY region ORDER BY amount DESC RANGE BETWEEN 15 PRECEDING AND CURRENT ROW) AS s \
+         FROM Sale ORDER BY sale_id",
+        &contract,
+        &mut records,
+    );
+
+    let expected = [(1_i64, 50_i64), (2, 40), (3, 40), (4, 20), (5, 15)];
+    assert_eq!(rows.len(), expected.len());
+    for (row, (id, sum)) in rows.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "s"), Value::I64(sum));
+    }
+}
+
+#[test]
+fn window_range_null_key_collapses_to_the_peer_group() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    exec("INSERT INTO Sale (sale_id, region, amount) VALUES (1, 'east', NULL)", &contract, &mut records);
+    exec("INSERT INTO Sale (sale_id, region, amount) VALUES (2, 'east', 10)", &contract, &mut records);
+    exec("INSERT INTO Sale (sale_id, region, amount) VALUES (3, 'east', NULL)", &contract, &mut records);
+
+    let rows = rows(
+        "SELECT sale_id, \
+                SUM(amount) OVER (PARTITION BY region ORDER BY amount RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS s, \
+                COUNT(amount) OVER (PARTITION BY region ORDER BY amount RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS c \
+         FROM Sale ORDER BY sale_id",
+        &contract,
+        &mut records,
+    );
+
+    // `NULL` has no value distance: its frame is exactly its own peer group,
+    // and the non-`NULL` row never reads the `NULL` rows.
+    assert_eq!(cell(&rows[0], "s"), Value::Null);
+    assert_eq!(cell(&rows[0], "c"), Value::I64(0));
+    assert_eq!(cell(&rows[1], "s"), Value::I64(10));
+    assert_eq!(cell(&rows[1], "c"), Value::I64(1));
+    assert_eq!(cell(&rows[2], "s"), Value::Null);
+    assert_eq!(cell(&rows[2], "c"), Value::I64(0));
+}
+
+#[test]
+fn window_range_unbounded_frames_span_the_partition() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    // Unbounded bounds need no value arithmetic, so they also work over a
+    // text order and without any `ORDER BY` at all.
+    let rows = rows(
+        "SELECT sale_id, \
+                SUM(amount) OVER (PARTITION BY region ORDER BY region RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS r, \
+                SUM(amount) OVER (PARTITION BY region RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS p \
+         FROM Sale ORDER BY sale_id",
+        &contract,
+        &mut records,
+    );
+
+    let expected = [(1_i64, 50_i64, 50_i64), (2, 50, 50), (3, 50, 50), (4, 20, 20), (5, 20, 20)];
+    assert_eq!(rows.len(), expected.len());
+    for (row, (id, r, p)) in rows.iter().zip(expected) {
+        assert_eq!(cell(row, "sale_id"), Value::I64(id));
+        assert_eq!(cell(row, "r"), Value::I64(r));
+        assert_eq!(cell(row, "p"), Value::I64(p));
+    }
+}
+
 // ─── rejections ─────────────────────────────────────────────────────────
 
 #[test]
-fn window_range_frame_is_rejected() {
-    let error = prepare_sql(
-        "SELECT SUM(amount) OVER (PARTITION BY region ORDER BY amount RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS s \
-         FROM Sale",
+fn window_range_offset_needs_exactly_one_order_key() {
+    let error = prepare_sql("SELECT SUM(amount) OVER (RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS s FROM Sale")
+        .expect_err("a RANGE offset without ORDER BY must be rejected");
+    assert!(format!("{error}").contains("exactly one `ORDER BY` key"), "unexpected error: {error}");
+
+    let error = prepare_sql("SELECT SUM(amount) OVER (ORDER BY region, amount RANGE 1 PRECEDING) AS s FROM Sale")
+        .expect_err("a RANGE offset over several keys must be rejected");
+    assert!(format!("{error}").contains("exactly one `ORDER BY` key"), "unexpected error: {error}");
+}
+
+#[test]
+fn window_range_offset_over_a_text_key_is_a_runtime_error() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed_ties(&contract, &mut records);
+
+    let error = execute_sql(
+        "SELECT SUM(amount) OVER (ORDER BY region RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS s FROM Sale",
+        &[],
+        &contract,
+        &[],
+        &mut records,
     )
-    .expect_err("a RANGE frame must be rejected");
-    assert!(format!("{error}").contains("`RANGE` window frames"), "unexpected frame error: {error}");
+    .expect_err("a text key has no value distance");
+    assert!(format!("{error}").contains("must be numeric"), "unexpected error: {error}");
 }
 
 #[test]

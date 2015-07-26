@@ -16,7 +16,8 @@ use super::{
     lower,
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, CountExpr, Expr, JoinKind, OUTER_ROW_MARKER, Pred, ProjectExpr,
-        ProjectField, QueryOp, QueryRow, ScalarFunction, SetOpKind, WindowField, WindowFrameBound, WindowFunction,
+        ProjectField, QueryOp, QueryRow, ScalarFunction, SetOpKind, WindowField, WindowFrame, WindowFrameBound,
+        WindowFrameUnit, WindowFunction,
     },
     resolve, store,
 };
@@ -2312,7 +2313,7 @@ fn eval_window_partition(
     }
 
     for (position, &slot) in order.iter().enumerate() {
-        let (start, end) = window_frame_range(field, &keys, &order, position);
+        let (start, end) = window_frame_range(field, &keys, &order, position)?;
         let frame_rows: Vec<QueryRow> = if start <= end {
             order[start..=end].iter().map(|&index| rows[partition[index]].clone()).collect()
         }
@@ -2362,27 +2363,162 @@ fn compare_window_keys(field: &WindowField, left: &[Value], right: &[Value]) -> 
 /// there is no `ORDER BY`, otherwise everything up to and including the current
 /// row's last peer. An explicit `ROWS` frame counts rows from the current row
 /// and is clamped to the partition, so an out-of-range bound never reads a row
-/// outside it. A frame that starts after it ends is reported as `start > end`,
-/// which the caller turns into the aggregate's empty-input result.
-fn window_frame_range(field: &WindowField, keys: &[Vec<Value>], order: &[usize], position: usize) -> (usize, usize) {
+/// outside it. An explicit `RANGE` frame compares the `ORDER BY` key's value
+/// instead; see [`range_frame_bounds`]. A frame that starts after it ends is
+/// reported as `start > end`, which the caller turns into the aggregate's
+/// empty-input result.
+fn window_frame_range(field: &WindowField, keys: &[Vec<Value>], order: &[usize], position: usize) -> Result<(usize, usize)> {
     let len = order.len();
     let Some(frame) = &field.spec.frame
     else {
         if field.spec.order_by.is_empty() {
-            return (0, len - 1);
+            return Ok((0, len - 1));
         }
         let mut end = position;
         while end + 1 < len && compare_window_keys(field, &keys[order[position]], &keys[order[end + 1]]).is_eq() {
             end += 1;
         }
-        return (0, end);
+        return Ok((0, end));
     };
+    if frame.unit == WindowFrameUnit::Range {
+        return range_frame_bounds(field, frame, keys, order, position);
+    }
     let start = frame_bound_index(&frame.start, position, len).max(0);
     let end = frame_bound_index(&frame.end, position, len).min(len as i64 - 1);
     if start > end {
-        return (1, 0);
+        return Ok((1, 0));
     }
-    (start as usize, end as usize)
+    Ok((start as usize, end as usize))
+}
+
+/// Value threshold one `RANGE` frame offset denotes, kept in the widest exact
+/// form the written numbers allow.
+enum RangeThreshold {
+    /// Exact integer side for the `i64` / `u64` family.
+    Int(i128),
+    /// Floating side, matching the `compare_values` treatment of mixed numeric
+    /// values.
+    Float(f64),
+}
+
+/// Offset the current key by `n`, `add` picking the written direction. Only
+/// the numeric family carries a value distance, so anything else is rejected
+/// rather than guessed at.
+fn range_threshold(current: &Value, offset: u64, add: bool) -> Result<RangeThreshold> {
+    let offset = offset as i128;
+    match current {
+        Value::I64(number) => Ok(RangeThreshold::Int(if add { *number as i128 + offset } else { *number as i128 - offset })),
+        Value::U64(number) => Ok(RangeThreshold::Int(if add { *number as i128 + offset } else { *number as i128 - offset })),
+        Value::F64(number) => Ok(RangeThreshold::Float(if add { *number + offset as f64 } else { *number - offset as f64 })),
+        _ => Err(query_runtime_error("a `RANGE` frame offset compares values, so its `ORDER BY` key must be numeric")),
+    }
+}
+
+/// Whether one ordered key sits at (or beyond) the threshold, `at_least`
+/// picking the side. `NULL` never sits within a value distance of a non-`NULL`
+/// threshold, and a non-numeric key is the same runtime error the current row's
+/// would be.
+fn range_key_satisfies(key: &Value, threshold: &RangeThreshold, at_least: bool) -> Result<bool> {
+    let ordering = match (key, threshold) {
+        (Value::Null, _) => return Ok(false),
+        (Value::I64(number), RangeThreshold::Int(threshold)) => (*number as i128).cmp(threshold),
+        (Value::U64(number), RangeThreshold::Int(threshold)) => (*number as i128).cmp(threshold),
+        (Value::I64(number), RangeThreshold::Float(threshold)) => (*number as f64).total_cmp(threshold),
+        (Value::U64(number), RangeThreshold::Float(threshold)) => (*number as f64).total_cmp(threshold),
+        (Value::F64(number), RangeThreshold::Int(threshold)) => number.total_cmp(&(*threshold as f64)),
+        (Value::F64(number), RangeThreshold::Float(threshold)) => number.total_cmp(threshold),
+        _ => {
+            return Err(query_runtime_error("a `RANGE` frame offset compares values, so its `ORDER BY` key must be numeric"));
+        }
+    };
+    Ok(if at_least { ordering != std::cmp::Ordering::Less } else { ordering != std::cmp::Ordering::Greater })
+}
+
+/// Inclusive frame bounds of one `RANGE` frame as indices into `order`.
+///
+/// `CURRENT ROW` and the unbounded bounds need no arithmetic: they denote the
+/// current row's peer group and the partition edges. An offset bound denotes a
+/// value `n` away from the current row's `ORDER BY` key — lowering guarantees
+/// exactly one key once an offset is written — and the frame is the contiguous
+/// run of ordered rows whose key lies between the two bounds. A `NULL` key has
+/// no value distance, so an offset bound collapses to the current row's peer
+/// group, exactly like `CURRENT ROW`.
+fn range_frame_bounds(
+    field: &WindowField,
+    frame: &WindowFrame,
+    keys: &[Vec<Value>],
+    order: &[usize],
+    position: usize,
+) -> Result<(usize, usize)> {
+    let len = order.len();
+    // A `RANGE` offset lowers only with exactly one `ORDER BY` key, so without
+    // an order every bound is unbounded or `CURRENT ROW`, every row is a peer,
+    // and no key value is ever read.
+    let key_at = |index: usize| &keys[order[index]][0];
+    let has_order = !field.spec.order_by.is_empty();
+    let current = if has_order { key_at(position) } else { &Value::Null };
+    let ascending = field.spec.order_by.first().map_or(true, |key| key.ascending);
+    let null_current = matches!(current, Value::Null);
+
+    let mut first_peer = position;
+    while first_peer > 0 && compare_window_keys(field, &keys[order[position]], &keys[order[first_peer - 1]]).is_eq() {
+        first_peer -= 1;
+    }
+    let mut last_peer = position;
+    while last_peer + 1 < len && compare_window_keys(field, &keys[order[position]], &keys[order[last_peer + 1]]).is_eq() {
+        last_peer += 1;
+    }
+
+    // `PRECEDING` moves against the sort direction and `FOLLOWING` with it, so
+    // the same rule decides the threshold for both bounds.
+    let threshold_of = |bound: &WindowFrameBound| -> Result<RangeThreshold> {
+        let offset = match bound {
+            WindowFrameBound::Preceding(offset) | WindowFrameBound::Following(offset) => *offset,
+            _ => unreachable!("the arms below only pass an offset bound here"),
+        };
+        let add = matches!(bound, WindowFrameBound::Following(_)) == ascending;
+        range_threshold(current, offset, add)
+    };
+
+    let start = match &frame.start {
+        WindowFrameBound::UnboundedPreceding => 0,
+        WindowFrameBound::CurrentRow => first_peer,
+        WindowFrameBound::UnboundedFollowing => len - 1,
+        bound if null_current => first_peer,
+        bound => {
+            let threshold = threshold_of(bound)?;
+            // Ascending keys grow along the order, so the frame starts at the
+            // first key at or above the threshold; descending flips the test.
+            let mut index = 0;
+            while index < len && !range_key_satisfies(key_at(index), &threshold, ascending)? {
+                index += 1;
+            }
+            index
+        }
+    };
+    let end = match &frame.end {
+        WindowFrameBound::UnboundedFollowing => len - 1,
+        WindowFrameBound::CurrentRow => last_peer,
+        WindowFrameBound::UnboundedPreceding => 0,
+        bound if null_current => last_peer,
+        bound => {
+            let threshold = threshold_of(bound)?;
+            let mut index = len;
+            let mut found = false;
+            while index > 0 && !found {
+                index -= 1;
+                found = range_key_satisfies(key_at(index), &threshold, !ascending)?;
+            }
+            if !found {
+                return Ok((1, 0));
+            }
+            index
+        }
+    };
+    if start > end {
+        return Ok((1, 0));
+    }
+    Ok((start, end))
 }
 
 /// Index one frame bound denotes, before it is clamped to the partition.
