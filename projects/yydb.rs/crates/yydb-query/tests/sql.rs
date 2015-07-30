@@ -6036,6 +6036,76 @@ fn limit_rejects_a_reference_to_an_unknown_qualifier() {
 }
 
 #[test]
+fn order_by_folds_a_subquery_nested_in_an_expression() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // The subquery folds once to `30`, so the key becomes `30 - score` per row:
+    // id 2 scores 0, id 3 scores 10, id 1 scores 20.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account ORDER BY (SELECT MAX(score) FROM Account) - score",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("a folded subquery inside an arithmetic sort key")
+    .rows;
+    assert_eq!(ids(&rows), vec![2, 3, 1]);
+}
+
+#[test]
+fn limit_accepts_an_uncorrelated_subquery_inside_an_expression() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // `COUNT(*)` over tenant `t2` is 1, so the arithmetic count caps at 2 rows.
+    let rows = execute_sql(
+        "SELECT account_id FROM Account ORDER BY account_id LIMIT (SELECT COUNT(*) FROM Account WHERE tenant = 't2') + 1",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("an uncorrelated subquery inside a limit expression")
+    .rows;
+    assert_eq!(ids(&rows), vec![1, 2]);
+}
+
+#[test]
+fn limit_rejects_a_negative_or_fractional_subquery_count() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // A negative folded value hits the same non-negative gate a literal does.
+    let error = execute_sql(
+        "SELECT account_id FROM Account LIMIT (SELECT score - 100 FROM Account WHERE account_id = 1)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("a negative row cap is rejected");
+    let message = format!("{error}");
+    assert!(message.contains("non-negative"), "unexpected error: {message}");
+
+    // `AVG` yields `F64`, and a fractional count is rejected rather than rounded.
+    let error = execute_sql(
+        "SELECT account_id FROM Account LIMIT (SELECT AVG(score) FROM Account WHERE account_id = 1 OR account_id = 2)",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect_err("a fractional row cap is rejected");
+    let message = format!("{error}");
+    assert!(message.contains("integer or NULL"), "unexpected error: {message}");
+}
+
+#[test]
 fn correlated_subqueries_reject_more_than_one_level() {
     // The innermost statement reaches past its enclosing statement, which has no
     // single row to hand down at that depth.
