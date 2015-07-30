@@ -349,7 +349,8 @@ fn lower_select(select: &SelectStatement, parameters: &[ParameterDescriptor], ct
 /// Extend one statement's `WITH` scope with the clause's definitions.
 ///
 /// The definitions are lowered in written order, so each one may reference the
-/// CTEs above it. Renaming a CTE's output columns is not modelled yet.
+/// CTEs above it. A written column list renames the body's leading output
+/// columns by position; see [`rename_cte_columns`] for the accepted shapes.
 fn extend_cte_scope(scope: &mut CteScope, with_clause: Option<&WithClause>, parameters: &[ParameterDescriptor]) -> Result<()> {
     let Some(with_clause) = with_clause
     else {
@@ -360,17 +361,47 @@ fn extend_cte_scope(scope: &mut CteScope, with_clause: Option<&WithClause>, para
         if scope.pipelines.contains_key(&name) {
             return Err(sql_error(format!("`{name}` is defined more than once in the same `WITH` scope")));
         }
-        if !cte.columns.is_empty() {
-            return Err(sql_error(format!(
-                "renaming the output columns of CTE `{name}` (`WITH {name}(a, b) AS …`) is not supported yet"
-            )));
-        }
         // A `WITH` body is a statement of its own, so it cannot read the row of
         // the statement that writes the clause.
         let mut body = scope.clone();
         body.frames.clear();
-        let (ops, _) = lower_select(&cte.query, parameters, &body)?;
+        let (mut ops, _) = lower_select(&cte.query, parameters, &body)?;
+        if !cte.columns.is_empty() {
+            rename_cte_columns(&name, &mut ops, &cte.columns)?;
+        }
         scope.pipelines.insert(name, ops);
+    }
+    Ok(())
+}
+
+/// Rename the leading output columns of one `WITH` body by position.
+///
+/// Only a body that ends in an explicit `Project` can carry a rename: the
+/// projection names every output column, so the written aliases replace the
+/// leading names and any remaining columns keep theirs. A `SELECT *` body has
+/// no projection at all and an aggregate body names its columns through the
+/// `Aggregate` op, so both stay rejected until those shapes carry a rename.
+/// Each renamed name is checked against the full output list, so a rename that
+/// would collide with another column fails at lowering.
+fn rename_cte_columns(cte: &str, ops: &mut [QueryOp], columns: &[Identifier]) -> Result<()> {
+    let [.., QueryOp::Project { fields }, QueryOp::Collect] = ops
+    else {
+        return Err(sql_error(format!(
+            "renaming the output columns of CTE `{cte}` requires a body with an explicit projection list (`WITH {cte}(a, b) AS (SELECT …)`); `SELECT *` and aggregate bodies are not supported yet"
+        )));
+    };
+    if columns.len() > fields.len() {
+        return Err(sql_error(format!("CTE `{cte}` renames {} columns but its body projects {}", columns.len(), fields.len())));
+    }
+    for (field, column) in fields.iter_mut().zip(columns) {
+        field.name = column.name.to_string();
+    }
+    let mut names: Vec<&str> = Vec::with_capacity(fields.len());
+    for field in fields.iter() {
+        if names.contains(&field.name.as_str()) {
+            return Err(sql_error(format!("CTE `{cte}` would output column `{}` more than once", field.name)));
+        }
+        names.push(&field.name);
     }
     Ok(())
 }

@@ -5003,7 +5003,7 @@ fn cte_joins_like_a_table_and_a_later_cte_reads_an_earlier_one() {
 }
 
 #[test]
-fn ctes_reject_duplicate_names_forward_references_and_column_renaming() {
+fn ctes_reject_duplicate_names_and_forward_references() {
     let contract = contract();
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
@@ -5012,10 +5012,6 @@ fn ctes_reject_duplicate_names_forward_references_and_column_renaming() {
         prepare_sql("WITH x AS (SELECT account_id FROM Account), x AS (SELECT account_id FROM Account) SELECT * FROM x")
             .expect_err("a name may be defined once per scope");
     assert!(format!("{duplicate}").contains("more than once"), "unexpected error: {duplicate}");
-
-    let renamed = prepare_sql("WITH x(account_id) AS (SELECT account_id FROM Account) SELECT * FROM x")
-        .expect_err("column renaming is not lowered");
-    assert!(format!("{renamed}").contains("not supported yet"), "unexpected error: {renamed}");
 
     // `b` is written after `a`, so it is not a visible name: the non-recursive
     // clause must not resolve it, and reading it as a stored table fails.
@@ -5030,6 +5026,98 @@ fn ctes_reject_duplicate_names_forward_references_and_column_renaming() {
         .is_err(),
         "a forward reference must not silently resolve"
     );
+}
+
+#[test]
+fn cte_column_lists_rename_the_leading_output_columns() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // Every written alias renames its position in the body projection, and the
+    // statement reads the CTE through the new names.
+    let rows = execute_sql(
+        "WITH top(a, t) AS (SELECT account_id, tenant FROM Account WHERE score >= 20) \
+         SELECT a FROM top ORDER BY a",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("renamed CTE")
+    .rows;
+    assert_eq!(column(&rows, "a"), vec![Value::I64(2), Value::I64(3)]);
+
+    // The clause name still qualifies the renamed columns.
+    let rows = execute_sql(
+        "WITH top(a, t) AS (SELECT account_id, tenant FROM Account WHERE score >= 20) \
+         SELECT top.a AS id, top.t AS tenant FROM top ORDER BY id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("qualified rename")
+    .rows;
+    assert_eq!(column(&rows, "id"), vec![Value::I64(2), Value::I64(3)]);
+    assert_eq!(column(&rows, "tenant"), vec![Value::Text("t1".into()), Value::Text("t2".into())]);
+
+    // A shorter list renames only the leading columns; the rest keep their names.
+    let rows = execute_sql(
+        "WITH top(id) AS (SELECT account_id, email FROM Account WHERE score >= 20) \
+         SELECT id, email FROM top ORDER BY id",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("partial rename")
+    .rows;
+    assert_eq!(column(&rows, "id"), vec![Value::I64(2), Value::I64(3)]);
+    assert_eq!(
+        column(&rows, "email"),
+        vec![Value::Text("linus@example.test".into()), Value::Text("grace@example.test".into())]
+    );
+
+    // A window column renames too: the projection re-emits the value the
+    // `Window` op wrote under the body name.
+    let rows = execute_sql(
+        "WITH ranked(r) AS (SELECT ROW_NUMBER() OVER (ORDER BY score) AS rn FROM Account) SELECT r FROM ranked ORDER BY r",
+        &[],
+        &contract,
+        &[],
+        &mut records,
+    )
+    .expect("renamed window column")
+    .rows;
+    assert_eq!(column(&rows, "r"), vec![Value::I64(1), Value::I64(2), Value::I64(3)]);
+}
+
+#[test]
+fn cte_column_lists_reject_renames_without_a_positional_target() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // More aliases than projected columns.
+    let too_many =
+        prepare_sql("WITH x(a, b) AS (SELECT account_id FROM Account) SELECT * FROM x").expect_err("a rename needs a column");
+    assert!(format!("{too_many}").contains("renames 2 columns but its body projects 1"), "unexpected error: {too_many}");
+
+    // A renamed name colliding with a remaining output column.
+    let collide = prepare_sql("WITH x(email) AS (SELECT account_id, email FROM Account) SELECT * FROM x")
+        .expect_err("the rename must stay distinct");
+    assert!(format!("{collide}").contains("more than once"), "unexpected error: {collide}");
+
+    // `SELECT *` carries no named projection to rename.
+    let star = prepare_sql("WITH x(a) AS (SELECT * FROM Account) SELECT * FROM x").expect_err("a star body has no projection");
+    assert!(format!("{star}").contains("explicit projection list"), "unexpected error: {star}");
+
+    // An aggregate body names its columns through the `Aggregate` op, which has
+    // no rename yet.
+    let aggregate =
+        prepare_sql("WITH x(total) AS (SELECT COUNT(*) FROM Account) SELECT total FROM x").expect_err("aggregate rename waits");
+    assert!(format!("{aggregate}").contains("explicit projection list"), "unexpected error: {aggregate}");
 }
 
 // ─── set operations ────────────────────────────────────────────────────
