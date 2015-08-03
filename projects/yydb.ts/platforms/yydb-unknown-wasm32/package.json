@@ -39,5 +39,5 @@
         "./lib/yydb_wasm.js"
     ],
     "type": "module",
-    "version": "0.1.17"
+    "version": "0.1.18"
 }

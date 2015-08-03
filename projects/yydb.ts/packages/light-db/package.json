@@ -1,6 +1,6 @@
 {
     "name": "@yydb/light-db",
-    "version": "0.1.17",
+    "version": "0.1.18",
     "description": "Light DB — browser-native YYDB database backed by Rust WASM (yydb-unknown-wasm32)",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
