@@ -410,6 +410,89 @@ fn victim_dir(chunk: &yydb::ObjectRef) -> String {
     chunk.hash_hex().chars().take(2).collect()
 }
 
+const FILE_VECTOR_SCHEMA: &str = r#"
+table Embedding {
+    @@id: i64,
+    payload: file,
+    embedding: vector<121>,
+}
+"#;
+
+fn insert_embedding(conn: &yydb::Connection, id: i64, file: &FileDescriptor, embedding: Value) -> yydb::Result<()> {
+    conn.execute_vos_write_with_params(
+        "Embedding::insert({ id: $id, payload: $payload, embedding: $embedding })",
+        &std::collections::BTreeMap::from([
+            ("id".to_string(), Value::I64(id)),
+            ("payload".to_string(), Value::File(file.clone())),
+            ("embedding".to_string(), embedding),
+        ]),
+    )
+}
+
+/// Hash of the `vector-payload` object the stored row references for `embedding`.
+fn stored_vector_object_hash(conn: &yydb::Connection, table: &str) -> String {
+    let rows = conn.scan_prefix(&format!("__yydb/v0/row/{table}/"), None, 64).unwrap();
+    assert_eq!(rows.len(), 1, "one stored row");
+    let json: serde_json::Value = serde_json::from_slice(&rows[0].1).unwrap();
+    let object = json.get("embedding").expect("embedding member");
+    assert_eq!(object["$yydb"], "object", "a 121-dim vector must leave the inline boundary: {json}");
+    assert_eq!(object["kind"], "vector-payload", "object kind must be vector-payload: {json}");
+    object["hash"].as_str().expect("object hash").to_owned()
+}
+
+#[test]
+fn restore_verifies_every_object_reference_not_only_file_digests() {
+    let (conn, path) = open_temp_yydx("file-vector-restore");
+    conn.ensure_schema(FILE_VECTOR_SCHEMA).unwrap();
+    let octets = payload(700);
+    let file = conn.put_file(Cursor::new(octets.clone()), 256, Some("asset.bin".into()), None).unwrap();
+    let embedding: Vec<f32> = (0..121).map(|index| index as f32 * 0.5 + 0.25).collect();
+    insert_embedding(&conn, 1, &file, Value::Vector(yydb::Vector::new(embedding.clone()).unwrap())).unwrap();
+
+    let vector_hash = stored_vector_object_hash(&conn, "Embedding");
+    assert!(conn.objects().path_for_hash(&vector_hash).exists(), "the vector object reference must be stored as a blob");
+
+    let dest = crate::fixtures::yydb::temp_yydx("file-vector-restore-dest");
+    conn.backup_yydx_to(&dest).unwrap();
+    drop(conn);
+
+    let restored = yydb::Connection::restore_yydx(&dest).expect("a complete backup restores cleanly");
+    assert_eq!(
+        restored.verify_object_references().unwrap(),
+        5,
+        "the manifest, three chunks, and the vector payload are all referenced objects"
+    );
+    assert_eq!(restored.verify_file_digests().unwrap(), 1);
+    let rows = restored.query_vos("Embedding.all().collect()").unwrap();
+    let stored_file = match rows[0].get("payload") {
+        Some(Value::File(stored)) => stored.clone(),
+        other => panic!("restored payload must be a file descriptor, got {other:?}"),
+    };
+    assert_eq!(stored_file, file);
+    assert_eq!(restored.read_file(&stored_file).unwrap(), octets);
+    let stored_vector = match rows[0].get("embedding") {
+        Some(Value::Vector(stored)) => stored,
+        other => panic!("restored embedding must resolve to a vector, got {other:?}"),
+    };
+    assert_eq!(stored_vector.data.as_ref(), embedding.as_slice(), "the copied object tree must carry the vector payload");
+    drop(restored);
+
+    let copied = yydb::ObjectStore::yydx_objects_root(&dest).join(&vector_hash[0..2]).join(format!("{vector_hash}.blob"));
+    std::fs::remove_file(&copied).unwrap();
+    let error = yydb::Connection::restore_yydx(&dest).err().unwrap();
+    assert!(matches!(error, Error::ObjectNotFound { .. }), "a missing vector payload must fail the restore: {error:?}");
+
+    std::fs::write(&copied, b"swapped content").unwrap();
+    let error = yydb::Connection::restore_yydx(&dest).err().unwrap();
+    assert!(
+        matches!(error, Error::ObjectCorrupt { .. }),
+        "a vector payload that does not match its reference must fail the restore: {error:?}"
+    );
+
+    cleanup(&path);
+    cleanup(&dest);
+}
+
 #[test]
 fn doctor_reports_a_missing_manifest_and_reclaim_refuses() {
     let (conn, path) = open_temp_yydx("file-doctor-manifest");

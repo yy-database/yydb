@@ -154,6 +154,37 @@ impl ObjectStore {
         Err(Error::ObjectNotFound { hash_hex: object.hash_hex() })
     }
 
+    /// Verify one referenced object is stored and reads back as the exact content
+    /// its hash identifies.
+    ///
+    /// Metadata reference closure only keeps hashes, so the stored segment supplies
+    /// its own declared length while the identity must still match the hash the
+    /// committed record points at. The hot cache is deliberately bypassed: this is
+    /// the strict gate a restored backup must clear, not a tier hint.
+    pub(crate) fn verify_object_hash(&self, hash: &[u8; 32]) -> Result<()> {
+        let hash_hex = hex_lower(hash);
+        if let ObjectStoreRoot::OnDisk(store) = &self.root {
+            let chunk = store.chunk_ref(&hash_hex)?;
+            if chunk.chunk_hash != *hash {
+                return Err(Error::ObjectCorrupt {
+                    message: format!("blob {hash_hex} does not carry the hash its reference declares"),
+                });
+            }
+            store.read(&hash_hex, u64::from(chunk.chunk_len))?;
+            return Ok(());
+        }
+        let object = {
+            let catalog = self.catalog.lock().unwrap_or_else(|p| p.into_inner());
+            catalog.get(hash).cloned()
+        };
+        let Some(object) = object
+        else {
+            return Err(Error::ObjectNotFound { hash_hex });
+        };
+        drop(self.get_object(&object)?);
+        Ok(())
+    }
+
     /// Pin an object in the hot set (tier hint: [`Tier::Hot`]).
     pub fn pin_object(&self, object: &ObjectRef) -> Result<Tier> {
         let _ = self.get_object(object)?;
