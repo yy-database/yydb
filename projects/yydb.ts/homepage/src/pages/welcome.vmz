@@ -9,9 +9,9 @@
             </h1>
             <p class="welcome__lede">{{ welcomeLedeLabel }}</p>
             <div class="welcome__actions">
-                <a class="btn btn--primary" href="/">{{ welcomeEnterLabel }}</a>
-                <a class="btn" href="/d/">{{ welcomeDocsLabel }}</a>
-                <a class="btn btn--quiet" href="/wire">{{ welcomeWireLabel }}</a>
+                <Button href="/">{{ welcomeEnterLabel }}</Button>
+                <Button href="/d/" variant="secondary">{{ welcomeDocsLabel }}</Button>
+                <Button href="/wire" variant="secondary">{{ welcomeWireLabel }}</Button>
             </div>
             <p class="welcome__note">{{ welcomeNoteLabel }}</p>
         </div>

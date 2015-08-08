@@ -93,16 +93,16 @@
             <div><span class="principle-index">03</span><h2>{{ homePrinciple3TitleLabel }}</h2><p>{{ homePrinciple3BodyLabel }}</p></div>
         </section>
         <section class="landing-section landing-wrap">
-            <div class="editorial-heading"><p class="overline">01 — PHILOSOPHY</p><h2>{{ homeFeatureTitleLabel }}</h2><p class="section-description">{{ homeFeatureLedeLabel }}</p></div>
+            <div class="editorial-heading"><p class="overline">01 — THE ENGINE</p><h2>{{ homeFeatureTitleLabel }}</h2><p class="section-description">{{ homeFeatureLedeLabel }}</p></div>
             <div class="feature-columns">
-                <article><span class="feature-symbol" aria-hidden="true">⌑</span><h3>{{ homeFeatureSchemaTitleLabel }}</h3><p>{{ homeFeatureSchemaBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureSchemaTitleLabel">↗</a></article>
-                <article><span class="feature-symbol" aria-hidden="true">≋</span><h3>{{ homeFeatureDurabilityTitleLabel }}</h3><p>{{ homeFeatureDurabilityBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureDurabilityTitleLabel">↗</a></article>
-                <article><span class="feature-symbol" aria-hidden="true">⌘</span><h3>{{ homeFeatureHostTitleLabel }}</h3><p>{{ homeFeatureHostBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureHostTitleLabel">↗</a></article>
+                <article><span class="feature-symbol" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="4" y="6" width="24" height="20"/><path d="M4 12h24M12 12v14"/></svg></span><h3>{{ homeFeatureSchemaTitleLabel }}</h3><p>{{ homeFeatureSchemaBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureSchemaTitleLabel">↗</a></article>
+                <article><span class="feature-symbol" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M26 16a10 10 0 1 1-3.4-7.6"/><path d="M26 4.5V10h-5.5"/><path d="M13 13h6v6h-6z"/></svg></span><h3>{{ homeFeatureDurabilityTitleLabel }}</h3><p>{{ homeFeatureDurabilityBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureDurabilityTitleLabel">↗</a></article>
+                <article><span class="feature-symbol" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="5" y="5" width="7" height="7"/><rect x="20" y="5" width="7" height="7"/><rect x="5" y="20" width="7" height="7"/><rect x="20" y="20" width="7" height="7"/><path d="M16 8.5v15M8.5 16h15"/></svg></span><h3>{{ homeFeatureHostTitleLabel }}</h3><p>{{ homeFeatureHostBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureHostTitleLabel">↗</a></article>
             </div>
         </section>
         <section class="architecture-section">
             <div class="landing-wrap architecture-section__grid">
-                <div><p class="overline">02 — ARCHITECTURE</p><h2>{{ homeArchitectureTitleLabel }}</h2><p class="section-description">{{ homeArchitectureBodyLabel }}</p><a class="inline-link" href="/d/">{{ homeArchitectureLinkLabel }}<span aria-hidden="true">→</span></a></div>
+                <div><p class="overline">02 — IN YOUR APP</p><h2>{{ homeArchitectureTitleLabel }}</h2><p class="section-description">{{ homeArchitectureBodyLabel }}</p><a class="inline-link" href="/d/">{{ homeArchitectureLinkLabel }}<span aria-hidden="true">→</span></a></div>
                 <div class="code-panel">
                     <div class="code-panel__top"><span>app.ts</span><span>VOS × NODE.JS</span></div>
                     <pre>{{ codeSample }}</pre>
@@ -111,7 +111,7 @@
             </div>
         </section>
         <section class="landing-wrap closing-section">
-            <p class="overline">03 — START BUILDING</p>
+            <p class="overline">03 — START</p>
             <h2>{{ homeClosingTitleLabel }}</h2>
             <div class="closing-section__bottom"><p>{{ homeClosingBodyLabel }}</p><a class="action action--primary" href="/install">{{ homeClosingActionLabel }}<span aria-hidden="true">↗</span></a></div>
             <div class="closing-wordmark" aria-hidden="true">YYDB<span> / YY</span></div>
