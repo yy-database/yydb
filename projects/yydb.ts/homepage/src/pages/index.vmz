@@ -1,1033 +1,211 @@
 <template>
     <SiteHeader />
-    <main class="main" id="main">
-        <section class="hero">
-            <div class="hero__inner">
-                <div class="hero__copy">
-                    <p class="hero__eyebrow">{{ homeEyebrowLabel }}</p>
-                    <h1 class="hero__title">{{ homeTitleLabel }}</h1>
-                    <p class="hero__tagline">{{ homeTaglineLabel }}</p>
-                    <p class="hero__lede">{{ homeLedeLabel }}</p>
-                    <div class="btn-row hero__actions">
-                        <a class="btn btn--primary" href="/install">{{ homeActionInstallLabel }}</a>
-                        <a class="btn" href="/d/">{{ homeActionDocsLabel }}</a>
+    <main class="landing landing--local" id="main">
+        <section class="landing-hero">
+            <div class="landing-wrap landing-hero__grid">
+                <div class="landing-hero__copy">
+                    <p class="overline"><span class="status-seed"></span>{{ homeEyebrowLabel }}</p>
+                    <h1><span>{{ homeHeroLine1Label }}</span><span class="hero-title-accent">{{ homeHeroLine2Label }}</span></h1>
+                    <p class="landing-hero__lede">{{ homeLedeLabel }}</p>
+                    <div class="landing-actions">
+                        <a class="action action--primary" href="/install">{{ homeActionInstallLabel }}<span aria-hidden="true">↗</span></a>
+                        <a class="action action--text" href="/d/">{{ homeActionDocsLabel }}<span aria-hidden="true">→</span></a>
                     </div>
                 </div>
-                <div class="hero__visual">
-                    <div class="hero__install">
-                        <code>npm install @yydb/yydb</code>
-                        <a class="btn btn--quiet" href="/install">{{ navInstallLabel }}</a>
-                    </div>
-                    <p class="hero__install-note">{{ homeQuickNoteLabel }}</p>
-                    <div class="file-card">
-                        <div class="file-card__header">
-                            <span class="file-card__name">app.yydb</span>
-                            <span class="file-card__title">{{ homeAnatomyTitleLabel }}</span>
-                        </div>
-                        <div class="file-card__body">
-                            <div class="file-layer">
-                                <span class="file-layer__kind">SCHEMA</span>
-                                <span class="file-layer__name">schema document</span>
-                                <span class="file-layer__meta">v1 · VOS</span>
-                                <span class="file-layer__bar"><span style="width:42%"></span></span>
-                            </div>
-                            <div class="file-layer">
-                                <span class="file-layer__kind">YDPG</span>
-                                <span class="file-layer__name">data pages</span>
-                                <span class="file-layer__meta">4096 B</span>
-                                <span class="file-layer__bar"><span style="width:78%"></span></span>
-                            </div>
-                            <div class="file-layer">
-                                <span class="file-layer__kind">YYWL</span>
-                                <span class="file-layer__name">write-ahead log</span>
-                                <span class="file-layer__meta">CRC32C</span>
-                                <span class="file-layer__bar"><span style="width:56%"></span></span>
-                            </div>
-                            <div class="file-layer file-layer--muted">
-                                <span class="file-layer__kind">OBJECTS</span>
-                                <span class="file-layer__name">app-objects/</span>
-                                <span class="file-layer__meta">content addressed</span>
-                                <span class="file-layer__bar"><span style="width:28%"></span></span>
-                            </div>
-                        </div>
-                        <div class="file-card__foot">
-                            <span>single writer</span>
-                            <span><code>checkpoint()</code> folds the WAL</span>
-                        </div>
-                    </div>
-                </div>
+                <figure class="landing-hero__figure">
+                    <svg class="architecture-svg" viewBox="0 0 640 540" role="img" aria-label="YYDB embedded database illustration">
+<g class="drawing-grid" fill="none" stroke="currentColor" stroke-width="0.65">
+<path d="M-500 110l520 300M-500 110l-520 300" />
+<path d="M-442 110l520 300M-442 110l-520 300" />
+<path d="M-384 110l520 300M-384 110l-520 300" />
+<path d="M-326 110l520 300M-326 110l-520 300" />
+<path d="M-268 110l520 300M-268 110l-520 300" />
+<path d="M-210 110l520 300M-210 110l-520 300" />
+<path d="M-152 110l520 300M-152 110l-520 300" />
+<path d="M-94 110l520 300M-94 110l-520 300" />
+<path d="M-36 110l520 300M-36 110l-520 300" />
+<path d="M22 110l520 300M22 110l-520 300" />
+<path d="M80 110l520 300M80 110l-520 300" />
+<path d="M138 110l520 300M138 110l-520 300" />
+<path d="M196 110l520 300M196 110l-520 300" />
+<path d="M254 110l520 300M254 110l-520 300" />
+<path d="M312 110l520 300M312 110l-520 300" />
+<path d="M370 110l520 300M370 110l-520 300" />
+<path d="M428 110l520 300M428 110l-520 300" />
+<path d="M486 110l520 300M486 110l-520 300" />
+<path d="M544 110l520 300M544 110l-520 300" />
+<path d="M602 110l520 300M602 110l-520 300" />
+<path d="M660 110l520 300M660 110l-520 300" />
+<path d="M718 110l520 300M718 110l-520 300" />
+<path d="M776 110l520 300M776 110l-520 300" />
+<path d="M834 110l520 300M834 110l-520 300" />
+<path d="M892 110l520 300M892 110l-520 300" />
+<path d="M950 110l520 300M950 110l-520 300" />
+</g>
+<g class="drawing-orbit" fill="none" stroke="currentColor"><ellipse cx="324" cy="306" rx="278" ry="150" stroke-dasharray="2 9"/><ellipse cx="324" cy="306" rx="246" ry="130"/></g>
+<path class="drawing-guide" d="M84 396H30V180h110M500 120h108v262h-48" fill="none" stroke="currentColor"/>
+<text class="drawing-label" x="32" y="162">01 / EMBEDDED ENGINE</text>
+<text class="drawing-label" x="425" y="452">YOUR DATA. YOUR FILE.</text>
+<g class="plate plate--0">
+<path class="plate-edge" d="M124 342l200 108 200-108v18L324 468 124 360z"/>
+<path class="plate-face" d="M124 342l200-108 200 108-200 108z"/>
+<path class="plate-etch" d="M165 340l132 72"/>
+<path class="plate-etch" d="M189 327l132 72"/>
+<path class="plate-etch" d="M213 314l132 72"/>
+<path class="plate-etch" d="M237 301l132 72"/>
+<path class="plate-etch" d="M261 288l132 72"/>
+<path class="plate-trace" d="M143 343l181 97 181-97"/>
+</g>
+<g class="plate plate--1">
+<path class="plate-edge" d="M124 285l200 108 200-108v18L324 411 124 303z"/>
+<path class="plate-face" d="M124 285l200-108 200 108-200 108z"/>
+<path class="plate-etch" d="M165 283l132 72"/>
+<path class="plate-etch" d="M189 270l132 72"/>
+<path class="plate-etch" d="M213 257l132 72"/>
+<path class="plate-etch" d="M237 244l132 72"/>
+<path class="plate-etch" d="M261 231l132 72"/>
+<path class="plate-trace" d="M143 286l181 97 181-97"/>
+</g>
+<g class="plate plate--2">
+<path class="plate-edge" d="M124 228l200 108 200-108v18L324 354 124 246z"/>
+<path class="plate-face" d="M124 228l200-108 200 108-200 108z"/>
+<path class="plate-etch" d="M165 226l132 72"/>
+<path class="plate-etch" d="M189 213l132 72"/>
+<path class="plate-etch" d="M213 200l132 72"/>
+<path class="plate-etch" d="M237 187l132 72"/>
+<path class="plate-etch" d="M261 174l132 72"/>
+<path class="plate-trace" d="M143 229l181 97 181-97"/>
+</g>
+<g class="drawing-core"><path d="M267 221l57-31 57 31-57 31z" class="core-top"/><path d="M267 221v23l57 31v-23M381 221v23l-57 31" class="core-side"/><path d="M295 221l29-16 29 16-29 16z" class="core-inset"/></g>
+<path class="drawing-guide" d="M324 98v52M324 450v35" stroke="currentColor"/><circle class="drawing-point" cx="324" cy="98" r="3"/><circle class="drawing-point" cx="324" cy="485" r="3"/>
+</svg>
+                    <figcaption><span>{{ homeDiagramCaptionLabel }}</span><span aria-hidden="true">FIG. 01</span></figcaption>
+                </figure>
             </div>
-            <dl class="hero__facts">
-                <div class="hero__fact">
-                    <dt>{{ homeMetaVersionLabel }}</dt>
-                    <dd>{{ homeMetaVersionValueLabel }}</dd>
-                </div>
-                <div class="hero__fact">
-                    <dt>{{ homeMetaStorageLabel }}</dt>
-                    <dd>{{ homeMetaStorageValueLabel }}</dd>
-                </div>
-                <div class="hero__fact">
-                    <dt>{{ homeMetaWireLabel }}</dt>
-                    <dd>{{ homeMetaWireValueLabel }}</dd>
-                </div>
-                <div class="hero__fact">
-                    <dt>{{ homeMetaLicenseLabel }}</dt>
-                    <dd>{{ homeMetaLicenseValueLabel }}</dd>
-                </div>
-            </dl>
+            <div class="landing-wrap hero-baseline">
+                <div><span class="install-glyph" aria-hidden="true">⌘</span><code>npm install @yydb/yydb</code><span class="install-description">{{ homeInstallHintLabel }}</span></div>
+                <span class="edition-label">{{ homeEditionLabel }}</span>
+            </div>
         </section>
-
-        <div class="stats-band">
-            <div class="stats-band__inner">
-                <div class="stat">
-                    <p class="stat__value">4096 B</p>
-                    <p class="stat__label">{{ homeStatsPageLabel }}</p>
-                </div>
-                <div class="stat">
-                    <p class="stat__value">CRC32C</p>
-                    <p class="stat__label">{{ homeStatsIntegrityLabel }}</p>
-                </div>
-                <div class="stat">
-                    <p class="stat__value">16 MiB</p>
-                    <p class="stat__label">{{ homeStatsFrameLabel }}</p>
-                </div>
-                <div class="stat">
-                    <p class="stat__value">20 B</p>
-                    <p class="stat__label">{{ homeStatsHeaderLabel }}</p>
-                </div>
-                <div class="stat">
-                    <p class="stat__value">4</p>
-                    <p class="stat__label">{{ homeStatsPlatformLabel }}</p>
+        <section class="principles landing-wrap" aria-label="Product principles">
+            <div><span class="principle-index">01</span><h2>{{ homePrinciple1TitleLabel }}</h2><p>{{ homePrinciple1BodyLabel }}</p></div>
+            <div><span class="principle-index">02</span><h2>{{ homePrinciple2TitleLabel }}</h2><p>{{ homePrinciple2BodyLabel }}</p></div>
+            <div><span class="principle-index">03</span><h2>{{ homePrinciple3TitleLabel }}</h2><p>{{ homePrinciple3BodyLabel }}</p></div>
+        </section>
+        <section class="landing-section landing-wrap">
+            <div class="editorial-heading"><p class="overline">01 — PHILOSOPHY</p><h2>{{ homeFeatureTitleLabel }}</h2><p class="section-description">{{ homeFeatureLedeLabel }}</p></div>
+            <div class="feature-columns">
+                <article><span class="feature-symbol" aria-hidden="true">⌑</span><h3>{{ homeFeatureSchemaTitleLabel }}</h3><p>{{ homeFeatureSchemaBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureSchemaTitleLabel">↗</a></article>
+                <article><span class="feature-symbol" aria-hidden="true">≋</span><h3>{{ homeFeatureDurabilityTitleLabel }}</h3><p>{{ homeFeatureDurabilityBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureDurabilityTitleLabel">↗</a></article>
+                <article><span class="feature-symbol" aria-hidden="true">⌘</span><h3>{{ homeFeatureHostTitleLabel }}</h3><p>{{ homeFeatureHostBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureHostTitleLabel">↗</a></article>
+            </div>
+        </section>
+        <section class="architecture-section">
+            <div class="landing-wrap architecture-section__grid">
+                <div><p class="overline">02 — ARCHITECTURE</p><h2>{{ homeArchitectureTitleLabel }}</h2><p class="section-description">{{ homeArchitectureBodyLabel }}</p><a class="inline-link" href="/d/">{{ homeArchitectureLinkLabel }}<span aria-hidden="true">→</span></a></div>
+                <div class="code-panel">
+                    <div class="code-panel__top"><span>app.ts</span><span>VOS × NODE.JS</span></div>
+                    <pre>{{ codeSample }}</pre>
+                    <div class="code-panel__bottom">LOCAL FILE <span>app.yydb</span></div>
                 </div>
             </div>
-        </div>
-
-        <div class="page">
-            <section class="section" style="margin-top:0;border-top:0;padding-top:0">
-                <div class="section__head">
-                    <div>
-                        <h2 class="section__title">{{ homeHowTitleLabel }}</h2>
-                        <p class="section__lede">{{ homeHowLedeLabel }}</p>
-                    </div>
-                </div>
-                <div class="how">
-                    <ol class="how__steps">
-                        <li class="how__step">
-                            <span class="how__index">01</span>
-                            <div>
-                                <h3>{{ homeHowStep1TitleLabel }}</h3>
-                                <p>{{ homeHowStep1BodyLabel }}</p>
-                            </div>
-                        </li>
-                        <li class="how__step">
-                            <span class="how__index">02</span>
-                            <div>
-                                <h3>{{ homeHowStep2TitleLabel }}</h3>
-                                <p>{{ homeHowStep2BodyLabel }}</p>
-                            </div>
-                        </li>
-                        <li class="how__step">
-                            <span class="how__index">03</span>
-                            <div>
-                                <h3>{{ homeHowStep3TitleLabel }}</h3>
-                                <p>{{ homeHowStep3BodyLabel }}</p>
-                            </div>
-                        </li>
-                    </ol>
-                    <div class="terminal">
-                        <div class="terminal__bar">
-                            <span>{{ homeQuickFileNameLabel }} · Node.js</span>
-                            <a href="/d/">{{ navDocsLabel }}</a>
-                        </div>
-                        <pre>// open or create a single-file database
-import { Database } from "@yydb/yydb";
-
-const db = await Database.open("app.yydb");
-
-await db.ensureSchema(`
-table User {
-    @@id: i64,
-    name: utf8,
-    email: utf8,
-}
-`);
-
-await db.execute(
-    'User { id: 1, name: "Ada", email: "ada@example.com" }.insert()',
-);
-
-const users = await db.query("User.all().collect()");
-console.log(users.length); // 1
-
-await db.close();</pre>
-                    </div>
-                </div>
-            </section>
-
-            <section class="section">
-                <div class="section__head">
-                    <div>
-                        <h2 class="section__title">{{ homeFeatureTitleLabel }}</h2>
-                        <p class="section__lede">{{ homeFeatureLedeLabel }}</p>
-                    </div>
-                </div>
-                <div class="grid-cards">
-                    <article>
-                        <h3>{{ homeFeatureSchemaTitleLabel }}</h3>
-                        <p>{{ homeFeatureSchemaBodyLabel }}</p>
-                    </article>
-                    <article>
-                        <h3>{{ homeFeatureDurabilityTitleLabel }}</h3>
-                        <p>{{ homeFeatureDurabilityBodyLabel }}</p>
-                    </article>
-                    <article>
-                        <h3>{{ homeFeatureObjectTitleLabel }}</h3>
-                        <p>{{ homeFeatureObjectBodyLabel }}</p>
-                    </article>
-                    <article>
-                        <h3>{{ homeFeatureScalarTitleLabel }}</h3>
-                        <p>{{ homeFeatureScalarBodyLabel }}</p>
-                    </article>
-                    <article>
-                        <h3>{{ homeFeatureHostTitleLabel }}</h3>
-                        <p>{{ homeFeatureHostBodyLabel }}</p>
-                    </article>
-                    <article>
-                        <h3>{{ homeFeatureWireTitleLabel }}</h3>
-                        <p>{{ homeFeatureWireBodyLabel }}</p>
-                    </article>
-                </div>
-            </section>
-
-            <section class="section section--panel">
-                <div class="section__head">
-                    <div>
-                        <h2 class="section__title">{{ homeMatrixTitleLabel }}</h2>
-                        <p class="section__lede">{{ homeMatrixLedeLabel }}</p>
-                    </div>
-                </div>
-                <table class="rule-table">
-                    <thead>
-                        <tr>
-                            <th scope="col">{{ homeMatrixColItemLabel }}</th>
-                            <th scope="col">{{ homeMatrixColStateLabel }}</th>
-                            <th scope="col">{{ homeMatrixColNoteLabel }}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <th scope="row">{{ homeRowEngineLabel }}</th>
-                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
-                            <td>{{ homeRowEngineNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowVosSchemaLabel }}</th>
-                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
-                            <td>{{ homeRowVosSchemaNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowQueryLabel }}</th>
-                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
-                            <td>{{ homeRowQueryNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowWriteLabel }}</th>
-                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
-                            <td>{{ homeRowWriteNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowStmtLabel }}</th>
-                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
-                            <td>{{ homeRowStmtNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowTxLabel }}</th>
-                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
-                            <td>{{ homeRowTxNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowObjectLabel }}</th>
-                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
-                            <td>{{ homeRowObjectNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowVectorLabel }}</th>
-                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
-                            <td>{{ homeRowVectorNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowUdfLabel }}</th>
-                            <td class="is-status status-ok">{{ stateAvailableLabel }}</td>
-                            <td>{{ homeRowUdfNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowAnnLabel }}</th>
-                            <td class="is-status status-out">{{ stateRoadmapLabel }}</td>
-                            <td>{{ homeRowAnnNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowDistLabel }}</th>
-                            <td class="is-status status-out">{{ stateExcludedLabel }}</td>
-                            <td>{{ homeRowDistNoteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">{{ homeRowSqlLabel }}</th>
-                            <td class="is-status status-out">{{ stateExcludedLabel }}</td>
-                            <td>{{ homeRowSqlNoteLabel }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
-
-            <section class="section">
-                <div class="section__head">
-                    <div>
-                        <h2 class="section__title">{{ homePathTitleLabel }}</h2>
-                        <p class="section__lede">{{ homePathLedeLabel }}</p>
-                    </div>
-                </div>
-                <div class="path-list">
-                    <article class="path-card">
-                        <p class="path-card__label">{{ homePathEmbeddedLabel }}</p>
-                        <h3>{{ homePathEmbeddedTitleLabel }}</h3>
-                        <ul class="path-card__flow">
-                            <li>{{ homePathEmbeddedStepAppLabel }}</li>
-                            <li>{{ homePathEmbeddedStepEngineLabel }}</li>
-                            <li>{{ homePathEmbeddedStepFileLabel }}</li>
-                        </ul>
-                    </article>
-                    <article class="path-card">
-                        <p class="path-card__label">{{ homePathServeLabel }}</p>
-                        <h3>{{ homePathServeTitleLabel }}</h3>
-                        <ul class="path-card__flow">
-                            <li>{{ homePathServeStepClientLabel }}</li>
-                            <li>{{ homePathServeStepWireLabel }}</li>
-                            <li>{{ homePathServeStepEngineLabel }}</li>
-                        </ul>
-                    </article>
-                    <article class="path-card">
-                        <p class="path-card__label">{{ homePathBrowserLabel }}</p>
-                        <h3>{{ homePathBrowserTitleLabel }}</h3>
-                        <ul class="path-card__flow">
-                            <li>{{ homePathBrowserStepContextLabel }}</li>
-                            <li>{{ homePathBrowserStepLightLabel }}</li>
-                            <li>{{ homePathBrowserStepStoreLabel }}</li>
-                        </ul>
-                    </article>
-                </div>
-            </section>
-
-            <section class="section">
-                <div class="section__head">
-                    <div>
-                        <h2 class="section__title">{{ homeWireTitleLabel }}</h2>
-                        <p class="section__lede">{{ homeWireLedeLabel }}</p>
-                    </div>
-                    <p class="section__aside"><a href="/wire">{{ homeWireLinkLabel }}</a></p>
-                </div>
-                <table class="rule-table">
-                    <thead>
-                        <tr>
-                            <th scope="col">{{ homeWireColOffsetLabel }}</th>
-                            <th scope="col">{{ homeWireColLenLabel }}</th>
-                            <th scope="col">{{ homeWireColFieldLabel }}</th>
-                            <th scope="col">{{ homeWireColValueLabel }}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><code>0</code></td>
-                            <td><code>4</code></td>
-                            <td><code>magic</code></td>
-                            <td>{{ homeWireRowMagicValueLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>4</code></td>
-                            <td><code>4</code></td>
-                            <td><code>version</code></td>
-                            <td>{{ homeWireRowVersionValueLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>8</code></td>
-                            <td><code>1</code></td>
-                            <td><code>msg_type</code></td>
-                            <td>{{ homeWireRowMsgValueLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>9</code></td>
-                            <td><code>3</code></td>
-                            <td><code>flags</code></td>
-                            <td>{{ homeWireRowFlagsValueLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>12</code></td>
-                            <td><code>4</code></td>
-                            <td><code>request_id</code></td>
-                            <td>{{ homeWireRowReqValueLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>16</code></td>
-                            <td><code>4</code></td>
-                            <td><code>body_len</code></td>
-                            <td>{{ homeWireRowLenValueLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>20</code></td>
-                            <td><code>body_len</code></td>
-                            <td><code>body</code></td>
-                            <td>{{ homeWireRowBodyValueLabel }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-                <p class="note" style="margin-top:0.875rem">{{ homeWireNoteLabel }}</p>
-            </section>
-
-            <section class="section">
-                <div class="section__head">
-                    <div>
-                        <h2 class="section__title">{{ homePackagesTitleLabel }}</h2>
-                        <p class="section__lede">{{ homePackagesLedeLabel }}</p>
-                    </div>
-                    <p class="section__aside"><a href="/install">{{ homePkgInstallHintLabel }}</a></p>
-                </div>
-                <table class="rule-table">
-                    <thead>
-                        <tr>
-                            <th scope="col">{{ homePkgColPackageLabel }}</th>
-                            <th scope="col">{{ homePkgColUseLabel }}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><code>@yydb/yydb</code></td>
-                            <td>{{ homePkgYydbLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>@yydb/light-db</code></td>
-                            <td>{{ homePkgLightLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>@yydb/yydb-client</code></td>
-                            <td>{{ homePkgClientLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>@yydb/webui</code></td>
-                            <td>{{ homePkgWebuiLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>@yydb/sqlite</code></td>
-                            <td>{{ homePkgSqliteLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>@yydb/yydb-skills</code></td>
-                            <td>{{ homePkgSkillsLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>yydb</code> (crate)</td>
-                            <td>{{ homePkgRustLabel }}</td>
-                        </tr>
-                        <tr>
-                            <td><code>@yydb/yydb-win32-x64</code> …</td>
-                            <td>{{ homePkgPlatformLabel }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
-
-            <section class="section">
-                <div class="section__head">
-                    <div>
-                        <h2 class="section__title">{{ homeDocsTitleLabel }}</h2>
-                        <p class="section__lede">{{ homeDocsLedeLabel }}</p>
-                    </div>
-                    <p class="section__aside"><a href="/d/">{{ navDocsLabel }}</a></p>
-                </div>
-                <ul class="doc-list">
-                    <li>
-                        <a :href="docQuickstartHref">{{ homeDocsQuickStartLabel }}</a>
-                        <p>{{ homeDocsQuickStartDescLabel }}</p>
-                    </li>
-                    <li>
-                        <a :href="docInstallHref">{{ homeDocsInstallLabel }}</a>
-                        <p>{{ homeDocsInstallDescLabel }}</p>
-                    </li>
-                    <li>
-                        <a :href="docSchemaHref">{{ homeDocsSchemaLabel }}</a>
-                        <p>{{ homeDocsSchemaDescLabel }}</p>
-                    </li>
-                    <li>
-                        <a :href="docReadWriteHref">{{ homeDocsReadWriteLabel }}</a>
-                        <p>{{ homeDocsReadWriteDescLabel }}</p>
-                    </li>
-                    <li>
-                        <a :href="docNodeHref">{{ homeDocsNodeLabel }}</a>
-                        <p>{{ homeDocsNodeDescLabel }}</p>
-                    </li>
-                    <li>
-                        <a :href="docBrowserHref">{{ homeDocsBrowserLabel }}</a>
-                        <p>{{ homeDocsBrowserDescLabel }}</p>
-                    </li>
-                    <li>
-                        <a :href="docServeHref">{{ homeDocsServeLabel }}</a>
-                        <p>{{ homeDocsServeDescLabel }}</p>
-                    </li>
-                    <li>
-                        <a :href="docWireHref">{{ homeDocsWireLabel }}</a>
-                        <p>{{ homeDocsWireDescLabel }}</p>
-                    </li>
-                    <li>
-                        <a :href="docPackagesHref">{{ homeDocsPackagesLabel }}</a>
-                        <p>{{ homeDocsPackagesDescLabel }}</p>
-                    </li>
-                    <li>
-                        <a :href="docErrorsHref">{{ homeDocsErrorsLabel }}</a>
-                        <p>{{ homeDocsErrorsDescLabel }}</p>
-                    </li>
-                </ul>
-            </section>
-
-            <section class="section">
-                <div class="section__head">
-                    <div>
-                        <h2 class="section__title">{{ homeCommunityTitleLabel }}</h2>
-                        <p class="section__lede">{{ homeCommunityBodyLabel }}</p>
-                    </div>
-                </div>
-                <div class="community">
-                    <p>{{ homeCommunityBodyLabel }}</p>
-                    <div class="btn-row">
-                        <a class="btn" :href="discussionsHref">{{ homeCommunityDiscussionsLabel }}</a>
-                        <a class="btn btn--quiet" :href="issuesHref">{{ homeCommunityIssuesLabel }}</a>
-                    </div>
-                </div>
-            </section>
-        </div>
-
-        <section class="band--cta">
-            <div class="band--cta__inner">
-                <div>
-                    <h2>{{ homeCtaTitleLabel }}</h2>
-                    <p>{{ homeCtaBodyLabel }}</p>
-                </div>
-                <div class="btn-row">
-                    <a class="btn" href="/install">{{ homeActionInstallLabel }}</a>
-                    <a class="btn btn--quiet" href="/d/">{{ homeActionDocsLabel }}</a>
-                </div>
-            </div>
+        </section>
+        <section class="landing-wrap closing-section">
+            <p class="overline">03 — START BUILDING</p>
+            <h2>{{ homeClosingTitleLabel }}</h2>
+            <div class="closing-section__bottom"><p>{{ homeClosingBodyLabel }}</p><a class="action action--primary" href="/install">{{ homeClosingActionLabel }}<span aria-hidden="true">↗</span></a></div>
+            <div class="closing-wordmark" aria-hidden="true">YYDB<span> / YY</span></div>
         </section>
     </main>
     <SiteFooter />
 </template>
 
 <script client>
-import {
-    navInstall,
-    navDocs,
-    homeEyebrow,
-    homeTitle,
-    homeTagline,
-    homeLede,
-    homeActionInstall,
-    homeActionDocs,
-    homeMetaVersionLabel,
-    homeMetaVersionValue,
-    homeMetaStorageLabel,
-    homeMetaStorageValue,
-    homeMetaWireLabel,
-    homeMetaWireValue,
-    homeMetaLicenseLabel,
-    homeMetaLicenseValue,
-    homeQuickNote,
-    homeQuickFileName,
-    homeAnatomyTitle,
-    homeStatsPage,
-    homeStatsIntegrity,
-    homeStatsFrame,
-    homeStatsHeader,
-    homeStatsPlatform,
-    homeHowTitle,
-    homeHowLede,
-    homeHowStep1Title,
-    homeHowStep1Body,
-    homeHowStep2Title,
-    homeHowStep2Body,
-    homeHowStep3Title,
-    homeHowStep3Body,
-    homeCtaTitle,
-    homeCtaBody,
-    homeFeatureTitle,
-    homeFeatureLede,
-    homeFeatureSchemaTitle,
-    homeFeatureSchemaBody,
-    homeFeatureDurabilityTitle,
-    homeFeatureDurabilityBody,
-    homeFeatureObjectTitle,
-    homeFeatureObjectBody,
-    homeFeatureScalarTitle,
-    homeFeatureScalarBody,
-    homeFeatureHostTitle,
-    homeFeatureHostBody,
-    homeFeatureWireTitle,
-    homeFeatureWireBody,
-    homeMatrixTitle,
-    homeMatrixLede,
-    homeMatrixColItem,
-    homeMatrixColState,
-    homeMatrixColNote,
-    homeRowEngine,
-    homeRowEngineNote,
-    homeRowVosSchema,
-    homeRowVosSchemaNote,
-    homeRowQuery,
-    homeRowQueryNote,
-    homeRowWrite,
-    homeRowWriteNote,
-    homeRowStmt,
-    homeRowStmtNote,
-    homeRowTx,
-    homeRowTxNote,
-    homeRowObject,
-    homeRowObjectNote,
-    homeRowVector,
-    homeRowVectorNote,
-    homeRowUdf,
-    homeRowUdfNote,
-    homeRowAnn,
-    homeRowAnnNote,
-    homeRowDist,
-    homeRowDistNote,
-    homeRowSql,
-    homeRowSqlNote,
-    stateAvailable,
-    stateRoadmap,
-    stateExcluded,
-    homePathTitle,
-    homePathLede,
-    homePathEmbeddedLabel,
-    homePathEmbeddedTitle,
-    homePathEmbeddedStepApp,
-    homePathEmbeddedStepEngine,
-    homePathEmbeddedStepFile,
-    homePathServeLabel,
-    homePathServeTitle,
-    homePathServeStepClient,
-    homePathServeStepWire,
-    homePathServeStepEngine,
-    homePathBrowserLabel,
-    homePathBrowserTitle,
-    homePathBrowserStepContext,
-    homePathBrowserStepLight,
-    homePathBrowserStepStore,
-    homeWireTitle,
-    homeWireLede,
-    homeWireColOffset,
-    homeWireColLen,
-    homeWireColField,
-    homeWireColValue,
-    homeWireRowMagicValue,
-    homeWireRowVersionValue,
-    homeWireRowMsgValue,
-    homeWireRowFlagsValue,
-    homeWireRowReqValue,
-    homeWireRowLenValue,
-    homeWireRowBodyValue,
-    homeWireNote,
-    homeWireLink,
-    homePackagesTitle,
-    homePackagesLede,
-    homePkgColPackage,
-    homePkgColUse,
-    homePkgYydb,
-    homePkgLight,
-    homePkgClient,
-    homePkgWebui,
-    homePkgSqlite,
-    homePkgSkills,
-    homePkgRust,
-    homePkgPlatform,
-    homePkgInstallHint,
-    homeDocsTitle,
-    homeDocsLede,
-    homeDocsQuickStart,
-    homeDocsQuickStartDesc,
-    homeDocsInstall,
-    homeDocsInstallDesc,
-    homeDocsSchema,
-    homeDocsSchemaDesc,
-    homeDocsReadWrite,
-    homeDocsReadWriteDesc,
-    homeDocsNode,
-    homeDocsNodeDesc,
-    homeDocsBrowser,
-    homeDocsBrowserDesc,
-    homeDocsServe,
-    homeDocsServeDesc,
-    homeDocsWire,
-    homeDocsWireDesc,
-    homeDocsPackages,
-    homeDocsPackagesDesc,
-    homeDocsErrors,
-    homeDocsErrorsDesc,
-    homeCommunityTitle,
-    homeCommunityBody,
-    homeCommunityDiscussions,
-    homeCommunityIssues,
-} from "#locales/common";
+import { homeEyebrow, homeHeroLine1, homeHeroLine2, homeLede, homeActionInstall, homeActionDocs, homeInstallHint, homePrinciple1Title, homePrinciple1Body, homePrinciple2Title, homePrinciple2Body, homePrinciple3Title, homePrinciple3Body, homeFeatureTitle, homeFeatureLede, homeFeatureSchemaTitle, homeFeatureSchemaBody, homeFeatureDurabilityTitle, homeFeatureDurabilityBody, homeFeatureHostTitle, homeFeatureHostBody, homeArchitectureTitle, homeArchitectureBody, homeArchitectureLink, homeClosingTitle, homeClosingBody, homeClosingAction, homeDiagramCaption, homeEdition, titleHome } from "#locales/common";
 import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
 
-const REPO = "https://github.com/yy-database/yydb";
+export default class Home {
+    codeSample = `import { Database } from "@yydb/yydb";
 
-export default class IndexPage {
-    navInstallLabel = "";
-    navDocsLabel = "";
+const db = await Database.open("app.yydb");
+
+const users = await db.query(
+  "User.all().collect()"
+);
+
+await db.close();`;
     homeEyebrowLabel = "";
-    homeTitleLabel = "";
-    homeTaglineLabel = "";
+    homeHeroLine1Label = "";
+    homeHeroLine2Label = "";
     homeLedeLabel = "";
     homeActionInstallLabel = "";
     homeActionDocsLabel = "";
-    homeMetaVersionLabel = "";
-    homeMetaVersionValueLabel = "";
-    homeMetaStorageLabel = "";
-    homeMetaStorageValueLabel = "";
-    homeMetaWireLabel = "";
-    homeMetaWireValueLabel = "";
-    homeMetaLicenseLabel = "";
-    homeMetaLicenseValueLabel = "";
-    homeQuickNoteLabel = "";
-    homeQuickFileNameLabel = "";
-    homeAnatomyTitleLabel = "";
-    homeStatsPageLabel = "";
-    homeStatsIntegrityLabel = "";
-    homeStatsFrameLabel = "";
-    homeStatsHeaderLabel = "";
-    homeStatsPlatformLabel = "";
-    homeHowTitleLabel = "";
-    homeHowLedeLabel = "";
-    homeHowStep1TitleLabel = "";
-    homeHowStep1BodyLabel = "";
-    homeHowStep2TitleLabel = "";
-    homeHowStep2BodyLabel = "";
-    homeHowStep3TitleLabel = "";
-    homeHowStep3BodyLabel = "";
-    homeCtaTitleLabel = "";
-    homeCtaBodyLabel = "";
+    homeInstallHintLabel = "";
+    homePrinciple1TitleLabel = "";
+    homePrinciple1BodyLabel = "";
+    homePrinciple2TitleLabel = "";
+    homePrinciple2BodyLabel = "";
+    homePrinciple3TitleLabel = "";
+    homePrinciple3BodyLabel = "";
     homeFeatureTitleLabel = "";
     homeFeatureLedeLabel = "";
     homeFeatureSchemaTitleLabel = "";
     homeFeatureSchemaBodyLabel = "";
     homeFeatureDurabilityTitleLabel = "";
     homeFeatureDurabilityBodyLabel = "";
-    homeFeatureObjectTitleLabel = "";
-    homeFeatureObjectBodyLabel = "";
-    homeFeatureScalarTitleLabel = "";
-    homeFeatureScalarBodyLabel = "";
     homeFeatureHostTitleLabel = "";
     homeFeatureHostBodyLabel = "";
-    homeFeatureWireTitleLabel = "";
-    homeFeatureWireBodyLabel = "";
-    homeMatrixTitleLabel = "";
-    homeMatrixLedeLabel = "";
-    homeMatrixColItemLabel = "";
-    homeMatrixColStateLabel = "";
-    homeMatrixColNoteLabel = "";
-    homeRowEngineLabel = "";
-    homeRowEngineNoteLabel = "";
-    homeRowVosSchemaLabel = "";
-    homeRowVosSchemaNoteLabel = "";
-    homeRowQueryLabel = "";
-    homeRowQueryNoteLabel = "";
-    homeRowWriteLabel = "";
-    homeRowWriteNoteLabel = "";
-    homeRowStmtLabel = "";
-    homeRowStmtNoteLabel = "";
-    homeRowTxLabel = "";
-    homeRowTxNoteLabel = "";
-    homeRowObjectLabel = "";
-    homeRowObjectNoteLabel = "";
-    homeRowVectorLabel = "";
-    homeRowVectorNoteLabel = "";
-    homeRowUdfLabel = "";
-    homeRowUdfNoteLabel = "";
-    homeRowAnnLabel = "";
-    homeRowAnnNoteLabel = "";
-    homeRowDistLabel = "";
-    homeRowDistNoteLabel = "";
-    homeRowSqlLabel = "";
-    homeRowSqlNoteLabel = "";
-    stateAvailableLabel = "";
-    stateRoadmapLabel = "";
-    stateExcludedLabel = "";
-    homePathTitleLabel = "";
-    homePathLedeLabel = "";
-    homePathEmbeddedLabel = "";
-    homePathEmbeddedTitleLabel = "";
-    homePathEmbeddedStepAppLabel = "";
-    homePathEmbeddedStepEngineLabel = "";
-    homePathEmbeddedStepFileLabel = "";
-    homePathServeLabel = "";
-    homePathServeTitleLabel = "";
-    homePathServeStepClientLabel = "";
-    homePathServeStepWireLabel = "";
-    homePathServeStepEngineLabel = "";
-    homePathBrowserLabel = "";
-    homePathBrowserTitleLabel = "";
-    homePathBrowserStepContextLabel = "";
-    homePathBrowserStepLightLabel = "";
-    homePathBrowserStepStoreLabel = "";
-    homeWireTitleLabel = "";
-    homeWireLedeLabel = "";
-    homeWireColOffsetLabel = "";
-    homeWireColLenLabel = "";
-    homeWireColFieldLabel = "";
-    homeWireColValueLabel = "";
-    homeWireRowMagicValueLabel = "";
-    homeWireRowVersionValueLabel = "";
-    homeWireRowMsgValueLabel = "";
-    homeWireRowFlagsValueLabel = "";
-    homeWireRowReqValueLabel = "";
-    homeWireRowLenValueLabel = "";
-    homeWireRowBodyValueLabel = "";
-    homeWireNoteLabel = "";
-    homeWireLinkLabel = "";
-    homePackagesTitleLabel = "";
-    homePackagesLedeLabel = "";
-    homePkgColPackageLabel = "";
-    homePkgColUseLabel = "";
-    homePkgYydbLabel = "";
-    homePkgLightLabel = "";
-    homePkgClientLabel = "";
-    homePkgWebuiLabel = "";
-    homePkgSqliteLabel = "";
-    homePkgSkillsLabel = "";
-    homePkgRustLabel = "";
-    homePkgPlatformLabel = "";
-    homePkgInstallHintLabel = "";
-    homeDocsTitleLabel = "";
-    homeDocsLedeLabel = "";
-    homeDocsQuickStartLabel = "";
-    homeDocsQuickStartDescLabel = "";
-    homeDocsInstallLabel = "";
-    homeDocsInstallDescLabel = "";
-    homeDocsSchemaLabel = "";
-    homeDocsSchemaDescLabel = "";
-    homeDocsReadWriteLabel = "";
-    homeDocsReadWriteDescLabel = "";
-    homeDocsNodeLabel = "";
-    homeDocsNodeDescLabel = "";
-    homeDocsBrowserLabel = "";
-    homeDocsBrowserDescLabel = "";
-    homeDocsServeLabel = "";
-    homeDocsServeDescLabel = "";
-    homeDocsWireLabel = "";
-    homeDocsWireDescLabel = "";
-    homeDocsPackagesLabel = "";
-    homeDocsPackagesDescLabel = "";
-    homeDocsErrorsLabel = "";
-    homeDocsErrorsDescLabel = "";
-    homeCommunityTitleLabel = "";
-    homeCommunityBodyLabel = "";
-    homeCommunityDiscussionsLabel = "";
-    homeCommunityIssuesLabel = "";
-    discussionsHref = `${REPO}/discussions`;
-    issuesHref = `${REPO}/issues`;
-    docQuickstartHref = "";
-    docInstallHref = "";
-    docSchemaHref = "";
-    docReadWriteHref = "";
-    docNodeHref = "";
-    docBrowserHref = "";
-    docServeHref = "";
-    docWireHref = "";
-    docPackagesHref = "";
-    docErrorsHref = "";
+    homeArchitectureTitleLabel = "";
+    homeArchitectureBodyLabel = "";
+    homeArchitectureLinkLabel = "";
+    homeClosingTitleLabel = "";
+    homeClosingBodyLabel = "";
+    homeClosingActionLabel = "";
+    homeDiagramCaptionLabel = "";
+    homeEditionLabel = "";
     _unwatchLocale = null;
-
     onMount() {
         this.applyLocaleCopy();
         this._unwatchLocale = watchDocumentLocale((id) => this.applyLocaleCopy(id));
     }
-
     onDestroy() {
-        if (typeof this._unwatchLocale === "function") {
-            this._unwatchLocale();
-        }
+        if (typeof this._unwatchLocale === "function") this._unwatchLocale();
         this._unwatchLocale = null;
     }
-
-    syncDocHrefs(localeId) {
-        const base = localeId === "en" ? "/d/en/" : "/d/zh-hans/";
-        const href = (slug) => `${base}guide/${slug}.html`;
-        this.docQuickstartHref = href("01-quickstart");
-        this.docInstallHref = href("02-install");
-        this.docSchemaHref = href("03-schema");
-        this.docReadWriteHref = href("04-read-write");
-        this.docNodeHref = href("05-node");
-        this.docBrowserHref = href("06-browser");
-        this.docServeHref = href("07-serve");
-        this.docWireHref = href("08-wire");
-        this.docPackagesHref = href("09-packages");
-        this.docErrorsHref = href("10-errors");
+    applyLocaleCopy(preferred) {
+        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
     }
-
     refreshCopy() {
-        this.navInstallLabel = navInstall();
-        this.navDocsLabel = navDocs();
         this.homeEyebrowLabel = homeEyebrow();
-        this.homeTitleLabel = homeTitle();
-        this.homeTaglineLabel = homeTagline();
+        this.homeHeroLine1Label = homeHeroLine1();
+        this.homeHeroLine2Label = homeHeroLine2();
         this.homeLedeLabel = homeLede();
         this.homeActionInstallLabel = homeActionInstall();
         this.homeActionDocsLabel = homeActionDocs();
-        this.homeMetaVersionLabel = homeMetaVersionLabel();
-        this.homeMetaVersionValueLabel = homeMetaVersionValue();
-        this.homeMetaStorageLabel = homeMetaStorageLabel();
-        this.homeMetaStorageValueLabel = homeMetaStorageValue();
-        this.homeMetaWireLabel = homeMetaWireLabel();
-        this.homeMetaWireValueLabel = homeMetaWireValue();
-        this.homeMetaLicenseLabel = homeMetaLicenseLabel();
-        this.homeMetaLicenseValueLabel = homeMetaLicenseValue();
-        this.homeQuickNoteLabel = homeQuickNote();
-        this.homeQuickFileNameLabel = homeQuickFileName();
-        this.homeAnatomyTitleLabel = homeAnatomyTitle();
-        this.homeStatsPageLabel = homeStatsPage();
-        this.homeStatsIntegrityLabel = homeStatsIntegrity();
-        this.homeStatsFrameLabel = homeStatsFrame();
-        this.homeStatsHeaderLabel = homeStatsHeader();
-        this.homeStatsPlatformLabel = homeStatsPlatform();
-        this.homeHowTitleLabel = homeHowTitle();
-        this.homeHowLedeLabel = homeHowLede();
-        this.homeHowStep1TitleLabel = homeHowStep1Title();
-        this.homeHowStep1BodyLabel = homeHowStep1Body();
-        this.homeHowStep2TitleLabel = homeHowStep2Title();
-        this.homeHowStep2BodyLabel = homeHowStep2Body();
-        this.homeHowStep3TitleLabel = homeHowStep3Title();
-        this.homeHowStep3BodyLabel = homeHowStep3Body();
-        this.homeCtaTitleLabel = homeCtaTitle();
-        this.homeCtaBodyLabel = homeCtaBody();
+        this.homeInstallHintLabel = homeInstallHint();
+        this.homePrinciple1TitleLabel = homePrinciple1Title();
+        this.homePrinciple1BodyLabel = homePrinciple1Body();
+        this.homePrinciple2TitleLabel = homePrinciple2Title();
+        this.homePrinciple2BodyLabel = homePrinciple2Body();
+        this.homePrinciple3TitleLabel = homePrinciple3Title();
+        this.homePrinciple3BodyLabel = homePrinciple3Body();
         this.homeFeatureTitleLabel = homeFeatureTitle();
         this.homeFeatureLedeLabel = homeFeatureLede();
         this.homeFeatureSchemaTitleLabel = homeFeatureSchemaTitle();
         this.homeFeatureSchemaBodyLabel = homeFeatureSchemaBody();
         this.homeFeatureDurabilityTitleLabel = homeFeatureDurabilityTitle();
         this.homeFeatureDurabilityBodyLabel = homeFeatureDurabilityBody();
-        this.homeFeatureObjectTitleLabel = homeFeatureObjectTitle();
-        this.homeFeatureObjectBodyLabel = homeFeatureObjectBody();
-        this.homeFeatureScalarTitleLabel = homeFeatureScalarTitle();
-        this.homeFeatureScalarBodyLabel = homeFeatureScalarBody();
         this.homeFeatureHostTitleLabel = homeFeatureHostTitle();
         this.homeFeatureHostBodyLabel = homeFeatureHostBody();
-        this.homeFeatureWireTitleLabel = homeFeatureWireTitle();
-        this.homeFeatureWireBodyLabel = homeFeatureWireBody();
-        this.homeMatrixTitleLabel = homeMatrixTitle();
-        this.homeMatrixLedeLabel = homeMatrixLede();
-        this.homeMatrixColItemLabel = homeMatrixColItem();
-        this.homeMatrixColStateLabel = homeMatrixColState();
-        this.homeMatrixColNoteLabel = homeMatrixColNote();
-        this.homeRowEngineLabel = homeRowEngine();
-        this.homeRowEngineNoteLabel = homeRowEngineNote();
-        this.homeRowVosSchemaLabel = homeRowVosSchema();
-        this.homeRowVosSchemaNoteLabel = homeRowVosSchemaNote();
-        this.homeRowQueryLabel = homeRowQuery();
-        this.homeRowQueryNoteLabel = homeRowQueryNote();
-        this.homeRowWriteLabel = homeRowWrite();
-        this.homeRowWriteNoteLabel = homeRowWriteNote();
-        this.homeRowStmtLabel = homeRowStmt();
-        this.homeRowStmtNoteLabel = homeRowStmtNote();
-        this.homeRowTxLabel = homeRowTx();
-        this.homeRowTxNoteLabel = homeRowTxNote();
-        this.homeRowObjectLabel = homeRowObject();
-        this.homeRowObjectNoteLabel = homeRowObjectNote();
-        this.homeRowVectorLabel = homeRowVector();
-        this.homeRowVectorNoteLabel = homeRowVectorNote();
-        this.homeRowUdfLabel = homeRowUdf();
-        this.homeRowUdfNoteLabel = homeRowUdfNote();
-        this.homeRowAnnLabel = homeRowAnn();
-        this.homeRowAnnNoteLabel = homeRowAnnNote();
-        this.homeRowDistLabel = homeRowDist();
-        this.homeRowDistNoteLabel = homeRowDistNote();
-        this.homeRowSqlLabel = homeRowSql();
-        this.homeRowSqlNoteLabel = homeRowSqlNote();
-        this.stateAvailableLabel = stateAvailable();
-        this.stateRoadmapLabel = stateRoadmap();
-        this.stateExcludedLabel = stateExcluded();
-        this.homePathTitleLabel = homePathTitle();
-        this.homePathLedeLabel = homePathLede();
-        this.homePathEmbeddedLabel = homePathEmbeddedLabel();
-        this.homePathEmbeddedTitleLabel = homePathEmbeddedTitle();
-        this.homePathEmbeddedStepAppLabel = homePathEmbeddedStepApp();
-        this.homePathEmbeddedStepEngineLabel = homePathEmbeddedStepEngine();
-        this.homePathEmbeddedStepFileLabel = homePathEmbeddedStepFile();
-        this.homePathServeLabel = homePathServeLabel();
-        this.homePathServeTitleLabel = homePathServeTitle();
-        this.homePathServeStepClientLabel = homePathServeStepClient();
-        this.homePathServeStepWireLabel = homePathServeStepWire();
-        this.homePathServeStepEngineLabel = homePathServeStepEngine();
-        this.homePathBrowserLabel = homePathBrowserLabel();
-        this.homePathBrowserTitleLabel = homePathBrowserTitle();
-        this.homePathBrowserStepContextLabel = homePathBrowserStepContext();
-        this.homePathBrowserStepLightLabel = homePathBrowserStepLight();
-        this.homePathBrowserStepStoreLabel = homePathBrowserStepStore();
-        this.homeWireTitleLabel = homeWireTitle();
-        this.homeWireLedeLabel = homeWireLede();
-        this.homeWireColOffsetLabel = homeWireColOffset();
-        this.homeWireColLenLabel = homeWireColLen();
-        this.homeWireColFieldLabel = homeWireColField();
-        this.homeWireColValueLabel = homeWireColValue();
-        this.homeWireRowMagicValueLabel = homeWireRowMagicValue();
-        this.homeWireRowVersionValueLabel = homeWireRowVersionValue();
-        this.homeWireRowMsgValueLabel = homeWireRowMsgValue();
-        this.homeWireRowFlagsValueLabel = homeWireRowFlagsValue();
-        this.homeWireRowReqValueLabel = homeWireRowReqValue();
-        this.homeWireRowLenValueLabel = homeWireRowLenValue();
-        this.homeWireRowBodyValueLabel = homeWireRowBodyValue();
-        this.homeWireNoteLabel = homeWireNote();
-        this.homeWireLinkLabel = homeWireLink();
-        this.homePackagesTitleLabel = homePackagesTitle();
-        this.homePackagesLedeLabel = homePackagesLede();
-        this.homePkgColPackageLabel = homePkgColPackage();
-        this.homePkgColUseLabel = homePkgColUse();
-        this.homePkgYydbLabel = homePkgYydb();
-        this.homePkgLightLabel = homePkgLight();
-        this.homePkgClientLabel = homePkgClient();
-        this.homePkgWebuiLabel = homePkgWebui();
-        this.homePkgSqliteLabel = homePkgSqlite();
-        this.homePkgSkillsLabel = homePkgSkills();
-        this.homePkgRustLabel = homePkgRust();
-        this.homePkgPlatformLabel = homePkgPlatform();
-        this.homePkgInstallHintLabel = homePkgInstallHint();
-        this.homeDocsTitleLabel = homeDocsTitle();
-        this.homeDocsLedeLabel = homeDocsLede();
-        this.homeDocsQuickStartLabel = homeDocsQuickStart();
-        this.homeDocsQuickStartDescLabel = homeDocsQuickStartDesc();
-        this.homeDocsInstallLabel = homeDocsInstall();
-        this.homeDocsInstallDescLabel = homeDocsInstallDesc();
-        this.homeDocsSchemaLabel = homeDocsSchema();
-        this.homeDocsSchemaDescLabel = homeDocsSchemaDesc();
-        this.homeDocsReadWriteLabel = homeDocsReadWrite();
-        this.homeDocsReadWriteDescLabel = homeDocsReadWriteDesc();
-        this.homeDocsNodeLabel = homeDocsNode();
-        this.homeDocsNodeDescLabel = homeDocsNodeDesc();
-        this.homeDocsBrowserLabel = homeDocsBrowser();
-        this.homeDocsBrowserDescLabel = homeDocsBrowserDesc();
-        this.homeDocsServeLabel = homeDocsServe();
-        this.homeDocsServeDescLabel = homeDocsServeDesc();
-        this.homeDocsWireLabel = homeDocsWire();
-        this.homeDocsWireDescLabel = homeDocsWireDesc();
-        this.homeDocsPackagesLabel = homeDocsPackages();
-        this.homeDocsPackagesDescLabel = homeDocsPackagesDesc();
-        this.homeDocsErrorsLabel = homeDocsErrors();
-        this.homeDocsErrorsDescLabel = homeDocsErrorsDesc();
-        this.homeCommunityTitleLabel = homeCommunityTitle();
-        this.homeCommunityBodyLabel = homeCommunityBody();
-        this.homeCommunityDiscussionsLabel = homeCommunityDiscussions();
-        this.homeCommunityIssuesLabel = homeCommunityIssues();
-    }
-
-    applyLocaleCopy(preferred) {
-        const localeId = readLocaleId(preferred);
-        this.syncDocHrefs(localeId);
-        withLocaleHint(localeId, () => this.refreshCopy());
+        this.homeArchitectureTitleLabel = homeArchitectureTitle();
+        this.homeArchitectureBodyLabel = homeArchitectureBody();
+        this.homeArchitectureLinkLabel = homeArchitectureLink();
+        this.homeClosingTitleLabel = homeClosingTitle();
+        this.homeClosingBodyLabel = homeClosingBody();
+        this.homeClosingActionLabel = homeClosingAction();
+        this.homeDiagramCaptionLabel = homeDiagramCaption();
+        this.homeEditionLabel = homeEdition();
+        if (typeof document !== "undefined") document.title = titleHome();
     }
 }
 </script>

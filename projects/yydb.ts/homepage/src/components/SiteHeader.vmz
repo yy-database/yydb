@@ -2,7 +2,7 @@
     <header data-vmz-fixture="site-header" class="site-header">
         <div class="site-header__inner">
             <a class="site-brand" href="/" :aria-label="homeAriaLabel">
-                <span class="site-brand__mark">{{ brandShortLabel }}</span>
+                <span class="site-brand__symbol" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M3 9l13-7 13 7-13 7zM3 16l13 7 13-7M3 23l13 7 13-7" stroke="currentColor" stroke-width="1.6"/><path d="M16 16v14" stroke="currentColor" stroke-width="1.6"/></svg></span><span class="site-brand__word">{{ brandShortLabel }}</span>
                 <span class="site-brand__tag">{{ brandFullLabel }}</span>
             </a>
 
