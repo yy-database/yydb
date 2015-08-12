@@ -1,127 +1,167 @@
 <template>
     <SiteHeader />
-    <main class="landing landing--local" id="main">
-        <section class="landing-hero">
-            <div class="landing-wrap landing-hero__grid">
-                <div class="landing-hero__copy">
-                    <p class="overline"><span class="status-seed"></span>{{ homeEyebrowLabel }}</p>
-                    <h1><span>{{ homeHeroLine1Label }}</span><span class="hero-title-accent">{{ homeHeroLine2Label }}</span></h1>
-                    <p class="landing-hero__lede">{{ homeLedeLabel }}</p>
-                    <div class="landing-actions">
-                        <a class="action action--primary" href="/install">{{ homeActionInstallLabel }}<span aria-hidden="true">↗</span></a>
-                        <a class="action action--text" href="/d/">{{ homeActionDocsLabel }}<span aria-hidden="true">→</span></a>
-                    </div>
+    <main class="landing" id="main">
+        <section class="hero">
+            <div class="wrap hero__inner">
+                <p class="hero__eyebrow overline"><span class="status-seed"></span>{{ homeEyebrowLabel }}</p>
+                <h1 class="hero__title"><span>{{ homeHeroLine1Label }}</span><span class="hero__title-step">{{ homeHeroLine2Label }}</span></h1>
+                <p class="hero__lede">{{ homeLedeLabel }}</p>
+                <div class="hero__actions">
+                    <a class="btn-flare" href="/install">{{ homeActionInstallLabel }}</a>
+                    <a class="hero-doc" href="/d/">{{ homeActionDocsLabel }}<span aria-hidden="true">→</span></a>
                 </div>
-                <figure class="landing-hero__figure">
-                    <svg class="architecture-svg" viewBox="0 0 640 540" role="img" aria-label="YYDB embedded database illustration">
-<g class="drawing-grid" fill="none" stroke="currentColor" stroke-width="0.65">
-<path d="M-500 110l520 300M-500 110l-520 300" />
-<path d="M-442 110l520 300M-442 110l-520 300" />
-<path d="M-384 110l520 300M-384 110l-520 300" />
-<path d="M-326 110l520 300M-326 110l-520 300" />
-<path d="M-268 110l520 300M-268 110l-520 300" />
-<path d="M-210 110l520 300M-210 110l-520 300" />
-<path d="M-152 110l520 300M-152 110l-520 300" />
-<path d="M-94 110l520 300M-94 110l-520 300" />
-<path d="M-36 110l520 300M-36 110l-520 300" />
-<path d="M22 110l520 300M22 110l-520 300" />
-<path d="M80 110l520 300M80 110l-520 300" />
-<path d="M138 110l520 300M138 110l-520 300" />
-<path d="M196 110l520 300M196 110l-520 300" />
-<path d="M254 110l520 300M254 110l-520 300" />
-<path d="M312 110l520 300M312 110l-520 300" />
-<path d="M370 110l520 300M370 110l-520 300" />
-<path d="M428 110l520 300M428 110l-520 300" />
-<path d="M486 110l520 300M486 110l-520 300" />
-<path d="M544 110l520 300M544 110l-520 300" />
-<path d="M602 110l520 300M602 110l-520 300" />
-<path d="M660 110l520 300M660 110l-520 300" />
-<path d="M718 110l520 300M718 110l-520 300" />
-<path d="M776 110l520 300M776 110l-520 300" />
-<path d="M834 110l520 300M834 110l-520 300" />
-<path d="M892 110l520 300M892 110l-520 300" />
-<path d="M950 110l520 300M950 110l-520 300" />
-</g>
-<g class="drawing-orbit" fill="none" stroke="currentColor"><ellipse cx="324" cy="306" rx="278" ry="150" stroke-dasharray="2 9"/><ellipse cx="324" cy="306" rx="246" ry="130"/></g>
-<path class="drawing-guide" d="M84 396H30V180h110M500 120h108v262h-48" fill="none" stroke="currentColor"/>
-<text class="drawing-label" x="32" y="162">01 / EMBEDDED ENGINE</text>
-<text class="drawing-label" x="425" y="452">YOUR DATA. YOUR FILE.</text>
-<g class="plate plate--0">
-<path class="plate-edge" d="M124 342l200 108 200-108v18L324 468 124 360z"/>
-<path class="plate-face" d="M124 342l200-108 200 108-200 108z"/>
-<path class="plate-etch" d="M165 340l132 72"/>
-<path class="plate-etch" d="M189 327l132 72"/>
-<path class="plate-etch" d="M213 314l132 72"/>
-<path class="plate-etch" d="M237 301l132 72"/>
-<path class="plate-etch" d="M261 288l132 72"/>
-<path class="plate-trace" d="M143 343l181 97 181-97"/>
-</g>
-<g class="plate plate--1">
-<path class="plate-edge" d="M124 285l200 108 200-108v18L324 411 124 303z"/>
-<path class="plate-face" d="M124 285l200-108 200 108-200 108z"/>
-<path class="plate-etch" d="M165 283l132 72"/>
-<path class="plate-etch" d="M189 270l132 72"/>
-<path class="plate-etch" d="M213 257l132 72"/>
-<path class="plate-etch" d="M237 244l132 72"/>
-<path class="plate-etch" d="M261 231l132 72"/>
-<path class="plate-trace" d="M143 286l181 97 181-97"/>
-</g>
-<g class="plate plate--2">
-<path class="plate-edge" d="M124 228l200 108 200-108v18L324 354 124 246z"/>
-<path class="plate-face" d="M124 228l200-108 200 108-200 108z"/>
-<path class="plate-etch" d="M165 226l132 72"/>
-<path class="plate-etch" d="M189 213l132 72"/>
-<path class="plate-etch" d="M213 200l132 72"/>
-<path class="plate-etch" d="M237 187l132 72"/>
-<path class="plate-etch" d="M261 174l132 72"/>
-<path class="plate-trace" d="M143 229l181 97 181-97"/>
-</g>
-<g class="drawing-core"><path d="M267 221l57-31 57 31-57 31z" class="core-top"/><path d="M267 221v23l57 31v-23M381 221v23l-57 31" class="core-side"/><path d="M295 221l29-16 29 16-29 16z" class="core-inset"/></g>
-<path class="drawing-guide" d="M324 98v52M324 450v35" stroke="currentColor"/><circle class="drawing-point" cx="324" cy="98" r="3"/><circle class="drawing-point" cx="324" cy="485" r="3"/>
-</svg>
+                <figure class="hero__flow">
+                    <svg viewBox="0 0 1200 150" role="img" :aria-label="homeDiagramCaptionLabel">
+                        <g class="flow-ruler"><path d="M24 132H1096"/><path d="M24 132v5M91 132v5M158 132v5M225 132v5M292 132v5M359 132v5M426 132v5M493 132v5M560 132v5M627 132v5M694 132v5M761 132v5M828 132v5M895 132v5M962 132v5M1029 132v5M1096 132v5"/></g>
+                        <g class="flow-bus" fill="none"><path d="M88 64H270M360 64H520M560 64H740M830 64H960"/></g>
+                        <g class="flow-joints"><rect x="85.5" y="61.5" width="5" height="5"/><rect x="267.5" y="61.5" width="5" height="5"/><rect x="357.5" y="61.5" width="5" height="5"/><rect x="517.5" y="61.5" width="5" height="5"/><rect x="557.5" y="61.5" width="5" height="5"/><rect x="737.5" y="61.5" width="5" height="5"/><rect x="827.5" y="61.5" width="5" height="5"/><rect x="957.5" y="61.5" width="5" height="5"/></g>
+                        <g class="flow-node"><rect x="24" y="48" width="64" height="32"/><text x="56" y="69" text-anchor="middle">APP</text></g>
+                        <g class="flow-node"><rect x="270" y="36" width="90" height="16"/><rect x="270" y="58" width="90" height="16"/><rect x="270" y="80" width="90" height="16"/><text x="315" y="118" text-anchor="middle">YYWL WAL</text></g>
+                        <text class="flow-tag" x="440" y="46" text-anchor="middle">COMMIT SEQ</text>
+                        <g class="flow-node"><path d="M520 42V86M560 42V86" fill="none"/><text x="540" y="118" text-anchor="middle">CHECKPOINT</text></g>
+                        <g class="flow-node"><path d="M740 40H830M740 52H830M740 64H830M740 76H830M740 88H830" fill="none"/><text x="785" y="118" text-anchor="middle">YDPG PAGES</text></g>
+                        <g class="flow-file"><path d="M960 40h110l26 26v54h-136zM1070 40v26h26"/><text x="1022" y="72" text-anchor="middle">.yydb</text></g>
+                        <path class="flow-pulse" d="M88 64H1096" fill="none"/>
+                    </svg>
                     <figcaption><span>{{ homeDiagramCaptionLabel }}</span><span aria-hidden="true">FIG. 01</span></figcaption>
                 </figure>
             </div>
-            <div class="landing-wrap hero-baseline">
-                <div><span class="install-glyph" aria-hidden="true">⌘</span><code>npm install @yydb/yydb</code><span class="install-description">{{ homeInstallHintLabel }}</span></div>
-                <span class="edition-label">{{ homeEditionLabel }}</span>
-            </div>
         </section>
-        <section class="principles landing-wrap" aria-label="Product principles">
+
+        <section class="principles wrap" aria-label="Product principles">
             <div><span class="principle-index">01</span><h2>{{ homePrinciple1TitleLabel }}</h2><p>{{ homePrinciple1BodyLabel }}</p></div>
             <div><span class="principle-index">02</span><h2>{{ homePrinciple2TitleLabel }}</h2><p>{{ homePrinciple2BodyLabel }}</p></div>
             <div><span class="principle-index">03</span><h2>{{ homePrinciple3TitleLabel }}</h2><p>{{ homePrinciple3BodyLabel }}</p></div>
         </section>
-        <section class="landing-section landing-wrap">
-            <div class="editorial-heading"><p class="overline">01 — THE ENGINE</p><h2>{{ homeFeatureTitleLabel }}</h2><p class="section-description">{{ homeFeatureLedeLabel }}</p></div>
-            <div class="feature-columns">
-                <article><span class="feature-symbol" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="4" y="6" width="24" height="20"/><path d="M4 12h24M12 12v14"/></svg></span><h3>{{ homeFeatureSchemaTitleLabel }}</h3><p>{{ homeFeatureSchemaBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureSchemaTitleLabel">↗</a></article>
-                <article><span class="feature-symbol" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M26 16a10 10 0 1 1-3.4-7.6"/><path d="M26 4.5V10h-5.5"/><path d="M13 13h6v6h-6z"/></svg></span><h3>{{ homeFeatureDurabilityTitleLabel }}</h3><p>{{ homeFeatureDurabilityBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureDurabilityTitleLabel">↗</a></article>
-                <article><span class="feature-symbol" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="5" y="5" width="7" height="7"/><rect x="20" y="5" width="7" height="7"/><rect x="5" y="20" width="7" height="7"/><rect x="20" y="20" width="7" height="7"/><path d="M16 8.5v15M8.5 16h15"/></svg></span><h3>{{ homeFeatureHostTitleLabel }}</h3><p>{{ homeFeatureHostBodyLabel }}</p><a href="/d/" :aria-label="homeFeatureHostTitleLabel">↗</a></article>
-            </div>
-        </section>
-        <section class="architecture-section">
-            <div class="landing-wrap architecture-section__grid">
-                <div><p class="overline">02 — IN YOUR APP</p><h2>{{ homeArchitectureTitleLabel }}</h2><p class="section-description">{{ homeArchitectureBodyLabel }}</p><a class="inline-link" href="/d/">{{ homeArchitectureLinkLabel }}<span aria-hidden="true">→</span></a></div>
-                <div class="code-panel">
-                    <div class="code-panel__top"><span>app.ts</span><span>VOS × NODE.JS</span></div>
-                    <pre>{{ codeSample }}</pre>
-                    <div class="code-panel__bottom">LOCAL FILE <span>app.yydb</span></div>
+
+        <section class="anatomy">
+            <div class="wrap">
+                <header class="section-head">
+                    <p class="overline">01 — FILE LAYOUT</p>
+                    <h2>{{ homeAnatomyTitleLabel }}</h2>
+                    <p class="section-lede">{{ homeAnatomyBodyLabel }}</p>
+                </header>
+                <div class="anatomy__grid">
+                    <figure class="anatomy__figure">
+                        <svg viewBox="0 0 900 600" role="img" aria-label=".yydb file layout diagram">
+                            <g class="anat-layer anat-layer--1">
+                                <path class="anat-shell" d="M72 40h300v500H72zM322 40h50v50z"/>
+                                <path class="anat-hatch" d="M84 96l48-56M108 96l48-56M132 96l48-56"/>
+                                <text class="anat-tag" x="84" y="76">HEADER</text>
+                                <path class="anat-rule" d="M72 96h300"/>
+                            </g>
+                            <g class="anat-layer anat-layer--2">
+                                <rect class="anat-textline" x="88" y="117" width="162" height="3"/>
+                                <rect class="anat-textline" x="88" y="137" width="212" height="3"/>
+                                <rect class="anat-textline" x="88" y="157" width="122" height="3"/>
+                                <rect class="anat-textline" x="88" y="177" width="192" height="3"/>
+                                <text class="anat-tag" x="88" y="206">VOS SCHEMA DOC</text>
+                                <path class="anat-rule" d="M72 216h300"/>
+                            </g>
+                            <g class="anat-layer anat-layer--3">
+                                <text class="anat-tag" x="88" y="238">YDPG PAGES</text>
+                                <path class="anat-pages" d="M88 252h268M88 268h268M88 284h268M88 300h268M88 316h268M88 332h268M88 348h268M88 364h268M88 380h268M88 396h268M88 412h268M88 428h268"/>
+                                <path class="anat-rule" d="M72 456h300"/>
+                            </g>
+                            <g class="anat-layer anat-layer--4">
+                                <rect class="anat-free" x="84" y="468" width="276" height="56"/>
+                                <text class="anat-tag anat-tag--dim" x="222" y="502" text-anchor="middle">FREE</text>
+                            </g>
+                            <g class="anat-leaders">
+                                <path d="M372 68h58"/><text x="438" y="72">MAGIC + VERSION</text>
+                                <path d="M372 156h98"/><text x="478" y="160">VOS DOC, VERSIONED</text>
+                                <path d="M372 400h44"/><text x="424" y="404">CRC32C PER PAGE</text>
+                                <path d="M372 498h58"/><text x="438" y="502">RESERVED</text>
+                            </g>
+                            <g class="anat-layer anat-layer--5">
+                                <path class="anat-shell" d="M560 300h180v180H560z"/>
+                                <path class="anat-wal" d="M572 316h156v32h-156zM572 356h156v32h-156zM572 396h156v32h-156zM572 436h156v32h-156z"/>
+                                <text class="anat-tag" x="650" y="512" text-anchor="middle">YYWL WAL</text>
+                            </g>
+                            <g class="anat-fold">
+                                <path class="anat-fold-line" d="M560 390h-80v-54h-102"/>
+                                <path class="anat-fold-head" d="M486 330l-10 6 10 6"/>
+                                <text x="472" y="356" text-anchor="end">CHECKPOINT</text>
+                            </g>
+                        </svg>
+                        <figcaption><span>.YYDB FORMAT</span><span aria-hidden="true">FIG. 02</span></figcaption>
+                    </figure>
+                    <div class="anatomy__notes">
+                        <article><h3>{{ homeAnatomySchemaTitleLabel }}</h3><p>{{ homeAnatomySchemaBodyLabel }}</p></article>
+                        <article><h3>{{ homeAnatomyWalTitleLabel }}</h3><p>{{ homeAnatomyWalBodyLabel }}</p></article>
+                    </div>
                 </div>
             </div>
         </section>
-        <section class="landing-wrap closing-section">
-            <p class="overline">03 — START</p>
-            <h2>{{ homeClosingTitleLabel }}</h2>
-            <div class="closing-section__bottom"><p>{{ homeClosingBodyLabel }}</p><a class="action action--primary" href="/install">{{ homeClosingActionLabel }}<span aria-hidden="true">↗</span></a></div>
-            <div class="closing-wordmark" aria-hidden="true">YYDB<span> / YY</span></div>
+
+        <section class="hosts">
+            <div class="wrap hosts__grid">
+                <div class="hosts__copy">
+                    <p class="overline">02 — HOSTS</p>
+                    <h2>{{ homeHostsTitleLabel }}</h2>
+                    <p class="section-lede">{{ homeHostsBodyLabel }}</p>
+                </div>
+                <figure class="hosts__figure">
+                    <svg viewBox="0 0 900 520" role="img" aria-label="Four hosts connected to one .yydb file">
+                        <g class="host-links" fill="none">
+                            <path d="M240 86h185v138"/>
+                            <path d="M660 86H465v138"/>
+                            <path d="M240 434h185V296"/>
+                            <path d="M660 434H465V296"/>
+                        </g>
+                        <g class="host-pulses" fill="none">
+                            <path d="M240 86h185v138"/>
+                            <path d="M660 86H465v138"/>
+                            <path d="M240 434h185V296"/>
+                            <path d="M660 434H465V296"/>
+                        </g>
+                        <g class="host-file">
+                            <path d="M405 224h64l16 16v56h-80zM469 224v16h16"/>
+                            <rect x="436" y="254" width="8" height="8"/>
+                        </g>
+                        <g class="host-node"><rect x="80" y="64" width="160" height="44"/><text class="host-name" x="160" y="85" text-anchor="middle">@yydb/yydb</text><text class="host-kind" x="160" y="99" text-anchor="middle">NODE-API</text></g>
+                        <g class="host-node"><rect x="660" y="64" width="160" height="44"/><text class="host-name" x="740" y="85" text-anchor="middle">yydb crate</text><text class="host-kind" x="740" y="99" text-anchor="middle">RUST</text></g>
+                        <g class="host-node"><rect x="80" y="412" width="160" height="44"/><text class="host-name" x="160" y="433" text-anchor="middle">yydb</text><text class="host-kind" x="160" y="447" text-anchor="middle">CLI</text></g>
+                        <g class="host-node"><rect x="660" y="412" width="160" height="44"/><text class="host-name" x="740" y="433" text-anchor="middle">@yydb/light-db</text><text class="host-kind" x="740" y="447" text-anchor="middle">WASM · OPFS</text></g>
+                    </svg>
+                    <figcaption><span>ONE FILE, FOUR HOSTS</span><span aria-hidden="true">FIG. 03</span></figcaption>
+                </figure>
+            </div>
+        </section>
+
+        <section class="code-section">
+            <div class="wrap code-section__grid">
+                <div class="code-section__copy">
+                    <p class="overline">03 — IN YOUR APP</p>
+                    <h2>{{ homeCodeTitleLabel }}</h2>
+                    <p class="section-lede">{{ homeCodeBodyLabel }}</p>
+                    <a class="inline-link" href="/d/">{{ homeCodeLinkLabel }}<span aria-hidden="true">→</span></a>
+                </div>
+                <div class="code-panel">
+                    <div class="code-panel__top"><span>app.ts</span><span>VOS × NODE.JS</span></div>
+                    <pre class="code-panel__raw">{{ codeSample }}</pre>
+                    <div class="code-panel__bottom"><span>LOCAL FILE</span><span>app.yydb</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="closing">
+            <div class="wrap">
+                <p class="overline">04 — START</p>
+                <h2>{{ homeClosingTitleLabel }}</h2>
+                <div class="closing__row">
+                    <p class="closing__install"><span class="closing__prompt" aria-hidden="true">$</span><code>npm install @yydb/yydb</code><span class="closing__hint">{{ homeInstallHintLabel }}</span></p>
+                    <a class="btn-flare" href="/install">{{ homeClosingActionLabel }}</a>
+                </div>
+                <p class="closing__meta">{{ homeClosingBodyLabel }}<span aria-hidden="true"> · </span><span class="closing__edition">{{ homeEditionLabel }}</span></p>
+            </div>
         </section>
     </main>
     <SiteFooter />
 </template>
 
 <script client>
-import { homeEyebrow, homeHeroLine1, homeHeroLine2, homeLede, homeActionInstall, homeActionDocs, homeInstallHint, homePrinciple1Title, homePrinciple1Body, homePrinciple2Title, homePrinciple2Body, homePrinciple3Title, homePrinciple3Body, homeFeatureTitle, homeFeatureLede, homeFeatureSchemaTitle, homeFeatureSchemaBody, homeFeatureDurabilityTitle, homeFeatureDurabilityBody, homeFeatureHostTitle, homeFeatureHostBody, homeArchitectureTitle, homeArchitectureBody, homeArchitectureLink, homeClosingTitle, homeClosingBody, homeClosingAction, homeDiagramCaption, homeEdition, titleHome } from "#locales/common";
+import { homeEyebrow, homeHeroLine1, homeHeroLine2, homeLede, homeActionInstall, homeActionDocs, homeInstallHint, homePrinciple1Title, homePrinciple1Body, homePrinciple2Title, homePrinciple2Body, homePrinciple3Title, homePrinciple3Body, homeAnatomyTitle, homeAnatomyBody, homeAnatomySchemaTitle, homeAnatomySchemaBody, homeAnatomyWalTitle, homeAnatomyWalBody, homeHostsTitle, homeHostsBody, homeCodeTitle, homeCodeBody, homeCodeLink, homeClosingTitle, homeClosingBody, homeClosingAction, homeDiagramCaption, homeEdition, titleHome } from "#locales/common";
 import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
 
 export default class Home {
@@ -129,9 +169,8 @@ export default class Home {
 
 const db = await Database.open("app.yydb");
 
-const users = await db.query(
-  "User.all().collect()"
-);
+await db.execute('User { id: 1, name: "Ada" }.insert()');
+const users = await db.query("User.all().collect()");
 
 await db.close();`;
     homeEyebrowLabel = "";
@@ -147,17 +186,17 @@ await db.close();`;
     homePrinciple2BodyLabel = "";
     homePrinciple3TitleLabel = "";
     homePrinciple3BodyLabel = "";
-    homeFeatureTitleLabel = "";
-    homeFeatureLedeLabel = "";
-    homeFeatureSchemaTitleLabel = "";
-    homeFeatureSchemaBodyLabel = "";
-    homeFeatureDurabilityTitleLabel = "";
-    homeFeatureDurabilityBodyLabel = "";
-    homeFeatureHostTitleLabel = "";
-    homeFeatureHostBodyLabel = "";
-    homeArchitectureTitleLabel = "";
-    homeArchitectureBodyLabel = "";
-    homeArchitectureLinkLabel = "";
+    homeAnatomyTitleLabel = "";
+    homeAnatomyBodyLabel = "";
+    homeAnatomySchemaTitleLabel = "";
+    homeAnatomySchemaBodyLabel = "";
+    homeAnatomyWalTitleLabel = "";
+    homeAnatomyWalBodyLabel = "";
+    homeHostsTitleLabel = "";
+    homeHostsBodyLabel = "";
+    homeCodeTitleLabel = "";
+    homeCodeBodyLabel = "";
+    homeCodeLinkLabel = "";
     homeClosingTitleLabel = "";
     homeClosingBodyLabel = "";
     homeClosingActionLabel = "";
@@ -189,17 +228,17 @@ await db.close();`;
         this.homePrinciple2BodyLabel = homePrinciple2Body();
         this.homePrinciple3TitleLabel = homePrinciple3Title();
         this.homePrinciple3BodyLabel = homePrinciple3Body();
-        this.homeFeatureTitleLabel = homeFeatureTitle();
-        this.homeFeatureLedeLabel = homeFeatureLede();
-        this.homeFeatureSchemaTitleLabel = homeFeatureSchemaTitle();
-        this.homeFeatureSchemaBodyLabel = homeFeatureSchemaBody();
-        this.homeFeatureDurabilityTitleLabel = homeFeatureDurabilityTitle();
-        this.homeFeatureDurabilityBodyLabel = homeFeatureDurabilityBody();
-        this.homeFeatureHostTitleLabel = homeFeatureHostTitle();
-        this.homeFeatureHostBodyLabel = homeFeatureHostBody();
-        this.homeArchitectureTitleLabel = homeArchitectureTitle();
-        this.homeArchitectureBodyLabel = homeArchitectureBody();
-        this.homeArchitectureLinkLabel = homeArchitectureLink();
+        this.homeAnatomyTitleLabel = homeAnatomyTitle();
+        this.homeAnatomyBodyLabel = homeAnatomyBody();
+        this.homeAnatomySchemaTitleLabel = homeAnatomySchemaTitle();
+        this.homeAnatomySchemaBodyLabel = homeAnatomySchemaBody();
+        this.homeAnatomyWalTitleLabel = homeAnatomyWalTitle();
+        this.homeAnatomyWalBodyLabel = homeAnatomyWalBody();
+        this.homeHostsTitleLabel = homeHostsTitle();
+        this.homeHostsBodyLabel = homeHostsBody();
+        this.homeCodeTitleLabel = homeCodeTitle();
+        this.homeCodeBodyLabel = homeCodeBody();
+        this.homeCodeLinkLabel = homeCodeLink();
         this.homeClosingTitleLabel = homeClosingTitle();
         this.homeClosingBodyLabel = homeClosingBody();
         this.homeClosingActionLabel = homeClosingAction();
