@@ -34,12 +34,13 @@
   homePrinciple3Title: 'VOS queries',
   homePrinciple3Body: 'Schema definitions and read-write operations share one VOS language. There is no second query dialect to learn.',
 
-  homeAnatomyTitle: 'Open one file,\nsee the whole structure.',
-  homeAnatomyBody: 'The schema, data pages and WAL each occupy a fixed place in the file, and the layout is public in the format documentation. Every implementation reads and writes the same structure, with no private parsing.',
   homeAnatomySchemaTitle: 'Schema travels with the file',
   homeAnatomySchemaBody: 'Tables are written in VOS and stored inside the file, so the CLI, clients and the engine all read the same definition.',
   homeAnatomyWalTitle: 'Committed writes survive',
   homeAnatomyWalBody: 'Writes are appended to the WAL with a commit sequence and folded into data pages at checkpoint. Reopen the file after a crash and the unfolded part replays automatically.',
+
+  homeWriteTitle: 'Every write travels\nthe same route.',
+  homeWriteBody: 'Every commit is appended to the WAL with its commit sequence and folded into data pages at checkpoint. The path is fixed, and no write ever takes a second route.',
 
   homeHostsTitle: 'Four hosts,\none file.',
   homeHostsBody: 'Node.js, Rust, the CLI and browser WASM sessions all read and write the same .yydb file. The semantics come from one Rust core, so no format conversion is involved.',
@@ -51,7 +52,7 @@
   homeClosingTitle: 'Start with one file.',
   homeClosingBody: 'Install @yydb/yydb, run your first VOS statement and keep the data in your own file.',
   homeClosingAction: 'Read the quickstart',
-  homeDiagramCaption: 'WRITE PATH / COMMIT TO FOLD',
+  homeDiagramCaption: 'FILE LAYOUT / FORMAT VIEW',
 
   footerBlurb: 'A local database embedded in your application. Schema and queries speak VOS, and data stays in a file you hold.',
   footerProduct: 'Product',

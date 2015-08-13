@@ -34,12 +34,13 @@
   homePrinciple3Title: 'VOS 查询',
   homePrinciple3Body: '结构定义与读写操作共用一种 VOS 语言，不需要再学一套查询语法。',
 
-  homeAnatomyTitle: '打开一个文件，\n看见全部结构。',
-  homeAnatomyBody: 'schema、数据页与 WAL 在文件里各有固定位置，布局由格式文档公开。任何实现按同一份布局读写，不存在私有解析。',
   homeAnatomySchemaTitle: 'schema 随文件走',
   homeAnatomySchemaBody: '表结构用 VOS 书写并存在文件内部，CLI、客户端与引擎读到的是同一份定义。',
   homeAnatomyWalTitle: '提交过的写入不丢',
   homeAnatomyWalBody: '写入先追加到 WAL 并记录提交序号，checkpoint 时再折叠进数据页。崩溃后重开文件，未折叠的部分自动重放。',
+
+  homeWriteTitle: '每一次写入，\n都走同一条路。',
+  homeWriteBody: '每次提交都先追加到 WAL 并记录提交序号，checkpoint 时再折叠进数据页。通路固定，任何一次写入都不会走第二条路线。',
 
   homeHostsTitle: '四种宿主，\n同一文件。',
   homeHostsBody: 'Node.js、Rust、CLI 与浏览器 WASM 会话读写同一种 .yydb 文件，语义来自同一个 Rust 内核，不需要格式转换。',
@@ -51,7 +52,7 @@
   homeClosingTitle: '从一个文件开始。',
   homeClosingBody: '安装 @yydb/yydb，执行第一段 VOS，把数据放进自己的文件。',
   homeClosingAction: '阅读快速开始',
-  homeDiagramCaption: '写入通路 / 提交到折叠',
+  homeDiagramCaption: '文件布局 / 格式示意',
 
   footerBlurb: '嵌入应用的本地数据库。schema 与查询使用 VOS，数据保存在你持有的文件里。',
   footerProduct: '产品',
