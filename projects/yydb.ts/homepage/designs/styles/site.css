@@ -1004,8 +1004,10 @@ pre {
    YYDB identity v3 — the drawing sheet. The whole page is a set of
    engineering sheets for one file: ink on drafting paper, fluorescent
    ink reserved for verification, data motion and the stamp. All visual
-   decisions live in this token layer so the upcoming unified design
-   system can retoken without restructuring the rules below.
+   decisions live in this token layer and belong to YYDB alone. The
+   minimal shared layer (icons, code blocks, footer structure, motion
+   physics, accessibility) may constrain individual parts later, never
+   this colour world or composition.
    ========================================================================== */
 
 :root {
