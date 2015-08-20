@@ -8,7 +8,7 @@
                 <h1><span>{{ homeHeroLine1Label }}</span><span class="step">{{ homeHeroLine2Label }}</span></h1>
                 <p class="lede">{{ homeLedeLabel }}</p>
                 <div class="actions">
-                    <a class="btn-ink" href="/install">{{ homeActionInstallLabel }}</a>
+                    <a class="btn-signal" href="/install">{{ homeActionInstallLabel }}</a>
                     <a class="doc-link" href="/d/">{{ homeActionDocsLabel }}<span aria-hidden="true">→</span></a>
                 </div>
             </div>
@@ -168,7 +168,7 @@
             <h2>{{ homeClosingTitleLabel }}</h2>
             <div class="issued__row">
                 <p class="issued__install"><span class="issued__prompt" aria-hidden="true">$</span><code>npm install @yydb/yydb</code><span class="issued__hint">{{ homeInstallHintLabel }}</span></p>
-                <a class="btn-ink" href="/install">{{ homeClosingActionLabel }}</a>
+                <a class="btn-signal" href="/install">{{ homeClosingActionLabel }}</a>
             </div>
             <p class="issued__meta">{{ homeClosingBodyLabel }}<span aria-hidden="true"> · </span><span class="issued__edition">{{ homeEditionLabel }}</span></p>
         </section>
