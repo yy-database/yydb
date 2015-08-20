@@ -14,7 +14,60 @@
                 </div>
                 <figure class="hero__visual">
                     <div class="hero__frame">
-                        <img src="/assets/hero-cartridge.jpg" :alt="homeDiagramCaptionLabel" loading="eager" decoding="async" />
+                        <svg viewBox="0 0 640 576" role="img" :aria-label="homeDiagramCaptionLabel">
+                            <defs>
+                                <linearGradient id="plateTop" x1="0" y1="0" x2="1" y2="1">
+                                    <stop offset="0" stop-color="#ffffff"/>
+                                    <stop offset="1" stop-color="#e9eff1"/>
+                                </linearGradient>
+                            </defs>
+                            <ellipse class="fig-shadow" cx="258" cy="556" rx="180" ry="14"/>
+                            <ellipse class="fig-shadow--core" cx="258" cy="552" rx="108" ry="10"/>
+                            <path class="fig-axis" d="M260 16V548"/>
+                            <g>
+                                <path class="iso-left" d="M110 96l150 48v10l-150-48z"/>
+                                <path class="iso-right" d="M410 96l-150 48v10l150-48z"/>
+                                <path class="iso-top" d="M110 96l150-48 150 48-150 48z"/>
+                                <text class="fig-label" x="260" y="100">HEADER</text>
+                            </g>
+                            <g>
+                                <path class="iso-left" d="M110 212l150 48v26l-150-48z"/>
+                                <path class="iso-right" d="M410 212l-150 48v26l150-48z"/>
+                                <path class="iso-top" d="M110 212l150-48 150 48-150 48z"/>
+                                <text class="fig-label" x="260" y="216">VOS SCHEMA DOC</text>
+                            </g>
+                            <g>
+                                <path class="iso-left" d="M110 332l150 48v64l-150-48z"/>
+                                <path class="iso-right" d="M410 332l-150 48v64l150-48z"/>
+                                <path class="iso-top" d="M110 332l150-48 150 48-150 48z"/>
+                                <path class="fig-pageline" d="M110 348l150 48M110 364l150 48M110 380l150 48"/>
+                                <text class="fig-label" x="260" y="328">YDPG PAGES</text>
+                                <text class="fig-label fig-label--dim" x="260" y="342">CRC32C / PAGE</text>
+                            </g>
+                            <g>
+                                <path class="iso-left iso-left--free" d="M110 486l150 48v8l-150-48z"/>
+                                <path class="iso-right iso-right--free" d="M410 486l-150 48v8l150-48z"/>
+                                <path class="iso-top iso-top--free" d="M110 486l150-48 150 48-150 48z"/>
+                                <text class="fig-label fig-label--dim" x="260" y="490">FREE</text>
+                            </g>
+                            <g>
+                                <path class="iso-left" d="M448 404l52 28v42l-52-28z"/>
+                                <path class="iso-right" d="M552 404l-52 28v42l52-28z"/>
+                                <path class="iso-top" d="M448 404l52-28 52 28-52 28z"/>
+                                <text class="fig-label" x="500" y="406">YYWL WAL</text>
+                            </g>
+                            <path class="fig-fold" d="M462 396c-20-12-38-18-56-22"/>
+                            <path class="fig-fold-head" d="M414 368l-10 6 10 6"/>
+                            <text class="fig-fold-text" x="440" y="356" text-anchor="middle">CHECKPOINT</text>
+                            <g class="fig-note-group">
+                                <path class="fig-note-line" d="M416 98h14"/>
+                                <text class="fig-note" x="438" y="102">MAGIC + VERSION</text>
+                                <path class="fig-note-line" d="M416 214h14"/>
+                                <text class="fig-note" x="438" y="218">VERSIONED</text>
+                                <path class="fig-note-line" d="M104 372h8"/>
+                                <text class="fig-note" x="98" y="376" text-anchor="end">N × 4096 B</text>
+                            </g>
+                        </svg>
                     </div>
                     <figcaption><span>{{ homeDiagramCaptionLabel }}</span><span aria-hidden="true">YDPG · YYWL · VOS · CRC32C</span></figcaption>
                 </figure>

@@ -50,7 +50,7 @@
   homeClosingTitle: '从一个文件开始。',
   homeClosingBody: '安装 @yydb/yydb，执行第一段 VOS，把数据放进自己的文件。',
   homeClosingAction: '阅读快速开始',
-  homeDiagramCaption: '单文件实体 / 概念渲染',
+  homeDiagramCaption: '文件内部结构',
 
   footerBlurb: '嵌入应用的本地数据库。schema 与查询使用 VOS，数据保存在你持有的文件里。',
   footerProduct: '产品',

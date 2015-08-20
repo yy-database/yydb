@@ -50,7 +50,7 @@
   homeClosingTitle: 'Start with one file.',
   homeClosingBody: 'Install @yydb/yydb, run your first VOS statement and keep the data in your own file.',
   homeClosingAction: 'Read the quickstart',
-  homeDiagramCaption: 'THE FILE AS ONE OBJECT',
+  homeDiagramCaption: 'INSIDE THE .YYDB FILE',
 
   footerBlurb: 'A local database embedded in your application. Schema and queries speak VOS, and data stays in a file you hold.',
   footerProduct: 'Product',
