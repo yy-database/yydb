@@ -45,14 +45,12 @@
   homeHostsTitle: 'Four hosts,\none file.',
   homeHostsBody: 'Node.js, Rust, the CLI and browser WASM sessions all read and write the same .yydb file. The semantics come from one Rust core, so no format conversion is involved.',
 
-  homeCodeTitle: 'Import one package.\nStart reading and writing.',
-  homeCodeBody: 'Database.open creates or opens a local file, and VOS statements run inside your process. Add the optional serve endpoint only when you need a network interface.',
   homeCodeLink: 'Read the query guide',
 
   homeClosingTitle: 'Start with one file.',
   homeClosingBody: 'Install @yydb/yydb, run your first VOS statement and keep the data in your own file.',
   homeClosingAction: 'Read the quickstart',
-  homeDiagramCaption: 'FILE LAYOUT / FORMAT VIEW',
+  homeDiagramCaption: 'THE FILE AS ONE OBJECT',
 
   footerBlurb: 'A local database embedded in your application. Schema and queries speak VOS, and data stays in a file you hold.',
   footerProduct: 'Product',

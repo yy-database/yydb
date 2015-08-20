@@ -1,94 +1,39 @@
 <template>
     <SiteHeader />
     <main class="landing" id="main">
-        <section class="sheet">
-            <div class="sheet__frame" aria-hidden="true"><span class="frame-outer"></span><span class="frame-inner"></span><span class="zones-top"><i>1</i><i>2</i><i>3</i><i>4</i></span><span class="zones-side"><i>A</i><i>B</i><i>C</i></span></div>
-            <div class="sheet__copy">
-                <p class="eyebrow"><i class="seed" aria-hidden="true"></i>{{ homeEyebrowLabel }} — SHEET 01</p>
-                <h1><span>{{ homeHeroLine1Label }}</span><span class="step">{{ homeHeroLine2Label }}</span></h1>
-                <p class="lede">{{ homeLedeLabel }}</p>
-                <div class="actions">
-                    <a class="btn-signal" href="/install">{{ homeActionInstallLabel }}</a>
-                    <a class="doc-link" href="/d/">{{ homeActionDocsLabel }}<span aria-hidden="true">→</span></a>
+        <section class="hero">
+            <div class="wrap hero__grid">
+                <div class="hero__copy">
+                    <p class="eyebrow"><i class="seed" aria-hidden="true"></i>{{ homeEyebrowLabel }}</p>
+                    <h1><span>{{ homeHeroLine1Label }}</span><span class="step">{{ homeHeroLine2Label }}</span></h1>
+                    <p class="lede">{{ homeLedeLabel }}</p>
+                    <div class="actions">
+                        <a class="btn-signal" href="/install">{{ homeActionInstallLabel }}</a>
+                        <a class="doc-link" href="/d/">{{ homeActionDocsLabel }}<span aria-hidden="true">→</span></a>
+                    </div>
                 </div>
-            </div>
-            <figure class="sheet__fig">
-                <div class="sheet__figinner">
-                    <i class="scan" aria-hidden="true"></i>
-                    <svg viewBox="0 0 900 600" role="img" :aria-label="homeDiagramCaptionLabel">
-                        <g class="anat-layer anat-layer--1">
-                            <path class="anat-shell draw-in" d="M72 40h300v500H72zM322 40h50v50z"/>
-                            <path class="anat-hatch" d="M84 96l48-56M108 96l48-56M132 96l48-56"/>
-                            <text class="anat-tag" x="84" y="76">HEADER</text>
-                            <path class="anat-rule" d="M72 96h300"/>
-                        </g>
-                        <g class="anat-layer anat-layer--2">
-                            <rect class="anat-textline" x="88" y="117" width="162" height="3"/>
-                            <rect class="anat-textline" x="88" y="137" width="212" height="3"/>
-                            <rect class="anat-textline" x="88" y="157" width="122" height="3"/>
-                            <rect class="anat-textline" x="88" y="177" width="192" height="3"/>
-                            <text class="anat-tag" x="88" y="206">VOS SCHEMA DOC</text>
-                            <path class="anat-rule" d="M72 216h300"/>
-                        </g>
-                        <g class="anat-layer anat-layer--3">
-                            <text class="anat-tag" x="88" y="238">YDPG PAGES</text>
-                            <path class="anat-pages" d="M88 252h268M88 268h268M88 284h268M88 300h268M88 316h268M88 332h268M88 348h268M88 364h268M88 380h268M88 396h268M88 412h268M88 428h268"/>
-                            <path class="anat-rule" d="M72 456h300"/>
-                        </g>
-                        <g class="anat-layer anat-layer--4">
-                            <rect class="anat-free" x="84" y="468" width="276" height="56"/>
-                            <text class="anat-tag anat-tag--dim" x="222" y="502" text-anchor="middle">FREE</text>
-                        </g>
-                        <g class="anat-leaders">
-                            <path d="M372 68h58"/><text x="438" y="72">MAGIC + VERSION</text>
-                            <path d="M372 156h98"/><text x="478" y="160">VOS DOC, VERSIONED</text>
-                            <path d="M372 400h44"/><text x="424" y="404">CRC32C PER PAGE</text>
-                            <path d="M372 498h58"/><text x="438" y="502">RESERVED</text>
-                        </g>
-                        <g class="anat-dim">
-                            <path d="M400 216v240M394 216h12M394 456h12"/>
-                            <text x="416" y="336" transform="rotate(-90 416 336)" text-anchor="middle">N × PAGE, FIXED SIZE</text>
-                        </g>
-                        <g class="anat-layer anat-layer--5">
-                            <path class="anat-shell" d="M560 300h180v180H560z"/>
-                            <path class="anat-wal" d="M572 316h156v32h-156zM572 356h156v32h-156zM572 396h156v32h-156zM572 436h156v32h-156z"/>
-                            <text class="anat-tag" x="650" y="512" text-anchor="middle">YYWL WAL</text>
-                        </g>
-                        <g class="anat-fold">
-                            <path class="anat-fold-line" d="M560 390h-80v-54h-102"/>
-                            <path class="anat-fold-head" d="M486 330l-10 6 10 6"/>
-                            <text x="472" y="356" text-anchor="end">CHECKPOINT</text>
-                        </g>
-                    </svg>
-                </div>
-                <figcaption><span>FIG. YY-01 — {{ homeDiagramCaptionLabel }}</span><span aria-hidden="true">SCALE 1:1</span></figcaption>
-            </figure>
-            <div class="stamp" aria-hidden="true">CRC32C<br>VERIFIED</div>
-            <div class="titleblock" aria-hidden="true">
-                <div class="titleblock__row"><span>PRODUCT</span><span>YYDB · YY DATABASE</span></div>
-                <div class="titleblock__row"><span>FORMAT</span><span>YDPG PAGES + YYWL WAL · CRC32C</span></div>
-                <div class="titleblock__row"><span>LICENSE</span><span>MPL-2.0 · LOCAL-FIRST</span></div>
-                <div class="titleblock__row"><span>SHEET</span><span>01 OF 01 · SCALE 1:1</span></div>
+                <figure class="hero__visual">
+                    <div class="hero__frame">
+                        <img src="/assets/hero-cartridge.jpg" :alt="homeDiagramCaptionLabel" loading="eager" decoding="async" />
+                    </div>
+                    <figcaption><span>{{ homeDiagramCaptionLabel }}</span><span aria-hidden="true">YDPG · YYWL · VOS · CRC32C</span></figcaption>
+                </figure>
             </div>
         </section>
 
-        <section class="notes wrap" aria-label="General notes">
-            <p class="plate-tab">GENERAL NOTES</p>
-            <div class="notes__grid">
-                <div><span class="notes__index">01</span><h2>{{ homePrinciple1TitleLabel }}</h2><p>{{ homePrinciple1BodyLabel }}</p></div>
-                <div><span class="notes__index">02</span><h2>{{ homePrinciple2TitleLabel }}</h2><p>{{ homePrinciple2BodyLabel }}</p></div>
-                <div><span class="notes__index">03</span><h2>{{ homePrinciple3TitleLabel }}</h2><p>{{ homePrinciple3BodyLabel }}</p></div>
-            </div>
+        <section class="principles wrap" aria-label="Product principles">
+            <div><span class="principle-index">01</span><h2>{{ homePrinciple1TitleLabel }}</h2><p>{{ homePrinciple1BodyLabel }}</p></div>
+            <div><span class="principle-index">02</span><h2>{{ homePrinciple2TitleLabel }}</h2><p>{{ homePrinciple2BodyLabel }}</p></div>
+            <div><span class="principle-index">03</span><h2>{{ homePrinciple3TitleLabel }}</h2><p>{{ homePrinciple3BodyLabel }}</p></div>
         </section>
 
-        <section class="plate wrap">
-            <header class="plate-head">
-                <p class="plate-tab">02 — WRITE PATH</p>
-                <h2>{{ homeWriteTitleLabel }}</h2>
-                <p class="plate-lede">{{ homeWriteBodyLabel }}</p>
-            </header>
-            <div class="plate__grid">
-                <figure class="plate__fig">
+        <section class="engine">
+            <div class="wrap">
+                <header class="engine__head">
+                    <h2>{{ homeWriteTitleLabel }}</h2>
+                    <p class="engine__lede">{{ homeWriteBodyLabel }}</p>
+                </header>
+                <figure class="engine__flow">
                     <svg viewBox="0 0 1200 150" role="img" aria-label="Write path from WAL to pages">
                         <g class="flow-ruler"><path d="M24 132H1096"/><path d="M24 132v5M91 132v5M158 132v5M225 132v5M292 132v5M359 132v5M426 132v5M493 132v5M560 132v5M627 132v5M694 132v5M761 132v5M828 132v5M895 132v5M962 132v5M1029 132v5M1096 132v5"/></g>
                         <g class="flow-bus" fill="none"><path d="M88 64H270M360 64H520M560 64H740M830 64H960"/></g>
@@ -101,83 +46,55 @@
                         <g class="flow-file"><path d="M960 40h110l26 26v54h-136zM1070 40v26h26"/><text x="1022" y="72" text-anchor="middle">.yydb</text></g>
                         <path class="flow-pulse" d="M88 64H1096" fill="none"/>
                     </svg>
-                    <figcaption><span>FIG. YY-02 — WRITE PATH</span><span aria-hidden="true">SCALE 1:1</span></figcaption>
                 </figure>
-                <article class="plate__note">
-                    <h3>{{ homeAnatomyWalTitleLabel }}</h3>
-                    <p>{{ homeAnatomyWalBodyLabel }}</p>
-                </article>
+                <div class="engine__grid">
+                    <article class="engine__note">
+                        <h3>{{ homeAnatomyWalTitleLabel }}</h3>
+                        <p>{{ homeAnatomyWalBodyLabel }}</p>
+                    </article>
+                    <div class="code-panel">
+                        <div class="code-panel__top"><span>app.ts</span><span>VOS × NODE.JS</span></div>
+                        <pre class="code-panel__raw">{{ codeSample }}</pre>
+                        <div class="code-panel__bottom"><span>LOCAL FILE</span><span>app.yydb</span></div>
+                    </div>
+                </div>
             </div>
         </section>
 
-        <section class="plate wrap">
-            <header class="plate-head">
-                <p class="plate-tab">03 — HOSTS</p>
+        <section class="hosts wrap">
+            <header class="hosts__head">
                 <h2>{{ homeHostsTitleLabel }}</h2>
-                <p class="plate-lede">{{ homeHostsBodyLabel }}</p>
+                <div class="hosts__side">
+                    <p class="hosts__lede">{{ homeHostsBodyLabel }}</p>
+                    <a class="doc-link" href="/d/">{{ homeCodeLinkLabel }}<span aria-hidden="true">→</span></a>
+                </div>
             </header>
-            <div class="plate__grid plate__grid--hosts">
-                <figure class="plate__fig">
-                    <svg viewBox="0 0 900 520" role="img" aria-label="Four hosts connected to one .yydb file">
-                        <g class="host-links" fill="none">
-                            <path d="M240 86h185v138"/>
-                            <path d="M660 86H465v138"/>
-                            <path d="M240 434h185V296"/>
-                            <path d="M660 434H465V296"/>
-                        </g>
-                        <g class="host-pulses" fill="none">
-                            <path d="M240 86h185v138"/>
-                            <path d="M660 86H465v138"/>
-                            <path d="M240 434h185V296"/>
-                            <path d="M660 434H465V296"/>
-                        </g>
-                        <g class="host-file">
-                            <path d="M405 224h64l16 16v56h-80zM469 224v16h16"/>
-                            <rect x="436" y="254" width="8" height="8"/>
-                        </g>
-                        <g class="host-node"><rect x="80" y="64" width="160" height="44"/><text class="host-name" x="160" y="85" text-anchor="middle">@yydb/yydb</text><text class="host-kind" x="160" y="99" text-anchor="middle">NODE-API</text></g>
-                        <g class="host-node"><rect x="660" y="64" width="160" height="44"/><text class="host-name" x="740" y="85" text-anchor="middle">yydb crate</text><text class="host-kind" x="740" y="99" text-anchor="middle">RUST</text></g>
-                        <g class="host-node"><rect x="80" y="412" width="160" height="44"/><text class="host-name" x="160" y="433" text-anchor="middle">yydb</text><text class="host-kind" x="160" y="447" text-anchor="middle">CLI</text></g>
-                        <g class="host-node"><rect x="660" y="412" width="160" height="44"/><text class="host-name" x="740" y="433" text-anchor="middle">@yydb/light-db</text><text class="host-kind" x="740" y="447" text-anchor="middle">WASM · OPFS</text></g>
-                    </svg>
-                    <figcaption><span>FIG. YY-03 — ONE FILE, FOUR HOSTS</span><span aria-hidden="true">SCALE 1:1</span></figcaption>
-                </figure>
-                <article class="plate__note">
-                    <h3>{{ homeAnatomySchemaTitleLabel }}</h3>
-                    <p>{{ homeAnatomySchemaBodyLabel }}</p>
-                </article>
-            </div>
+            <ul class="hosts__list">
+                <li><code>@yydb/yydb</code><span>NODE-API</span></li>
+                <li><code>yydb crate</code><span>RUST</span></li>
+                <li><code>yydb</code><span>CLI</span></li>
+                <li><code>@yydb/light-db</code><span>WASM · OPFS</span></li>
+            </ul>
+            <article class="hosts__note">
+                <h3>{{ homeAnatomySchemaTitleLabel }}</h3>
+                <p>{{ homeAnatomySchemaBodyLabel }}</p>
+            </article>
         </section>
 
-        <section class="plate wrap">
-            <header class="plate-head">
-                <p class="plate-tab">04 — OPERATION</p>
-                <h2>{{ homeCodeTitleLabel }}</h2>
-                <p class="plate-lede">{{ homeCodeBodyLabel }}</p>
-                <a class="doc-link doc-link--section" href="/d/">{{ homeCodeLinkLabel }}<span aria-hidden="true">→</span></a>
-            </header>
-            <div class="code-panel">
-                <div class="code-panel__top"><span>app.ts</span><span>VOS × NODE.JS</span></div>
-                <pre class="code-panel__raw">{{ codeSample }}</pre>
-                <div class="code-panel__bottom"><span>LOCAL FILE</span><span>app.yydb</span></div>
-            </div>
-        </section>
-
-        <section class="issued wrap">
-            <p class="plate-tab">ISSUED FOR USE</p>
+        <section class="closing wrap">
             <h2>{{ homeClosingTitleLabel }}</h2>
-            <div class="issued__row">
-                <p class="issued__install"><span class="issued__prompt" aria-hidden="true">$</span><code>npm install @yydb/yydb</code><span class="issued__hint">{{ homeInstallHintLabel }}</span></p>
+            <div class="closing__row">
+                <p class="closing__install"><span class="closing__prompt" aria-hidden="true">$</span><code>npm install @yydb/yydb</code><span class="closing__hint">{{ homeInstallHintLabel }}</span></p>
                 <a class="btn-signal" href="/install">{{ homeClosingActionLabel }}</a>
             </div>
-            <p class="issued__meta">{{ homeClosingBodyLabel }}<span aria-hidden="true"> · </span><span class="issued__edition">{{ homeEditionLabel }}</span></p>
+            <p class="closing__meta">{{ homeClosingBodyLabel }}<span aria-hidden="true"> · </span><span class="closing__edition">{{ homeEditionLabel }}</span></p>
         </section>
     </main>
     <SiteFooter />
 </template>
 
 <script client>
-import { homeEyebrow, homeHeroLine1, homeHeroLine2, homeLede, homeActionInstall, homeActionDocs, homeInstallHint, homePrinciple1Title, homePrinciple1Body, homePrinciple2Title, homePrinciple2Body, homePrinciple3Title, homePrinciple3Body, homeWriteTitle, homeWriteBody, homeAnatomySchemaTitle, homeAnatomySchemaBody, homeAnatomyWalTitle, homeAnatomyWalBody, homeHostsTitle, homeHostsBody, homeCodeTitle, homeCodeBody, homeCodeLink, homeClosingTitle, homeClosingBody, homeClosingAction, homeDiagramCaption, homeEdition, titleHome } from "#locales/common";
+import { homeEyebrow, homeHeroLine1, homeHeroLine2, homeLede, homeActionInstall, homeActionDocs, homeInstallHint, homePrinciple1Title, homePrinciple1Body, homePrinciple2Title, homePrinciple2Body, homePrinciple3Title, homePrinciple3Body, homeWriteTitle, homeWriteBody, homeAnatomySchemaTitle, homeAnatomySchemaBody, homeAnatomyWalTitle, homeAnatomyWalBody, homeHostsTitle, homeHostsBody, homeCodeLink, homeClosingTitle, homeClosingBody, homeClosingAction, homeDiagramCaption, homeEdition, titleHome } from "#locales/common";
 import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
 
 export default class Home {
@@ -210,8 +127,6 @@ await db.close();`;
     homeAnatomyWalBodyLabel = "";
     homeHostsTitleLabel = "";
     homeHostsBodyLabel = "";
-    homeCodeTitleLabel = "";
-    homeCodeBodyLabel = "";
     homeCodeLinkLabel = "";
     homeClosingTitleLabel = "";
     homeClosingBodyLabel = "";
@@ -252,8 +167,6 @@ await db.close();`;
         this.homeAnatomyWalBodyLabel = homeAnatomyWalBody();
         this.homeHostsTitleLabel = homeHostsTitle();
         this.homeHostsBodyLabel = homeHostsBody();
-        this.homeCodeTitleLabel = homeCodeTitle();
-        this.homeCodeBodyLabel = homeCodeBody();
         this.homeCodeLinkLabel = homeCodeLink();
         this.homeClosingTitleLabel = homeClosingTitle();
         this.homeClosingBodyLabel = homeClosingBody();
