@@ -51,91 +51,280 @@
             </div>
         </section>
 
-        <section class="principles wrap" aria-label="Product principles">
-            <div><span class="principle-index">01</span><h2>{{ homePrinciple1TitleLabel }}</h2><p>{{ homePrinciple1BodyLabel }}</p></div>
-            <div><span class="principle-index">02</span><h2>{{ homePrinciple2TitleLabel }}</h2><p>{{ homePrinciple2BodyLabel }}</p></div>
-            <div><span class="principle-index">03</span><h2>{{ homePrinciple3TitleLabel }}</h2><p>{{ homePrinciple3BodyLabel }}</p></div>
+        <section class="caps wrap" aria-labelledby="caps-title">
+            <div class="section-head">
+                <p class="eyebrow"><span class="eyebrow__no" aria-hidden="true">02</span>{{ homeCapsEyebrowLabel }}</p>
+                <h2 id="caps-title">{{ homeCapsTitleLabel }}</h2>
+                <p class="section-head__lede">{{ homeCapsLedeLabel }}</p>
+            </div>
+            <ol class="caps__list">
+                <li class="caps__row">
+                    <span class="caps__index" aria-hidden="true">01</span>
+                    <h3 class="caps__name">{{ homeCap1TitleLabel }}</h3>
+                    <p class="caps__fact">{{ homeCap1FactLabel }}</p>
+                    <span class="caps__tag">{{ homeCap1TagLabel }}</span>
+                </li>
+                <li class="caps__row">
+                    <span class="caps__index" aria-hidden="true">02</span>
+                    <h3 class="caps__name">{{ homeCap2TitleLabel }}</h3>
+                    <p class="caps__fact">{{ homeCap2FactLabel }}</p>
+                    <span class="caps__tag">{{ homeCap2TagLabel }}</span>
+                </li>
+                <li class="caps__row">
+                    <span class="caps__index" aria-hidden="true">03</span>
+                    <h3 class="caps__name">{{ homeCap3TitleLabel }}</h3>
+                    <p class="caps__fact">{{ homeCap3FactLabel }}</p>
+                    <span class="caps__tag">{{ homeCap3TagLabel }}</span>
+                </li>
+                <li class="caps__row">
+                    <span class="caps__index" aria-hidden="true">04</span>
+                    <h3 class="caps__name">{{ homeCap4TitleLabel }}</h3>
+                    <p class="caps__fact">{{ homeCap4FactLabel }}</p>
+                    <span class="caps__tag">{{ homeCap4TagLabel }}</span>
+                </li>
+                <li class="caps__row">
+                    <span class="caps__index" aria-hidden="true">05</span>
+                    <h3 class="caps__name">{{ homeCap5TitleLabel }}</h3>
+                    <p class="caps__fact">{{ homeCap5FactLabel }}</p>
+                    <span class="caps__tag">{{ homeCap5TagLabel }}</span>
+                </li>
+                <li class="caps__row">
+                    <span class="caps__index" aria-hidden="true">06</span>
+                    <h3 class="caps__name">{{ homeCap6TitleLabel }}</h3>
+                    <p class="caps__fact">{{ homeCap6FactLabel }}</p>
+                    <span class="caps__tag">{{ homeCap6TagLabel }}</span>
+                </li>
+            </ol>
         </section>
 
-        <section class="engine">
+        <section class="quick" aria-labelledby="quick-title">
             <div class="wrap">
-                <header class="engine__head">
-                    <h2>{{ homeWriteTitleLabel }}</h2>
-                    <p class="engine__lede">{{ homeWriteBodyLabel }}</p>
-                </header>
-                <figure class="engine__flow">
-                    <svg viewBox="0 0 1200 150" role="img" aria-label="Write path from WAL to pages">
-                        <g class="flow-ruler"><path d="M24 132H1096"/><path d="M24 132v5M91 132v5M158 132v5M225 132v5M292 132v5M359 132v5M426 132v5M493 132v5M560 132v5M627 132v5M694 132v5M761 132v5M828 132v5M895 132v5M962 132v5M1029 132v5M1096 132v5"/></g>
-                        <g class="flow-bus" fill="none"><path d="M88 64H270M360 64H520M560 64H740M830 64H960"/></g>
-                        <g class="flow-joints"><rect x="85.5" y="61.5" width="5" height="5"/><rect x="267.5" y="61.5" width="5" height="5"/><rect x="357.5" y="61.5" width="5" height="5"/><rect x="517.5" y="61.5" width="5" height="5"/><rect x="557.5" y="61.5" width="5" height="5"/><rect x="737.5" y="61.5" width="5" height="5"/><rect x="827.5" y="61.5" width="5" height="5"/><rect x="957.5" y="61.5" width="5" height="5"/></g>
-                        <g class="flow-node"><rect x="24" y="48" width="64" height="32"/><text x="56" y="69" text-anchor="middle">APP</text></g>
-                        <g class="flow-node"><rect x="270" y="36" width="90" height="16"/><rect x="270" y="58" width="90" height="16"/><rect x="270" y="80" width="90" height="16"/><text x="315" y="118" text-anchor="middle">YYWL WAL</text></g>
-                        <text class="flow-tag" x="440" y="46" text-anchor="middle">COMMIT SEQ</text>
-                        <g class="flow-node"><path d="M520 42V86M560 42V86" fill="none"/><text x="540" y="118" text-anchor="middle">CHECKPOINT</text></g>
-                        <g class="flow-node"><path d="M740 40H830M740 52H830M740 64H830M740 76H830M740 88H830" fill="none"/><text x="785" y="118" text-anchor="middle">YDPG PAGES</text></g>
-                        <g class="flow-file"><path d="M960 40h110l26 26v54h-136zM1070 40v26h26"/><text x="1022" y="72" text-anchor="middle">.yydb</text></g>
-                        <path class="flow-pulse" d="M88 64H1096" fill="none"/>
-                    </svg>
-                </figure>
-                <div class="engine__grid">
-                    <article class="engine__note">
-                        <h3>{{ homeAnatomyWalTitleLabel }}</h3>
-                        <p>{{ homeAnatomyWalBodyLabel }}</p>
-                    </article>
-                    <div class="code-panel">
-                        <div class="code-panel__top"><span>app.ts</span><span>VOS × NODE.JS</span></div>
-                        <pre class="code-panel__raw">{{ codeSample }}</pre>
-                        <div class="code-panel__bottom"><span>LOCAL FILE</span><span>app.yydb</span></div>
+                <div class="section-head">
+                    <p class="eyebrow"><span class="eyebrow__no" aria-hidden="true">03</span>{{ homeQuickEyebrowLabel }}</p>
+                    <h2 id="quick-title">{{ homeQuickTitleLabel }}</h2>
+                    <p class="section-head__lede">{{ homeQuickLedeLabel }}</p>
+                </div>
+                <div class="quick__grid">
+                    <figure class="quick__panel">
+                        <div class="quick__bar"><span>app.ts</span><span>NODE.JS · VOS</span></div>
+                        <pre class="quick__code">{{ codeSample }}</pre>
+                        <div class="quick__bar quick__bar--bottom"><span>{{ homeQuickInstallLabel }}</span><span>npm install @yydb/yydb</span></div>
+                    </figure>
+                    <figure class="quick__panel">
+                        <div class="quick__bar"><span>terminal</span><span>{{ homeQuickOutputLabel }}</span></div>
+                        <pre class="quick__term">{{ terminalSample }}</pre>
+                        <div class="quick__bar quick__bar--bottom"><span>./app.yydb</span><span>1 ROW</span></div>
+                    </figure>
+                </div>
+            </div>
+        </section>
+
+        <section class="spec wrap" aria-labelledby="spec-title">
+            <div class="section-head">
+                <p class="eyebrow"><span class="eyebrow__no" aria-hidden="true">04</span>{{ homeSpecEyebrowLabel }}</p>
+                <h2 id="spec-title">{{ homeSpecTitleLabel }}</h2>
+                <p class="section-head__lede">{{ homeSpecLedeLabel }}</p>
+            </div>
+            <ol class="spec__table">
+                <li class="spec__row">
+                    <span class="spec__label">{{ homeSpec1LabelLabel }}</span>
+                    <span class="spec__value">{{ homeSpec1ValueLabel }}</span>
+                    <span class="spec__note">{{ homeSpec1NoteLabel }}</span>
+                </li>
+                <li class="spec__row">
+                    <span class="spec__label">{{ homeSpec2LabelLabel }}</span>
+                    <span class="spec__value">{{ homeSpec2ValueLabel }}</span>
+                    <span class="spec__note">{{ homeSpec2NoteLabel }}</span>
+                </li>
+                <li class="spec__row">
+                    <span class="spec__label">{{ homeSpec3LabelLabel }}</span>
+                    <span class="spec__value">{{ homeSpec3ValueLabel }}</span>
+                    <span class="spec__note">{{ homeSpec3NoteLabel }}</span>
+                </li>
+                <li class="spec__row">
+                    <span class="spec__label">{{ homeSpec4LabelLabel }}</span>
+                    <span class="spec__value">{{ homeSpec4ValueLabel }}</span>
+                    <span class="spec__note">{{ homeSpec4NoteLabel }}</span>
+                </li>
+                <li class="spec__row">
+                    <span class="spec__label">{{ homeSpec5LabelLabel }}</span>
+                    <span class="spec__value">{{ homeSpec5ValueLabel }}</span>
+                    <span class="spec__note">{{ homeSpec5NoteLabel }}</span>
+                </li>
+                <li class="spec__row">
+                    <span class="spec__label">{{ homeSpec6LabelLabel }}</span>
+                    <span class="spec__value">{{ homeSpec6ValueLabel }}</span>
+                    <span class="spec__note">{{ homeSpec6NoteLabel }}</span>
+                </li>
+                <li class="spec__row">
+                    <span class="spec__label">{{ homeSpec7LabelLabel }}</span>
+                    <span class="spec__value">{{ homeSpec7ValueLabel }}</span>
+                    <span class="spec__note">{{ homeSpec7NoteLabel }}</span>
+                </li>
+            </ol>
+        </section>
+
+        <section class="bounds" aria-labelledby="bounds-title">
+            <div class="wrap">
+                <div class="section-head">
+                    <p class="eyebrow"><span class="eyebrow__no" aria-hidden="true">05</span>{{ homeBoundEyebrowLabel }}</p>
+                    <h2 id="bounds-title">{{ homeBoundTitleLabel }}</h2>
+                    <p class="section-head__lede">{{ homeBoundLedeLabel }}</p>
+                </div>
+                <ul class="bounds__list">
+                    <li class="bounds__row">
+                        <h3>{{ homeBound1TitleLabel }}</h3>
+                        <p>{{ homeBound1BodyLabel }}</p>
+                    </li>
+                    <li class="bounds__row">
+                        <h3>{{ homeBound2TitleLabel }}</h3>
+                        <p>{{ homeBound2BodyLabel }}</p>
+                    </li>
+                    <li class="bounds__row">
+                        <h3>{{ homeBound3TitleLabel }}</h3>
+                        <p>{{ homeBound3BodyLabel }}</p>
+                    </li>
+                    <li class="bounds__row">
+                        <h3>{{ homeBound4TitleLabel }}</h3>
+                        <p>{{ homeBound4BodyLabel }}</p>
+                    </li>
+                    <li class="bounds__row">
+                        <h3>{{ homeBound5TitleLabel }}</h3>
+                        <p>{{ homeBound5BodyLabel }}</p>
+                    </li>
+                    <li class="bounds__row">
+                        <h3>{{ homeBound6TitleLabel }}</h3>
+                        <p>{{ homeBound6BodyLabel }}</p>
+                    </li>
+                    <li class="bounds__row">
+                        <h3>{{ homeBound7TitleLabel }}</h3>
+                        <p>{{ homeBound7BodyLabel }}</p>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="cmp wrap" aria-labelledby="cmp-title">
+            <div class="section-head">
+                <p class="eyebrow"><span class="eyebrow__no" aria-hidden="true">06</span>{{ homeCmpEyebrowLabel }}</p>
+                <h2 id="cmp-title">{{ homeCmpTitleLabel }}</h2>
+                <p class="section-head__lede">{{ homeCmpLedeLabel }}</p>
+            </div>
+            <div class="cmp__grid">
+                <div class="cmp__head" aria-hidden="true">
+                    <span>{{ homeCmpLabelLabel }}</span>
+                    <span>{{ homeCmpColALabel }}</span>
+                    <span>{{ homeCmpColBLabel }}</span>
+                </div>
+                <div class="cmp__row">
+                    <span class="cmp__label">{{ homeCmp1LabelLabel }}</span>
+                    <span class="cmp__cell cmp__cell--a"><i aria-hidden="true">{{ homeCmpColALabel }}</i>{{ homeCmp1ALabel }}</span>
+                    <span class="cmp__cell"><i aria-hidden="true">{{ homeCmpColBLabel }}</i>{{ homeCmp1BLabel }}</span>
+                </div>
+                <div class="cmp__row">
+                    <span class="cmp__label">{{ homeCmp2LabelLabel }}</span>
+                    <span class="cmp__cell cmp__cell--a"><i aria-hidden="true">{{ homeCmpColALabel }}</i>{{ homeCmp2ALabel }}</span>
+                    <span class="cmp__cell"><i aria-hidden="true">{{ homeCmpColBLabel }}</i>{{ homeCmp2BLabel }}</span>
+                </div>
+                <div class="cmp__row">
+                    <span class="cmp__label">{{ homeCmp3LabelLabel }}</span>
+                    <span class="cmp__cell cmp__cell--a"><i aria-hidden="true">{{ homeCmpColALabel }}</i>{{ homeCmp3ALabel }}</span>
+                    <span class="cmp__cell"><i aria-hidden="true">{{ homeCmpColBLabel }}</i>{{ homeCmp3BLabel }}</span>
+                </div>
+                <div class="cmp__row">
+                    <span class="cmp__label">{{ homeCmp4LabelLabel }}</span>
+                    <span class="cmp__cell cmp__cell--a"><i aria-hidden="true">{{ homeCmpColALabel }}</i>{{ homeCmp4ALabel }}</span>
+                    <span class="cmp__cell"><i aria-hidden="true">{{ homeCmpColBLabel }}</i>{{ homeCmp4BLabel }}</span>
+                </div>
+                <div class="cmp__row">
+                    <span class="cmp__label">{{ homeCmp5LabelLabel }}</span>
+                    <span class="cmp__cell cmp__cell--a"><i aria-hidden="true">{{ homeCmpColALabel }}</i>{{ homeCmp5ALabel }}</span>
+                    <span class="cmp__cell"><i aria-hidden="true">{{ homeCmpColBLabel }}</i>{{ homeCmp5BLabel }}</span>
+                </div>
+                <div class="cmp__row">
+                    <span class="cmp__label">{{ homeCmp6LabelLabel }}</span>
+                    <span class="cmp__cell cmp__cell--a"><i aria-hidden="true">{{ homeCmpColALabel }}</i>{{ homeCmp6ALabel }}</span>
+                    <span class="cmp__cell"><i aria-hidden="true">{{ homeCmpColBLabel }}</i>{{ homeCmp6BLabel }}</span>
+                </div>
+            </div>
+            <p class="cmp__note">{{ homeCmpNoteLabel }}</p>
+        </section>
+
+        <section class="stack" aria-labelledby="stack-title">
+            <div class="wrap">
+                <div class="section-head">
+                    <p class="eyebrow"><span class="eyebrow__no" aria-hidden="true">07</span>{{ homeStackEyebrowLabel }}</p>
+                    <h2 id="stack-title">{{ homeStackTitleLabel }}</h2>
+                    <p class="section-head__lede">{{ homeStackLedeLabel }}</p>
+                </div>
+                <div class="stack__strip">
+                    <div class="stack__cell">
+                        <span class="stack__name">{{ homeStack1NameLabel }}</span>
+                        <span class="stack__role">{{ homeStack1RoleLabel }}</span>
+                        <p>{{ homeStack1BodyLabel }}</p>
+                    </div>
+                    <div class="stack__cell stack__cell--here">
+                        <span class="stack__name">{{ homeStack2NameLabel }}</span>
+                        <span class="stack__role">{{ homeStack2RoleLabel }}</span>
+                        <p>{{ homeStack2BodyLabel }}</p>
+                    </div>
+                    <div class="stack__cell">
+                        <span class="stack__name">{{ homeStack3NameLabel }}</span>
+                        <span class="stack__role">{{ homeStack3RoleLabel }}</span>
+                        <p>{{ homeStack3BodyLabel }}</p>
+                    </div>
+                    <div class="stack__cell">
+                        <span class="stack__name">{{ homeStack4NameLabel }}</span>
+                        <span class="stack__role">{{ homeStack4RoleLabel }}</span>
+                        <p>{{ homeStack4BodyLabel }}</p>
                     </div>
                 </div>
             </div>
         </section>
 
-        <section class="hosts wrap">
-            <header class="hosts__head">
-                <h2>{{ homeHostsTitleLabel }}</h2>
-                <div class="hosts__side">
-                    <p class="hosts__lede">{{ homeHostsBodyLabel }}</p>
-                    <a class="doc-link" href="/d/">{{ homeCodeLinkLabel }}<span aria-hidden="true">→</span></a>
+        <section class="finale" aria-labelledby="finale-title">
+            <div class="wrap">
+                <h2 id="finale-title">{{ homeClosingTitleLabel }}</h2>
+                <p class="finale__lede">{{ homeClosingBodyLabel }}</p>
+                <div class="finale__row">
+                    <p class="finale__install"><span class="finale__prompt" aria-hidden="true">$</span><code>npm install @yydb/yydb</code></p>
+                    <a class="btn-signal" href="/install">{{ homeClosingActionLabel }}</a>
                 </div>
-            </header>
-            <ul class="hosts__list">
-                <li><code>@yydb/yydb</code><span>NODE-API</span></li>
-                <li><code>yydb crate</code><span>RUST</span></li>
-                <li><code>yydb</code><span>CLI</span></li>
-                <li><code>@yydb/light-db</code><span>WASM · OPFS</span></li>
-            </ul>
-            <article class="hosts__note">
-                <h3>{{ homeAnatomySchemaTitleLabel }}</h3>
-                <p>{{ homeAnatomySchemaBodyLabel }}</p>
-            </article>
-        </section>
-
-        <section class="closing wrap">
-            <h2>{{ homeClosingTitleLabel }}</h2>
-            <div class="closing__row">
-                <p class="closing__install"><span class="closing__prompt" aria-hidden="true">$</span><code>npm install @yydb/yydb</code><span class="closing__hint">{{ homeInstallHintLabel }}</span></p>
-                <a class="btn-signal" href="/install">{{ homeClosingActionLabel }}</a>
+                <div class="finale__links">
+                    <a href="/install">{{ homeClosingInstallLabel }}<span aria-hidden="true"> →</span></a>
+                    <a href="/d/">{{ homeClosingDocsLabel }}<span aria-hidden="true"> →</span></a>
+                    <a :href="githubHref" target="_blank" rel="noopener noreferrer">{{ homeClosingGithubLabel }}<span aria-hidden="true"> →</span></a>
+                </div>
+                <p class="finale__meta">{{ homeClosingMetaLabel }}</p>
             </div>
-            <p class="closing__meta">{{ homeClosingBodyLabel }}<span aria-hidden="true"> · </span><span class="closing__edition">{{ homeEditionLabel }}</span></p>
         </section>
     </main>
     <SiteFooter />
 </template>
 
 <script client>
-import { homeEyebrow, homeHeroLine1, homeHeroLine2, homeLede, homeActionInstall, homeActionDocs, homeInstallHint, homePrinciple1Title, homePrinciple1Body, homePrinciple2Title, homePrinciple2Body, homePrinciple3Title, homePrinciple3Body, homeWriteTitle, homeWriteBody, homeAnatomySchemaTitle, homeAnatomySchemaBody, homeAnatomyWalTitle, homeAnatomyWalBody, homeHostsTitle, homeHostsBody, homeCodeLink, homeClosingTitle, homeClosingBody, homeClosingAction, homeDiagramCaption, homeEdition, titleHome } from "#locales/common";
+import { homeEyebrow, homeHeroLine1, homeHeroLine2, homeLede, homeActionInstall, homeActionDocs, homeInstallHint, homeDiagramCaption, homeEdition, titleHome, homeCapsEyebrow, homeCapsTitle, homeCapsLede, homeCap1Title, homeCap1Fact, homeCap1Tag, homeCap2Title, homeCap2Fact, homeCap2Tag, homeCap3Title, homeCap3Fact, homeCap3Tag, homeCap4Title, homeCap4Fact, homeCap4Tag, homeCap5Title, homeCap5Fact, homeCap5Tag, homeCap6Title, homeCap6Fact, homeCap6Tag, homeQuickEyebrow, homeQuickTitle, homeQuickLede, homeQuickInstall, homeQuickOutput, homeSpecEyebrow, homeSpecTitle, homeSpecLede, homeSpec1Label, homeSpec1Value, homeSpec1Note, homeSpec2Label, homeSpec2Value, homeSpec2Note, homeSpec3Label, homeSpec3Value, homeSpec3Note, homeSpec4Label, homeSpec4Value, homeSpec4Note, homeSpec5Label, homeSpec5Value, homeSpec5Note, homeSpec6Label, homeSpec6Value, homeSpec6Note, homeSpec7Label, homeSpec7Value, homeSpec7Note, homeBoundEyebrow, homeBoundTitle, homeBoundLede, homeBound1Title, homeBound1Body, homeBound2Title, homeBound2Body, homeBound3Title, homeBound3Body, homeBound4Title, homeBound4Body, homeBound5Title, homeBound5Body, homeBound6Title, homeBound6Body, homeBound7Title, homeBound7Body, homeCmpEyebrow, homeCmpTitle, homeCmpLede, homeCmpLabel, homeCmpColA, homeCmpColB, homeCmp1Label, homeCmp1A, homeCmp1B, homeCmp2Label, homeCmp2A, homeCmp2B, homeCmp3Label, homeCmp3A, homeCmp3B, homeCmp4Label, homeCmp4A, homeCmp4B, homeCmp5Label, homeCmp5A, homeCmp5B, homeCmp6Label, homeCmp6A, homeCmp6B, homeCmpNote, homeStackEyebrow, homeStackTitle, homeStackLede, homeStack1Name, homeStack1Role, homeStack1Body, homeStack2Name, homeStack2Role, homeStack2Body, homeStack3Name, homeStack3Role, homeStack3Body, homeStack4Name, homeStack4Role, homeStack4Body, homeClosingTitle, homeClosingBody, homeClosingAction, homeClosingInstall, homeClosingDocs, homeClosingGithub, homeClosingMeta } from "#locales/common";
 import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
+
+const REPO = "https://github.com/yy-database/yydb";
 
 export default class Home {
     codeSample = `import { Database } from "@yydb/yydb";
 
 const db = await Database.open("app.yydb");
-
-await db.execute('User { id: 1, name: "Ada" }.insert()');
-const users = await db.query("User.all().collect()");
-
+await db.ensureSchema("table User { @@id: i64, name: utf8, active: bool }");
+await db.execute('User { id: 1, name: "Ada", active: true }.insert()');
+await db.execute('User { id: 2, name: "Lin", active: false }.insert()');
+const active = await db.query("User.all().filter(x => x.active).collect()");
+console.log(JSON.stringify(active));
+await db.checkpoint();
 await db.close();`;
+    terminalSample = `$ npx @yydb/yydb init ./app.yydb
+initialized ./app.yydb
+
+$ node app.ts
+[{"active":true,"id":1,"name":"Ada"}]`;
+    githubHref = REPO;
     homeEyebrowLabel = "";
     homeHeroLine1Label = "";
     homeHeroLine2Label = "";
@@ -143,26 +332,122 @@ await db.close();`;
     homeActionInstallLabel = "";
     homeActionDocsLabel = "";
     homeInstallHintLabel = "";
-    homePrinciple1TitleLabel = "";
-    homePrinciple1BodyLabel = "";
-    homePrinciple2TitleLabel = "";
-    homePrinciple2BodyLabel = "";
-    homePrinciple3TitleLabel = "";
-    homePrinciple3BodyLabel = "";
-    homeWriteTitleLabel = "";
-    homeWriteBodyLabel = "";
-    homeAnatomySchemaTitleLabel = "";
-    homeAnatomySchemaBodyLabel = "";
-    homeAnatomyWalTitleLabel = "";
-    homeAnatomyWalBodyLabel = "";
-    homeHostsTitleLabel = "";
-    homeHostsBodyLabel = "";
-    homeCodeLinkLabel = "";
+    homeDiagramCaptionLabel = "";
+    homeEditionLabel = "";
+    homeCapsEyebrowLabel = "";
+    homeCapsTitleLabel = "";
+    homeCapsLedeLabel = "";
+    homeCap1TitleLabel = "";
+    homeCap1FactLabel = "";
+    homeCap1TagLabel = "";
+    homeCap2TitleLabel = "";
+    homeCap2FactLabel = "";
+    homeCap2TagLabel = "";
+    homeCap3TitleLabel = "";
+    homeCap3FactLabel = "";
+    homeCap3TagLabel = "";
+    homeCap4TitleLabel = "";
+    homeCap4FactLabel = "";
+    homeCap4TagLabel = "";
+    homeCap5TitleLabel = "";
+    homeCap5FactLabel = "";
+    homeCap5TagLabel = "";
+    homeCap6TitleLabel = "";
+    homeCap6FactLabel = "";
+    homeCap6TagLabel = "";
+    homeQuickEyebrowLabel = "";
+    homeQuickTitleLabel = "";
+    homeQuickLedeLabel = "";
+    homeQuickInstallLabel = "";
+    homeQuickOutputLabel = "";
+    homeSpecEyebrowLabel = "";
+    homeSpecTitleLabel = "";
+    homeSpecLedeLabel = "";
+    homeSpec1LabelLabel = "";
+    homeSpec1ValueLabel = "";
+    homeSpec1NoteLabel = "";
+    homeSpec2LabelLabel = "";
+    homeSpec2ValueLabel = "";
+    homeSpec2NoteLabel = "";
+    homeSpec3LabelLabel = "";
+    homeSpec3ValueLabel = "";
+    homeSpec3NoteLabel = "";
+    homeSpec4LabelLabel = "";
+    homeSpec4ValueLabel = "";
+    homeSpec4NoteLabel = "";
+    homeSpec5LabelLabel = "";
+    homeSpec5ValueLabel = "";
+    homeSpec5NoteLabel = "";
+    homeSpec6LabelLabel = "";
+    homeSpec6ValueLabel = "";
+    homeSpec6NoteLabel = "";
+    homeSpec7LabelLabel = "";
+    homeSpec7ValueLabel = "";
+    homeSpec7NoteLabel = "";
+    homeBoundEyebrowLabel = "";
+    homeBoundTitleLabel = "";
+    homeBoundLedeLabel = "";
+    homeBound1TitleLabel = "";
+    homeBound1BodyLabel = "";
+    homeBound2TitleLabel = "";
+    homeBound2BodyLabel = "";
+    homeBound3TitleLabel = "";
+    homeBound3BodyLabel = "";
+    homeBound4TitleLabel = "";
+    homeBound4BodyLabel = "";
+    homeBound5TitleLabel = "";
+    homeBound5BodyLabel = "";
+    homeBound6TitleLabel = "";
+    homeBound6BodyLabel = "";
+    homeBound7TitleLabel = "";
+    homeBound7BodyLabel = "";
+    homeCmpEyebrowLabel = "";
+    homeCmpTitleLabel = "";
+    homeCmpLedeLabel = "";
+    homeCmpLabelLabel = "";
+    homeCmpColALabel = "";
+    homeCmpColBLabel = "";
+    homeCmp1LabelLabel = "";
+    homeCmp1ALabel = "";
+    homeCmp1BLabel = "";
+    homeCmp2LabelLabel = "";
+    homeCmp2ALabel = "";
+    homeCmp2BLabel = "";
+    homeCmp3LabelLabel = "";
+    homeCmp3ALabel = "";
+    homeCmp3BLabel = "";
+    homeCmp4LabelLabel = "";
+    homeCmp4ALabel = "";
+    homeCmp4BLabel = "";
+    homeCmp5LabelLabel = "";
+    homeCmp5ALabel = "";
+    homeCmp5BLabel = "";
+    homeCmp6LabelLabel = "";
+    homeCmp6ALabel = "";
+    homeCmp6BLabel = "";
+    homeCmpNoteLabel = "";
+    homeStackEyebrowLabel = "";
+    homeStackTitleLabel = "";
+    homeStackLedeLabel = "";
+    homeStack1NameLabel = "";
+    homeStack1RoleLabel = "";
+    homeStack1BodyLabel = "";
+    homeStack2NameLabel = "";
+    homeStack2RoleLabel = "";
+    homeStack2BodyLabel = "";
+    homeStack3NameLabel = "";
+    homeStack3RoleLabel = "";
+    homeStack3BodyLabel = "";
+    homeStack4NameLabel = "";
+    homeStack4RoleLabel = "";
+    homeStack4BodyLabel = "";
     homeClosingTitleLabel = "";
     homeClosingBodyLabel = "";
     homeClosingActionLabel = "";
-    homeDiagramCaptionLabel = "";
-    homeEditionLabel = "";
+    homeClosingInstallLabel = "";
+    homeClosingDocsLabel = "";
+    homeClosingGithubLabel = "";
+    homeClosingMetaLabel = "";
     _unwatchLocale = null;
     onMount() {
         this.applyLocaleCopy();
@@ -183,26 +468,122 @@ await db.close();`;
         this.homeActionInstallLabel = homeActionInstall();
         this.homeActionDocsLabel = homeActionDocs();
         this.homeInstallHintLabel = homeInstallHint();
-        this.homePrinciple1TitleLabel = homePrinciple1Title();
-        this.homePrinciple1BodyLabel = homePrinciple1Body();
-        this.homePrinciple2TitleLabel = homePrinciple2Title();
-        this.homePrinciple2BodyLabel = homePrinciple2Body();
-        this.homePrinciple3TitleLabel = homePrinciple3Title();
-        this.homePrinciple3BodyLabel = homePrinciple3Body();
-        this.homeWriteTitleLabel = homeWriteTitle();
-        this.homeWriteBodyLabel = homeWriteBody();
-        this.homeAnatomySchemaTitleLabel = homeAnatomySchemaTitle();
-        this.homeAnatomySchemaBodyLabel = homeAnatomySchemaBody();
-        this.homeAnatomyWalTitleLabel = homeAnatomyWalTitle();
-        this.homeAnatomyWalBodyLabel = homeAnatomyWalBody();
-        this.homeHostsTitleLabel = homeHostsTitle();
-        this.homeHostsBodyLabel = homeHostsBody();
-        this.homeCodeLinkLabel = homeCodeLink();
+        this.homeDiagramCaptionLabel = homeDiagramCaption();
+        this.homeEditionLabel = homeEdition();
+        this.homeCapsEyebrowLabel = homeCapsEyebrow();
+        this.homeCapsTitleLabel = homeCapsTitle();
+        this.homeCapsLedeLabel = homeCapsLede();
+        this.homeCap1TitleLabel = homeCap1Title();
+        this.homeCap1FactLabel = homeCap1Fact();
+        this.homeCap1TagLabel = homeCap1Tag();
+        this.homeCap2TitleLabel = homeCap2Title();
+        this.homeCap2FactLabel = homeCap2Fact();
+        this.homeCap2TagLabel = homeCap2Tag();
+        this.homeCap3TitleLabel = homeCap3Title();
+        this.homeCap3FactLabel = homeCap3Fact();
+        this.homeCap3TagLabel = homeCap3Tag();
+        this.homeCap4TitleLabel = homeCap4Title();
+        this.homeCap4FactLabel = homeCap4Fact();
+        this.homeCap4TagLabel = homeCap4Tag();
+        this.homeCap5TitleLabel = homeCap5Title();
+        this.homeCap5FactLabel = homeCap5Fact();
+        this.homeCap5TagLabel = homeCap5Tag();
+        this.homeCap6TitleLabel = homeCap6Title();
+        this.homeCap6FactLabel = homeCap6Fact();
+        this.homeCap6TagLabel = homeCap6Tag();
+        this.homeQuickEyebrowLabel = homeQuickEyebrow();
+        this.homeQuickTitleLabel = homeQuickTitle();
+        this.homeQuickLedeLabel = homeQuickLede();
+        this.homeQuickInstallLabel = homeQuickInstall();
+        this.homeQuickOutputLabel = homeQuickOutput();
+        this.homeSpecEyebrowLabel = homeSpecEyebrow();
+        this.homeSpecTitleLabel = homeSpecTitle();
+        this.homeSpecLedeLabel = homeSpecLede();
+        this.homeSpec1LabelLabel = homeSpec1Label();
+        this.homeSpec1ValueLabel = homeSpec1Value();
+        this.homeSpec1NoteLabel = homeSpec1Note();
+        this.homeSpec2LabelLabel = homeSpec2Label();
+        this.homeSpec2ValueLabel = homeSpec2Value();
+        this.homeSpec2NoteLabel = homeSpec2Note();
+        this.homeSpec3LabelLabel = homeSpec3Label();
+        this.homeSpec3ValueLabel = homeSpec3Value();
+        this.homeSpec3NoteLabel = homeSpec3Note();
+        this.homeSpec4LabelLabel = homeSpec4Label();
+        this.homeSpec4ValueLabel = homeSpec4Value();
+        this.homeSpec4NoteLabel = homeSpec4Note();
+        this.homeSpec5LabelLabel = homeSpec5Label();
+        this.homeSpec5ValueLabel = homeSpec5Value();
+        this.homeSpec5NoteLabel = homeSpec5Note();
+        this.homeSpec6LabelLabel = homeSpec6Label();
+        this.homeSpec6ValueLabel = homeSpec6Value();
+        this.homeSpec6NoteLabel = homeSpec6Note();
+        this.homeSpec7LabelLabel = homeSpec7Label();
+        this.homeSpec7ValueLabel = homeSpec7Value();
+        this.homeSpec7NoteLabel = homeSpec7Note();
+        this.homeBoundEyebrowLabel = homeBoundEyebrow();
+        this.homeBoundTitleLabel = homeBoundTitle();
+        this.homeBoundLedeLabel = homeBoundLede();
+        this.homeBound1TitleLabel = homeBound1Title();
+        this.homeBound1BodyLabel = homeBound1Body();
+        this.homeBound2TitleLabel = homeBound2Title();
+        this.homeBound2BodyLabel = homeBound2Body();
+        this.homeBound3TitleLabel = homeBound3Title();
+        this.homeBound3BodyLabel = homeBound3Body();
+        this.homeBound4TitleLabel = homeBound4Title();
+        this.homeBound4BodyLabel = homeBound4Body();
+        this.homeBound5TitleLabel = homeBound5Title();
+        this.homeBound5BodyLabel = homeBound5Body();
+        this.homeBound6TitleLabel = homeBound6Title();
+        this.homeBound6BodyLabel = homeBound6Body();
+        this.homeBound7TitleLabel = homeBound7Title();
+        this.homeBound7BodyLabel = homeBound7Body();
+        this.homeCmpEyebrowLabel = homeCmpEyebrow();
+        this.homeCmpTitleLabel = homeCmpTitle();
+        this.homeCmpLedeLabel = homeCmpLede();
+        this.homeCmpLabelLabel = homeCmpLabel();
+        this.homeCmpColALabel = homeCmpColA();
+        this.homeCmpColBLabel = homeCmpColB();
+        this.homeCmp1LabelLabel = homeCmp1Label();
+        this.homeCmp1ALabel = homeCmp1A();
+        this.homeCmp1BLabel = homeCmp1B();
+        this.homeCmp2LabelLabel = homeCmp2Label();
+        this.homeCmp2ALabel = homeCmp2A();
+        this.homeCmp2BLabel = homeCmp2B();
+        this.homeCmp3LabelLabel = homeCmp3Label();
+        this.homeCmp3ALabel = homeCmp3A();
+        this.homeCmp3BLabel = homeCmp3B();
+        this.homeCmp4LabelLabel = homeCmp4Label();
+        this.homeCmp4ALabel = homeCmp4A();
+        this.homeCmp4BLabel = homeCmp4B();
+        this.homeCmp5LabelLabel = homeCmp5Label();
+        this.homeCmp5ALabel = homeCmp5A();
+        this.homeCmp5BLabel = homeCmp5B();
+        this.homeCmp6LabelLabel = homeCmp6Label();
+        this.homeCmp6ALabel = homeCmp6A();
+        this.homeCmp6BLabel = homeCmp6B();
+        this.homeCmpNoteLabel = homeCmpNote();
+        this.homeStackEyebrowLabel = homeStackEyebrow();
+        this.homeStackTitleLabel = homeStackTitle();
+        this.homeStackLedeLabel = homeStackLede();
+        this.homeStack1NameLabel = homeStack1Name();
+        this.homeStack1RoleLabel = homeStack1Role();
+        this.homeStack1BodyLabel = homeStack1Body();
+        this.homeStack2NameLabel = homeStack2Name();
+        this.homeStack2RoleLabel = homeStack2Role();
+        this.homeStack2BodyLabel = homeStack2Body();
+        this.homeStack3NameLabel = homeStack3Name();
+        this.homeStack3RoleLabel = homeStack3Role();
+        this.homeStack3BodyLabel = homeStack3Body();
+        this.homeStack4NameLabel = homeStack4Name();
+        this.homeStack4RoleLabel = homeStack4Role();
+        this.homeStack4BodyLabel = homeStack4Body();
         this.homeClosingTitleLabel = homeClosingTitle();
         this.homeClosingBodyLabel = homeClosingBody();
         this.homeClosingActionLabel = homeClosingAction();
-        this.homeDiagramCaptionLabel = homeDiagramCaption();
-        this.homeEditionLabel = homeEdition();
+        this.homeClosingInstallLabel = homeClosingInstall();
+        this.homeClosingDocsLabel = homeClosingDocs();
+        this.homeClosingGithubLabel = homeClosingGithub();
+        this.homeClosingMetaLabel = homeClosingMeta();
         if (typeof document !== "undefined") document.title = titleHome();
     }
 }
