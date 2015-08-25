@@ -106,16 +106,17 @@
                 </div>
                 <div class="quick__grid">
                     <figure class="quick__panel">
-                        <div class="quick__bar"><span>app.ts</span><span>NODE.JS · VOS</span></div>
+                        <div class="quick__bar"><span>app.ts</span><span class="quick__bar-right"><span>NODE.JS · VOS</span><button type="button" class="quick__copy" @click='(() => copySnippet("code"))'>{{ codeCopyLabel }}</button></span></div>
                         <pre class="quick__code">{{ codeSample }}</pre>
                         <div class="quick__bar quick__bar--bottom"><span>{{ homeQuickInstallLabel }}</span><span>npm install @yydb/yydb</span></div>
                     </figure>
                     <figure class="quick__panel">
-                        <div class="quick__bar"><span>terminal</span><span>{{ homeQuickOutputLabel }}</span></div>
+                        <div class="quick__bar"><span>terminal</span><span class="quick__bar-right"><span>{{ homeQuickOutputLabel }}</span><button type="button" class="quick__copy" @click='(() => copySnippet("term"))'>{{ termCopyLabel }}</button></span></div>
                         <pre class="quick__term">{{ terminalSample }}</pre>
                         <div class="quick__bar quick__bar--bottom"><span>./app.yydb</span><span>1 ROW</span></div>
                     </figure>
                 </div>
+                <p class="quick__hint">{{ homeQuickHintLabel }}</p>
             </div>
         </section>
 
@@ -303,7 +304,7 @@
 </template>
 
 <script client>
-import { homeEyebrow, homeHeroLine1, homeHeroLine2, homeLede, homeActionInstall, homeActionDocs, homeInstallHint, homeDiagramCaption, homeEdition, titleHome, homeCapsEyebrow, homeCapsTitle, homeCapsLede, homeCap1Title, homeCap1Fact, homeCap1Tag, homeCap2Title, homeCap2Fact, homeCap2Tag, homeCap3Title, homeCap3Fact, homeCap3Tag, homeCap4Title, homeCap4Fact, homeCap4Tag, homeCap5Title, homeCap5Fact, homeCap5Tag, homeCap6Title, homeCap6Fact, homeCap6Tag, homeQuickEyebrow, homeQuickTitle, homeQuickLede, homeQuickInstall, homeQuickOutput, homeSpecEyebrow, homeSpecTitle, homeSpecLede, homeSpec1Label, homeSpec1Value, homeSpec1Note, homeSpec2Label, homeSpec2Value, homeSpec2Note, homeSpec3Label, homeSpec3Value, homeSpec3Note, homeSpec4Label, homeSpec4Value, homeSpec4Note, homeSpec5Label, homeSpec5Value, homeSpec5Note, homeSpec6Label, homeSpec6Value, homeSpec6Note, homeSpec7Label, homeSpec7Value, homeSpec7Note, homeBoundEyebrow, homeBoundTitle, homeBoundLede, homeBound1Title, homeBound1Body, homeBound2Title, homeBound2Body, homeBound3Title, homeBound3Body, homeBound4Title, homeBound4Body, homeBound5Title, homeBound5Body, homeBound6Title, homeBound6Body, homeBound7Title, homeBound7Body, homeCmpEyebrow, homeCmpTitle, homeCmpLede, homeCmpLabel, homeCmpColA, homeCmpColB, homeCmp1Label, homeCmp1A, homeCmp1B, homeCmp2Label, homeCmp2A, homeCmp2B, homeCmp3Label, homeCmp3A, homeCmp3B, homeCmp4Label, homeCmp4A, homeCmp4B, homeCmp5Label, homeCmp5A, homeCmp5B, homeCmp6Label, homeCmp6A, homeCmp6B, homeCmpNote, homeStackEyebrow, homeStackTitle, homeStackLede, homeStack1Name, homeStack1Role, homeStack1Body, homeStack2Name, homeStack2Role, homeStack2Body, homeStack3Name, homeStack3Role, homeStack3Body, homeStack4Name, homeStack4Role, homeStack4Body, homeClosingTitle, homeClosingBody, homeClosingAction, homeClosingInstall, homeClosingDocs, homeClosingGithub, homeClosingMeta } from "#locales/common";
+import { homeEyebrow, homeHeroLine1, homeHeroLine2, homeLede, homeActionInstall, homeActionDocs, homeInstallHint, homeDiagramCaption, homeEdition, titleHome, homeCapsEyebrow, homeCapsTitle, homeCapsLede, homeCap1Title, homeCap1Fact, homeCap1Tag, homeCap2Title, homeCap2Fact, homeCap2Tag, homeCap3Title, homeCap3Fact, homeCap3Tag, homeCap4Title, homeCap4Fact, homeCap4Tag, homeCap5Title, homeCap5Fact, homeCap5Tag, homeCap6Title, homeCap6Fact, homeCap6Tag, homeQuickEyebrow, homeQuickTitle, homeQuickLede, homeQuickInstall, homeQuickOutput, homeQuickCopy, homeQuickCopied, homeQuickHint, homeSpecEyebrow, homeSpecTitle, homeSpecLede, homeSpec1Label, homeSpec1Value, homeSpec1Note, homeSpec2Label, homeSpec2Value, homeSpec2Note, homeSpec3Label, homeSpec3Value, homeSpec3Note, homeSpec4Label, homeSpec4Value, homeSpec4Note, homeSpec5Label, homeSpec5Value, homeSpec5Note, homeSpec6Label, homeSpec6Value, homeSpec6Note, homeSpec7Label, homeSpec7Value, homeSpec7Note, homeBoundEyebrow, homeBoundTitle, homeBoundLede, homeBound1Title, homeBound1Body, homeBound2Title, homeBound2Body, homeBound3Title, homeBound3Body, homeBound4Title, homeBound4Body, homeBound5Title, homeBound5Body, homeBound6Title, homeBound6Body, homeBound7Title, homeBound7Body, homeCmpEyebrow, homeCmpTitle, homeCmpLede, homeCmpLabel, homeCmpColA, homeCmpColB, homeCmp1Label, homeCmp1A, homeCmp1B, homeCmp2Label, homeCmp2A, homeCmp2B, homeCmp3Label, homeCmp3A, homeCmp3B, homeCmp4Label, homeCmp4A, homeCmp4B, homeCmp5Label, homeCmp5A, homeCmp5B, homeCmp6Label, homeCmp6A, homeCmp6B, homeCmpNote, homeStackEyebrow, homeStackTitle, homeStackLede, homeStack1Name, homeStack1Role, homeStack1Body, homeStack2Name, homeStack2Role, homeStack2Body, homeStack3Name, homeStack3Role, homeStack3Body, homeStack4Name, homeStack4Role, homeStack4Body, homeClosingTitle, homeClosingBody, homeClosingAction, homeClosingInstall, homeClosingDocs, homeClosingGithub, homeClosingMeta } from "#locales/common";
 import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
 
 const REPO = "https://github.com/yy-database/yydb";
@@ -448,6 +449,12 @@ $ node app.ts
     homeClosingDocsLabel = "";
     homeClosingGithubLabel = "";
     homeClosingMetaLabel = "";
+    codeCopyLabel = "";
+    termCopyLabel = "";
+    homeQuickHintLabel = "";
+    copiedCode = false;
+    copiedTerm = false;
+    _copyTimer = null;
     _unwatchLocale = null;
     onMount() {
         this.applyLocaleCopy();
@@ -459,6 +466,32 @@ $ node app.ts
     }
     applyLocaleCopy(preferred) {
         withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
+    }
+
+    async copySnippet(which) {
+        if (typeof navigator === "undefined") return;
+        const text = which === "term" ? this.terminalSample : this.codeSample;
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+        }
+        if (which === "term") this.copiedTerm = true;
+        else this.copiedCode = true;
+        this.codeCopyLabel = this.copiedCode ? homeQuickCopied() : homeQuickCopy();
+        this.termCopyLabel = this.copiedTerm ? homeQuickCopied() : homeQuickCopy();
+        if (this._copyTimer) clearTimeout(this._copyTimer);
+        this._copyTimer = setTimeout(() => {
+            this.copiedCode = false;
+            this.copiedTerm = false;
+            this.codeCopyLabel = homeQuickCopy();
+            this.termCopyLabel = homeQuickCopy();
+        }, 1600);
     }
     refreshCopy() {
         this.homeEyebrowLabel = homeEyebrow();
@@ -496,6 +529,11 @@ $ node app.ts
         this.homeQuickLedeLabel = homeQuickLede();
         this.homeQuickInstallLabel = homeQuickInstall();
         this.homeQuickOutputLabel = homeQuickOutput();
+        this.homeQuickHintLabel = homeQuickHint();
+        this.copiedCode = false;
+        this.copiedTerm = false;
+        this.codeCopyLabel = homeQuickCopy();
+        this.termCopyLabel = homeQuickCopy();
         this.homeSpecEyebrowLabel = homeSpecEyebrow();
         this.homeSpecTitleLabel = homeSpecTitle();
         this.homeSpecLedeLabel = homeSpecLede();

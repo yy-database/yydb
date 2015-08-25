@@ -16,6 +16,19 @@
             </nav>
 
             <div class="site-header__tools">
+                <details class="site-menu">
+                    <summary :aria-label="navMenuLabel" :title="navMenuLabel">
+                        <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" focusable="false"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.5"/></svg>
+                    </summary>
+                    <nav class="site-menu__panel" :aria-label="navPrimaryLabel">
+                        <a href="/" :aria-current="homeCurrent" @click='(() => closeMenu())'>{{ navHomeLabel }}</a>
+                        <a href="/welcome" :aria-current="welcomeCurrent" @click='(() => closeMenu())'>{{ navWelcomeLabel }}</a>
+                        <a href="/playground" :aria-current="playgroundCurrent" @click='(() => closeMenu())'>{{ navPlaygroundLabel }}</a>
+                        <a href="/d/" :aria-current="docsCurrent" @click='(() => closeMenu())'>{{ navDocsLabel }}</a>
+                        <a href="/install" :aria-current="installCurrent" @click='(() => closeMenu())'>{{ navInstallLabel }}</a>
+                        <a href="/wire" :aria-current="wireCurrent" @click='(() => closeMenu())'>{{ navWireLabel }}</a>
+                    </nav>
+                </details>
                 <details class="site-language">
                     <summary :aria-label="selectLanguageLabel">{{ langSummary }}</summary>
                     <div class="site-language__menu">
@@ -75,6 +88,7 @@ import {
     navDocs,
     navWire,
     navPrimary,
+    navMenu,
     github,
     discussions,
     selectLanguage,
@@ -98,6 +112,7 @@ export default class SiteHeader {
     navDocsLabel = "";
     navWireLabel = "";
     navPrimaryLabel = "";
+    navMenuLabel = "";
     homeAriaLabel = "";
     githubLabel = "";
     discussionsLabel = "";
@@ -138,6 +153,12 @@ export default class SiteHeader {
         this.wireCurrent = isActivePath("/wire") ? "page" : null;
     }
 
+    closeMenu() {
+        if (typeof document === "undefined") return;
+        const el = document.querySelector(".site-menu");
+        if (el) el.removeAttribute("open");
+    }
+
     refreshCopy() {
         this.brandShortLabel = brandShort();
         this.brandFullLabel = brandFull();
@@ -148,6 +169,7 @@ export default class SiteHeader {
         this.navDocsLabel = navDocs();
         this.navWireLabel = navWire();
         this.navPrimaryLabel = navPrimary();
+        this.navMenuLabel = navMenu();
         this.homeAriaLabel = `${this.brandShortLabel} home`;
         this.githubLabel = github();
         this.discussionsLabel = discussions();
