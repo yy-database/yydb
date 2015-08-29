@@ -126,41 +126,41 @@
                 <h2 id="spec-title">{{ homeSpecTitleLabel }}</h2>
                 <p class="section-head__lede">{{ homeSpecLedeLabel }}</p>
             </div>
-            <ol class="spec__table">
-                <li class="spec__row">
-                    <span class="spec__label">{{ homeSpec1LabelLabel }}</span>
-                    <span class="spec__value">{{ homeSpec1ValueLabel }}</span>
-                    <span class="spec__note">{{ homeSpec1NoteLabel }}</span>
+            <ol class="spec__sheet">
+                <li class="spec__stat">
+                    <span class="spec__stat-value">{{ homeSpec1ValueLabel }}</span>
+                    <span class="spec__stat-label">{{ homeSpec1LabelLabel }}</span>
+                    <p class="spec__stat-note">{{ homeSpec1NoteLabel }}</p>
                 </li>
-                <li class="spec__row">
-                    <span class="spec__label">{{ homeSpec2LabelLabel }}</span>
-                    <span class="spec__value">{{ homeSpec2ValueLabel }}</span>
-                    <span class="spec__note">{{ homeSpec2NoteLabel }}</span>
+                <li class="spec__stat">
+                    <span class="spec__stat-value">{{ homeSpec2ValueLabel }}</span>
+                    <span class="spec__stat-label">{{ homeSpec2LabelLabel }}</span>
+                    <p class="spec__stat-note">{{ homeSpec2NoteLabel }}</p>
                 </li>
-                <li class="spec__row">
-                    <span class="spec__label">{{ homeSpec3LabelLabel }}</span>
-                    <span class="spec__value">{{ homeSpec3ValueLabel }}</span>
-                    <span class="spec__note">{{ homeSpec3NoteLabel }}</span>
+                <li class="spec__stat">
+                    <span class="spec__stat-value">{{ homeSpec3ValueLabel }}</span>
+                    <span class="spec__stat-label">{{ homeSpec3LabelLabel }}</span>
+                    <p class="spec__stat-note">{{ homeSpec3NoteLabel }}</p>
                 </li>
-                <li class="spec__row">
-                    <span class="spec__label">{{ homeSpec4LabelLabel }}</span>
-                    <span class="spec__value">{{ homeSpec4ValueLabel }}</span>
-                    <span class="spec__note">{{ homeSpec4NoteLabel }}</span>
+                <li class="spec__stat">
+                    <span class="spec__stat-value">{{ homeSpec4ValueLabel }}</span>
+                    <span class="spec__stat-label">{{ homeSpec4LabelLabel }}</span>
+                    <p class="spec__stat-note">{{ homeSpec4NoteLabel }}</p>
                 </li>
-                <li class="spec__row">
-                    <span class="spec__label">{{ homeSpec5LabelLabel }}</span>
-                    <span class="spec__value">{{ homeSpec5ValueLabel }}</span>
-                    <span class="spec__note">{{ homeSpec5NoteLabel }}</span>
+                <li class="spec__stat">
+                    <span class="spec__stat-value">{{ homeSpec5ValueLabel }}</span>
+                    <span class="spec__stat-label">{{ homeSpec5LabelLabel }}</span>
+                    <p class="spec__stat-note">{{ homeSpec5NoteLabel }}</p>
                 </li>
-                <li class="spec__row">
-                    <span class="spec__label">{{ homeSpec6LabelLabel }}</span>
-                    <span class="spec__value">{{ homeSpec6ValueLabel }}</span>
-                    <span class="spec__note">{{ homeSpec6NoteLabel }}</span>
+                <li class="spec__stat">
+                    <span class="spec__stat-value">{{ homeSpec6ValueLabel }}</span>
+                    <span class="spec__stat-label">{{ homeSpec6LabelLabel }}</span>
+                    <p class="spec__stat-note">{{ homeSpec6NoteLabel }}</p>
                 </li>
-                <li class="spec__row">
-                    <span class="spec__label">{{ homeSpec7LabelLabel }}</span>
-                    <span class="spec__value">{{ homeSpec7ValueLabel }}</span>
-                    <span class="spec__note">{{ homeSpec7NoteLabel }}</span>
+                <li class="spec__stat">
+                    <span class="spec__stat-value">{{ homeSpec7ValueLabel }}</span>
+                    <span class="spec__stat-label">{{ homeSpec7LabelLabel }}</span>
+                    <p class="spec__stat-note">{{ homeSpec7NoteLabel }}</p>
                 </li>
             </ol>
         </section>
@@ -173,34 +173,13 @@
                     <p class="section-head__lede">{{ homeBoundLedeLabel }}</p>
                 </div>
                 <ul class="bounds__list">
-                    <li class="bounds__row">
-                        <h3>{{ homeBound1TitleLabel }}</h3>
-                        <p>{{ homeBound1BodyLabel }}</p>
-                    </li>
-                    <li class="bounds__row">
-                        <h3>{{ homeBound2TitleLabel }}</h3>
-                        <p>{{ homeBound2BodyLabel }}</p>
-                    </li>
-                    <li class="bounds__row">
-                        <h3>{{ homeBound3TitleLabel }}</h3>
-                        <p>{{ homeBound3BodyLabel }}</p>
-                    </li>
-                    <li class="bounds__row">
-                        <h3>{{ homeBound4TitleLabel }}</h3>
-                        <p>{{ homeBound4BodyLabel }}</p>
-                    </li>
-                    <li class="bounds__row">
-                        <h3>{{ homeBound5TitleLabel }}</h3>
-                        <p>{{ homeBound5BodyLabel }}</p>
-                    </li>
-                    <li class="bounds__row">
-                        <h3>{{ homeBound6TitleLabel }}</h3>
-                        <p>{{ homeBound6BodyLabel }}</p>
-                    </li>
-                    <li class="bounds__row">
-                        <h3>{{ homeBound7TitleLabel }}</h3>
-                        <p>{{ homeBound7BodyLabel }}</p>
-                    </li>
+                    <li class="bounds__clause"><span class="bounds__no" aria-hidden="true">§1</span><p><strong>{{ homeBound1TitleLabel }}</strong>{{ homeBound1BodyLabel }}</p></li>
+                    <li class="bounds__clause"><span class="bounds__no" aria-hidden="true">§2</span><p><strong>{{ homeBound2TitleLabel }}</strong>{{ homeBound2BodyLabel }}</p></li>
+                    <li class="bounds__clause"><span class="bounds__no" aria-hidden="true">§3</span><p><strong>{{ homeBound3TitleLabel }}</strong>{{ homeBound3BodyLabel }}</p></li>
+                    <li class="bounds__clause"><span class="bounds__no" aria-hidden="true">§4</span><p><strong>{{ homeBound4TitleLabel }}</strong>{{ homeBound4BodyLabel }}</p></li>
+                    <li class="bounds__clause"><span class="bounds__no" aria-hidden="true">§5</span><p><strong>{{ homeBound5TitleLabel }}</strong>{{ homeBound5BodyLabel }}</p></li>
+                    <li class="bounds__clause"><span class="bounds__no" aria-hidden="true">§6</span><p><strong>{{ homeBound6TitleLabel }}</strong>{{ homeBound6BodyLabel }}</p></li>
+                    <li class="bounds__clause"><span class="bounds__no" aria-hidden="true">§7</span><p><strong>{{ homeBound7TitleLabel }}</strong>{{ homeBound7BodyLabel }}</p></li>
                 </ul>
             </div>
         </section>
