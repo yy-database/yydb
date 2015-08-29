@@ -2,7 +2,7 @@
     "entries": [
         {
             "key": { "path": ["action", "primary", "background"] },
-            "value": "#0B6E4F"
+            "value": "#00684A"
         },
         {
             "key": { "path": ["action", "primary", "foreground"] },
@@ -10,47 +10,47 @@
         },
         {
             "key": { "path": ["action", "primary", "hover"] },
-            "value": "#0A5C42"
+            "value": "#00543B"
         },
         {
             "key": { "path": ["action", "primary", "active"] },
-            "value": "#084C37"
+            "value": "#00543B"
         },
         {
             "key": { "path": ["action", "primary", "soft"] },
-            "value": "#ECFDF5"
+            "value": "#FFFFFF"
         },
         {
             "key": { "path": ["action", "secondary", "background"] },
-            "value": "rgba(255, 255, 255, 0.55)"
+            "value": "#FFFFFF"
         },
         {
             "key": { "path": ["action", "secondary", "foreground"] },
-            "value": "#142033"
+            "value": "#001E2B"
         },
         {
             "key": { "path": ["action", "secondary", "border"] },
-            "value": "rgba(11, 110, 79, 0.28)"
+            "value": "#00684A"
         },
         {
             "key": { "path": ["action", "secondary", "hover"] },
-            "value": "rgba(255, 255, 255, 0.75)"
+            "value": "#E5E7E9"
         },
         {
             "key": { "path": ["action", "secondary", "active"] },
-            "value": "rgba(255, 255, 255, 0.9)"
+            "value": "#E5E7E9"
         },
         {
             "key": { "path": ["action", "link", "foreground"] },
-            "value": "#084C37"
+            "value": "#00684A"
         },
         {
             "key": { "path": ["action", "link", "hover"] },
-            "value": "#0B6E4F"
+            "value": "#00543B"
         },
         {
             "key": { "path": ["focus", "ring"] },
-            "value": "color-mix(in srgb, #0B6E4F 35%, transparent)"
+            "value": "#00684A"
         }
     ]
 }

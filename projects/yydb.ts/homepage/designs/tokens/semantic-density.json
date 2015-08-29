@@ -94,15 +94,15 @@
         },
         {
             "key": { "path": ["surface", "page"] },
-            "value": "#F5F6F8"
+            "value": "#FFFFFF"
         },
         {
             "key": { "path": ["surface", "fill"] },
-            "value": "#FAFBFC"
+            "value": "#FFFFFF"
         },
         {
             "key": { "path": ["line", "subtle"] },
-            "value": "#F0F1F3"
+            "value": "#E5E7E9"
         }
     ]
 }

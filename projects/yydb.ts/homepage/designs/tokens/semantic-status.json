@@ -2,67 +2,67 @@
     "entries": [
         {
             "key": { "path": ["status", "info", "accent"] },
-            "value": "#1677FF"
+            "value": "#5A6570"
         },
         {
             "key": { "path": ["status", "info", "foreground"] },
-            "value": "#0958D9"
+            "value": "#001E2B"
         },
         {
             "key": { "path": ["status", "info", "background"] },
-            "value": "#E6F4FF"
+            "value": "#FFFFFF"
         },
         {
             "key": { "path": ["status", "info", "border"] },
-            "value": "#91CAFF"
+            "value": "#E5E7E9"
         },
         {
             "key": { "path": ["status", "success", "accent"] },
-            "value": "#52C41A"
+            "value": "#00684A"
         },
         {
             "key": { "path": ["status", "success", "foreground"] },
-            "value": "#237804"
+            "value": "#00684A"
         },
         {
             "key": { "path": ["status", "success", "background"] },
-            "value": "#F6FFED"
+            "value": "#FFFFFF"
         },
         {
             "key": { "path": ["status", "success", "border"] },
-            "value": "#B7EB8F"
+            "value": "#E5E7E9"
         },
         {
             "key": { "path": ["status", "warning", "accent"] },
-            "value": "#FAAD14"
+            "value": "#5A6570"
         },
         {
             "key": { "path": ["status", "warning", "foreground"] },
-            "value": "#874D00"
+            "value": "#001E2B"
         },
         {
             "key": { "path": ["status", "warning", "background"] },
-            "value": "#FFFBE6"
+            "value": "#FFFFFF"
         },
         {
             "key": { "path": ["status", "warning", "border"] },
-            "value": "#FFE58F"
+            "value": "#E5E7E9"
         },
         {
             "key": { "path": ["status", "danger", "accent"] },
-            "value": "#FF4D4F"
+            "value": "#5A6570"
         },
         {
             "key": { "path": ["status", "danger", "foreground"] },
-            "value": "#A8071A"
+            "value": "#001E2B"
         },
         {
             "key": { "path": ["status", "danger", "background"] },
-            "value": "#FFF1F0"
+            "value": "#FFFFFF"
         },
         {
             "key": { "path": ["status", "danger", "border"] },
-            "value": "#FFA39E"
+            "value": "#E5E7E9"
         }
     ]
 }
