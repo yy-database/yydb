@@ -1,4 +1,4 @@
-import { defineConfig } from "@vmz/plugin";
+import { defineConfig } from "@vmz/vmz";
 
 export default defineConfig({
     delivery: {

@@ -1,4 +1,4 @@
-import { defineConfig } from "@vmz/plugin";
+import { defineConfig } from "@vmz/vmz";
 import markdownIt from "@vmz/plugin-markdown-it";
 import shiki from "@vmz/plugin-shiki";
 
