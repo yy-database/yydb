@@ -3,7 +3,7 @@ use std::path::Path;
 use yydb_storage::files::{copy_main, copy_sidecars, copy_tree};
 
 use crate::{
-    Error, Result,
+    DoctorSeverity, Error, Result,
     objects::{ObjectStore, references as refs},
 };
 
@@ -47,6 +47,31 @@ impl Connection {
         self.checkpoint()?;
         copy_main(src, dest)?;
         copy_tree(&ObjectStore::yydx_objects_root(src), &ObjectStore::yydx_objects_root(dest))
+    }
+
+    /// Open a restored `.yydb` backup after verifying the pristine copy.
+    ///
+    /// The copied bytes are diagnosed before open runs recovery: header slots,
+    /// every data page's CRC32C, the record tree structure and any `YYWL`
+    /// sidecar are all checked first, and any error-severity finding fails the
+    /// restore closed. Diagnosing before open matters because recovery truncates
+    /// a torn WAL tail — verifying after open would mistake transit damage for
+    /// a normal crash cut and hand back a database missing committed
+    /// transactions. A `.yydx` main file is rejected here: its backup restores
+    /// through [`restore_yydx`](Self::restore_yydx), which verifies the object
+    /// tree closure.
+    pub fn restore_yydb(backup: impl AsRef<Path>) -> Result<Self> {
+        let path = backup.as_ref();
+        if is_yydx_main_path(path) {
+            return Err(Error::Unsupported(
+                "restore_yydb requires a .yydb main file path; .yydx backups restore through restore_yydx",
+            ));
+        }
+        let issues = yydb_storage::diagnose_file(path)?;
+        if issues.iter().any(|issue| issue.severity == DoctorSeverity::Error) {
+            return Err(Error::Corrupt("backup copy failed integrity verification"));
+        }
+        Self::open(path)
     }
 
     /// Open a restored `.yydx` backup and verify every committed object reference.
