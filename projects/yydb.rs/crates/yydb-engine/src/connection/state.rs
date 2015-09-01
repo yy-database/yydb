@@ -5,10 +5,11 @@ use super::{Backend, Connection, State, is_yydx_main_path};
 impl Connection {
     pub(crate) fn reconcile_leases_on_open(&self) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
-        self.mutate_active_state_unlocked(|state| {
-            lease::reconcile_expired_leases(&mut state.records)?;
-            Ok(())
-        })
+        let mut state = self.active_state_unlocked()?;
+        if lease::reconcile_expired_leases(&mut state.records)? {
+            self.replace_active_state_unlocked(state)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn active_state_unlocked(&self) -> Result<State> {
@@ -28,7 +29,8 @@ impl Connection {
         }
         else {
             drop(slot);
-            self.write_state(&state)
+            self.write_state(&state)?;
+            Ok(())
         }
     }
 
@@ -51,7 +53,14 @@ impl Connection {
         }
     }
 
-    pub(crate) fn write_state(&self, state: &State) -> Result<()> {
+    /// Publish a state snapshot, advancing the durable commit sequence by one.
+    ///
+    /// This is the single publish point for every durable state change, so the
+    /// `__yydb/meta/commit_sequence` record doubles as the transaction fencing
+    /// base: `begin` captures it and `commit` refuses to publish once it moved.
+    pub(crate) fn write_state(&self, state: &State) -> Result<yydb_types::CommitSequence> {
+        let mut state = state.clone();
+        let sequence = lease::bump_commit_sequence(&mut state.records);
         match self.backend.as_ref() {
             Backend::File { database, .. } => {
                 let blob_objects = if self.path().is_some_and(is_yydx_main_path) && self.journal_mode() == JournalMode::Wal {
@@ -62,17 +71,17 @@ impl Connection {
                 };
                 let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                 let before = database.snapshot()?.records;
-                let next = snapshot::snapshot_from_state(state)?;
+                let next = snapshot::snapshot_from_state(&state)?;
                 let blob_refs = match blob_objects {
                     Some(objects) => snapshot::blob_deltas(&before, &next.records, objects)?,
                     None => Vec::new(),
                 };
-                database.commit(&next, &blob_refs)
+                database.commit(&next, &blob_refs)?;
             }
             Backend::Memory { state: slot } => {
-                *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = state.clone();
-                Ok(())
+                *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = state;
             }
         }
+        Ok(sequence)
     }
 }

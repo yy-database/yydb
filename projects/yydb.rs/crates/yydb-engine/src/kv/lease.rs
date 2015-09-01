@@ -151,9 +151,12 @@ pub(crate) fn bump_commit_sequence(records: &mut std::collections::BTreeMap<Stri
     next
 }
 
-pub(crate) fn reconcile_expired_leases(records: &mut std::collections::BTreeMap<String, Vec<u8>>) -> Result<()> {
+/// Requeue claimed leases whose deadline passed. Returns whether any record
+/// changed so callers can skip publishing a no-op reconciliation.
+pub(crate) fn reconcile_expired_leases(records: &mut std::collections::BTreeMap<String, Vec<u8>>) -> Result<bool> {
     let now = now_millis();
     let keys = records.keys().filter(|key| key.starts_with(LEASE_PREFIX)).cloned().collect::<Vec<_>>();
+    let mut changed = false;
     for key in keys {
         let bytes = records.get(&key).cloned().unwrap_or_default();
         let record = decode_record(&bytes)?;
@@ -162,9 +165,10 @@ pub(crate) fn reconcile_expired_leases(records: &mut std::collections::BTreeMap<
         }
         if matches!(record, LeaseRecord::Claimed { .. }) {
             records.insert(key, encode_record(&LeaseRecord::Queued));
+            changed = true;
         }
     }
-    Ok(())
+    Ok(changed)
 }
 
 pub(crate) fn claim_lease(

@@ -95,7 +95,8 @@ impl Connection {
             !(existing.table() == declared.table() && existing.constraint().name() == declared.constraint().name())
         });
         state.unique_constraints.push(declared);
-        self.write_state(&state)
+        self.write_state(&state)?;
+        Ok(())
     }
 
     /// Number of stored key/value records.
@@ -138,7 +139,8 @@ impl Connection {
         state.resolved_contract = Some(schema::resolve_contract(&history.snapshot)?);
         state.identity_history = Some(history);
         state.schema = Some(SchemaVersion { version, document: document.to_owned() });
-        self.write_state(&state)
+        self.write_state(&state)?;
+        Ok(())
     }
 
     /// Evolve the persisted schema to the next version (`current + 1`).
@@ -170,7 +172,8 @@ impl Connection {
         state.identity_history = Some(evolved);
         state.resolved_contract = Some(resolved_contract);
         state.unique_constraints = remapped;
-        self.write_state(&state)
+        self.write_state(&state)?;
+        Ok(())
     }
 }
 

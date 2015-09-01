@@ -158,6 +158,15 @@ pub enum Error {
         /// Key that failed the compare.
         key: String,
     },
+    /// Transaction commit found the durable state ahead of the transaction
+    /// base. Nothing was published and the transaction is over; retry with a
+    /// fresh `begin`.
+    TransactionConflict {
+        /// Commit sequence the transaction started from.
+        expected: u64,
+        /// Commit sequence the durable state had reached at commit time.
+        found: u64,
+    },
     /// Lease cannot be claimed under the given expectation.
     LeaseUnavailable {
         /// Lease key.
@@ -308,6 +317,9 @@ impl fmt::Display for Error {
                 write!(f, "query bind `${parameter}: {message}")
             }
             Self::CasConflict { key } => write!(f, "CAS conflict on key {key}"),
+            Self::TransactionConflict { expected, found } => {
+                write!(f, "transaction conflict: durable state advanced to {found}, transaction based on {expected}")
+            }
             Self::LeaseUnavailable { key } => write!(f, "lease unavailable on key {key}"),
             Self::FencingMismatch { key } => {
                 write!(f, "fencing mismatch on key {key}")
@@ -376,6 +388,7 @@ impl Error {
             Self::Protocol { .. } => "yydb.protocol",
             Self::QueryBind { .. } => "yydb.query.bind",
             Self::CasConflict { .. } => "yydb.cas.conflict",
+            Self::TransactionConflict { .. } => "yydb.transaction.conflict",
             Self::LeaseUnavailable { .. } => "yydb.lease.unavailable",
             Self::FencingMismatch { .. } => "yydb.fencing.mismatch",
             Self::LeaseExpired { .. } => "yydb.lease.expired",
@@ -400,7 +413,7 @@ impl Error {
     /// High-level operation category for diagnostic catalog routing.
     ///
     /// One of: `"io"` / `"schema"` / `"udf"` / `"object"` / `"cas"` /
-    /// `"lease"` / `"fencing"` / `"protocol"` / `"session"` / `"auth"` /
+    /// `"transaction"` / `"lease"` / `"fencing"` / `"protocol"` / `"session"` / `"auth"` /
     /// `"quota"` / `"unsupported"` / `"remote"`. Hosts use this to pick the right section
     /// of a locale catalog.
     pub fn operation(&self) -> &'static str {
@@ -414,6 +427,7 @@ impl Error {
             Self::Protocol { .. } => "protocol",
             Self::QueryBind { .. } => "query",
             Self::CasConflict { .. } => "cas",
+            Self::TransactionConflict { .. } => "transaction",
             Self::LeaseUnavailable { .. } => "lease",
             Self::FencingMismatch { .. } => "fencing",
             Self::LeaseExpired { .. } => "lease",
@@ -464,6 +478,9 @@ impl Error {
             Self::Protocol { message } => vec![("detail", message.clone())],
             Self::QueryBind { parameter, message } => vec![("parameter", parameter.clone()), ("detail", message.clone())],
             Self::CasConflict { key } => vec![("key", key.clone())],
+            Self::TransactionConflict { expected, found } => {
+                vec![("expected", expected.to_string()), ("found", found.to_string())]
+            }
             Self::LeaseUnavailable { key } | Self::FencingMismatch { key } => {
                 vec![("key", key.clone())]
             }

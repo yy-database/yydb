@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::{Error, Result, kv::lease};
 
 use super::Connection;
 
@@ -21,6 +21,11 @@ impl Connection {
     }
 
     /// Commit the open transaction.
+    ///
+    /// Commit is optimistic whole-snapshot serialization: the durable commit
+    /// sequence must still equal the one `begin` captured, otherwise the
+    /// commit fails with [`Error::TransactionConflict`], publishes nothing and
+    /// ends the transaction. The caller retries with a fresh `begin`.
     pub fn commit(&self) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut slot = self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -33,7 +38,14 @@ impl Connection {
         savepoints.clear();
         drop(savepoints);
         drop(slot);
-        self.write_state(&state)
+        let base = lease::read_u64_meta(&state.records, lease::META_COMMIT_SEQ);
+        let durable = self.read_state()?;
+        let found = lease::read_u64_meta(&durable.records, lease::META_COMMIT_SEQ);
+        if found != base {
+            return Err(Error::TransactionConflict { expected: base, found });
+        }
+        self.write_state(&state)?;
+        Ok(())
     }
 
     /// Roll back the open transaction.

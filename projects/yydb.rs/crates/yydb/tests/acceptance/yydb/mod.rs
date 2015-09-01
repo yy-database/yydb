@@ -16,6 +16,7 @@ mod orphan_reclaim_skips_referenced;
 mod quota_response_evict;
 mod scan_bounded_10k;
 mod scan_resume_cursor;
+mod transaction_fencing;
 mod ttl_robots_expiry;
 mod udf_deterministic;
 mod udf_version_mismatch;

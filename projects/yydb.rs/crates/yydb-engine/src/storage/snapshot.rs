@@ -20,18 +20,31 @@ const META_CONTRACT: &[u8] = b"__yydb/meta/contract";
 const META_UNIQUE: &[u8] = b"__yydb/meta/unique";
 const META_PREFIX: &str = "__yydb/meta/";
 
+/// `__yydb/meta/` rows owned by typed [`State`] fields rather than the records
+/// map. Every other metadata row (commit/checkpoint sequence, fencing counter,
+/// future reserved rows) round-trips through `State.records` so counters stay
+/// durable across reopen.
+const TYPED_META_KEYS: [&[u8]; 4] = [META_SCHEMA, META_IDENTITY, META_CONTRACT, META_UNIQUE];
+
 /// Decode engine [`State`] from a durable snapshot.
 pub(crate) fn state_from_snapshot(snapshot: &Snapshot) -> Result<State> {
     let schema = decode_schema(snapshot.metadata.get(META_SCHEMA).cloned())?;
     let identity_history = decode_identity(snapshot.metadata.get(META_IDENTITY).cloned())?;
     let resolved_contract = decode_contract(snapshot.metadata.get(META_CONTRACT).cloned())?;
     let unique_constraints = decode_unique_constraints(snapshot.metadata.get(META_UNIQUE).cloned())?;
-    let records = snapshot
+    let mut records: BTreeMap<String, Vec<u8>> = snapshot
         .records
         .iter()
         .filter(|(key, _)| !key.starts_with(META_PREFIX))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
+    for (key, value) in &snapshot.metadata {
+        if TYPED_META_KEYS.contains(&key.as_slice()) {
+            continue;
+        }
+        let key = String::from_utf8(key.clone()).map_err(|_| Error::Corrupt("metadata key is not UTF-8"))?;
+        records.insert(key, value.clone());
+    }
     Ok(State { schema, identity_history, resolved_contract, records, unique_constraints })
 }
 
@@ -47,6 +60,11 @@ pub(crate) fn snapshot_from_state(state: &State) -> Result<Snapshot> {
     let mut records = BTreeMap::new();
     for (key, value) in &state.records {
         if key.starts_with(META_PREFIX) {
+            // Typed fields own their rows; the records copy must not override
+            // the encoding produced from the typed field above.
+            if TYPED_META_KEYS.contains(&key.as_bytes()) {
+                continue;
+            }
             metadata.insert(key.as_bytes().to_vec(), value.clone());
         }
         else {

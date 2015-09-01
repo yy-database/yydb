@@ -1,7 +1,4 @@
-use crate::{
-    EvictBudget, EvictReport, NamespaceQuota, NamespaceStats, RecordVersion, Result,
-    kv::{lease, retention as ttl},
-};
+use crate::{EvictBudget, EvictReport, NamespaceQuota, NamespaceStats, RecordVersion, Result, kv::retention as ttl};
 
 use super::Connection;
 
@@ -79,7 +76,6 @@ impl Connection {
                     }
                 }
             }
-            lease::bump_commit_sequence(&mut state.records);
             Ok(())
         })
     }

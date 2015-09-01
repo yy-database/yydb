@@ -23,7 +23,8 @@ impl Connection {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         lease::renew_lease(&mut state.records, token, new_lease_until)?;
-        self.write_state(&state)
+        self.write_state(&state)?;
+        Ok(())
     }
 
     /// Release a lease with a store-visible outcome.
@@ -31,7 +32,8 @@ impl Connection {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         lease::release_lease(&mut state.records, token, outcome)?;
-        self.write_state(&state)
+        self.write_state(&state)?;
+        Ok(())
     }
 
     /// Apply `batch` only when `token` matches the active claim.
@@ -49,10 +51,8 @@ impl Connection {
                 }
             }
         }
-        let sequence = lease::bump_commit_sequence(&mut state.records);
         lease::release_lease(&mut state.records, token, ReleaseOutcome::Requeue)?;
-        self.write_state(&state)?;
-        Ok(sequence)
+        self.write_state(&state)
     }
 
     /// Read the active lease deadline for `key`, if any.

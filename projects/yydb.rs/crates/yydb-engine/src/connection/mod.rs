@@ -165,7 +165,8 @@ impl Connection {
             Backend::Memory { .. } => {
                 let snapshot = snapshot_from_main_bytes(bytes)?;
                 let state = snapshot::state_from_snapshot(&snapshot)?;
-                self.write_state(&state)
+                self.write_state(&state)?;
+                Ok(())
             }
             Backend::File { .. } => Err(Error::Unsupported("load_main_snapshot is only supported on in-memory connections")),
         }
