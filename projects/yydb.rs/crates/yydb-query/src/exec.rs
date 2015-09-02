@@ -620,7 +620,7 @@ fn eval_pred_in(
                 Ok(v) => v,
                 Err(_) => return None,
             };
-            Some(cmp_values(&left, *op, &right))
+            cmp_values(&left, *op, &right)
         }
         // A join condition is a SQL comparison: either side `NULL` is unknown.
         Pred::FieldCmpField { left_path, op, right_path } => {
@@ -629,7 +629,7 @@ fn eval_pred_in(
             if matches!(left, Value::Null) || matches!(right, Value::Null) {
                 return None;
             }
-            Some(cmp_values(&left, *op, &right))
+            cmp_values(&left, *op, &right)
         }
         Pred::And(left, right) => truth_and(
             eval_pred_in(left, row, table, contract, records, bound_values, outer),
@@ -651,7 +651,7 @@ fn eval_pred_in(
             if matches!(left, Value::Null) || matches!(value, Value::Null) {
                 return None;
             }
-            Some(cmp_values(&left, *op, value))
+            cmp_values(&left, *op, value)
         }
         // Per-row expression comparison with SQL three-valued NULL semantics.
         Pred::ExprCmp { expr, op, value } => {
@@ -666,7 +666,7 @@ fn eval_pred_in(
             if matches!(left, Value::Null) || matches!(right, Value::Null) {
                 return None;
             }
-            Some(cmp_values(&left, *op, &right))
+            cmp_values(&left, *op, &right)
         }
         // `IS NULL` is decided: `expr IS NULL` is TRUE on NULL, FALSE
         // otherwise, never unknown.
@@ -705,7 +705,9 @@ fn eval_pred_in(
             if matches!(left, Value::Null) || matches!(low, Value::Null) || matches!(high, Value::Null) {
                 return None;
             }
-            let in_range = cmp_values(&left, CmpOp::Ge, &low) && cmp_values(&left, CmpOp::Le, &high);
+            let above_low = cmp_values(&left, CmpOp::Ge, &low)?;
+            let below_high = cmp_values(&left, CmpOp::Le, &high)?;
+            let in_range = above_low && below_high;
             Some(if *negated { !in_range } else { in_range })
         }
         // `[NOT] IN (<values>)` with expression left-hand side follows the same
@@ -814,7 +816,8 @@ fn in_set_truth(value: &Value, values: &[Value]) -> Option<bool> {
             has_null = true;
             continue;
         }
-        if cmp_values(value, CmpOp::Eq, candidate) {
+        // An incomparable candidate (e.g. a vector) can never match.
+        if cmp_values(value, CmpOp::Eq, candidate).unwrap_or(false) {
             return Some(true);
         }
     }
@@ -871,10 +874,19 @@ fn read_path(
 /// compares as an integer, and any pair that involves a REAL promotes both
 /// sides to `f64`. Distinct kind families never compare equal: they order by
 /// kind rank (`null` < `bool` < number < text/uuid < bytes < date < time <
-/// timestamp < decimal), so a comparison such as `text_column = 1.5` or
-/// `date_column = time_column` never matches instead of pretending the two sides
-/// are equal. Two values of the same unmodelled kind also compare equal rather
-/// than falling back to an arbitrary order.
+/// timestamp < decimal < file < vector < object < row), so a comparison such
+/// as `text_column = 1.5` or `date_column = time_column` never matches instead
+/// of pretending the two sides are equal.
+///
+/// `file` values order by their content digest: the SHA-256 over the complete
+/// octets is the file identity, while `name` / `media_type` are labels that
+/// never take part in comparison. Two files with equal digests are the same
+/// file even when their metadata differs.
+///
+/// `vector` values keep a deterministic structural order (dimension, then
+/// component bit patterns) so `ORDER BY` is stable; this ordering is **not**
+/// an equality semantics — vector comparison for queries is similarity with an
+/// explicit metric, which [`cmp_values`] keeps out of filter predicates.
 fn compare_values(left: &Value, right: &Value) -> std::cmp::Ordering {
     match (left, right) {
         (Value::Null, Value::Null) => std::cmp::Ordering::Equal,
@@ -901,6 +913,13 @@ fn compare_values(left: &Value, right: &Value) -> std::cmp::Ordering {
         // `Decimal::compare` is exact across declared scales, so `1.50` and
         // `1.5` compare equal without a floating-point detour.
         (Value::Decimal(a), Value::Decimal(b)) => a.compare(*b),
+        // File identity is the content digest; metadata labels never compare.
+        (Value::File(a), Value::File(b)) => a.digest.cmp(&b.digest),
+        // Deterministic structural order for sorting only (see fn docs).
+        (Value::Vector(a), Value::Vector(b)) => a
+            .dim
+            .cmp(&b.dim)
+            .then_with(|| a.data.iter().map(|component| component.to_bits()).cmp(b.data.iter().map(|component| component.to_bits()))),
         _ => value_kind_rank(left).cmp(&value_kind_rank(right)),
     }
 }
@@ -919,20 +938,45 @@ fn value_kind_rank(value: &Value) -> u8 {
         Value::Time(_) => 6,
         Value::Timestamp(_) => 7,
         Value::Decimal(_) => 8,
-        _ => 9,
+        Value::File(_) => 9,
+        Value::Vector(_) => 10,
+        Value::Object(_) => 11,
+        Value::Row(_) => 12,
+        // `Value` is non-exhaustive; unknown future kinds order after every
+        // modelled family.
+        _ => 13,
     }
 }
 
-fn cmp_values(left: &Value, op: CmpOp, right: &Value) -> bool {
+/// Kinds whose values carry no filter comparison semantics.
+///
+/// `vector` comparison is similarity under an explicit query-side metric, not
+/// equality, and `object` / `row` handles have no equality contract at all.
+/// Filter predicates on these kinds stay unknown instead of silently matching.
+fn is_filter_incomparable(left: &Value, right: &Value) -> bool {
+    matches!(
+        (left, right),
+        (Value::Vector(_), Value::Vector(_)) | (Value::Object(_), Value::Object(_)) | (Value::Row(_), Value::Row(_))
+    )
+}
+
+/// Filter comparison truth for one operand pair.
+///
+/// `None` marks an incomparable pair (see [`is_filter_incomparable`]): the
+/// predicate is unknown and the row does not pass, for `Eq` and `Ne` alike.
+fn cmp_values(left: &Value, op: CmpOp, right: &Value) -> Option<bool> {
+    if is_filter_incomparable(left, right) {
+        return None;
+    }
     let ord = compare_values(left, right);
-    match op {
+    Some(match op {
         CmpOp::Eq => ord == std::cmp::Ordering::Equal,
         CmpOp::Ne => ord != std::cmp::Ordering::Equal,
         CmpOp::Lt => ord == std::cmp::Ordering::Less,
         CmpOp::Le => ord != std::cmp::Ordering::Greater,
         CmpOp::Gt => ord == std::cmp::Ordering::Greater,
         CmpOp::Ge => ord != std::cmp::Ordering::Less,
-    }
+    })
 }
 
 // ─── expression evaluation (CASE / CAST) ──────────────────────────────────
@@ -2618,4 +2662,74 @@ fn group_key_to_string(values: &[Value]) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod comparison_semantics_tests {
+    use yydb_types::{FileDescriptor, FileManifestRef, ObjectKind, ObjectRef, Value, Vector};
+
+    use super::{CmpOp, cmp_values, compare_values};
+
+    fn file_value(digest: &str, name: Option<&str>, media_type: Option<&str>) -> Value {
+        Value::File(FileDescriptor {
+            digest: digest.to_owned(),
+            octets: 4,
+            name: name.map(str::to_owned),
+            media_type: media_type.map(str::to_owned),
+            manifest: FileManifestRef { hash: [7; 32], size: 4 },
+        })
+    }
+
+    fn digest(byte: u8) -> String {
+        std::iter::repeat_n(format!("{byte:02x}"), 32).collect()
+    }
+
+    /// File identity is the content digest: metadata labels never participate,
+    /// so two descriptors with the same digest are the same file.
+    #[test]
+    fn file_equality_is_content_hash_equality() {
+        let left = file_value(&digest(0xaa), Some("report.pdf"), Some("application/pdf"));
+        let same_content = file_value(&digest(0xaa), Some("renamed.bin"), None);
+        let other_content = file_value(&digest(0xbb), Some("report.pdf"), Some("application/pdf"));
+
+        assert_eq!(cmp_values(&left, CmpOp::Eq, &same_content), Some(true));
+        assert_eq!(cmp_values(&left, CmpOp::Ne, &same_content), Some(false));
+        assert_eq!(cmp_values(&left, CmpOp::Eq, &other_content), Some(false));
+        assert_eq!(cmp_values(&left, CmpOp::Ne, &other_content), Some(true));
+        assert_eq!(cmp_values(&left, CmpOp::Lt, &other_content), Some(true));
+    }
+
+    /// Vector / object pairs carry no filter comparison semantics: every
+    /// predicate on them stays unknown instead of silently matching.
+    #[test]
+    fn vector_and_object_filter_comparisons_stay_unknown() {
+        let vector_a = Value::Vector(Vector::new(vec![1.0_f32, 2.0]).expect("vector"));
+        let vector_b = Value::Vector(Vector::new(vec![1.0_f32, 2.0]).expect("vector"));
+        for op in [CmpOp::Eq, CmpOp::Ne, CmpOp::Lt, CmpOp::Le, CmpOp::Gt, CmpOp::Ge] {
+            assert_eq!(cmp_values(&vector_a, op, &vector_b), None, "vector `{op:?}` must stay unknown");
+        }
+
+        let object = Value::Object(ObjectRef { algo: yydb_types::HashAlgo::Blake3, hash: [1; 32], size: 8, kind: ObjectKind::Blob });
+        assert_eq!(cmp_values(&object, CmpOp::Eq, &object), None);
+        assert_eq!(cmp_values(&object, CmpOp::Ne, &object), None);
+    }
+
+    /// Sorting keeps a deterministic order for vectors (dimension, then bit
+    /// patterns) even though filters cannot compare them.
+    #[test]
+    fn vector_ordering_is_structural_and_total() {
+        let small = Value::Vector(Vector::new(vec![1.0_f32]).expect("vector"));
+        let pair = Value::Vector(Vector::new(vec![1.0_f32, 0.0]).expect("vector"));
+        assert_eq!(compare_values(&small, &pair), std::cmp::Ordering::Less);
+        assert_eq!(compare_values(&pair, &pair), std::cmp::Ordering::Equal);
+    }
+
+    /// Cross-kind pairs order by kind rank and never collapse into equality.
+    #[test]
+    fn cross_kind_pairs_never_compare_equal() {
+        let file = file_value(&digest(0xaa), None, None);
+        let vector = Value::Vector(Vector::new(vec![0.0_f32]).expect("vector"));
+        assert_eq!(cmp_values(&file, CmpOp::Eq, &vector), Some(false));
+        assert_eq!(cmp_values(&vector, CmpOp::Eq, &file), Some(false));
+    }
 }
