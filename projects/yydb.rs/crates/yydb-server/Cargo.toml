@@ -24,3 +24,6 @@ yydb-protocol = { workspace = true }
 yydb-query = { workspace = true }
 yydb-types = { workspace = true }
 yydb-udf = { workspace = true }
+
+[dev-dependencies]
+yydb-client = { workspace = true }
