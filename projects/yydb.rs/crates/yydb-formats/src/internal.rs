@@ -128,15 +128,44 @@ impl InternalPage {
     }
 
     /// Split into left (retained) and right internal pages.
+    ///
+    /// Both halves keep at least two children and must encode within a page:
+    /// separator lengths vary, so a plain midpoint can leave a half that still
+    /// overflows. Among the valid split points the most byte-balanced one wins.
     pub fn split(&mut self) -> Result<(TreeKey, InternalPage)> {
         if self.entries.len() < 4 {
             return Err(Error::Corrupt("internal page too small to split"));
         }
-        let split_at = self.entries.len() / 2;
+        let mut best: Option<(usize, usize)> = None;
+        for split_at in 2..self.entries.len() - 1 {
+            let left = encoded_entries_bytes(&self.entries[..split_at]);
+            let right = encoded_entries_bytes(&self.entries[split_at..]);
+            if left > PAGE_PAYLOAD_LEN || right > PAGE_PAYLOAD_LEN {
+                continue;
+            }
+            let imbalance = left.abs_diff(right);
+            if best.is_none_or(|(_, current)| imbalance <= current) {
+                best = Some((split_at, imbalance));
+            }
+        }
+        let Some((split_at, _)) = best
+        else {
+            return Err(Error::Corrupt("internal page cannot split into two encodable halves"));
+        };
         let right_entries = self.entries.split_off(split_at);
         let separator = right_entries[0].separator.clone();
         let right =
             InternalPage { page_id: 0, page_generation: self.page_generation, tree_id: self.tree_id, entries: right_entries };
         Ok((separator, right))
     }
+}
+
+/// Payload bytes used by `entries`: child count plus per-entry length, child id
+/// and separator bytes.
+fn encoded_entries_bytes(entries: &[InternalEntry]) -> usize {
+    let mut total = 2usize;
+    for entry in entries {
+        total += 2 + 4 + entry.separator.to_bytes().len();
+    }
+    total
 }

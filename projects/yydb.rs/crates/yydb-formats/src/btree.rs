@@ -111,16 +111,21 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
                 let child_id = node.child_page_id(child_idx);
                 if let Some((separator, right_id)) = self.insert_at(child_id, key, value)? {
                     let mut internal = node;
-                    if internal.insert_child(child_idx, separator, right_id)? {
+                    if internal.insert_child(child_idx, separator.clone(), right_id)? {
                         self.pager.put_page(page_id, internal.encode()?)?;
                         return Ok(None);
                     }
+                    // The page is full and `insert_child` rolled the new entry
+                    // back. Re-insert it before splitting so the split child
+                    // stays reachable from exactly one of the two halves;
+                    // dropping it here orphans a whole leaf of records.
+                    internal.entries.insert(child_idx + 1, InternalEntry { separator, child_page_id: right_id });
                     let (promoted, mut right_internal) = internal.split()?;
-                    let right_id = self.pager.alloc_page_id()?;
-                    right_internal.page_id = right_id;
+                    let split_right_id = self.pager.alloc_page_id()?;
+                    right_internal.page_id = split_right_id;
                     self.pager.put_page(page_id, internal.encode()?)?;
-                    self.pager.put_page(right_id, right_internal.encode()?)?;
-                    return Ok(Some((promoted, right_id)));
+                    self.pager.put_page(split_right_id, right_internal.encode()?)?;
+                    return Ok(Some((promoted, split_right_id)));
                 }
                 Ok(None)
             }

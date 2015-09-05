@@ -1,3 +1,4 @@
+mod bulk_insert_integrity;
 mod catalog_ledger;
 mod connection_smoke;
 mod execution_catalog;

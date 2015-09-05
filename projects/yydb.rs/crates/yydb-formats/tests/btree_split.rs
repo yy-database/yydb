@@ -21,6 +21,29 @@ fn memory_pager_kv_leaf_split() {
     }
 }
 
+/// Internal page splits must keep every split child reachable.
+///
+/// Regression: when a full internal page absorbed a split child, the new
+/// entries were rolled back before the page split and never re-inserted, so
+/// one whole leaf of records became unreachable (silent row loss around the
+/// first internal-page split).
+#[test]
+fn internal_splits_keep_every_record_reachable() {
+    let id = [9, 9, 9, 9, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 7];
+    let mut pager = MemoryPager::new_empty(id, 0x01);
+    let total = 2_000usize;
+    let payload = vec![b'v'; 64];
+    for i in 0..total {
+        pager.put_kv(format!("key-{i:010}"), &payload).unwrap();
+    }
+    let scanned = pager.scan_kv().unwrap();
+    assert_eq!(scanned.len(), total, "scan must see every inserted record");
+    for i in (0..total).step_by(37) {
+        let key = format!("key-{i:010}");
+        assert_eq!(pager.get_kv(&key).unwrap(), Some(payload.clone()), "missing {key}");
+    }
+}
+
 #[test]
 fn leaf_split_halves_cells() {
     let mut leaf = yydb_formats::LeafPage::empty(1, 1, TREE_RECORD);
