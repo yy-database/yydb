@@ -27,6 +27,8 @@ yydb = { version = "0.0.18", path = "crates/yydb" }
 # Transport (aggregated by the facade; never depend back on `yydb`)
 yydb-client = { path = "crates/yydb-client" }
 yydb-server = { path = "crates/yydb-server" }
+# Measurement harness (SQLite-referenced; never a product dependency)
+yydb-bench = { version = "0.0.18", path = "crates/yydb-bench" }
 # SQLite split: format primitives, storage runtime, and product facade
 sqlite-formats = { version = "0.1.0", path = "crates/sqlite-formats" }
 sqlite-storage = { version = "0.1.0", path = "crates/sqlite-storage" }
@@ -36,6 +38,7 @@ yydb-napi = { path = "ffis/yydb-napi" }
 yydb-pyo3 = { path = "ffis/yydb-pyo3" }
 # Third party
 blake3 = "1"
+rusqlite = { version = "0.33", features = ["bundled"] }
 sha1 = "0.11.0"
 sha2 = "0.10"
 base64 = "0.23.1"
