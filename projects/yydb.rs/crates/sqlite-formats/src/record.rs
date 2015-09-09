@@ -112,6 +112,130 @@ pub fn decode_record(payload: &[u8], encoding: TextEncoding, limits: RecordLimit
     Ok(values)
 }
 
+/// An owned value that can be encoded into a SQLite record payload.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WriteValue {
+    /// SQL NULL.
+    Null,
+    /// Signed SQLite integer.
+    Integer(i64),
+    /// IEEE-754 binary64 value.
+    Real(f64),
+    /// Binary bytes.
+    Blob(Vec<u8>),
+    /// UTF-8 text.
+    Text(String),
+}
+
+/// Appends one SQLite unsigned varint (one to nine bytes) to `out`.
+pub fn encode_varint_into(out: &mut Vec<u8>, value: u64) {
+    if value > 0x00ff_ffff_ffff_ffff {
+        let mut bytes = [0u8; 9];
+        for (index, byte) in bytes.iter_mut().take(8).enumerate() {
+            *byte = (((value >> (57 - 7 * index)) & 0x7f) as u8) | 0x80;
+        }
+        bytes[8] = (value & 0xff) as u8;
+        out.extend_from_slice(&bytes);
+        return;
+    }
+    let mut bytes = [0u8; 8];
+    let mut index = 7;
+    bytes[index] = (value & 0x7f) as u8;
+    let mut rest = value >> 7;
+    while rest > 0 {
+        index -= 1;
+        bytes[index] = ((rest & 0x7f) as u8) | 0x80;
+        rest >>= 7;
+    }
+    out.extend_from_slice(&bytes[index..]);
+}
+
+/// Returns the serial type used for `value` and appends its body bytes to `body`.
+fn serial_and_body(value: &WriteValue, body: &mut Vec<u8>) -> u64 {
+    match value {
+        WriteValue::Null => 0,
+        WriteValue::Integer(number) => {
+            if *number == 0 {
+                return 8;
+            }
+            if *number == 1 {
+                return 9;
+            }
+            let width = signed_width(*number);
+            // Serial 5 stores six bytes, so five- and six-byte values share it;
+            // seven- and eight-byte values need the eight-byte serial 6.
+            let serial = if width <= 4 {
+                width as u64
+            }
+            else if width <= 6 {
+                5
+            }
+            else {
+                6
+            };
+            let bytes = (*number).to_be_bytes();
+            body.extend_from_slice(&bytes[8 - width_clamp(serial)..]);
+            serial
+        }
+        WriteValue::Real(real) => {
+            body.extend_from_slice(&real.to_bits().to_be_bytes());
+            7
+        }
+        WriteValue::Blob(bytes) => {
+            body.extend_from_slice(bytes);
+            12 + 2 * bytes.len() as u64
+        }
+        WriteValue::Text(text) => {
+            body.extend_from_slice(text.as_bytes());
+            13 + 2 * text.len() as u64
+        }
+    }
+}
+
+/// Smallest two's-complement width in bytes that holds `number`.
+///
+/// Positive values whose top magnitude bit is set need an extra sign byte
+/// (128 stores as `0x0080`, not `0x80`), and negative values are bounded by
+/// the signed minimum of each width (-129 needs two bytes).
+fn signed_width(number: i64) -> usize {
+    for width in [1usize, 2, 3, 4, 6, 8] {
+        let bits = width * 8 - 1;
+        let min = if bits == 63 { i64::MIN } else { -(1i64 << bits) };
+        let max = if bits == 63 { i64::MAX } else { (1i64 << bits) - 1 };
+        if number >= min && number <= max {
+            return width;
+        }
+    }
+    8
+}
+
+/// Body width in bytes of the integer serial chosen for `serial`.
+fn width_clamp(serial: u64) -> usize {
+    match serial {
+        1 => 1,
+        2 => 2,
+        3 => 3,
+        4 => 4,
+        5 => 6,
+        _ => 8,
+    }
+}
+
+/// Encodes a complete record payload (header size varint, serial header, body).
+pub fn encode_record(values: &[WriteValue]) -> Vec<u8> {
+    let mut header = Vec::new();
+    let mut body = Vec::new();
+    for value in values {
+        let serial = serial_and_body(value, &mut body);
+        encode_varint_into(&mut header, serial);
+    }
+    let mut payload = Vec::with_capacity(header.len() + body.len() + 1);
+    encode_varint_into(&mut payload, (header.len() + 1) as u64);
+    payload.extend_from_slice(&header);
+    payload.extend_from_slice(&body);
+    payload
+}
+
 fn signed_integer(bytes: &[u8]) -> i64 {
     let mut value = if bytes[0] & 0x80 != 0 { u64::MAX } else { 0 };
     for byte in bytes {
@@ -317,6 +441,64 @@ mod tests {
 
         let reserved_error = error(&record(&[11], &[]), TextEncoding::Utf8);
         assert_eq!(reserved_error.code(), "yydb.corrupt");
+    }
+
+    #[test]
+    fn encode_record_round_trips_boundary_integers() {
+        // Width boundaries of the signed serial classes: values whose top
+        // magnitude bit is set need an extra sign byte.
+        for number in [
+            0i64,
+            1,
+            -1,
+            127,
+            128,
+            255,
+            256,
+            -128,
+            -129,
+            32_767,
+            32_768,
+            -32_768,
+            -32_769,
+            8_388_607,
+            8_388_608,
+            -8_388_609,
+            2_147_483_647,
+            2_147_483_648,
+            -2_147_483_649,
+            140_737_488_355_327,
+            140_737_488_355_328,
+            -140_737_488_355_329,
+            i64::MAX,
+            i64::MIN,
+        ] {
+            let payload = encode_record(&[WriteValue::Integer(number)]);
+            let values = decode_record(&payload, TextEncoding::Utf8, RecordLimits::default()).expect("decode");
+            assert_eq!(values, [RecordValue::Integer(number)], "round trip for {number}");
+        }
+    }
+
+    #[test]
+    fn encode_record_round_trips_every_storage_class() {
+        let values = [
+            WriteValue::Null,
+            WriteValue::Integer(-42),
+            WriteValue::Real(-0.5),
+            WriteValue::Text("中文😀".to_string()),
+            WriteValue::Blob(vec![0, 255, 128]),
+            WriteValue::Text(String::new()),
+            WriteValue::Blob(Vec::new()),
+        ];
+        let payload = encode_record(&values);
+        let decoded = decode_record(&payload, TextEncoding::Utf8, RecordLimits::default()).expect("decode");
+        assert_eq!(decoded[0], RecordValue::Null);
+        assert_eq!(decoded[1], RecordValue::Integer(-42));
+        assert_eq!(decoded[2], RecordValue::Real(-0.5));
+        assert_eq!(decoded[3], RecordValue::Text("中文😀".to_string()));
+        assert_eq!(decoded[4], RecordValue::Blob(&[0, 255, 128]));
+        assert_eq!(decoded[5], RecordValue::Text(String::new()));
+        assert_eq!(decoded[6], RecordValue::Blob(&[]));
     }
 
     #[test]

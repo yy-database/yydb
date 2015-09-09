@@ -7,6 +7,7 @@
 mod database;
 mod schema;
 mod table;
+mod writer;
 
 #[cfg(test)]
 mod tests;
@@ -15,7 +16,8 @@ pub use crate::{
     database::{SqliteDatabase, read_existing},
     schema::{SchemaObject, SchemaObjectKind, read_named_table, read_schema},
     table::{TableLimits, TableRow, read_table},
+    writer::{ColumnSpec, SqliteWriter, UpdateValue},
 };
 
 // Re-exported from sqlite-formats for convenient one-crate consumption.
-pub use sqlite_formats::{TextEncoding, decode_record, decode_varint, sqlite_library_version};
+pub use sqlite_formats::{TextEncoding, WriteValue, decode_record, decode_varint, encode_record, sqlite_library_version};

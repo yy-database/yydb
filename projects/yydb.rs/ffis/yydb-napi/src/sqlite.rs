@@ -361,3 +361,234 @@ pub fn decodeRecord(payload: Buffer, encoding: Option<String>) -> napi::Result<V
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     Ok(values.into_iter().map(record_value).collect())
 }
+
+/// One column definition for [`SqliteWriter::createTable`] (JSON form).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WriterColumnJson {
+    name: String,
+    #[serde(default)]
+    declared_type: Option<String>,
+    #[serde(default)]
+    not_null: Option<bool>,
+    #[serde(default)]
+    default_value: Option<serde_json::Value>,
+    #[serde(default)]
+    primary_key: Option<bool>,
+    #[serde(default)]
+    unique: Option<bool>,
+}
+
+fn json_to_write_value(json: &serde_json::Value) -> napi::Result<sqlite::WriteValue> {
+    Ok(match json {
+        serde_json::Value::Null => sqlite::WriteValue::Null,
+        serde_json::Value::Bool(flag) => sqlite::WriteValue::Integer(i64::from(*flag)),
+        serde_json::Value::Number(number) => {
+            if let Some(integer) = number.as_i64() {
+                sqlite::WriteValue::Integer(integer)
+            }
+            else if let Some(real) = number.as_f64() {
+                sqlite::WriteValue::Real(real)
+            }
+            else {
+                return Err(napi::Error::from_reason("sqlite write value number out of range"));
+            }
+        }
+        serde_json::Value::String(text) => sqlite::WriteValue::Text(text.clone()),
+        serde_json::Value::Object(object) => {
+            if let Some(hex) = object.get("$blob").and_then(serde_json::Value::as_str) {
+                if hex.len() % 2 != 0 {
+                    return Err(napi::Error::from_reason("sqlite blob hex must have even length"));
+                }
+                let mut bytes = Vec::with_capacity(hex.len() / 2);
+                for index in 0..hex.len() / 2 {
+                    let byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16)
+                        .map_err(|_| napi::Error::from_reason("sqlite blob hex is not valid"))?;
+                    bytes.push(byte);
+                }
+                sqlite::WriteValue::Blob(bytes)
+            }
+            else if let Some(integer) = object.get("$i64").and_then(serde_json::Value::as_str) {
+                let value = integer
+                    .parse::<i64>()
+                    .map_err(|_| napi::Error::from_reason("sqlite $i64 value must be a decimal string"))?;
+                sqlite::WriteValue::Integer(value)
+            }
+            else {
+                return Err(napi::Error::from_reason("sqlite write value object must carry `$blob` or `$i64`"));
+            }
+        }
+        serde_json::Value::Array(_) => return Err(napi::Error::from_reason("sqlite write value must not be an array")),
+    })
+}
+
+/// Writes SQLite format-3 database files that upstream SQLite implementations
+/// open directly. The writer keeps the image in memory until [`save`](SqliteWriter::save).
+#[napi]
+pub struct SqliteWriter {
+    writer: sqlite::SqliteWriter,
+}
+
+#[napi]
+impl SqliteWriter {
+    /// Creates a fresh database image with the given page size (default 4096).
+    #[napi(factory)]
+    pub fn create(page_size: Option<u32>) -> napi::Result<Self> {
+        let page_size = page_size.unwrap_or(4096) as usize;
+        let writer = sqlite::SqliteWriter::create(page_size).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        Ok(Self { writer })
+    }
+
+    /// Loads an existing SQLite main file for further mutation.
+    #[napi(factory)]
+    pub fn open(path: String) -> napi::Result<Self> {
+        let writer = sqlite::SqliteWriter::open(&path).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        Ok(Self { writer })
+    }
+
+    /// Creates a table; `columnsJson` is `[{name, declaredType, notNull,
+    /// defaultValue, primaryKey, unique}]` with SQLite semantics.
+    #[napi]
+    pub fn createTable(&mut self, name: String, columns_json: String) -> napi::Result<()> {
+        let columns: Vec<WriterColumnJson> = serde_json::from_str(&columns_json)
+            .map_err(|e| napi::Error::from_reason(format!("sqlite columns JSON invalid: {e}")))?;
+        let mut specs = Vec::with_capacity(columns.len());
+        for column in columns {
+            specs.push(sqlite::ColumnSpec {
+                name: column.name,
+                declared_type: column.declared_type.unwrap_or_else(|| "BLOB".to_string()),
+                not_null: column.not_null.unwrap_or(false),
+                default_value: match column.default_value {
+                    Some(json) => Some(json_to_write_value(&json)?),
+                    None => None,
+                },
+                primary_key: column.primary_key.unwrap_or(false),
+                unique: column.unique.unwrap_or(false),
+            });
+        }
+        self.writer.create_table(&name, &specs).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Creates an index over one or more columns.
+    #[napi]
+    pub fn createIndex(&mut self, name: String, table: String, columns: Vec<String>, unique: Option<bool>) -> napi::Result<()> {
+        self.writer
+            .create_index(&name, &table, &columns, unique.unwrap_or(false))
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Inserts one row. `valuesJson` is a JSON array; `null` is an explicit
+    /// NULL and `{"$omit":true}` applies the column default. Returns the rowid.
+    #[napi]
+    pub fn insert(&mut self, table: String, values_json: String) -> napi::Result<i64> {
+        let values: Vec<serde_json::Value> = serde_json::from_str(&values_json)
+            .map_err(|e| napi::Error::from_reason(format!("sqlite values JSON invalid: {e}")))?;
+        let mut slots = Vec::with_capacity(values.len());
+        for value in values {
+            if value.as_object().is_some_and(|object| object.get("$omit").and_then(serde_json::Value::as_bool).unwrap_or(false))
+            {
+                slots.push(None);
+                continue;
+            }
+            slots.push(Some(json_to_write_value(&value)?));
+        }
+        self.writer.insert(&table, &slots).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Deletes one row by rowid; returns whether a row was removed.
+    #[napi]
+    pub fn delete(&mut self, table: String, rowid: i64) -> napi::Result<bool> {
+        self.writer.delete(&table, rowid).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Updates one row by rowid. `slotsJson` is a JSON array where each slot
+    /// is `{"keep":true}` or `{"set":<value>}`. Returns whether a row changed.
+    #[napi]
+    pub fn update(&mut self, table: String, rowid: i64, slots_json: String) -> napi::Result<bool> {
+        let values: Vec<serde_json::Value> = serde_json::from_str(&slots_json)
+            .map_err(|e| napi::Error::from_reason(format!("sqlite slots JSON invalid: {e}")))?;
+        let mut slots = Vec::with_capacity(values.len());
+        for value in values {
+            let object = value.as_object().ok_or_else(|| napi::Error::from_reason("sqlite update slot must be an object"))?;
+            if object.get("keep").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                slots.push(sqlite::UpdateValue::Keep);
+                continue;
+            }
+            match object.get("set") {
+                Some(inner) => slots.push(sqlite::UpdateValue::Set(json_to_write_value(inner)?)),
+                None => return Err(napi::Error::from_reason("sqlite update slot needs `keep` or `set`")),
+            }
+        }
+        self.writer.update(&table, rowid, &slots).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Starts an in-memory transaction.
+    #[napi]
+    pub fn begin(&mut self) -> napi::Result<()> {
+        self.writer.begin().map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Commits the open transaction.
+    #[napi]
+    pub fn commit(&mut self) -> napi::Result<()> {
+        self.writer.commit().map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Rolls the image back to the state before `begin`.
+    #[napi]
+    pub fn rollback(&mut self) -> napi::Result<()> {
+        self.writer.rollback().map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Bumps the change counter and writes the image to `path`.
+    #[napi]
+    pub fn save(&mut self, path: String) -> napi::Result<()> {
+        self.writer.save(&path).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Returns the raw file image.
+    #[napi]
+    pub fn pages(&self) -> Buffer {
+        self.writer.pages().to_vec().into()
+    }
+
+    /// Page size of this database image.
+    #[napi]
+    pub fn pageSize(&self) -> u32 {
+        self.writer.page_size() as u32
+    }
+
+    /// Reads schema objects back through the crate's own reader.
+    #[napi]
+    pub fn schema(&self, limits: Option<SqliteReadLimits>) -> napi::Result<Vec<SqliteSchemaObject>> {
+        self.writer
+            .schema_objects(SqliteReadLimits::resolve(limits))
+            .map(|objects| {
+                objects
+                    .into_iter()
+                    .map(|object| SqliteSchemaObject {
+                        kind: match object.kind {
+                            SchemaObjectKind::Table => "table",
+                            SchemaObjectKind::Index => "index",
+                            SchemaObjectKind::View => "view",
+                            SchemaObjectKind::Trigger => "trigger",
+                        }
+                        .into(),
+                        name: object.name,
+                        table_name: object.table_name,
+                        root_page: object.root_page,
+                        sql: object.sql,
+                    })
+                    .collect()
+            })
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Reads one table's decoded rows back through the crate's own reader.
+    #[napi]
+    pub fn tableDecoded(&self, name: String, limits: Option<SqliteReadLimits>) -> napi::Result<Vec<SqliteDecodedRow>> {
+        let resolved = SqliteReadLimits::resolve(limits);
+        let rows = self.writer.table_rows(&name, resolved).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        build_decoded_rows(self.writer.pages(), rows, resolved)
+    }
+}

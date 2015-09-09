@@ -21,8 +21,8 @@
 #![deny(missing_docs)]
 
 pub use sqlite_storage::{
-    SchemaObject, SchemaObjectKind, SqliteDatabase, TableLimits, TableRow, TextEncoding, decode_record, decode_varint,
-    read_existing, read_named_table, read_schema, read_table, sqlite_library_version,
+    ColumnSpec, SchemaObject, SchemaObjectKind, SqliteDatabase, SqliteWriter, TableLimits, TableRow, TextEncoding, UpdateValue,
+    WriteValue, decode_record, decode_varint, read_existing, read_named_table, read_schema, read_table, sqlite_library_version,
 };
 
 // Legacy surface constants and format functions that historical consumers
