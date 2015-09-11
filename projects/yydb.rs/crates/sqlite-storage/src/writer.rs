@@ -52,12 +52,28 @@ pub enum UpdateValue {
     Set(WriteValue),
 }
 
-/// Result of inserting into a child subtree.
+/// Result of inserting into a child subtree: the child keeps every key up to
+/// the first boundary key, and each boundary page holds the keys above its
+/// predecessor up to (and including) its own boundary key.
 struct Split {
-    /// Largest key that stays routed through the original child page.
-    new_key: i64,
-    /// New page holding every key above `new_key`.
-    right: u32,
+    boundaries: Vec<(i64, u32)>,
+}
+
+/// Greedily packs sorted cells into groups that each fit one page, returning
+/// at least two groups when the total exceeds `capacity`.
+fn pack_groups<T>(cells: Vec<T>, capacity: usize, size_of: impl Fn(&T) -> usize) -> Vec<Vec<T>> {
+    let mut groups: Vec<Vec<T>> = Vec::new();
+    let mut space = 0usize;
+    for cell in cells {
+        let size = size_of(&cell);
+        if groups.is_empty() || size > space {
+            groups.push(Vec::new());
+            space = capacity;
+        }
+        space = space.saturating_sub(size);
+        groups.last_mut().expect("group pushed above").push(cell);
+    }
+    groups
 }
 
 struct MasterRow {
@@ -205,7 +221,7 @@ impl SqliteWriter {
         let root_page = self.allocate_page()?;
         self.init_leaf_page(root_page, PAGE_TABLE_LEAF);
         let sql = render_create_table(name, columns);
-        let master_rowid = self.insert_master_row("table", name, name, root_page, &sql)?;
+        let master_rowid = self.insert_master_row("table", name, name, root_page, Some(&sql))?;
 
         let mut meta = TableMeta {
             table_name: name.to_string(),
@@ -222,7 +238,7 @@ impl SqliteWriter {
             if (column.primary_key || column.unique) && Some(index) != rowid_alias {
                 auto_number += 1;
                 let auto_name = format!("sqlite_autoindex_{name}_{auto_number}");
-                self.create_index_inner(&auto_name, &mut meta, vec![index], true)?;
+                self.create_index_inner(&auto_name, &mut meta, vec![index], true, true)?;
             }
         }
         self.bump_cookie();
@@ -249,17 +265,32 @@ impl SqliteWriter {
                 .ok_or(Error::Unsupported("sqlite index column does not exist"))?;
             positions.push(position);
         }
-        self.create_index_inner(name, &mut meta, positions, unique)?;
+        self.create_index_inner(name, &mut meta, positions, unique, false)?;
         self.bump_cookie();
         Ok(())
     }
 
-    fn create_index_inner(&mut self, name: &str, meta: &mut TableMeta, columns: Vec<usize>, unique: bool) -> Result<()> {
+    fn create_index_inner(
+        &mut self,
+        name: &str,
+        meta: &mut TableMeta,
+        columns: Vec<usize>,
+        unique: bool,
+        automatic: bool,
+    ) -> Result<()> {
         let root_page = self.allocate_page()?;
         self.init_leaf_page(root_page, PAGE_INDEX_LEAF);
-        let column_names: Vec<String> = columns.iter().map(|index| meta.columns[*index].name.clone()).collect();
-        let sql = render_create_index(name, &table_name_of(meta), &column_names, unique);
-        let master_rowid = self.insert_master_row("index", name, &table_name_of(meta), root_page, &sql)?;
+        // Automatic constraint indexes carry no CREATE text in sqlite_master;
+        // upstream SQLite re-derives them from the table definition and would
+        // reject a duplicate if the text were present.
+        let master_rowid = if automatic {
+            self.insert_master_row("index", name, &table_name_of(meta), root_page, None)?
+        }
+        else {
+            let column_names: Vec<String> = columns.iter().map(|index| meta.columns[*index].name.clone()).collect();
+            let sql = render_create_index(name, &table_name_of(meta), &column_names, unique);
+            self.insert_master_row("index", name, &table_name_of(meta), root_page, Some(&sql))?
+        };
         let mut index = IndexMeta { master_rowid, root_page, columns, unique };
 
         // Backfill existing rows into the new index; splits may regrow the
@@ -298,6 +329,7 @@ impl SqliteWriter {
                 Some(value) => value.clone(),
                 None => column.default_value.clone().unwrap_or(WriteValue::Null),
             };
+            let value = apply_affinity(value, affinity_of(&column.declared_type));
             if matches!(value, WriteValue::Null) && column.not_null && Some(index) != meta.rowid_alias {
                 return Err(Error::Unsupported("sqlite NOT NULL constraint failed"));
             }
@@ -408,6 +440,7 @@ impl SqliteWriter {
                 continue;
             };
             let column = &meta.columns[index];
+            let value = apply_affinity(value.clone(), affinity_of(&column.declared_type));
             if matches!(value, WriteValue::Null) && column.not_null && Some(index) != meta.rowid_alias {
                 return Err(Error::Unsupported("sqlite NOT NULL constraint failed"));
             }
@@ -416,7 +449,7 @@ impl SqliteWriter {
                 else {
                     return Err(Error::Unsupported("sqlite rowid alias must be an integer"));
                 };
-                next_rowid = *rowid_value;
+                next_rowid = rowid_value;
             }
             owned[index] = value.clone();
         }
@@ -484,14 +517,18 @@ impl SqliteWriter {
         Ok(out)
     }
 
-    fn insert_master_row(&mut self, kind: &str, name: &str, table_name: &str, root_page: u32, sql: &str) -> Result<i64> {
+    fn insert_master_row(&mut self, kind: &str, name: &str, table_name: &str, root_page: u32, sql: Option<&str>) -> Result<i64> {
         let rowid = self.max_rowid(1)?.saturating_add(1);
+        let sql_value = match sql {
+            Some(text) => WriteValue::Text(text.to_string()),
+            None => WriteValue::Null,
+        };
         let record = encode_record(&[
             WriteValue::Text(kind.to_string()),
             WriteValue::Text(name.to_string()),
             WriteValue::Text(table_name.to_string()),
             WriteValue::Integer(i64::from(root_page)),
-            WriteValue::Text(sql.to_string()),
+            sql_value,
         ]);
         let root = self.table_insert(1, rowid, &record)?;
         if root != 1 {
@@ -544,17 +581,42 @@ impl SqliteWriter {
             indexes: Vec::new(),
         };
         for row in rows.iter().filter(|row| row.kind == "index" && eq_ignore_ascii_case(&row.table_name, table)) {
-            let sql = row.sql.as_deref().ok_or(Error::Unsupported("sqlite index has no CREATE text"))?;
-            let (column_names, unique) = parse_create_index(sql)?;
-            let mut positions = Vec::with_capacity(column_names.len());
-            for name in column_names {
-                let position = meta
-                    .columns
-                    .iter()
-                    .position(|column| eq_ignore_ascii_case(&column.name, &name))
-                    .ok_or(Error::Corrupt("sqlite index references unknown column"))?;
-                positions.push(position);
-            }
+            let (positions, unique) = match row.sql.as_deref() {
+                Some(sql) => {
+                    let (column_names, unique) = parse_create_index(sql)?;
+                    let mut positions = Vec::with_capacity(column_names.len());
+                    for name in column_names {
+                        let position = meta
+                            .columns
+                            .iter()
+                            .position(|column| eq_ignore_ascii_case(&column.name, &name))
+                            .ok_or(Error::Corrupt("sqlite index references unknown column"))?;
+                        positions.push(position);
+                    }
+                    (positions, unique)
+                }
+                None => {
+                    // Automatic constraint indexes store no CREATE text; the
+                    // `sqlite_autoindex_<table>_<n>` suffix names the n-th
+                    // PK/UNIQUE constraint column in declaration order.
+                    let number = row
+                        .name
+                        .rsplit_once('_')
+                        .and_then(|(_, suffix)| suffix.parse::<usize>().ok())
+                        .ok_or(Error::Corrupt("sqlite autoindex name unrecognized"))?;
+                    let constraint_columns: Vec<usize> = meta
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, column)| (column.primary_key || column.unique) && Some(*index) != rowid_alias)
+                        .map(|(index, _)| index)
+                        .collect();
+                    let position = *constraint_columns
+                        .get(number - 1)
+                        .ok_or(Error::Corrupt("sqlite autoindex number out of range"))?;
+                    (vec![position], true)
+                }
+            };
             meta.indexes.push(IndexMeta { master_rowid: row.rowid, root_page: row.root_page, columns: positions, unique });
         }
         Ok(meta)
@@ -870,14 +932,17 @@ impl SqliteWriter {
             Some(split) => {
                 let new_root = self.allocate_page()?;
                 self.init_leaf_page(new_root, PAGE_TABLE_INTERIOR);
-                let mut cell = Vec::with_capacity(16);
-                cell.extend_from_slice(&page.to_be_bytes());
-                encode_varint_into(&mut cell, split.new_key as u64);
-                self.rebuild_leaf(new_root, PAGE_TABLE_INTERIOR, &[cell]);
+                let mut cells = Vec::with_capacity(split.boundaries.len());
+                let mut left = page;
+                for (key, right) in split.boundaries.iter() {
+                    cells.push(interior_cell(left, *key));
+                    left = *right;
+                }
+                self.rebuild_leaf(new_root, PAGE_TABLE_INTERIOR, &cells);
                 let offset = self.page_offset(new_root);
                 let header_relative = Self::header_offset(new_root);
                 self.pages[offset + header_relative + 8..offset + header_relative + 12]
-                    .copy_from_slice(&split.right.to_be_bytes());
+                    .copy_from_slice(&left.to_be_bytes());
                 Ok(new_root)
             }
             None => Ok(page),
@@ -900,20 +965,36 @@ impl SqliteWriter {
                     self.place_leaf_cell(page, position, &cell);
                     return Ok(None);
                 }
-                // Split: rebuild both halves from scratch.
+                // Split: pack the sorted cells into as many pages as the
+                // payload sizes demand (one oversized overflow cell can make a
+                // count-based half-page overflow its page).
                 let mut all: Vec<(i64, Vec<u8>)> = cells.into_iter().map(|(key, _, bytes)| (key, bytes)).collect();
                 all.insert(position, (rowid, cell));
-                let mid = (all.len() / 2).clamp(1, all.len() - 1);
-                let right_rows: Vec<(i64, Vec<u8>)> = all.split_off(mid);
-                let separator = all.last().map(|(key, _)| *key).expect("left half keeps at least one cell");
-                let right_page = self.allocate_page()?;
-                self.rebuild_leaf(
-                    right_page,
-                    PAGE_TABLE_LEAF,
-                    &right_rows.iter().map(|(_, bytes)| bytes.clone()).collect::<Vec<_>>(),
-                );
-                self.rebuild_leaf(page, PAGE_TABLE_LEAF, &all.iter().map(|(_, bytes)| bytes.clone()).collect::<Vec<_>>());
-                Ok(Some(Split { new_key: separator, right: right_page }))
+                let capacity = self.usable - 8;
+                let groups = pack_groups(all, capacity, |(_, bytes)| bytes.len() + 2);
+                if groups.len() < 2 {
+                    // Freeblocks fragmented the free space; one compacted page
+                    // holds everything again.
+                    let only = groups.into_iter().next().expect("one group");
+                    self.rebuild_leaf(page, PAGE_TABLE_LEAF, &only.iter().map(|(_, bytes)| bytes.clone()).collect::<Vec<_>>());
+                    return Ok(None);
+                }
+                let mut iter = groups.into_iter();
+                let first = iter.next().expect("at least two groups");
+                let mut previous_max = first.last().map(|(key, _)| *key).expect("group keeps its cells");
+                self.rebuild_leaf(page, PAGE_TABLE_LEAF, &first.iter().map(|(_, bytes)| bytes.clone()).collect::<Vec<_>>());
+                let mut boundaries = Vec::new();
+                for group in iter {
+                    let new_page = self.allocate_page()?;
+                    self.rebuild_leaf(
+                        new_page,
+                        PAGE_TABLE_LEAF,
+                        &group.iter().map(|(_, bytes)| bytes.clone()).collect::<Vec<_>>(),
+                    );
+                    boundaries.push((previous_max, new_page));
+                    previous_max = group.last().map(|(key, _)| *key).expect("group keeps its cells");
+                }
+                Ok(Some(Split { boundaries }))
             }
             PAGE_TABLE_INTERIOR => {
                 let count = u16::from_be_bytes(
@@ -940,22 +1021,21 @@ impl SqliteWriter {
                 else {
                     return Ok(None);
                 };
-                self.interior_accept(page, child_index, child, split.new_key, split.right)
+                self.interior_accept(page, child_index, child, split.boundaries)
             }
             _ => Err(Error::Corrupt("sqlite table b-tree page type invalid")),
         }
     }
 
-    /// Integrates a child split into this interior page (may split this page).
-    /// `right_page` holds the keys above `new_key` up to the child's former
-    /// maximum, so the inserted upper cell must carry the child's OLD max key.
+    /// Integrates a child's split boundaries into this interior page (may
+    /// split this page in turn). The child keeps every key up to the first
+    /// boundary; each boundary page covers the keys between its neighbours.
     fn interior_accept(
         &mut self,
         page: u32,
         child_index: Option<usize>,
         child: u32,
-        new_key: i64,
-        right_page: u32,
+        boundaries: Vec<(i64, u32)>,
     ) -> Result<Option<Split>> {
         let offset = self.page_offset(page);
         let header_relative = Self::header_offset(page);
@@ -965,7 +1045,7 @@ impl SqliteWriter {
                 as usize;
 
         // Collect existing cells as (child pointer, key, bytes).
-        let mut cells: Vec<(u32, i64, Vec<u8>)> = Vec::with_capacity(count + 1);
+        let mut cells: Vec<(u32, i64, Vec<u8>)> = Vec::with_capacity(count + boundaries.len() + 1);
         for index in 0..count {
             let pointer = header_relative + 12 + index * 2;
             let cell_offset =
@@ -978,19 +1058,29 @@ impl SqliteWriter {
         let mut rightmost =
             u32::from_be_bytes(self.pages[offset + header_relative + 8..offset + header_relative + 12].try_into().unwrap());
 
+        let last_page = boundaries.last().expect("split carries at least one boundary").1;
         match child_index {
             Some(index) => {
-                // The existing cell for `child` keeps routing keys <= new_key;
-                // the new right page takes over keys above new_key up to the
-                // old separator.
                 let old_key = cells[index].1;
-                cells[index].1 = new_key;
-                cells[index].2 = interior_cell(child, new_key);
-                cells.insert(index + 1, (right_page, old_key, interior_cell(right_page, old_key)));
+                let first_key = boundaries[0].0;
+                cells[index].1 = first_key;
+                cells[index].2 = interior_cell(child, first_key);
+                let mut insert_at = index + 1;
+                for window in boundaries.windows(2) {
+                    let (upper_page, upper_key) = (window[0].1, window[1].0);
+                    cells.insert(insert_at, (upper_page, upper_key, interior_cell(upper_page, upper_key)));
+                    insert_at += 1;
+                }
+                cells.insert(insert_at, (last_page, old_key, interior_cell(last_page, old_key)));
             }
             None => {
-                cells.push((child, new_key, interior_cell(child, new_key)));
-                rightmost = right_page;
+                let first_key = boundaries[0].0;
+                cells.push((child, first_key, interior_cell(child, first_key)));
+                for window in boundaries.windows(2) {
+                    let (upper_page, upper_key) = (window[0].1, window[1].0);
+                    cells.push((upper_page, upper_key, interior_cell(upper_page, upper_key)));
+                }
+                rightmost = last_page;
             }
         }
 
@@ -1016,7 +1106,7 @@ impl SqliteWriter {
         let left_cells: Vec<Vec<u8>> = cells[..mid].iter().map(|(_, _, bytes)| bytes.clone()).collect();
         self.rebuild_leaf(page, kind, &left_cells);
         self.pages[offset + header_relative + 8..offset + header_relative + 12].copy_from_slice(&moved.0.to_be_bytes());
-        Ok(Some(Split { new_key: moved.1, right: right_page }))
+        Ok(Some(Split { boundaries: vec![(moved.1, right_page)] }))
     }
 
     fn table_delete(&mut self, page: u32, rowid: i64) -> Result<u32> {
@@ -1279,19 +1369,25 @@ impl SqliteWriter {
     // ------------------------------------------------------------------
 
     /// Index pages route strictly: keys below a cell key descend into that
-    /// cell's child, keys at or above continue right. The separator of a
-    /// split is therefore the smallest key of the new right page.
+    /// cell's child, keys at or above continue right. The divider of a split
+    /// is a real entry that MOVES up to the parent and leaves both halves,
+    /// exactly like upstream SQLite.
     fn index_insert(&mut self, root: u32, key: &[u8]) -> Result<u32> {
         match self.index_insert_inner(root, key)? {
             Some(split) => {
                 let new_root = self.allocate_page()?;
                 self.init_leaf_page(new_root, PAGE_INDEX_INTERIOR);
-                let cell = index_interior_cell(root, &split.separator_payload);
-                self.rebuild_leaf(new_root, PAGE_INDEX_INTERIOR, &[cell]);
+                let mut cells = Vec::with_capacity(split.dividers.len());
+                let mut left = root;
+                for (divider, page) in split.dividers.iter().zip(split.pages.iter()) {
+                    cells.push(index_interior_cell(left, divider));
+                    left = *page;
+                }
+                self.rebuild_leaf(new_root, PAGE_INDEX_INTERIOR, &cells);
                 let offset = self.page_offset(new_root);
                 let header_relative = Self::header_offset(new_root);
                 self.pages[offset + header_relative + 8..offset + header_relative + 12]
-                    .copy_from_slice(&split.right.to_be_bytes());
+                    .copy_from_slice(&left.to_be_bytes());
                 Ok(new_root)
             }
             None => Ok(root),
@@ -1314,18 +1410,42 @@ impl SqliteWriter {
                     self.place_leaf_cell(page, position, &cell);
                     return Ok(None);
                 }
+                // Pack into as many pages as the payload sizes demand, then
+                // move one divider entry per boundary up to the parent.
                 let mut all: Vec<Vec<u8>> = entries.into_iter().map(|(_, bytes)| bytes).collect();
                 all.insert(position, cell);
-                // Index splits MOVE the middle cell up: it stays an entry in
-                // the parent and leaves both halves, matching upstream SQLite.
-                let mid = (all.len() / 2).clamp(1, all.len() - 2);
-                let divider = decode_cell_payload(&all[mid])?;
-                let right_cells: Vec<Vec<u8>> = all.split_off(mid + 1);
-                all.pop();
-                let right_page = self.allocate_page()?;
-                self.rebuild_leaf(right_page, PAGE_INDEX_LEAF, &right_cells);
-                self.rebuild_leaf(page, PAGE_INDEX_LEAF, &all);
-                Ok(Some(IndexSplit { separator_payload: divider, right: right_page }))
+                let capacity = self.usable - 8;
+                let mut groups = pack_groups(all, capacity, |bytes| bytes.len() + 2);
+                if groups.len() < 2 {
+                    // Freeblocks fragmented the free space; one compacted page
+                    // holds everything again.
+                    let only = groups.into_iter().next().expect("one group");
+                    self.rebuild_leaf(page, PAGE_INDEX_LEAF, &only);
+                    return Ok(None);
+                }
+                let mut dividers = Vec::with_capacity(groups.len() - 1);
+                for boundary in 1..groups.len() {
+                    let divider_cell = if groups[boundary].len() >= 2 {
+                        groups[boundary].remove(0)
+                    }
+                    else if groups[boundary - 1].len() >= 2 {
+                        groups[boundary - 1].pop().expect("checked length")
+                    }
+                    else {
+                        return Err(Error::Unsupported("sqlite index cell too large to split"));
+                    };
+                    dividers.push(decode_cell_payload(&divider_cell)?);
+                }
+                let mut pages = Vec::with_capacity(groups.len() - 1);
+                let mut iter = groups.into_iter();
+                let first = iter.next().expect("at least two groups");
+                for group in iter {
+                    let new_page = self.allocate_page()?;
+                    self.rebuild_leaf(new_page, PAGE_INDEX_LEAF, &group);
+                    pages.push(new_page);
+                }
+                self.rebuild_leaf(page, PAGE_INDEX_LEAF, &first);
+                Ok(Some(IndexSplit { dividers, pages }))
             }
             PAGE_INDEX_INTERIOR => {
                 let entries = self.index_interior_entries(page)?;
@@ -1354,9 +1474,9 @@ impl SqliteWriter {
         }
     }
 
-    /// Integrates a child split into this interior index page. The child keeps
-    /// keys below the separator; the split's right page takes over the upper
-    /// part of the child's former key range.
+    /// Integrates a child split into this interior index page. Divider entries
+    /// move up into this page; each group page covers the keys between its
+    /// neighbouring dividers.
     fn index_interior_accept(
         &mut self,
         page: u32,
@@ -1367,18 +1487,26 @@ impl SqliteWriter {
         let offset = self.page_offset(page);
         let header_relative = Self::header_offset(page);
         let entries = self.index_interior_entries(page)?;
-        // (payload, child pointer) pairs rebuilt as full cells below.
         let mut pairs: Vec<(Vec<u8>, u32)> = entries.cells;
         let mut rightmost = entries.rightmost;
+        let last_page = *split.pages.last().expect("split carries at least one page");
         match child_index {
             Some(index) => {
                 let old_payload = pairs[index].0.clone();
-                pairs[index] = (split.separator_payload.clone(), child);
-                pairs.insert(index + 1, (old_payload, split.right));
+                pairs[index] = (split.dividers[0].clone(), child);
+                let mut insert_at = index + 1;
+                for (window_index, window) in split.dividers.windows(2).enumerate() {
+                    pairs.insert(insert_at, (window[1].clone(), split.pages[window_index + 1]));
+                    insert_at += 1;
+                }
+                pairs.insert(insert_at, (old_payload, last_page));
             }
             None => {
-                pairs.push((split.separator_payload.clone(), child));
-                rightmost = split.right;
+                pairs.push((split.dividers[0].clone(), child));
+                for (window_index, window) in split.dividers.windows(2).enumerate() {
+                    pairs.push((window[1].clone(), split.pages[window_index + 1]));
+                }
+                rightmost = last_page;
             }
         }
         let cells: Vec<Vec<u8>> = pairs.iter().map(|(payload, child_page)| index_interior_cell(*child_page, payload)).collect();
@@ -1388,8 +1516,7 @@ impl SqliteWriter {
             self.pages[offset + header_relative + 8..offset + header_relative + 12].copy_from_slice(&rightmost.to_be_bytes());
             return Ok(None);
         }
-        // Split this interior page: the middle cell moves up, its child
-        // pointer becomes the left page's new rightmost.
+        // Split this interior page: the middle cell (an entry itself) moves up.
         let mid = cells.len() / 2;
         let moved_payload = pairs[mid].0.clone();
         let moved_child = pairs[mid].1;
@@ -1404,7 +1531,7 @@ impl SqliteWriter {
         let left_cells: Vec<Vec<u8>> = cells[..mid].to_vec();
         self.rebuild_leaf(page, PAGE_INDEX_INTERIOR, &left_cells);
         self.pages[offset + header_relative + 8..offset + header_relative + 12].copy_from_slice(&moved_child.to_be_bytes());
-        Ok(Some(IndexSplit { separator_payload: moved_payload, right: right_page }))
+        Ok(Some(IndexSplit { dividers: vec![moved_payload], pages: vec![right_page] }))
     }
 
     fn index_delete(&mut self, root: u32, key: &[u8]) -> Result<u32> {
@@ -1680,8 +1807,10 @@ struct CellInfo {
 }
 
 struct IndexSplit {
-    separator_payload: Vec<u8>,
-    right: u32,
+    /// Divider entries moved up to the parent, between consecutive groups.
+    dividers: Vec<Vec<u8>>,
+    /// Pages holding the groups after the first, aligned with `dividers`.
+    pages: Vec<u32>,
 }
 
 struct InteriorEntries {
@@ -1800,6 +1929,108 @@ fn prefix_equal(
 
 fn is_rowid_alias(column: &ColumnSpec) -> bool {
     column.primary_key && column.declared_type.eq_ignore_ascii_case("INTEGER")
+}
+
+/// SQLite column affinity derived from the declared type (fileformat2 §3.1).
+#[derive(Clone, Copy, PartialEq)]
+enum Affinity {
+    Integer,
+    Text,
+    Blob,
+    Real,
+    Numeric,
+}
+
+fn affinity_of(declared: &str) -> Affinity {
+    let upper = declared.to_ascii_uppercase();
+    if upper.contains("INT") {
+        Affinity::Integer
+    }
+    else if upper.contains("CHAR") || upper.contains("CLOB") || upper.contains("TEXT") {
+        Affinity::Text
+    }
+    else if upper.contains("BLOB") || upper.trim().is_empty() {
+        Affinity::Blob
+    }
+    else if upper.contains("REAL") || upper.contains("FLOA") || upper.contains("DOUB") {
+        Affinity::Real
+    }
+    else {
+        Affinity::Numeric
+    }
+}
+
+/// Applies SQLite affinity conversion to a value before storage.
+fn apply_affinity(value: WriteValue, affinity: Affinity) -> WriteValue {
+    match affinity {
+        Affinity::Blob => value,
+        Affinity::Real => match value {
+            WriteValue::Integer(number) => WriteValue::Real(number as f64),
+            other => other,
+        },
+        Affinity::Text => match value {
+            WriteValue::Integer(number) => WriteValue::Text(number.to_string()),
+            WriteValue::Real(real) => WriteValue::Text(render_real_as_text(real)),
+            other => other,
+        },
+        Affinity::Numeric | Affinity::Integer => match value {
+            WriteValue::Real(real) => match lossless_integer(real) {
+                Some(integer) => WriteValue::Integer(integer),
+                None => WriteValue::Real(real),
+            },
+            WriteValue::Text(text) => convert_text_numeric(&text, affinity),
+            other => other,
+        },
+    }
+}
+
+fn lossless_integer(real: f64) -> Option<i64> {
+    if !real.is_finite() || real.trunc() != real {
+        return None;
+    }
+    if real.abs() >= 9.223372036854776e18 {
+        return None;
+    }
+    let integer = real as i64;
+    if (integer as f64) == real { Some(integer) } else { None }
+}
+
+fn convert_text_numeric(text: &str, affinity: Affinity) -> WriteValue {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return WriteValue::Text(text.to_string());
+    }
+    if let Ok(integer) = trimmed.parse::<i64>() {
+        return WriteValue::Integer(integer);
+    }
+    if affinity == Affinity::Integer {
+        return WriteValue::Text(text.to_string());
+    }
+    match trimmed.parse::<f64>() {
+        Ok(real) if trimmed.bytes().any(|byte| matches!(byte, b'.' | b'e' | b'E')) => match lossless_integer(real) {
+            Some(integer) => WriteValue::Integer(integer),
+            None => WriteValue::Real(real),
+        },
+        _ => WriteValue::Text(text.to_string()),
+    }
+}
+
+fn render_real_as_text(real: f64) -> String {
+    if real.is_infinite() || real.is_nan() {
+        return format!("{real}");
+    }
+    let mut text = format!("{real:.15e}");
+    // %.15g trims trailing zeros of the mantissa; mirror that.
+    if let Some(exponent_position) = text.find('e') {
+        let (mantissa, exponent) = text.split_at(exponent_position);
+        let mut mantissa = mantissa.trim_end_matches('0').trim_end_matches('.').to_string();
+        if mantissa.is_empty() || mantissa == "-" {
+            mantissa.push('0');
+        }
+        let exponent_value: i32 = exponent[1..].parse().unwrap_or(0);
+        text = format!("{mantissa}e{exponent_value:+}");
+    }
+    text
 }
 
 fn eq_ignore_ascii_case(left: &str, right: &str) -> bool {

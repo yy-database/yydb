@@ -103,7 +103,9 @@ fn large_alternating_null_index_survives_splits() {
     // out of the leaves. The Rust-side invariant: every mutation still
     // round-trips through the reader and the unique check stays exact.
     let mut writer = SqliteWriter::create(4096).expect("create database");
-    writer.create_table("t", &[column("id", "INTEGER"), column("score", "REAL"), column("v", "TEXT")]).expect("create table");
+    let mut id = column("id", "INTEGER");
+    id.primary_key = true;
+    writer.create_table("t", &[id, column("score", "REAL"), column("v", "TEXT")]).expect("create table");
     writer.create_index("t_score", "t", &["score".to_string()], false).expect("create index");
     for index in 1..=500i64 {
         let score = if index % 2 == 0 { Some(WriteValue::Real(index as f64 + 0.5)) } else { None };
@@ -118,6 +120,52 @@ fn large_alternating_null_index_survives_splits() {
     let rows = writer.table_rows("t", limits()).expect("read rows");
     assert_eq!(rows.len(), 499);
     assert!(rows.iter().all(|row| row.rowid != 4));
+}
+
+#[test]
+fn five_hundred_sequential_inserts_never_duplicate_or_lose_rows() {
+    // Pure-insert regression: sequential rowids at 4096-byte pages force leaf
+    // and interior splits along the rightmost path only, while later inserts
+    // land in the middle. Any routing overlap shows up as duplicate or lost
+    // rowids here and as `integrity_check` failures for upstream SQLite.
+    let mut writer = SqliteWriter::create(4096).expect("create database");
+    let mut id = column("id", "INTEGER");
+    id.primary_key = true;
+    writer.create_table("seq", &[id, column("v", "TEXT")]).expect("create table");
+    for index in 1..=500i64 {
+        writer
+            .insert("seq", &[integer(index), text(&format!("v{index}"))])
+            .unwrap_or_else(|error| panic!("insert {index}: {error}"));
+    }
+    let rows = writer.table_rows("seq", limits()).expect("read rows");
+    assert_eq!(rows.len(), 500, "no row may be lost or duplicated");
+    for (position, row) in rows.iter().enumerate() {
+        assert_eq!(row.rowid, position as i64 + 1);
+    }
+}
+
+#[test]
+fn overflow_cell_survives_leaf_splits() {
+    let mut writer = SqliteWriter::create(4096).expect("create database");
+    let mut id = column("id", "INTEGER");
+    id.primary_key = true;
+    writer.create_table("big", &[id, column("body", "TEXT")]).expect("create table");
+    for index in 1..=300i64 {
+        writer.insert("big", &[integer(index), text(&format!("v{index}"))]).expect("insert small");
+    }
+    let huge = "甲乙丙丁戊己庚辛壬癸-external-".repeat(1_200); // 48 KB, overflow cell
+    writer.insert("big", &[integer(400), Some(WriteValue::Text(huge.clone()))]).expect("insert huge");
+    writer.insert("big", &[integer(401), text("after")]).expect("insert after");
+
+    let rows = writer.table_rows("big", limits()).expect("read rows");
+    assert_eq!(rows.len(), 302, "the overflow row must survive splits");
+    let huge_row = rows.iter().find(|row| row.rowid == 400).expect("rowid 400 present");
+    let decoded = sqlite_storage::decode_record(&huge_row.payload, sqlite_storage::TextEncoding::Utf8, Default::default())
+        .expect("decode huge row");
+    match &decoded[1] {
+        sqlite_formats::RecordValue::Text(value) => assert_eq!(value, &huge),
+        other => panic!("expected text, got {other:?}"),
+    }
 }
 
 #[test]
