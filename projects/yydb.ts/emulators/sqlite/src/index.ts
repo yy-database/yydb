@@ -7,6 +7,10 @@ export type {
     SqliteSnapshotBinding,
     SqliteTableRow,
     SqliteTextEncoding,
+    SqliteUpdateSlot,
+    SqliteWriteValue,
+    SqliteWriterBinding,
+    SqliteWriterColumnSpec,
 } from "./node.ts";
 
-export { SqliteSnapshot, SqliteDatabase, decodeRecord } from "./node.ts";
+export { SqliteSnapshot, SqliteDatabase, SqliteWriter, decodeRecord } from "./node.ts";

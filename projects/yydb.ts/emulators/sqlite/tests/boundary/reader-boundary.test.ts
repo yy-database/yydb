@@ -15,6 +15,7 @@ import { YY_STORAGE_EXTENSIONS, writeYyStorageStub } from "./fixtures/yy-storage
 const SQLITE_READER_EXPORTS = [
     "SqliteSnapshot",
     "SqliteDatabase",
+    "SqliteWriter",
     "decodeRecord",
 ] as const;
 
@@ -28,7 +29,7 @@ const YYDB_ENGINE_EXPORTS = [
     "loadYydsNative",
 ] as const;
 
-test("@yydb/sqlite exposes only the read-only snapshot reader surface", () => {
+test("@yydb/sqlite exposes the snapshot reader and writer surfaces only", () => {
     const exportNames = Object.keys(sqlite).sort();
     assert.deepEqual(exportNames, [...SQLITE_READER_EXPORTS].sort());
 
