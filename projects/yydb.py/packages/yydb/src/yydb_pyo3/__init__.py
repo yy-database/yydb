@@ -9,6 +9,7 @@ from __future__ import annotations
 
 try:
     from .yydb_pyo3 import (
+        execute_vos_transaction,
         execute_vos_write,
         info_text,
         init_db,
@@ -24,6 +25,7 @@ except ImportError as error:  # running from a source checkout without a wheel
     raise ImportError(f"the yydb_pyo3 extension is not built ({error})") from error
 
 __all__ = [
+    "execute_vos_transaction",
     "execute_vos_write",
     "info_text",
     "init_db",

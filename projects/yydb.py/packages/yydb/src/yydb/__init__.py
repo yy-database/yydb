@@ -132,6 +132,27 @@ class Database:
         native = _require_native()
         _call("execute", native.execute_vos_write, self._path, source, dict(params or {}))
 
+    def execute_transaction(self, statements: list[tuple[str, dict[str, Any]]]) -> None:
+        """Run a batch of VOS write statements inside one transaction.
+
+        A failure in any statement rolls the whole batch back, otherwise the
+        batch commits. The Python handle is stateless by design, so one
+        transaction spans exactly one native call.
+        """
+        self._ensure_open()
+        if not isinstance(statements, list) or not statements:
+            raise YydbError(INVALID_ARGUMENT, "statements must be a non-empty list")
+        batch = []
+        for statement in statements:
+            if not isinstance(statement, tuple) or len(statement) != 2:
+                raise YydbError(INVALID_ARGUMENT, "each statement must be a (source, params) tuple")
+            source, params = statement
+            if not isinstance(source, str):
+                raise YydbError(INVALID_ARGUMENT, "source must be a str")
+            batch.append((source, dict(params or {})))
+        native = _require_native()
+        _call("execute_transaction", native.execute_vos_transaction, self._path, batch)
+
     def query(self, source: str) -> list[dict[str, Any]]:
         """Run one VOS read pipeline and return one dict per row.
 

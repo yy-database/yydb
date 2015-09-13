@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,6 +40,16 @@ table Asset {
     payload: file,
 }
 """
+DOC_SCHEMA = """
+table Doc {
+    @@id: i64,
+    name: utf8,
+    score: f64,
+    embedding: vector<3>,
+}
+"""
+DOC_INSERT = "Doc::insert({ id: $id, name: $name, score: $score, embedding: $embedding })"
+DOC_READ = "Doc.all().collect()"
 FILE_INSERT = "Asset::insert({ asset_id: $id, payload: $payload })"
 FILE_READ = "Asset.all().collect()"
 INLINE_BYTES_MAX = 4096
@@ -265,6 +276,130 @@ class NativeTest(unittest.TestCase):
             schema_path = Path(directory) / "project.vos"
             schema_path.write_text(SCHEMA, encoding="utf-8")
             self.assertEqual(yydb.read_schema_file(schema_path), SCHEMA)
+
+    def _open_docs(self, directory: str) -> tuple[Any, Path]:
+        path = Path(directory) / "docs.yydb"
+        database = Database.open(path)
+        database.ensure_schema(DOC_SCHEMA)
+        return database, path
+
+    @staticmethod
+    def _vector(*components: float) -> dict[str, Any]:
+        import struct
+
+        return {"$yydb": "vector", "dimension": len(components), "components": struct.pack(f"<{len(components)}f", *components).hex()}
+
+    def test_point_query_and_range_filter_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            database, _ = self._open_docs(directory)
+            try:
+                for index in range(1, 8):
+                    database.execute(
+                        DOC_INSERT,
+                        {"id": index, "name": f"doc-{index}-中文", "score": index + 0.5, "embedding": self._vector(float(index), 1.5, 2.5)},
+                    )
+
+                point = database.query("Doc.all().filter(x => x.id == 4).collect()")
+                self.assertEqual(len(point), 1)
+                self.assertEqual(point[0]["name"], "doc-4-中文")
+                self.assertEqual(point[0]["score"], 4.5)
+                self.assertEqual(point[0]["embedding"], self._vector(4.0, 1.5, 2.5))
+
+                lower = database.query("Doc.all().filter(x => x.id >= 5).collect()")
+                self.assertEqual([row["id"] for row in lower], [5, 6, 7])
+                upper = database.query("Doc.all().filter(x => x.id <= 2).collect()")
+                self.assertEqual([row["id"] for row in upper], [1, 2])
+            finally:
+                database.close()
+
+    def test_upsert_updates_existing_key_and_survives_reopen(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            database, path = self._open_docs(directory)
+            try:
+                database.execute(DOC_INSERT, {"id": 1, "name": "before", "score": 1.5, "embedding": self._vector(1.0, 2.0, 3.0)})
+                database.execute(DOC_INSERT, {"id": 1, "name": "after", "score": 9.5, "embedding": self._vector(4.0, 5.0, 6.0)})
+                rows = database.query(DOC_READ)
+                self.assertEqual(len(rows), 1, "upsert must not grow the table")
+                self.assertEqual(rows[0]["name"], "after")
+                self.assertEqual(rows[0]["score"], 9.5)
+            finally:
+                database.close()
+
+            reopened = Database.open(path)
+            try:
+                rows = reopened.query(DOC_READ)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["name"], "after")
+                self.assertEqual(rows[0]["embedding"], self._vector(4.0, 5.0, 6.0))
+            finally:
+                reopened.close()
+
+    def test_transaction_batch_commits_and_rolls_back(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            database, _ = self._open_docs(directory)
+            try:
+                database.execute_transaction(
+                    [
+                        (DOC_INSERT, {"id": 1, "name": "txn-1", "score": 1.5, "embedding": self._vector(1.0, 0.0, 0.0)}),
+                        (DOC_INSERT, {"id": 2, "name": "txn-2", "score": 2.5, "embedding": self._vector(2.0, 0.0, 0.0)}),
+                    ]
+                )
+                self.assertEqual([row["id"] for row in database.query(DOC_READ)], [1, 2], "committed batch persists")
+
+                with self.assertRaises(YydbError):
+                    database.execute_transaction(
+                        [
+                            (DOC_INSERT, {"id": 3, "name": "ghost", "score": 3.5, "embedding": self._vector(3.0, 0.0, 0.0)}),
+                            ("Doc::insert({ id: 4, broken: true })", {}),
+                        ]
+                    )
+                ids = [row["id"] for row in database.query(DOC_READ)]
+                self.assertEqual(ids, [1, 2], "a failing batch rolls back every statement")
+            finally:
+                database.close()
+
+    def test_wide_integers_and_floats_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            database, _ = self._open_docs(directory)
+            try:
+                edges = [(-9223372036854775808, -0.5), (0, 0.0), (9223372036854775807, 1e300)]
+                for index, (rowid, score) in enumerate(edges, start=1):
+                    database.execute(DOC_INSERT, {"id": rowid, "name": f"edge-{index}", "score": score, "embedding": self._vector(0.0, 0.0, 0.0)})
+                rows = {row["id"]: row for row in database.query(DOC_READ)}
+                for rowid, score in edges:
+                    self.assertEqual(rows[rowid]["score"], score, f"row {rowid} keeps its exact float")
+                self.assertIsInstance(rows[edges[0][0]]["id"], int)
+                self.assertEqual(rows[edges[0][0]]["id"], -9223372036854775808)
+                self.assertEqual(rows[edges[2][0]]["id"], 9223372036854775807)
+            finally:
+                database.close()
+
+    def test_vector_dimension_mismatch_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            database, _ = self._open_docs(directory)
+            try:
+                with self.assertRaises(YydbError) as raised:
+                    database.execute(DOC_INSERT, {"id": 1, "name": "bad", "score": 1.0, "embedding": self._vector(1.0, 2.0)})
+                self.assertEqual(raised.exception.code, NATIVE_ERROR)
+                self.assertEqual(database.query(DOC_READ), [])
+            finally:
+                database.close()
+
+    def test_update_and_delete_pipelines_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            database, _ = self._open_docs(directory)
+            try:
+                database.execute(DOC_INSERT, {"id": 1, "name": "kept", "score": 1.0, "embedding": self._vector(1.0, 0.0, 0.0)})
+                with self.assertRaises(YydbError) as update_error:
+                    database.execute("Doc.all().filter(x => x.id == 1).update(x => x.{ score: 2.0 })", {})
+                self.assertEqual(update_error.exception.code, NATIVE_ERROR)
+                with self.assertRaises(YydbError) as delete_error:
+                    database.execute("Doc.all().filter(x => x.id == 1).delete()", {})
+                self.assertEqual(delete_error.exception.code, NATIVE_ERROR)
+                rows = database.query(DOC_READ)
+                self.assertEqual(len(rows), 1, "refused pipelines must not mutate rows")
+            finally:
+                database.close()
 
 
 if __name__ == "__main__":

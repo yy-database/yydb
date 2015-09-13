@@ -49,6 +49,9 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(number) = value.extract::<i64>() {
         return Ok(Value::I64(number));
     }
+    if let Ok(number) = value.extract::<f64>() {
+        return Ok(Value::F64(number));
+    }
     Err(PyTypeError::new_err(format!("unsupported parameter value {value:?}")))
 }
 
@@ -90,12 +93,15 @@ fn value_to_py(py: Python<'_>, value: Value) -> PyResult<Py<PyAny>> {
         Value::F64(number) => number.into_py_any(py),
         Value::Text(text) => text.into_py_any(py),
         Value::Bytes(octets) => PyBytes::new(py, &octets).into_py_any(py),
-        Value::File(descriptor) => {
-            let json = yydb::types::scalar::tagged_value_json(&Value::File(descriptor))
-                .expect("`Value::File` always has a tagged form");
-            json_to_py(py, &json)
+        other => {
+            // Tagged scalar forms (uuid, date, time, timestamp, decimal,
+            // vector, wide integers, file descriptors) cross as tagged dicts
+            // exactly like the TypeScript host.
+            match yydb::types::scalar::tagged_value_json(&other) {
+                Some(json) => json_to_py(py, &json),
+                None => Err(PyTypeError::new_err(format!("unsupported result value `{}`", other.kind()))),
+            }
         }
-        other => Err(PyTypeError::new_err(format!("unsupported result value `{}`", other.kind()))),
     }
 }
 
@@ -226,6 +232,32 @@ fn execute_vos_write(db_path: String, source: String, params: &Bound<'_, PyDict>
     conn.execute_vos_write_with_params(&source, &named).map_err(map_err)
 }
 
+/// Execute a batch of VOS write statements inside one transaction.
+///
+/// Every statement runs against one connection under a single transaction: a
+/// failure anywhere rolls the whole batch back, otherwise it commits. This is
+/// the transactional surface of the stateless Python handle, which opens a
+/// fresh connection per native call by design.
+#[pyfunction]
+fn execute_vos_transaction(db_path: String, statements: Vec<(String, Bound<'_, PyDict>)>) -> PyResult<()> {
+    if statements.is_empty() {
+        return Err(PyTypeError::new_err("transaction batch must not be empty"));
+    }
+    let conn = yydb::Connection::open(&db_path).map_err(map_err)?;
+    conn.begin().map_err(map_err)?;
+    for (source, params) in &statements {
+        let mut named = BTreeMap::new();
+        for (key, value) in params.iter() {
+            named.insert(key.extract::<String>()?, py_to_value(&value)?);
+        }
+        if let Err(error) = conn.execute_vos_write_with_params(source, &named) {
+            let _ = conn.rollback();
+            return Err(map_err(error));
+        }
+    }
+    conn.commit().map_err(map_err)
+}
+
 fn decode_descriptor_dict(dict: &Bound<'_, PyDict>) -> PyResult<yydb::FileDescriptor> {
     let json = dict_to_json(dict)?;
     let decoded = yydb::types::scalar::tagged_value_from_json(&json)
@@ -312,6 +344,7 @@ fn yydb_pyo3(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_schema_file, m)?)?;
     m.add_function(wrap_pyfunction!(query_vos, m)?)?;
     m.add_function(wrap_pyfunction!(execute_vos_write, m)?)?;
+    m.add_function(wrap_pyfunction!(execute_vos_transaction, m)?)?;
     m.add_function(wrap_pyfunction!(put_file, m)?)?;
     m.add_function(wrap_pyfunction!(read_file_window, m)?)?;
     m.add_function(wrap_pyfunction!(read_file, m)?)?;
