@@ -7,20 +7,13 @@ use yydb::{
     journal::{shm_path, wal_path},
 };
 
-#[test]
-fn stores_schema_and_records_in_one_reopenable_file() {
-    let path = temp_db("reopen");
-    let conn = Connection::open(&path).unwrap();
-    conn.ensure_schema("table Project { @@id: uuid }").unwrap();
-    conn.put("project/meta", b"Spark").unwrap();
-    drop(conn);
-
-    let reopened = Connection::open(&path).unwrap();
-    assert_eq!(reopened.schema().unwrap().unwrap().version, 1);
-    assert_eq!(reopened.record_count().unwrap(), 1);
-    assert_eq!(reopened.get("project/meta").unwrap(), Some(b"Spark".to_vec()));
-    cleanup(&path);
-}
+// Connection-level KV reopen and batch/CAS smoke migrated to the TypeScript
+// binding suite (`statement-txn-kv` in `@yydb/yydb`), which covers KV
+// roundtrip/reopen, batch, compare-exchange and prefix scans through the
+// N-API surface. The tests below stay Rust-side because they assert internal
+// layout and recovery details no binding exposes: temp-file hygiene of the
+// atomic publish, journal-mode switching with sidecar cleanup, object-store
+// layout/CAS paths and chunk-window reads at the manifest level.
 
 #[test]
 fn atomically_replaces_main_image_without_leaving_temp_files() {
@@ -54,21 +47,6 @@ fn open_in_memory_roundtrip() {
     assert_eq!(conn.get("k").unwrap(), Some(b"v".to_vec()));
     assert_eq!(conn.schema().unwrap().unwrap().version, 1);
     assert_eq!(conn.record_count().unwrap(), 1);
-}
-
-#[test]
-fn batch_compare_exchange_and_prefix_scan_are_atomic_on_connection() {
-    let conn = Connection::open_in_memory().unwrap();
-    conn.write_batch(&[
-        ("frontier/a".into(), Some(b"queued".to_vec())),
-        ("frontier/b".into(), Some(b"queued".to_vec())),
-        ("other/c".into(), Some(b"ignored".to_vec())),
-    ])
-    .unwrap();
-    assert_eq!(conn.scan_prefix("frontier/", None, 10).unwrap().len(), 2);
-    assert!(conn.compare_exchange("frontier/a", Some(b"queued"), Some(b"claimed")).unwrap());
-    assert!(!conn.compare_exchange("frontier/a", Some(b"queued"), Some(b"stale")).unwrap());
-    assert_eq!(conn.get("frontier/a").unwrap(), Some(b"claimed".to_vec()));
 }
 
 #[test]
