@@ -223,6 +223,83 @@ test("unique constraints stay enforced for external writers", { timeout: 120_000
     }
 });
 
+test("better-sqlite3 writes and @yydb/sqlite reads the same rows", { timeout: 120_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), "yydb-read-better-"));
+    const path = join(directory, "corpus.sqlite");
+    try {
+        // Independent corpus generation through better-sqlite3 itself.
+        const writerDb = await openBetterSqlite3(path);
+        writerDb.prepare(`CREATE TABLE events (
+            id INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL,
+            payload BLOB,
+            score REAL,
+            note TEXT
+        )`).run();
+        const insert = writerDb.prepare("INSERT INTO events (id, kind, payload, score, note) VALUES (?, ?, ?, ?, ?)");
+        const rows = 200;
+        for (let index = 1; index <= rows; index += 1) {
+            const payload = index % 5 === 0 ? Buffer.from([index % 256, 0, 255]) : null;
+            const score = index % 2 === 0 ? index + 0.25 : null;
+            const note = index % 3 === 0 ? "备注-" + index : null;
+            insert.run(index, `kind-${index % 7}-${index % 2 ? "中文" : "ascii"}`, payload, score, note);
+        }
+        insert.run(-9223372036854775808n, "edge-min", Buffer.alloc(0), -0.5, null);
+        insert.run(9223372036854775807n, "edge-max", null, 1e300, "");
+        writerDb.close();
+
+        // better-sqlite3 itself is the oracle; @yydb/sqlite must read identical rows.
+        const oracle = await readWithBetterSqlite3(path);
+        assert.equal(oracle.integrity, "ok");
+
+        const reader = SqliteWriter.open(path);
+        assert.equal(reader.pageSize(), 4096);
+        const schema = reader.schema();
+        assert.ok(schema.some((object) => object.kind === "table" && object.name === "events"));
+        const ours = reader.table("events").map((row) => ({
+            rowid: row.rowid,
+            values: row.columns.map((column): ExternalValue => {
+                switch (column.kind) {
+                    case "null":
+                        return { kind: "null" };
+                    case "integer":
+                        return { kind: "integer", value: column.valueInteger ?? 0n };
+                    case "real": {
+                        const buffer = Buffer.alloc(8);
+                        buffer.writeDoubleBE(column.valueReal ?? 0);
+                        return { kind: "real", bits: buffer.readBigUInt64BE() };
+                    }
+                    case "text":
+                        return { kind: "text", value: column.valueText ?? "" };
+                    case "blob":
+                        return { kind: "blob", value: Buffer.from(column.valueBlob ?? Buffer.alloc(0)) };
+                    default:
+                        throw new Error(`unexpected column kind ${column.kind}`);
+                }
+            }),
+        }));
+        assert.equal(ours.length, oracle.tables.events.length);
+        for (const [index, row] of ours.entries()) {
+            const want = oracle.tables.events[index];
+            assert.equal(row.rowid, want.rowid);
+            assert.equal(row.values.length, want.values.length);
+            for (const [columnIndex, column] of row.values.entries()) {
+                if (columnIndex === 0) {
+                    // `id` is the rowid alias: the record stores NULL and the
+                    // SQL layer reports the rowid. The format reader exposes
+                    // the storage truth while the oracle exposes the SQL view.
+                    assert.deepEqual(column, { kind: "null" }, `row ${want.rowid} alias slot`);
+                    assert.deepEqual(want.values[0], { kind: "integer", value: want.rowid }, `row ${want.rowid} SQL alias`);
+                    continue;
+                }
+                assert.deepEqual(column, want.values[columnIndex], `row ${want.rowid} column ${columnIndex}`);
+            }
+        }
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test("rolled-back transactions leave an externally consistent file", { timeout: 120_000, skip: SKIP_NO_PYTHON }, () => {
     const directory = mkdtempSync(join(tmpdir(), "yydb-write-rollback-"));
     const path = join(directory, "rollback.sqlite");
