@@ -1,5 +1,14 @@
-//! `file` column lifecycle: descriptor shape, manifest publishing, read windows,
-//! and reference-driven reclamation.
+//! `file` column lifecycle: descriptor shape, manifest validation, failure
+//! paths and reference-driven reclamation.
+//!
+//! The host-coverable parts of this surface migrated to the binding suites:
+//! manifest publishing with chunk counts, single-file refusal, descriptor
+//! identity through rename, reopen with full-content reread, window EOF
+//! semantics, zero-octet files and tampered-chunk digest failures are covered
+//! by `yydb.py`'s `test_yydb.py` and `@yydb/yydb`'s `file-channel` suite. The
+//! tests below stay Rust-side because they assert internals no binding
+//! exposes: the tagged descriptor and manifest wire shapes, missing-object
+//! injection, reference counting, reclamation and backup/restore verification.
 
 use std::io::Cursor;
 
@@ -9,42 +18,6 @@ use crate::fixtures::yydb::{cleanup, open_temp_db, open_temp_yydx, reopen};
 
 fn payload(len: usize) -> Vec<u8> {
     (0..len).map(|index| (index % 251) as u8).collect()
-}
-
-#[test]
-fn publishes_chunks_then_a_file_manifest() {
-    let (conn, path) = open_temp_yydx("file-publish");
-    let octets = payload(1000);
-    let file = conn
-        .put_file(Cursor::new(octets.clone()), 256, Some("asset.bin".into()), Some("application/octet-stream".into()))
-        .unwrap();
-
-    assert_eq!(file.octets, octets.len() as u64);
-    assert_eq!(file.digest, yydb::vos::types::FileManifestIdentity::from_octets(&octets).digest);
-    assert_eq!(file.name.as_deref(), Some("asset.bin"));
-    assert_eq!(file.media_type.as_deref(), Some("application/octet-stream"));
-
-    let manifest_object = file.manifest_object();
-    assert_eq!(manifest_object.kind, ObjectKind::FileManifest);
-    assert!(conn.objects().path_for(&manifest_object).exists());
-    let manifest = ChunkManifest::from_payload_bytes(&conn.get_object(&manifest_object).unwrap()).unwrap();
-    assert_eq!(manifest.total_size, octets.len() as u64);
-    assert_eq!(manifest.chunks.len(), 4);
-    assert_eq!(manifest.chunk_size, 256);
-    for chunk in &manifest.chunks {
-        assert_eq!(chunk.kind, ObjectKind::Blob);
-        assert!(conn.objects().path_for(chunk).exists());
-    }
-
-    cleanup(&path);
-}
-
-#[test]
-fn rejects_file_values_on_a_single_file_yydb() {
-    let (conn, path) = open_temp_db("file-single-file");
-    let error = conn.put_file(Cursor::new(payload(32)), 0, None, None).unwrap_err();
-    assert!(matches!(error, Error::Unsupported(_)), "single-file `.yydb` must reject `file` values: {error:?}");
-    cleanup(&path);
 }
 
 #[test]
@@ -118,92 +91,6 @@ fn manifest_payload_rejects_unknown_members_and_size_mismatch() {
 }
 
 #[test]
-fn reopen_keeps_the_descriptor_and_manifest_objects() {
-    let (conn, path) = open_temp_yydx("file-reopen");
-    let octets = payload(700);
-    let file = conn.put_file(Cursor::new(octets.clone()), 256, None, None).unwrap();
-    drop(conn);
-
-    let reopened = reopen(&path);
-    let manifest = ChunkManifest::from_payload_bytes(&reopened.get_object(&file.manifest_object()).unwrap()).unwrap();
-    assert_eq!(manifest.total_size, octets.len() as u64);
-    assert!(reopened.objects().path_for(&file.manifest_object()).exists());
-    assert_eq!(reopened.read_file(&file).unwrap(), octets, "reopen relocates and re-checks every chunk");
-    cleanup(&path);
-}
-
-#[test]
-fn reads_windows_with_vos_eof_semantics() {
-    use yydb::vos::types::FileReadWindow;
-
-    let (conn, path) = open_temp_yydx("file-windows");
-    let octets = payload(1000);
-    let file = conn.put_file(Cursor::new(octets.clone()), 256, None, None).unwrap();
-
-    let read = |offset: u64, length: u64| conn.read_file_window(&file, FileReadWindow::new(offset, length)).unwrap();
-
-    assert_eq!(read(0, 1000), octets);
-    assert_eq!(read(0, 100), octets[..100]);
-    assert_eq!(read(200, 200), octets[200..400]);
-    assert_eq!(read(256, 256), octets[256..512]);
-    assert_eq!(read(900, 500), octets[900..]);
-
-    assert!(read(0, 0).is_empty());
-    assert!(read(1000, 10).is_empty(), "an offset at end of file is an empty window");
-    assert!(read(1500, 10).is_empty(), "an offset past end of file is an empty window");
-
-    let manifest = conn.objects().load_file_manifest(&file).unwrap();
-    assert_eq!(conn.read_file_range(&manifest, 200, 200).unwrap(), octets[200..400]);
-    assert!(conn.read_file_range(&manifest, 2000, 100).unwrap().is_empty());
-    cleanup(&path);
-}
-
-#[test]
-fn reads_zero_octet_files_and_exact_chunk_multiples() {
-    use yydb::vos::types::FileReadWindow;
-
-    let (conn, path) = open_temp_yydx("file-boundaries");
-
-    let empty = conn.put_file(Cursor::new(Vec::new()), 256, None, None).unwrap();
-    assert_eq!(empty.octets, 0);
-    assert_eq!(empty.digest, yydb::vos::types::FileManifestIdentity::from_octets(&[]).digest);
-    assert!(conn.read_file(&empty).unwrap().is_empty());
-    assert!(conn.read_file_window(&empty, FileReadWindow::new(0, 8)).unwrap().is_empty());
-    assert!(conn.read_file_window(&empty, FileReadWindow::new(4, 8)).unwrap().is_empty());
-
-    let octets = payload(512);
-    let exact = conn.put_file(Cursor::new(octets.clone()), 256, None, None).unwrap();
-    assert_eq!(conn.read_file(&exact).unwrap(), octets);
-    assert_eq!(
-        conn.read_file_window(&exact, FileReadWindow::new(256, 256)).unwrap(),
-        octets[256..],
-        "a window starting exactly at a chunk boundary reads the following chunk"
-    );
-    assert!(conn.read_file_window(&exact, FileReadWindow::new(512, 16)).unwrap().is_empty());
-
-    let short = payload(100);
-    let single = conn.put_file(Cursor::new(short.clone()), 256, None, None).unwrap();
-    assert_eq!(conn.objects().load_file_manifest(&single).unwrap().chunks.len(), 1);
-    assert_eq!(conn.read_file(&single).unwrap(), short);
-    assert_eq!(conn.read_file_window(&single, FileReadWindow::new(40, 200)).unwrap(), short[40..]);
-    cleanup(&path);
-}
-
-#[test]
-fn reads_the_complete_file_and_verifies_the_digest() {
-    let (conn, path) = open_temp_yydx("file-digest");
-    let octets = payload(1000);
-    let file = conn.put_file(Cursor::new(octets.clone()), 256, None, None).unwrap();
-    assert_eq!(conn.read_file(&file).unwrap(), octets);
-
-    let mut wrong = file.clone();
-    wrong.digest = "0f".repeat(32);
-    let error = conn.read_file(&wrong).unwrap_err();
-    assert!(matches!(error, Error::ObjectCorrupt { .. }), "a rewritten digest must fail: {error:?}");
-    cleanup(&path);
-}
-
-#[test]
 fn reports_missing_objects_instead_of_empty_content() {
     use yydb::vos::types::FileReadWindow;
 
@@ -221,28 +108,6 @@ fn reports_missing_objects_instead_of_empty_content() {
     conn.objects().remove_object(&manifest.chunks[0]).unwrap();
     let error = conn.read_file_window(&file, FileReadWindow::new(0, 10)).unwrap_err();
     assert!(matches!(error, Error::ObjectNotFound { .. }), "a missing chunk must not read as empty: {error:?}");
-    cleanup(&path);
-}
-
-#[test]
-fn detects_a_tampered_chunk_after_reopen() {
-    use yydb::vos::types::FileReadWindow;
-
-    let (conn, path) = open_temp_yydx("file-tamper");
-    let octets = payload(600);
-    let file = conn.put_file(Cursor::new(octets), 256, None, None).unwrap();
-    drop(conn);
-
-    let reopened = reopen(&path);
-    let manifest = reopened.objects().load_file_manifest(&file).unwrap();
-    let chunk = manifest.chunks[0].clone();
-    let chunk_path = reopened.objects().path_for(&chunk);
-    let mut tampered = std::fs::read(&chunk_path).unwrap();
-    tampered[0] ^= 0xff;
-    std::fs::write(&chunk_path, &tampered).unwrap();
-
-    let error = reopened.read_file_window(&file, FileReadWindow::new(0, 10)).unwrap_err();
-    assert!(matches!(error, Error::ObjectCorrupt { .. }), "a tampered chunk must fail its hash check: {error:?}");
     cleanup(&path);
 }
 
