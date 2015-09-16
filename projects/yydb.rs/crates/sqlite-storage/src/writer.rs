@@ -104,14 +104,25 @@ struct IndexMeta {
 
 struct Snapshot {
     pages: Vec<u8>,
+    index_entries: std::collections::BTreeMap<i64, std::collections::BTreeSet<Vec<u8>>>,
 }
 
 /// In-memory SQLite format-3 file image with mutation operations.
+///
+/// Index trees are maintained as ordered in-memory key sets while the image
+/// is being mutated and are materialized into b-tree pages by [`SqliteWriter::save`].
+/// Deleting from a b-tree in place would demand full upstream-style
+/// rebalancing (merge/redistribute) to keep SQLite's equal-leaf-depth
+/// invariant; rebuilding from the sorted sets reuses the proven insert path
+/// instead. `pages()` therefore reflects current table content at all times,
+/// while index trees are only guaranteed current after `save`.
 pub struct SqliteWriter {
     pages: Vec<u8>,
     page_size: usize,
     usable: usize,
     snapshot: Option<Snapshot>,
+    /// Live index keys by `sqlite_master` rowid; rebuilt into pages on save.
+    index_entries: std::collections::BTreeMap<i64, std::collections::BTreeSet<Vec<u8>>>,
 }
 
 impl SqliteWriter {
@@ -119,7 +130,7 @@ impl SqliteWriter {
     pub fn create(page_size: usize) -> Result<Self> {
         let pages = blank_with_page_size(page_size)?;
         let usable = page_size - usize::from(pages[20]);
-        Ok(Self { pages, page_size, usable, snapshot: None })
+        Ok(Self { pages, page_size, usable, snapshot: None, index_entries: std::collections::BTreeMap::new() })
     }
 
     /// Loads an existing SQLite main file for further mutation.
@@ -127,7 +138,14 @@ impl SqliteWriter {
         let pages = fs::read(path.as_ref()).map_err(Error::Io)?;
         let page_size = validate_database(&pages)?;
         let usable = page_size - usize::from(pages[20]);
-        Ok(Self { pages, page_size, usable, snapshot: None })
+        let mut writer = Self { pages, page_size, usable, snapshot: None, index_entries: std::collections::BTreeMap::new() };
+        for row in writer.master_rows()? {
+            if row.kind == "index" && row.root_page != 0 {
+                let entries = writer.read_index_entries(row.root_page)?;
+                writer.index_entries.insert(row.rowid, entries);
+            }
+        }
+        Ok(writer)
     }
 
     /// Returns the raw file image.
@@ -140,8 +158,10 @@ impl SqliteWriter {
         self.page_size
     }
 
-    /// Bumps the change counter and writes the image to `path`.
+    /// Materializes every index tree from its live key set, bumps the change
+    /// counter and writes the image to `path`.
     pub fn save(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        self.materialize_indexes()?;
         bump_change_counter(&mut self.pages);
         fs::write(path.as_ref(), &self.pages).map_err(Error::Io)
     }
@@ -151,7 +171,7 @@ impl SqliteWriter {
         if self.snapshot.is_some() {
             return Err(Error::Unsupported("sqlite writer already has an open transaction"));
         }
-        self.snapshot = Some(Snapshot { pages: self.pages.clone() });
+        self.snapshot = Some(Snapshot { pages: self.pages.clone(), index_entries: self.index_entries.clone() });
         Ok(())
     }
 
@@ -167,6 +187,7 @@ impl SqliteWriter {
     pub fn rollback(&mut self) -> Result<()> {
         let snapshot = self.snapshot.take().ok_or(Error::Unsupported("sqlite writer has no open transaction"))?;
         self.pages = snapshot.pages;
+        self.index_entries = snapshot.index_entries;
         Ok(())
     }
 
@@ -293,20 +314,24 @@ impl SqliteWriter {
         };
         let mut index = IndexMeta { master_rowid, root_page, columns, unique };
 
-        // Backfill existing rows into the new index; splits may regrow the
-        // root, and the master row must follow it.
+        // Backfill existing rows into the live key set, then materialize the
+        // fresh root. Splits may regrow the root; the master row must follow.
         let rows = read_table(&self.pages, meta.root_page, TableLimits::default())?;
-        let initial_root = root_page;
+        let mut entries = std::collections::BTreeSet::new();
         for row in rows {
             let values = decode_record(&row.payload, TextEncoding::Utf8, Default::default())
                 .map_err(|_| Error::Corrupt("sqlite record decode failed"))?;
             let owned = expand_alias(meta, row.rowid, &values);
-            let key = encode_index_key(meta, &index, row.rowid, &owned)?;
-            index.root_page = self.index_insert(index.root_page, &key)?;
+            entries.insert(encode_index_key(meta, &index, row.rowid, &owned)?);
+        }
+        let initial_root = root_page;
+        for key in &entries {
+            index.root_page = self.index_insert(index.root_page, key)?;
         }
         if index.root_page != initial_root {
             self.set_master_root(master_rowid, index.root_page)?;
         }
+        self.index_entries.insert(master_rowid, entries);
         meta.indexes.push(index);
         Ok(())
     }
@@ -367,7 +392,7 @@ impl SqliteWriter {
         for index_meta in &meta.indexes {
             if index_meta.unique {
                 let key = encode_index_key(&meta, index_meta, rowid, &resolved)?;
-                if self.index_contains_prefix(index_meta.root_page, &key, index_meta.columns.len())? {
+                if self.set_prefix_match(index_meta.master_rowid, &key, index_meta.columns.len(), None)? {
                     return Err(Error::Unsupported("sqlite UNIQUE constraint failed"));
                 }
             }
@@ -382,12 +407,9 @@ impl SqliteWriter {
             self.set_master_root(meta.master_rowid, root)?;
             meta.root_page = root;
         }
-        for index_meta in meta.indexes.clone() {
-            let key = encode_index_key(&meta, &index_meta, rowid, &resolved)?;
-            let root = self.index_insert(index_meta.root_page, &key)?;
-            if root != index_meta.root_page {
-                self.set_master_root(index_meta.master_rowid, root)?;
-            }
+        for index_meta in &meta.indexes {
+            let key = encode_index_key(&meta, index_meta, rowid, &resolved)?;
+            self.index_entries.entry(index_meta.master_rowid).or_default().insert(key);
         }
         Ok(rowid)
     }
@@ -402,11 +424,10 @@ impl SqliteWriter {
         let values = decode_record(&payload, TextEncoding::Utf8, Default::default())
             .map_err(|_| Error::Corrupt("sqlite record decode failed"))?;
         let owned = expand_alias(&meta, rowid, &values);
-        for index_meta in meta.indexes.clone() {
-            let key = encode_index_key(&meta, &index_meta, rowid, &owned)?;
-            let root = self.index_delete(index_meta.root_page, &key)?;
-            if root != index_meta.root_page {
-                self.set_master_root(index_meta.master_rowid, root)?;
+        for index_meta in &meta.indexes {
+            let key = encode_index_key(&meta, index_meta, rowid, &owned)?;
+            if let Some(entries) = self.index_entries.get_mut(&index_meta.master_rowid) {
+                entries.remove(&key);
             }
         }
         let root = self.table_delete(meta.root_page, rowid)?;
@@ -459,7 +480,7 @@ impl SqliteWriter {
         for index_meta in &meta.indexes {
             if index_meta.unique {
                 let key = encode_index_key(&meta, index_meta, next_rowid, &owned)?;
-                if self.index_contains_prefix_excluding(index_meta.root_page, &key, index_meta.columns.len(), rowid)? {
+                if self.set_prefix_match(index_meta.master_rowid, &key, index_meta.columns.len(), Some(rowid))? {
                     return Err(Error::Unsupported("sqlite UNIQUE constraint failed"));
                 }
             }
@@ -478,12 +499,9 @@ impl SqliteWriter {
             self.set_master_root(meta.master_rowid, root)?;
         }
         let meta = self.table_meta(table)?;
-        for index_meta in meta.indexes.clone() {
-            let key = encode_index_key(&meta, &index_meta, next_rowid, &owned)?;
-            let root = self.index_insert(index_meta.root_page, &key)?;
-            if root != index_meta.root_page {
-                self.set_master_root(index_meta.master_rowid, root)?;
-            }
+        for index_meta in &meta.indexes {
+            let key = encode_index_key(&meta, index_meta, next_rowid, &owned)?;
+            self.index_entries.entry(index_meta.master_rowid).or_default().insert(key);
         }
         Ok(true)
     }
@@ -1264,18 +1282,21 @@ impl SqliteWriter {
             return Err(Error::Corrupt("sqlite cell position out of range"));
         }
 
-        // Locate the cell span including its overflow pages.
+        // Locate the cell span including its overflow pages. Index interior
+        // cells carry a 4-byte child pointer before the payload-length varint.
         let pointer = header_relative + header_size + position * 2;
         let cell_offset = u16::from_be_bytes(self.pages[offset + pointer..offset + pointer + 2].try_into().unwrap()) as usize;
-        let (length, length_size) = decode_varint(&self.pages[offset + cell_offset..])?;
+        let child_bytes = if kind == PAGE_INDEX_INTERIOR { 4 } else { 0 };
+        let (length, length_size) = decode_varint(&self.pages[offset + cell_offset + child_bytes..])?;
         let length = usize::try_from(length).map_err(|_| Error::Unsupported("sqlite payload too large"))?;
-        let prefix = match kind {
-            PAGE_TABLE_LEAF => {
-                let (_, rowid_size) = decode_varint(&self.pages[offset + cell_offset + length_size..])?;
-                length_size + rowid_size
-            }
-            _ => length_size,
-        };
+        let prefix = child_bytes
+            + match kind {
+                PAGE_TABLE_LEAF => {
+                    let (_, rowid_size) = decode_varint(&self.pages[offset + cell_offset + length_size..])?;
+                    length_size + rowid_size
+                }
+                _ => length_size,
+            };
         let local = self.local_payload(length);
         let span = prefix + local + if length > local { 4 } else { 0 };
         if length > local {
@@ -1534,140 +1555,6 @@ impl SqliteWriter {
         Ok(Some(IndexSplit { dividers: vec![moved_payload], pages: vec![right_page] }))
     }
 
-    fn index_delete(&mut self, root: u32, key: &[u8]) -> Result<u32> {
-        let offset = self.page_offset(root);
-        let header_relative = Self::header_offset(root);
-        let kind = self.pages[offset + header_relative];
-        match kind {
-            PAGE_INDEX_LEAF => {
-                let entries = self.index_leaf_entries(root)?;
-                let Some(position) = entries.iter().position(|(payload, _)| payload == key)
-                else {
-                    return Err(Error::Unsupported("sqlite index entry not found"));
-                };
-                self.remove_cell(root, position)?;
-                Ok(root)
-            }
-            PAGE_INDEX_INTERIOR => {
-                let entries = self.index_interior_entries(root)?;
-                let mut child_index = None;
-                let mut child = entries.rightmost;
-                let mut divider_hit = None;
-                for (index, (payload, child_page)) in entries.cells.iter().enumerate() {
-                    match compare_index_payloads(key, payload) {
-                        std::cmp::Ordering::Less => {
-                            child = *child_page;
-                            child_index = Some(index);
-                            break;
-                        }
-                        std::cmp::Ordering::Equal => {
-                            divider_hit = Some(index);
-                            child = *child_page;
-                            child_index = Some(index);
-                            break;
-                        }
-                        std::cmp::Ordering::Greater => continue,
-                    }
-                }
-                if let Some(index) = divider_hit {
-                    // The entry lives in this interior page; replace its key
-                    // with the largest key of the left subtree, removed there.
-                    let (replacement, new_child) = self.index_extract_max(child)?;
-                    if new_child != child {
-                        self.repoint_index_child(root, child_index, child, new_child)?;
-                    }
-                    self.replace_index_divider(root, index, &replacement)?;
-                    return Ok(root);
-                }
-                let new_root = self.index_delete(child, key)?;
-                if new_root != child {
-                    self.repoint_index_child(root, child_index, child, new_root)?;
-                }
-                let offset = self.page_offset(root);
-                let header_relative = Self::header_offset(root);
-                let count = u16::from_be_bytes(
-                    self.pages[offset + header_relative + 3..offset + header_relative + 5].try_into().unwrap(),
-                );
-                if count == 0 {
-                    let rightmost = u32::from_be_bytes(
-                        self.pages[offset + header_relative + 8..offset + header_relative + 12].try_into().unwrap(),
-                    );
-                    self.free_page(root);
-                    return Ok(rightmost);
-                }
-                Ok(root)
-            }
-            _ => Err(Error::Corrupt("sqlite index b-tree page type invalid")),
-        }
-    }
-
-    /// Removes and returns the largest entry of an index subtree, plus the
-    /// (possibly changed) subtree root.
-    fn index_extract_max(&mut self, page: u32) -> Result<(Vec<u8>, u32)> {
-        let offset = self.page_offset(page);
-        let header_relative = Self::header_offset(page);
-        let kind = self.pages[offset + header_relative];
-        match kind {
-            PAGE_INDEX_LEAF => {
-                let entries = self.index_leaf_entries(page)?;
-                let last = entries.len() - 1;
-                let payload = entries[last].0.clone();
-                self.remove_cell(page, last)?;
-                Ok((payload, page))
-            }
-            PAGE_INDEX_INTERIOR => {
-                let entries = self.index_interior_entries(page)?;
-                let (payload, new_rightmost) = self.index_extract_max(entries.rightmost)?;
-                if new_rightmost == 0 {
-                    // The rightmost subtree vanished entirely; this page's last
-                    // cell becomes the new divider-less rightmost routing.
-                    return Err(Error::Corrupt("sqlite index extract-max lost a subtree"));
-                }
-                let offset = self.page_offset(page);
-                let header_relative = Self::header_offset(page);
-                self.pages[offset + header_relative + 8..offset + header_relative + 12]
-                    .copy_from_slice(&new_rightmost.to_be_bytes());
-                Ok((payload, page))
-            }
-            _ => Err(Error::Corrupt("sqlite index b-tree page type invalid")),
-        }
-    }
-
-    fn repoint_index_child(&mut self, page: u32, child_index: Option<usize>, old_child: u32, new_child: u32) -> Result<()> {
-        let offset = self.page_offset(page);
-        let header_relative = Self::header_offset(page);
-        match child_index {
-            Some(index) => {
-                let pointer = header_relative + 12 + index * 2;
-                let cell_offset =
-                    u16::from_be_bytes(self.pages[offset + pointer..offset + pointer + 2].try_into().unwrap()) as usize;
-                let stored = u32::from_be_bytes(self.pages[offset + cell_offset..offset + cell_offset + 4].try_into().unwrap());
-                if stored != old_child {
-                    return Err(Error::Corrupt("sqlite index child pointer mismatch"));
-                }
-                self.pages[offset + cell_offset..offset + cell_offset + 4].copy_from_slice(&new_child.to_be_bytes());
-            }
-            None => {
-                self.pages[offset + header_relative + 8..offset + header_relative + 12]
-                    .copy_from_slice(&new_child.to_be_bytes());
-            }
-        }
-        Ok(())
-    }
-
-    /// Rewrites divider cell `index` of an interior index page with a new key.
-    fn replace_index_divider(&mut self, page: u32, index: usize, payload: &[u8]) -> Result<()> {
-        let offset = self.page_offset(page);
-        let header_relative = Self::header_offset(page);
-        let entries = self.index_interior_entries(page)?;
-        let mut pairs = entries.cells;
-        let rightmost = entries.rightmost;
-        pairs[index].0 = payload.to_vec();
-        let cells: Vec<Vec<u8>> = pairs.iter().map(|(divider, child_page)| index_interior_cell(*child_page, divider)).collect();
-        self.rebuild_leaf(page, PAGE_INDEX_INTERIOR, &cells);
-        self.pages[offset + header_relative + 8..offset + header_relative + 12].copy_from_slice(&rightmost.to_be_bytes());
-        Ok(())
-    }
 
     fn index_leaf_entries(&self, page: u32) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let offset = self.page_offset(page);
@@ -1728,25 +1615,32 @@ impl SqliteWriter {
         Ok(InteriorEntries { cells, rightmost })
     }
 
-    fn index_contains_prefix(&self, root: u32, key: &[u8], prefix_columns: usize) -> Result<bool> {
-        self.index_prefix_match(root, key, prefix_columns, None)
-    }
-
-    fn index_contains_prefix_excluding(
+    /// UNIQUE constraint probe against the live key set of one index.
+    fn set_prefix_match(
         &self,
-        root: u32,
+        master_rowid: i64,
         key: &[u8],
         prefix_columns: usize,
-        excluded_rowid: i64,
+        excluded_rowid: Option<i64>,
     ) -> Result<bool> {
-        self.index_prefix_match(root, key, prefix_columns, Some(excluded_rowid))
-    }
-
-    fn index_prefix_match(&self, root: u32, key: &[u8], prefix_columns: usize, excluded_rowid: Option<i64>) -> Result<bool> {
         let wanted = decode_record(key, TextEncoding::Utf8, Default::default())
             .map_err(|_| Error::Corrupt("sqlite index record decode failed"))?;
-        // Entries live in leaves and in interior divider cells alike, so the
-        // check walks every page instead of descending once.
+        let Some(entries) = self.index_entries.get(&master_rowid) else {
+            return Ok(false);
+        };
+        for payload in entries {
+            if self.prefix_matches(payload, &wanted, prefix_columns, excluded_rowid)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Collects every entry of an index b-tree into an ordered set. Used when
+    /// opening an existing file: the tree becomes the live key set and is only
+    /// materialized back into pages on save.
+    fn read_index_entries(&self, root: u32) -> Result<std::collections::BTreeSet<Vec<u8>>> {
+        let mut out = std::collections::BTreeSet::new();
         let mut pending = vec![root];
         while let Some(page) = pending.pop() {
             let offset = self.page_offset(page);
@@ -1755,17 +1649,13 @@ impl SqliteWriter {
             match kind {
                 PAGE_INDEX_LEAF => {
                     for (payload, _) in self.index_leaf_entries(page)? {
-                        if self.prefix_matches(&payload, &wanted, prefix_columns, excluded_rowid)? {
-                            return Ok(true);
-                        }
+                        out.insert(payload);
                     }
                 }
                 PAGE_INDEX_INTERIOR => {
                     let entries = self.index_interior_entries(page)?;
                     for (payload, child_page) in entries.cells {
-                        if self.prefix_matches(&payload, &wanted, prefix_columns, excluded_rowid)? {
-                            return Ok(true);
-                        }
+                        out.insert(payload);
                         pending.push(child_page);
                     }
                     pending.push(entries.rightmost);
@@ -1773,7 +1663,61 @@ impl SqliteWriter {
                 _ => return Err(Error::Corrupt("sqlite index b-tree page type invalid")),
             }
         }
-        Ok(false)
+        Ok(out)
+    }
+
+    /// Frees every page of an index subtree, including overflow chains.
+    fn free_subtree(&mut self, page: u32) -> Result<()> {
+        let offset = self.page_offset(page);
+        let header_relative = Self::header_offset(page);
+        let kind = self.pages[offset + header_relative];
+        match kind {
+            PAGE_INDEX_LEAF => {
+                for (_, cell) in self.index_leaf_entries(page)? {
+                    let (length, length_size) = decode_varint(&cell)?;
+                    let length = usize::try_from(length).map_err(|_| Error::Unsupported("sqlite payload too large"))?;
+                    let local = self.local_payload(length);
+                    if length > local {
+                        let head = u32::from_be_bytes(cell[length_size + local..length_size + local + 4].try_into().unwrap());
+                        self.free_overflow_chain(head);
+                    }
+                }
+                self.free_page(page);
+                Ok(())
+            }
+            PAGE_INDEX_INTERIOR => {
+                let entries = self.index_interior_entries(page)?;
+                for (_, child_page) in &entries.cells {
+                    self.free_subtree(*child_page)?;
+                }
+                self.free_subtree(entries.rightmost)?;
+                self.free_page(page);
+                Ok(())
+            }
+            _ => Err(Error::Corrupt("sqlite index b-tree page type invalid")),
+        }
+    }
+
+    /// Rebuilds every index b-tree from its live key set. The old pages are
+    /// returned to the freelist before the fresh tree is allocated so the
+    /// file does not grow across repeated saves.
+    fn materialize_indexes(&mut self) -> Result<()> {
+        let rows = self.master_rows()?;
+        for row in rows.iter().filter(|row| row.kind == "index") {
+            let entries = self.index_entries.get(&row.rowid).cloned().unwrap_or_default();
+            if row.root_page != 0 {
+                self.free_subtree(row.root_page)?;
+            }
+            let mut root = self.allocate_page()?;
+            self.init_leaf_page(root, PAGE_INDEX_LEAF);
+            for key in &entries {
+                root = self.index_insert(root, key)?;
+            }
+            if root != row.root_page {
+                self.set_master_root(row.rowid, root)?;
+            }
+        }
+        Ok(())
     }
 
     fn prefix_matches(

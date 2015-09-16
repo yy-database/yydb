@@ -320,6 +320,57 @@ fn indexes_backfill_and_maintain_on_mutation() {
 }
 
 #[test]
+fn index_deletes_emptying_leaves_keep_extract_max_safe() {
+    // Regression: index deletes that empty whole leaf pages used to leave
+    // husks whose later `extract_max` (deleting the divider entry above them)
+    // underflowed with an index-out-of-bounds panic. Small pages force many
+    // leaves; the interleaved update/delete churn empties some of them and
+    // then deletes the divider entries routing to the husks. The crate-level
+    // invariant: no panic, survivors stay readable and deletions stay gone.
+    // External `integrity_check` evidence lives in the `@yydb/sqlite` suite.
+    let mut writer = SqliteWriter::create(4096).expect("create database");
+    let mut id = column("id", "INTEGER");
+    id.primary_key = true;
+    writer
+        .create_table("t", &[id, column("a", "INTEGER"), column("b", "TEXT"), column("c", "REAL")])
+        .expect("create table");
+    writer.create_index("t_a", "t", &["a".to_string()], false).expect("create index a");
+    writer.create_index("t_b", "t", &["b".to_string()], false).expect("create index b");
+    writer.create_index("t_c", "t", &["c".to_string()], false).expect("create index c");
+    let rows = 10_000i64;
+    for index in 1..=rows {
+        writer
+            .insert(
+                "t",
+                &[
+                    integer(index),
+                    integer((index * 7919) % 50021),
+                    text(&format!("grp-{}", (index * 131) % 977)),
+                    Some(WriteValue::Real((index * 37 % 1000) as f64 / 4.0)),
+                ],
+            )
+            .unwrap_or_else(|error| panic!("insert {index}: {error}"));
+    }
+    for n in 0..rows / 20 {
+        let index = n * 613 % rows + 1;
+        writer
+            .update("t", index, &[UpdateValue::Keep, UpdateValue::Set(WriteValue::Integer(index + 1)), UpdateValue::Keep, UpdateValue::Keep])
+            .expect("update");
+    }
+    let mut deleted = 0i64;
+    for n in 0..rows / 20 {
+        let index = n * 1777 % rows + 1;
+        if writer.delete("t", index).expect("delete") {
+            deleted += 1;
+        }
+    }
+    let rows_read = writer.table_rows("t", limits()).expect("read rows");
+    assert_eq!(rows_read.len() as i64, rows - deleted, "survivors stay readable");
+    let removed: std::collections::BTreeSet<i64> = (0..rows / 20).map(|n| n * 1777 % rows + 1).collect();
+    assert!(rows_read.iter().all(|row| !removed.contains(&row.rowid)), "deleted rows stay deleted");
+}
+
+#[test]
 fn save_writes_a_validated_file_that_reopens() {
     let directory = tempfile_path("sqlite-writer-save");
     let mut writer = SqliteWriter::create(4096).expect("create database");
