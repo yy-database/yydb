@@ -1,5 +1,9 @@
 //! SQL frontend on the connection surface: the same rows VOS writes, addressed
 //! with SQL statements.
+//!
+//! Kept Rust-side on purpose: the host bindings (`@yydb/yydb`, `yydb.py`) are
+//! VOS-only by contract and deliberately refuse SQL text, so no binding layer
+//! can reproduce this surface.
 
 use yydb::{Connection, UniqueConstraint, Value};
 

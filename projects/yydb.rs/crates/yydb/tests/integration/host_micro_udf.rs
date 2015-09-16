@@ -1,3 +1,11 @@
+//! Host micro registration and invocation through the Rust-native
+//! `HostRuntimeAdapter`.
+//!
+//! Kept Rust-side on purpose: the JS host registers micros through the N-API
+//! adapter (`scalar-micro-boundary` in `@yydb/yydb` pins the same engine
+//! mechanics), but the Rust-native adapter path is a facade API for embedded
+//! Rust consumers that no binding exposes.
+
 use std::sync::Arc;
 
 use yydb::{Connection, HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, UdfType, Value};

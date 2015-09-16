@@ -3,6 +3,9 @@
 //! A `bytes` column carries arbitrary octets. Binding a parameter must move
 //! those octets without a UTF-8 or `String` detour, so a payload that no text
 //! spelling can represent still stores, compares, and returns verbatim.
+//!
+//! Kept Rust-side on purpose: the host bindings are VOS-only by contract and
+//! have no SQL parameter path to exercise.
 
 use std::{collections::BTreeMap, fs, path::PathBuf};
 

@@ -2,6 +2,10 @@
 //!
 //! Regression probe for silent row loss at B-tree scale: sequential keys are
 //! inserted in one transaction and every single one must be present afterwards.
+//!
+//! Kept Rust-side on purpose: this pins a page-split internal invariant of the
+//! format layer (the defect originally surfaced here), and the host layer can
+//! only observe it indirectly through slower end-to-end inserts.
 
 use yydb::{Connection, Value};
 

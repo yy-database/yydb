@@ -1,4 +1,8 @@
 //! Writable SQLite dialect surface: SQL statements executed by YYDB operators.
+//!
+//! Kept Rust-side on purpose: `SqliteConnection` is a Rust facade over the
+//! engine and is not exposed through the N-API or PyO3 bindings, which speak
+//! VOS only.
 
 use sqlite::SqliteConnection;
 use yydb::Value;
