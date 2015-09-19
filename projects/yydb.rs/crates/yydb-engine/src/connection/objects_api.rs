@@ -1,20 +1,43 @@
 use std::sync::Arc;
 
-use crate::{ChunkManifest, Error, FileDescriptor, ObjectKind, ObjectRef, Result, Tier, Vector};
+use crate::{ChunkManifest, FileDescriptor, ObjectKind, ObjectRef, Result, Tier, Vector};
 
 use super::Connection;
 
 impl Connection {
+    /// Publish process-local CAS objects into the single-file main image.
+    ///
+    /// A `.yydb` main file is the only durable home for object payloads, so an
+    /// object published through the CAS surface has to reach the image before
+    /// the call returns: hosts that open a fresh handle per operation (the
+    /// Python binding does) would otherwise lose it with the handle. `.yydx`
+    /// keeps its `<stem>-objects/` tree and needs no flush. An open transaction
+    /// is skipped because its commit publishes the objects.
+    fn persist_embedded_objects(&self) -> Result<()> {
+        if !self.is_single_file_yydb() {
+            return Ok(());
+        }
+        if self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_some() {
+            return Ok(());
+        }
+        let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let state = self.read_state()?;
+        self.write_state(&state)?;
+        Ok(())
+    }
+
     /// Store one CAS object at `<hash-prefix>/<chunk_hash>.blob`.
     pub fn put_chunk(&self, kind: ObjectKind, bytes: &[u8]) -> Result<ObjectRef> {
-        self.guard_yydb_cas_payload(bytes.len())?;
-        self.objects.put_chunk(kind, bytes)
+        let object = self.objects.put_chunk(kind, bytes)?;
+        self.persist_embedded_objects()?;
+        Ok(object)
     }
 
     /// Store a vector payload in CAS (`ObjectKind::VectorPayload`).
     pub fn put_vector(&self, vector: &Vector) -> Result<ObjectRef> {
-        self.guard_yydb_cas_payload(vector.to_le_bytes().len())?;
-        self.objects.put_vector(vector)
+        let object = self.objects.put_vector(vector)?;
+        self.persist_embedded_objects()?;
+        Ok(object)
     }
 
     /// Load a vector payload from CAS.
@@ -29,9 +52,10 @@ impl Connection {
 
     /// Publish a logical `file` value: chunks first, then the manifest object.
     ///
-    /// Only `.yydx` layouts keep the object tree a descriptor depends on, so a
-    /// single-file `.yydb` rejects the write instead of inlining octets or
-    /// truncating them to the inline boundary.
+    /// A `.yydx` layout keeps the object tree in `<stem>-objects/`; a
+    /// single-file `.yydb` embeds the same objects as chunked records in the
+    /// main image. Both are supported, but embedding large payloads inflates
+    /// the single file and slows down every snapshot and backup.
     pub fn put_file(
         &self,
         reader: impl std::io::Read,
@@ -39,18 +63,16 @@ impl Connection {
         name: Option<String>,
         media_type: Option<String>,
     ) -> Result<FileDescriptor> {
-        if self.is_single_file_yydb() {
-            return Err(Error::Unsupported("`file` values require a .yydx layout; .yydb single-file mode rejects them"));
-        }
-        self.objects.put_file(reader, chunk_size, name, media_type)
+        let descriptor = self.objects.put_file(reader, chunk_size, name, media_type)?;
+        self.persist_embedded_objects()?;
+        Ok(descriptor)
     }
 
     /// Chunk a logical file into CAS objects.
     pub fn put_file_chunked(&self, reader: impl std::io::Read, chunk_size: usize) -> Result<ChunkManifest> {
-        if self.is_single_file_yydb() {
-            return Err(Error::Unsupported("chunked file objects require a .yydx layout; .yydb single-file mode rejects them"));
-        }
-        self.objects.put_file_chunked(reader, chunk_size)
+        let manifest = self.objects.put_file_chunked(reader, chunk_size)?;
+        self.persist_embedded_objects()?;
+        Ok(manifest)
     }
 
     /// Range-read a chunked file without assembling the whole payload.

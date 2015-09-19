@@ -244,7 +244,7 @@
   homeSpec5Note: '37 B WAL header, 13 B record header, 8 MiB per record',
   homeSpec6Label: 'Inline limit',
   homeSpec6Value: '1 KiB',
-  homeSpec6Note: 'Above it the value becomes a CAS object reference. A single-file .yydb rejects overflow explicitly.',
+  homeSpec6Note: 'Above it the value becomes a CAS object reference. A single-file .yydb embeds the object in the main image, which is supported but inflates the file.',
   homeSpec7Label: 'Checkpoint',
   homeSpec7Value: 'Clean close or threshold',
   homeSpec7Note: 'checkpoint() folds the WAL and clears companions. Reopen replays complete transactions only.',

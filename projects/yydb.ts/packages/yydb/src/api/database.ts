@@ -597,8 +597,10 @@ export class Database {
     /**
      * Publish a logical `file` value: chunks first, then the immutable manifest.
      *
-     * Only `.yydx` layouts keep the object tree a descriptor depends on, so a
-     * single-file `.yydb` handle rejects the call. The returned tagged descriptor
+     * A `.yydx` layout keeps the object tree in `<stem>-objects/`; a single-file
+     * `.yydb` embeds the same chunk and manifest objects as records in its main
+     * image. Both are supported, but embedding large payloads inflates the file
+     * and slows down every snapshot and backup. The returned tagged descriptor
      * can be bound as a VOS write parameter for a `file` column; renaming never
      * changes content identity because the digest covers the complete octets.
      */

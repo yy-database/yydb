@@ -20,11 +20,11 @@ impl Connection {
     }
 
     fn bytes_policy(&self) -> Arc<dyn yydb_query::BytesPlacementHook> {
-        Arc::new(YydbBytesPolicy::new(Arc::clone(&self.objects), !self.is_single_file_yydb()))
+        Arc::new(YydbBytesPolicy::new(Arc::clone(&self.objects)))
     }
 
     fn vector_policy(&self) -> Arc<dyn yydb_query::VectorPlacementHook> {
-        Arc::new(YydbVectorPolicy::new(Arc::clone(&self.objects), !self.is_single_file_yydb()))
+        Arc::new(YydbVectorPolicy::new(Arc::clone(&self.objects)))
     }
 
     /// Prepare a VOS read pipeline into a reusable query plan.
@@ -201,7 +201,6 @@ impl Connection {
     /// the row, at or below it stay inline. Mutations follow the same
     /// transaction rules as [`Self::execute_vos_write`].
     pub fn execute_vos_write_with_params(&self, source: &str, named: &BTreeMap<String, Value>) -> Result<()> {
-        self.reject_single_file_values(named.values())?;
         self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         self.mutate_active_state_unlocked(|state| {
@@ -234,7 +233,6 @@ impl Connection {
     /// **Not part of the `@yydb/yydb` public author surface.**
     #[doc(hidden)]
     pub fn execute_sql_write(&self, source: &str, values: &[Value]) -> Result<usize> {
-        self.reject_single_file_values(values.iter())?;
         let stmt = self.prepare_sql(source)?;
         let values = yydb_query::bind_ordered(&stmt, values)?;
         self.guard_session_alive()?;
@@ -260,21 +258,6 @@ impl Connection {
             Ok(())
         })?;
         Ok(affected)
-    }
-}
-
-impl Connection {
-    /// Reject a `file` value on a single-file `.yydb` write.
-    ///
-    /// A descriptor refers to manifest and chunk objects under `<app>-objects/`,
-    /// so a single-file database cannot persist one. The write is refused before
-    /// staging instead of inlining the file or truncating it to the inline
-    /// boundary.
-    fn reject_single_file_values<'a>(&self, values: impl IntoIterator<Item = &'a Value>) -> Result<()> {
-        if self.is_single_file_yydb() && values.into_iter().any(|value| matches!(value, Value::File(_))) {
-            return Err(Error::Unsupported("`file` values require a .yydx layout; .yydb single-file mode rejects them"));
-        }
-        Ok(())
     }
 }
 

@@ -59,6 +59,8 @@ pub(crate) fn diagnose(
     // the gap below is reported as `missing_blob` instead of failing the probe.
     // Reclamation keeps the strict scan and refuses to delete anything.
     let referenced = refs::referenced_hashes_tolerant(records, "", objects)?;
+    let single_file_layout = objects.is_embedded()
+        && file_path.is_some_and(|path| path.extension().and_then(|ext| ext.to_str()) != Some("yydx"));
     if objects.persist_to_disk() {
         // 1. Raw `yydb:object:` prefixes — carry the owning key as a hint so
         //    operators can jump straight to the broken record.
@@ -99,8 +101,35 @@ pub(crate) fn diagnose(
             }
         }
     }
+    else if single_file_layout {
+        // A single-file image keeps its CAS objects as embedded records, so a
+        // committed reference that has no matching object is just as broken as
+        // a missing `.blob` file.
+        for hash in &referenced {
+            if !objects.contains_hash(hash) {
+                issues.push(DoctorIssue {
+                    severity: DoctorSeverity::Error,
+                    code: "yydb.doctor.missing_blob".into(),
+                    message: format!("committed reference points to missing embedded object {}", hex_lower(hash)),
+                    key_hint: None,
+                });
+            }
+        }
+    }
+    let stored_objects = objects.list_objects()?;
+    if single_file_layout && !stored_objects.is_empty() {
+        issues.push(DoctorIssue {
+            severity: DoctorSeverity::Warn,
+            code: "yydb.doctor.single_file_objects".into(),
+            message: format!(
+                "{} CAS object(s) are embedded in the single-file image; large `file`, `blob` and `vector` payloads are supported but inflate the file, so a .yydx layout is recommended",
+                stored_objects.len()
+            ),
+            key_hint: None,
+        });
+    }
     let orphans: Vec<ObjectRef> =
-        objects.list_objects()?.into_iter().filter(|object| !referenced.contains(&object.hash)).collect();
+        stored_objects.into_iter().filter(|object| !referenced.contains(&object.hash)).collect();
     let orphan_object_count = orphans.len() as u64;
 
     let namespaces = collect_namespace_stats(records);

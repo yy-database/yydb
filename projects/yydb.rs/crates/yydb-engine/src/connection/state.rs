@@ -44,13 +44,17 @@ impl Connection {
     }
 
     pub(crate) fn read_state(&self) -> Result<State> {
-        match self.backend.as_ref() {
+        let mut state = match self.backend.as_ref() {
             Backend::File { database, .. } => {
                 let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                snapshot::state_from_snapshot(&database.snapshot()?)
+                snapshot::state_from_snapshot(&database.snapshot()?)?
             }
-            Backend::Memory { state } => Ok(state.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()),
+            Backend::Memory { state } => state.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone(),
+        };
+        if self.is_single_file_yydb() {
+            self.objects.take_embedded_records(&mut state.records)?;
         }
+        Ok(state)
     }
 
     /// Publish a state snapshot, advancing the durable commit sequence by one.
@@ -60,6 +64,9 @@ impl Connection {
     /// base: `begin` captures it and `commit` refuses to publish once it moved.
     pub(crate) fn write_state(&self, state: &State) -> Result<yydb_types::CommitSequence> {
         let mut state = state.clone();
+        if self.is_single_file_yydb() {
+            self.objects.embed_into(&mut state.records)?;
+        }
         let sequence = lease::bump_commit_sequence(&mut state.records);
         match self.backend.as_ref() {
             Backend::File { database, .. } => {

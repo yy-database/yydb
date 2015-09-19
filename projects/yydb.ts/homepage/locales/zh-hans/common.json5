@@ -244,7 +244,7 @@
   homeSpec5Note: 'WAL 头 37 B，记录头 13 B，单条记录上限 8 MiB',
   homeSpec6Label: '内联上限',
   homeSpec6Value: '1 KiB',
-  homeSpec6Note: '超过上限进 CAS 对象引用；单文件 .yydb 超界稳定拒绝',
+  homeSpec6Note: '超过上限进 CAS 对象引用；单文件 .yydb 把对象内嵌进主文件，支持但会撑大文件',
   homeSpec7Label: 'checkpoint',
   homeSpec7Value: 'clean close / 阈值',
   homeSpec7Note: 'checkpoint() 折叠 WAL 并清理 companion；重开只重放完整事务',

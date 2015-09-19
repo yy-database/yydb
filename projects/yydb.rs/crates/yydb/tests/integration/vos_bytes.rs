@@ -2,7 +2,7 @@
 //!
 //! The host-coverable parts of this surface migrated to the binding suites:
 //! arbitrary-octet round-trip, the inline/object boundary, single-file
-//! refusal, deduplication, rollback visibility and reopen are covered by
+//! embedding, deduplication, rollback visibility and reopen are covered by
 //! `@yydb/yydb`'s `bytes-channel` and `yydb.py`'s `test_yydb.py`. The test
 //! below stays Rust-side because injecting a missing object requires direct
 //! access to the internal object store.

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use vos::types::{BytesPlacement, BytesPlacementPolicy};
 use yydb_query::{BytesPlacementHook, ObjectResolver, VectorPlacementHook};
-use yydb_types::{Error, INLINE_BYTES_MAX, ObjectKind, ObjectRef, Result, Value, Vector};
+use yydb_types::{INLINE_BYTES_MAX, ObjectKind, ObjectRef, Result, Value, Vector};
 
 use crate::ObjectStore;
 
@@ -23,19 +23,19 @@ use crate::ObjectStore;
 /// physical property of this store: row storage hex-encodes octets inside a
 /// single leaf cell, so a larger inline payload would not fit a stored row and
 /// is not part of the VOS contract.
+///
+/// A single-file `.yydb` embeds the referenced objects as records in its main
+/// image, so the placement is supported on both layouts. It is only a size
+/// recommendation: embedding large payloads inflates the single file and makes
+/// every snapshot and backup rewrite those bytes.
 pub struct YydbBytesPolicy {
     store: Arc<ObjectStore>,
-    persistent_objects: bool,
 }
 
 impl YydbBytesPolicy {
     /// Builds the policy over `store`.
-    ///
-    /// `persistent_objects` is `false` for a single-file `.yydb` connection,
-    /// whose object store is process-local: storing a reference there would
-    /// lose the payload on reopen, so such a write is refused instead.
-    pub fn new(store: Arc<ObjectStore>, persistent_objects: bool) -> Self {
-        Self { store, persistent_objects }
+    pub fn new(store: Arc<ObjectStore>) -> Self {
+        Self { store }
     }
 }
 
@@ -49,9 +49,6 @@ impl BytesPlacementHook for YydbBytesPolicy {
     fn place(&self, octets: Vec<u8>) -> Result<Value> {
         match self.placement_for(&octets) {
             BytesPlacement::Inline => Ok(Value::Bytes(octets)),
-            BytesPlacement::ObjectReference if !self.persistent_objects => Err(Error::Unsupported(
-                "CAS payloads larger than INLINE_BYTES_MAX require a .yydx layout in single-file .yydb mode",
-            )),
             BytesPlacement::ObjectReference => self.store.put_chunk(ObjectKind::Blob, &octets).map(Value::Object),
         }
     }
@@ -70,18 +67,16 @@ const INLINE_VECTOR_DIM_MAX: u32 = 120;
 ///
 /// Mirrors [`YydbBytesPolicy`]: dimensions at or below
 /// [`INLINE_VECTOR_DIM_MAX`] stay inline; above that the payload is written
-/// into CAS as a `VectorPayload` object and the row keeps a reference. A
-/// single-file `.yydb` connection refuses vectors that need an object store
-/// (same rule as `bytes`).
+/// into CAS as a `VectorPayload` object and the row keeps a reference. Both
+/// layouts support it, with the same single-file size recommendation as `bytes`.
 pub struct YydbVectorPolicy {
     store: Arc<ObjectStore>,
-    persistent_objects: bool,
 }
 
 impl YydbVectorPolicy {
     /// Builds the policy over `store`.
-    pub fn new(store: Arc<ObjectStore>, persistent_objects: bool) -> Self {
-        Self { store, persistent_objects }
+    pub fn new(store: Arc<ObjectStore>) -> Self {
+        Self { store }
     }
 
     /// Whether `vector` fits the row's inline JSON budget.
@@ -94,11 +89,6 @@ impl VectorPlacementHook for YydbVectorPolicy {
     fn place(&self, vector: Vector) -> Result<Value> {
         if Self::fits_inline(&vector) {
             return Ok(Value::Vector(vector));
-        }
-        if !self.persistent_objects {
-            return Err(Error::Unsupported(
-                "large vectors that require CAS storage need a .yydx layout; .yydb single-file mode rejects them",
-            ));
         }
         self.store.put_vector(&vector).map(Value::Object)
     }

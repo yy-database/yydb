@@ -174,11 +174,13 @@ class Database:
     ) -> dict[str, Any]:
         """Publish a logical ``file`` value: chunks first, then the manifest.
 
-        Only ``.yydx`` layouts keep the object tree a descriptor depends on, so
-        a single-file ``.yydb`` handle refuses the call. The returned tagged
-        dict ``{"$yydb": "file", ...}`` can be bound as a VOS write parameter
-        for a ``file`` column; renaming never changes content identity because
-        the digest covers the complete octets.
+        A ``.yydx`` layout keeps the object tree in ``<stem>-objects/``; a
+        single-file ``.yydb`` embeds the same chunk and manifest objects as
+        records in its main image. Both are supported, but embedding large
+        payloads inflates the file and slows down every snapshot and backup.
+        The returned tagged dict ``{"$yydb": "file", ...}`` can be bound as a VOS
+        write parameter for a ``file`` column; renaming never changes content
+        identity because the digest covers the complete octets.
         """
         self._ensure_open()
         if not isinstance(payload, (bytes, bytearray, memoryview)):

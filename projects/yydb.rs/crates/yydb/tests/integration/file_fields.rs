@@ -2,8 +2,8 @@
 //! paths and reference-driven reclamation.
 //!
 //! The host-coverable parts of this surface migrated to the binding suites:
-//! manifest publishing with chunk counts, single-file refusal, descriptor
-//! identity through rename, reopen with full-content reread, window EOF
+//! manifest publishing with chunk counts, single-file embedding and backup,
+//! descriptor identity through rename, reopen with full-content reread, window EOF
 //! semantics, zero-octet files and tampered-chunk digest failures are covered
 //! by `yydb.py`'s `test_yydb.py` and `@yydb/yydb`'s `file-channel` suite. The
 //! tests below stay Rust-side because they assert internals no binding
@@ -12,7 +12,7 @@
 
 use std::io::Cursor;
 
-use yydb::{ChunkManifest, Error, FileDescriptor, FileManifestRef, ObjectKind, Value, types::scalar};
+use yydb::{ChunkManifest, Error, FileDescriptor, FileManifestRef, Value, types::scalar};
 
 use crate::fixtures::yydb::{cleanup, open_temp_db, open_temp_yydx, reopen};
 
@@ -203,6 +203,61 @@ fn rollback_leaves_file_objects_for_reclaim() {
     let orphans = conn.scan_orphans("").unwrap();
     assert_eq!(orphans.len(), 4, "a rollback leaves objects instead of deleting shared content");
     assert_eq!(conn.reclaim_orphans(&orphans).unwrap().reclaimed_objects, 4);
+    cleanup(&path);
+}
+
+#[test]
+fn single_file_yydb_embeds_files_and_restores_from_a_self_contained_backup() {
+    let (conn, path) = open_temp_db("file-single-embed");
+
+    conn.ensure_schema(ASSET_SCHEMA).unwrap();
+    let octets = payload(3000);
+    let file = conn.put_file(Cursor::new(octets.clone()), 500, Some("asset.bin".into()), None).unwrap();
+    insert_asset(&conn, 1, &file).unwrap();
+    assert_eq!(conn.read_file(&file).unwrap(), octets, "the embedded chunks must read back in-session");
+    assert!(!crate::fixtures::yydb::objects_sidecar(&path).exists(), "single-file .yydb must not create a sibling object tree");
+
+    let dest = crate::fixtures::yydb::temp_db_path("file-single-embed-backup");
+    conn.backup_to(&dest).unwrap();
+    drop(conn);
+
+    let restored = yydb::Connection::restore_yydb(&dest).unwrap();
+    assert!(restored.verify_object_references().unwrap() > 0, "restore must verify the embedded chunks");
+    let rows = restored.query_vos("Asset.all().collect()").unwrap();
+    let stored = match rows[0].get("payload") {
+        Some(Value::File(stored)) => stored.clone(),
+        other => panic!("restored payload must be a file descriptor, got {other:?}"),
+    };
+    assert_eq!(stored, file);
+    assert_eq!(restored.read_file(&stored).unwrap(), octets, "the backup carries the embedded payloads");
+
+    cleanup(&path);
+    cleanup(&dest);
+}
+
+#[test]
+fn single_file_yydb_survives_a_put_file_handle_being_dropped() {
+    let (conn, path) = open_temp_db("file-single-handle");
+    conn.ensure_schema(ASSET_SCHEMA).unwrap();
+    let octets = payload(1200);
+    let file = conn.put_file(Cursor::new(octets.clone()), 300, Some("asset.bin".into()), None).unwrap();
+    drop(conn);
+
+    // Hosts that open a handle per operation must see the object from the next
+    // handle: the payload is already in the main image when `put_file` returns.
+    let second = yydb::Connection::open(&path).unwrap();
+    insert_asset(&second, 1, &file).unwrap();
+    drop(second);
+
+    let third = yydb::Connection::open(&path).unwrap();
+    let rows = third.query_vos("Asset.all().collect()").unwrap();
+    let stored = match rows[0].get("payload") {
+        Some(Value::File(stored)) => stored.clone(),
+        other => panic!("payload must be a file descriptor, got {other:?}"),
+    };
+    assert_eq!(stored, file);
+    assert_eq!(third.read_file(&stored).unwrap(), octets, "a later handle must re-read the embedded chunks");
+    assert!(!crate::fixtures::yydb::objects_sidecar(&path).exists(), "single-file .yydb must not create a sibling object tree");
     cleanup(&path);
 }
 

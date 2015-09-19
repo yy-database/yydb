@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::{
-    Error, INLINE_BYTES_MAX, Result, SchemaVersion,
+    Error, Result, SchemaVersion,
     journal::{OpenFlags, shm_path, wal_path},
     objects::ObjectStore,
     storage::snapshot,
@@ -197,15 +197,6 @@ impl Connection {
 
     pub(crate) fn is_single_file_yydb(&self) -> bool {
         self.path().is_some_and(|path| !is_yydx_main_path(path))
-    }
-
-    pub(crate) fn guard_yydb_cas_payload(&self, len: usize) -> Result<()> {
-        if self.is_single_file_yydb() && len > INLINE_BYTES_MAX {
-            return Err(Error::Unsupported(
-                "CAS payloads larger than INLINE_BYTES_MAX require a .yydx layout in single-file .yydb mode",
-            ));
-        }
-        Ok(())
     }
 
     /// Mark this connection and all derived sessions as closed.

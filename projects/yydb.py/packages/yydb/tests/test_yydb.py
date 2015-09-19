@@ -185,20 +185,27 @@ class NativeTest(unittest.TestCase):
             finally:
                 reopened.close()
 
-    def test_bytes_above_the_inline_boundary_are_refused_in_single_file_mode(self) -> None:
+    def test_bytes_above_the_inline_boundary_are_embedded_in_single_file_mode(self) -> None:
         payload = b"\xff" * (INLINE_BYTES_MAX + 1)
         with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
             path = Path(directory) / "blobs.yydb"
             database = Database.open(path)
             try:
                 database.ensure_schema(BYTES_SCHEMA)
-                with self.assertRaises(YydbError) as raised:
-                    database.execute(BYTES_INSERT, {"id": 1, "label": "big", "body": payload})
-                self.assertEqual(raised.exception.code, NATIVE_ERROR)
-                self.assertIn("INLINE_BYTES_MAX", raised.exception.message)
-                self.assertEqual(database.query(BYTES_READ), [])
+                database.execute(BYTES_INSERT, {"id": 1, "label": "big", "body": payload})
+                self.assertEqual(database.query(BYTES_READ)[0]["body"], payload)
             finally:
                 database.close()
+
+            self.assertFalse(
+                (Path(directory) / "blobs-objects").exists(),
+                "single-file .yydb must not create a sibling object tree",
+            )
+            reopened = Database.open(path)
+            try:
+                self.assertEqual(reopened.query(BYTES_READ)[0]["body"], payload, "reopen must re-read the embedded payload")
+            finally:
+                reopened.close()
 
     def test_file_round_trip_through_the_public_handle(self) -> None:
         octets = bytes((index * 7) % 256 for index in range(1000))
@@ -239,17 +246,29 @@ class NativeTest(unittest.TestCase):
             finally:
                 reopened.close()
 
-    def test_file_values_are_refused_in_single_file_mode(self) -> None:
+    def test_file_values_are_embedded_in_single_file_mode(self) -> None:
+        octets = bytes((index * 7) % 256 for index in range(600))
         with tempfile.TemporaryDirectory(prefix="yydb-python-file-") as directory:
             path = Path(directory) / "assets.yydb"
             database = Database.open(path)
             try:
-                with self.assertRaises(YydbError) as raised:
-                    database.put_file(b"payload", 0)
-                self.assertEqual(raised.exception.code, NATIVE_ERROR)
-                self.assertIn(".yydx", raised.exception.message)
+                database.ensure_schema(FILE_SCHEMA)
+                descriptor = database.put_file(octets, 256, name="asset.bin")
+                database.execute(FILE_INSERT, {"id": 1, "payload": descriptor})
+                self.assertEqual(database.read_file(descriptor), octets)
             finally:
                 database.close()
+
+            self.assertFalse(
+                (Path(directory) / "assets-objects").exists(),
+                "single-file .yydb must not create a sibling object tree",
+            )
+            reopened = Database.open(path)
+            try:
+                rows = reopened.query(FILE_READ)
+                self.assertEqual(reopened.read_file(rows[0]["payload"]), octets, "reopen must re-read the embedded chunks")
+            finally:
+                reopened.close()
 
     def test_file_arguments_are_validated_before_the_native_call(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yydb-python-file-") as directory:

@@ -7,9 +7,9 @@
 //! refusal all live in `@yydb/yydb`'s `engine-depth` / vector tests and in
 //! `yydb.py`'s `test_yydb.py`. The tests below stay Rust-side because they
 //! assert storage internals no binding exposes: the raw row JSON layout,
-//! corruption injected through the internal row key, the single-file layout
-//! refusal for object-backed vectors, and the no-half-published state after
-//! a refused schema.
+//! corruption injected through the internal row key, the embedded CAS records
+//! a single-file `.yydb` uses for object-backed vectors, and the no-half-published
+//! state after a refused schema.
 
 use std::collections::BTreeMap;
 
@@ -126,18 +126,24 @@ fn vos_vector_corrupt_row_encoding_is_refused_at_read() {
 }
 
 #[test]
-fn vos_vector_single_file_yydb_rejects_large_vector() {
-    // 大维度 vector 走 CAS，但 .yydb single-file mode 没有 persistent object store，
-    // 所以写入应该被拒绝（和 bytes 的行为一致）。
-    let (conn, path) = open_temp_db("vos-vector-yydb-reject-large");
+fn vos_vector_single_file_yydb_embeds_large_vector() {
+    // 大维度 vector 走 CAS；单文件 `.yydb` 把对象作为分块记录写进主文件，
+    // 支持但不建议（会撑大单文件并拖慢快照与备份）。
+    let (conn, path) = open_temp_db("vos-vector-yydb-large");
     conn.ensure_schema(LARGE_DIM_SCHEMA).expect("schema");
 
-    let error = insert_large(&conn, 1, large_vector(121)).expect_err("single-file .yydb must reject large vectors");
-    assert!(matches!(error, Error::Unsupported(_)), "unexpected error: {error}");
-    assert!(format!("{error}").contains(".yydx"), "single-file .yydb error should mention .yydx layout requirement: {error}");
-    assert!(stored_row_json_for_table(&conn, "BigDoc").is_empty(), "no row may be written");
+    let expected = large_vector(121);
+    insert_large(&conn, 1, expected.clone()).expect("single-file .yydb must embed large vectors");
+    let rows = stored_row_json_for_table(&conn, "BigDoc");
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].contains("\"$yydb\":\"object\""), "large vector row must keep an object reference: {}", rows[0]);
 
     drop(conn);
+    let reopened = Connection::open(&path).expect("reopen");
+    let rows = reopened.query_vos("BigDoc.all().collect()").expect("read embedded vector");
+    assert_eq!(rows[0].get("embedding"), Some(&expected), "reopen must resolve the embedded vector payload");
+    drop(reopened);
+
     cleanup(&path);
 }
 

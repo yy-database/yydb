@@ -7,7 +7,7 @@
 //! `.yydb` single-file mode must not rely on persistent sidecars.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     io::Read,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -30,6 +30,22 @@ use yydb_types::{
 
 /// Soft inline size guidance (re-exported for callers).
 pub use yydb_types::INLINE_BYTES_MAX as INLINE_BYTES_SOFT_MAX;
+
+/// Record prefix for CAS payloads embedded in a single-file `.yydb` image.
+///
+/// Single-file databases keep every artefact inside one file, so a
+/// process-local object store publishes its objects as chunked records on
+/// commit instead of relying on a sibling `<stem>-objects/` tree.
+pub(crate) const EMBEDDED_OBJECT_PREFIX: &str = "__yydb/v0/object/";
+
+/// One record per embedded chunk, comfortably below a leaf cell.
+const EMBEDDED_CHUNK_BYTES: usize = 2048;
+
+#[derive(Default)]
+struct EmbeddedGroup {
+    meta: Option<(ObjectKind, u64)>,
+    chunks: BTreeMap<usize, Vec<u8>>,
+}
 
 /// Content-addressed object store rooted beside a `.yydb` file.
 pub struct ObjectStore {
@@ -465,6 +481,118 @@ impl ObjectStore {
         self.pinned.lock().unwrap_or_else(|p| p.into_inner()).remove(&object.hash);
         Ok(())
     }
+
+    /// Whether this store keeps payloads beside the database instead of inside it.
+    pub(crate) fn is_embedded(&self) -> bool {
+        !self.persist_to_disk()
+    }
+
+    /// Whether `hash` is currently held by this store.
+    pub(crate) fn contains_hash(&self, hash: &[u8; 32]) -> bool {
+        if self.persist_to_disk() {
+            let object = ObjectRef { algo: HashAlgo::Blake3, hash: *hash, size: 0, kind: ObjectKind::Blob };
+            return self.path_for(&object).exists();
+        }
+        if self.catalog.lock().unwrap_or_else(|p| p.into_inner()).contains_key(hash) {
+            return true;
+        }
+        if self.hot.lock().unwrap_or_else(|p| p.into_inner()).contains_key(hash) {
+            return true;
+        }
+        self.cold.lock().unwrap_or_else(|p| p.into_inner()).contains_key(hash)
+    }
+
+    /// Publish every process-local CAS object into `records`.
+    ///
+    /// Records are content addressed, so a chunk that is already present is
+    /// left untouched and only new payloads are chunked in. On-disk `.yydx`
+    /// stores keep their own blob tree and are skipped.
+    pub(crate) fn embed_into(&self, records: &mut BTreeMap<String, Vec<u8>>) -> Result<()> {
+        if self.persist_to_disk() {
+            return Ok(());
+        }
+        let catalog: Vec<ObjectRef> =
+            self.catalog.lock().unwrap_or_else(|p| p.into_inner()).values().cloned().collect();
+        for object in catalog {
+            let Some(bytes) = self.local_payload(&object) else { continue };
+            let hash_hex = object.hash_hex();
+            let meta_key = format!("{EMBEDDED_OBJECT_PREFIX}{hash_hex}/meta");
+            records.entry(meta_key).or_insert_with(|| format!("{}:{}", object.kind.as_str(), object.size).into_bytes());
+            for (index, chunk) in bytes.chunks(EMBEDDED_CHUNK_BYTES).enumerate() {
+                let key = format!("{EMBEDDED_OBJECT_PREFIX}{hash_hex}/{index:06}");
+                records.entry(key).or_insert_with(|| chunk.to_vec());
+            }
+        }
+        Ok(())
+    }
+
+    /// Restore process-local CAS objects encoded in `records` and drop those records.
+    ///
+    /// Every payload is re-hashed against the identity the record key declares,
+    /// so a tampered or truncated image fails closed instead of surfacing as a
+    /// different object.
+    pub(crate) fn take_embedded_records(&self, records: &mut BTreeMap<String, Vec<u8>>) -> Result<()> {
+        if self.persist_to_disk() {
+            return Ok(());
+        }
+        let keys: Vec<String> =
+            records.keys().filter(|key| key.starts_with(EMBEDDED_OBJECT_PREFIX)).cloned().collect();
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let mut groups: BTreeMap<String, EmbeddedGroup> = BTreeMap::new();
+        for key in keys {
+            let Some(value) = records.remove(&key) else { continue };
+            let rest = &key[EMBEDDED_OBJECT_PREFIX.len()..];
+            let (hash_hex, part) = rest.split_once('/').ok_or(Error::Corrupt("embedded object key is malformed"))?;
+            let group = groups.entry(hash_hex.to_owned()).or_default();
+            if part == "meta" {
+                group.meta = Some(decode_embedded_meta(&value)?);
+            }
+            else {
+                let index: usize =
+                    part.parse().map_err(|_| Error::Corrupt("embedded object chunk index is not a number"))?;
+                group.chunks.insert(index, value);
+            }
+        }
+        for (hash_hex, group) in groups {
+            let hash = decode_hash_hex(&hash_hex)?;
+            if self.contains_hash(&hash) {
+                continue;
+            }
+            let (kind, size) = group.meta.ok_or(Error::Corrupt("embedded object is missing its metadata record"))?;
+            let mut payload = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+            for index in 0..group.chunks.len() {
+                let chunk = group.chunks.get(&index).ok_or(Error::Corrupt("embedded object chunks are not contiguous"))?;
+                payload.extend_from_slice(chunk);
+            }
+            if payload.len() as u64 != size {
+                return Err(Error::Corrupt("embedded object payload length does not match its metadata"));
+            }
+            if blob_chunk_hash(&payload) != hash {
+                return Err(Error::Corrupt("embedded object payload does not match its declared hash"));
+            }
+            let object = ObjectRef { algo: HashAlgo::Blake3, hash, size, kind };
+            self.hot.lock().unwrap_or_else(|p| p.into_inner()).insert(hash, Arc::<[u8]>::from(payload));
+            self.catalog.lock().unwrap_or_else(|p| p.into_inner()).insert(hash, object);
+        }
+        Ok(())
+    }
+
+    fn local_payload(&self, object: &ObjectRef) -> Option<Arc<[u8]>> {
+        if let Some(bytes) = self.hot.lock().unwrap_or_else(|p| p.into_inner()).get(&object.hash) {
+            return Some(Arc::clone(bytes));
+        }
+        self.cold.lock().unwrap_or_else(|p| p.into_inner()).get(&object.hash).cloned()
+    }
+}
+
+fn decode_embedded_meta(bytes: &[u8]) -> Result<(ObjectKind, u64)> {
+    let text = std::str::from_utf8(bytes).map_err(|_| Error::Corrupt("embedded object metadata is not UTF-8"))?;
+    let (kind, size) = text.split_once(':').ok_or(Error::Corrupt("embedded object metadata is malformed"))?;
+    let kind = ObjectKind::from_name(kind).ok_or(Error::Corrupt("embedded object metadata names an unknown kind"))?;
+    let size: u64 = size.parse().map_err(|_| Error::Corrupt("embedded object metadata size is not a number"))?;
+    Ok((kind, size))
 }
 
 /// Reader adapter that hashes every octet it hands to the chunker.

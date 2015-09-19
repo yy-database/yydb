@@ -269,8 +269,14 @@ fn decode_descriptor_dict(dict: &Bound<'_, PyDict>) -> PyResult<yydb::FileDescri
     }
 }
 
-/// Publish a logical `file` value in a `.yydx` layout and return the
-/// descriptor as a tagged `{"$yydb":"file",…}` dict.
+/// Publish a logical `file` value and return the descriptor as a tagged
+/// `{"$yydb":"file",…}` dict.
+///
+/// Both layouts support it: `.yydx` keeps the object tree in
+/// `<stem>-objects/`, and a single-file `.yydb` embeds the same objects as
+/// records in its main image. Embedding large payloads inflates the single
+/// file and slows down snapshots and backups, so a `.yydx` layout is
+/// recommended for object-heavy workloads.
 #[pyfunction]
 #[pyo3(signature = (db_path, payload, chunk_size, name=None, media_type=None))]
 fn put_file(

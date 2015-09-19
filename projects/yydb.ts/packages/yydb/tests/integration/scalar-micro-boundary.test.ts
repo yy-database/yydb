@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -194,17 +194,28 @@ test("a `uuid` column stores the literal and reads back the tagged form", async 
     }
 });
 
-test("an over-budget inline `bytes` payload is refused on the single-file layout", async () => {
+test("an over-budget inline `bytes` payload is embedded in the single-file layout", async () => {
     const directory = mkdtempSync(join(tmpdir(), "yydb-bytes-cap-"));
     try {
-        const database = await Database.open(join(directory, "cap.yydb"));
+        const path = join(directory, "cap.yydb");
+        const octets = Uint8Array.from({ length: 1025 }, (_, i) => i % 256);
+        const database = await Database.open(path);
         try {
             await database.ensureSchema("table B {\n    @@b_id: i64,\n    body: bytes,\n}");
-            const octets = Uint8Array.from({ length: 1025 }, (_, i) => i % 256);
-            const rejection = await rejectDiagnostic(() => database.execute("B::insert({ b_id: 1, body: $b })", { b: octets }));
-            assert.equal(rejection.code, "yydb.unsupported");
+            await database.execute("B::insert({ b_id: 1, body: $b })", { b: octets });
+            const rows = await database.query<{ b_id: number; body: Uint8Array }>("B.all().collect()");
+            assert.deepEqual(rows[0].body, octets);
         } finally {
             await database.close();
+        }
+        assert.equal(existsSync(join(directory, "cap-objects")), false, "single-file `.yydb` must not create a sibling object tree");
+
+        const reopened = await Database.open(path);
+        try {
+            const rows = await reopened.query<{ b_id: number; body: Uint8Array }>("B.all().collect()");
+            assert.deepEqual(rows[0].body, octets, "reopen must re-read the embedded payload");
+        } finally {
+            await reopened.close();
         }
     } finally {
         rmSync(directory, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -71,13 +71,27 @@ test("@yydb/yydb publishes a file value and reads it back through the public han
     }
 });
 
-test("@yydb/yydb refuses file values on a single-file .yydb", async () => {
+test("@yydb/yydb embeds file values inside a single-file .yydb", async () => {
     const directory = mkdtempSync(join(tmpdir(), "yydb-file-single-"));
     const path = join(directory, "assets.yydb");
     try {
+        const octets = payload(1000);
         const database = await Database.open(path);
-        await assert.rejects(() => database.putFile(payload(32)), /file|yydx/i, "single-file `.yydb` must reject `file` values");
+        await database.ensureSchema(ASSET_SCHEMA);
+        const file = await database.putFile(octets, { chunkSize: 256, name: "asset.bin" });
+        await database.execute(INSERT_ASSET, { id: 1, payload: file });
+        assert.equal(hexOf(await database.readFile(file)), hexOf(octets));
         await database.close();
+
+        assert.equal(existsSync(join(directory, "assets-objects")), false, "single-file `.yydb` must not create a sibling object tree");
+
+        const reopened = await Database.open(path);
+        try {
+            const [row] = await reopened.query<{ asset_id: number; payload: FileScalar }>("Asset.all().collect()");
+            assert.equal(hexOf(await reopened.readFile(row.payload)), hexOf(octets), "reopen must re-read the embedded chunks");
+        } finally {
+            await reopened.close();
+        }
     } finally {
         rmSync(directory, { recursive: true, force: true });
     }

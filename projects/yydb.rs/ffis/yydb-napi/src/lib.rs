@@ -580,7 +580,11 @@ impl Database {
 
     /// Publish a logical `file` value: chunks first, then the manifest object.
     ///
-    /// Only `.yydx` layouts keep the object tree a descriptor depends on.
+    /// Both layouts support it: `.yydx` keeps the object tree in
+    /// `<stem>-objects/`, and a single-file `.yydb` embeds the same objects as
+    /// records in its main image. Embedding large payloads inflates the single
+    /// file and slows down snapshots and backups, so a `.yydx` layout is
+    /// recommended for object-heavy workloads.
     /// Returns the descriptor as a tagged JSON object with the shape
     /// `{"$yydb":"file",…}` that can be round-tripped through VOS write
     /// parameters or `read_file_window`.

@@ -57,9 +57,12 @@ impl Connection {
     /// restore closed. Diagnosing before open matters because recovery truncates
     /// a torn WAL tail — verifying after open would mistake transit damage for
     /// a normal crash cut and hand back a database missing committed
-    /// transactions. A `.yydx` main file is rejected here: its backup restores
-    /// through [`restore_yydx`](Self::restore_yydx), which verifies the object
-    /// tree closure.
+    /// transactions. Object payloads embedded inside the single file are then
+    /// read back through their content address, so a damaged copy fails the
+    /// restore instead of surfacing later as a corrupt read. A `.yydx` main
+    /// file is rejected here: its backup restores through
+    /// [`restore_yydx`](Self::restore_yydx), which verifies the object tree
+    /// closure.
     pub fn restore_yydb(backup: impl AsRef<Path>) -> Result<Self> {
         let path = backup.as_ref();
         if is_yydx_main_path(path) {
@@ -71,7 +74,9 @@ impl Connection {
         if issues.iter().any(|issue| issue.severity == DoctorSeverity::Error) {
             return Err(Error::Corrupt("backup copy failed integrity verification"));
         }
-        Self::open(path)
+        let connection = Self::open(path)?;
+        connection.verify_object_references()?;
+        Ok(connection)
     }
 
     /// Open a restored `.yydx` backup and verify every committed object reference.

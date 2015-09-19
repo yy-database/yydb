@@ -116,12 +116,14 @@ fn open_yydb_does_not_create_objects_sidecar() {
 }
 
 #[test]
-fn open_yydb_rejects_chunked_files() {
-    let path = temp_db("no-chunk");
+fn open_yydb_embeds_chunked_files() {
+    let path = temp_db("chunk-embed");
     let conn = Connection::open(&path).unwrap();
-    let payload = vec![0_u8; 2000];
-    let err = conn.put_file_chunked(std::io::Cursor::new(payload), 500).unwrap_err();
-    assert!(matches!(err, Error::Unsupported(_)));
+    let payload: Vec<u8> = (0..2000u16).map(|v| (v % 256) as u8).collect();
+    let manifest = conn.put_file_chunked(std::io::Cursor::new(payload.clone()), 500).unwrap();
+    assert!(manifest.chunks.len() >= 4);
+    assert_eq!(conn.read_file_range(&manifest, 0, payload.len()).unwrap(), payload);
+    assert!(!objects_sidecar(&path).exists());
     cleanup(&path);
 }
 
@@ -140,13 +142,23 @@ fn open_yydx_uses_objects_root_and_allows_chunked_files() {
 }
 
 #[test]
-fn open_yydb_rejects_large_cas_payloads() {
-    let path = temp_db("no-large-cas");
+fn open_yydb_embeds_large_cas_payloads_and_restores_them() {
+    let path = temp_db("large-cas-embed");
+    let backup = temp_db("large-cas-embed-backup");
     let conn = Connection::open(&path).unwrap();
     let payload = vec![7_u8; INLINE_BYTES_MAX + 1];
-    let err = conn.put_chunk(ObjectKind::Blob, &payload).unwrap_err();
-    assert!(matches!(err, Error::Unsupported(_)));
+    let object = conn.put_chunk(ObjectKind::Blob, &payload).unwrap();
+    assert_eq!(&*conn.get_object(&object).unwrap(), payload.as_slice());
+    assert!(!objects_sidecar(&path).exists());
+    conn.ensure_schema("table T {\n    @@t_id: i64,\n    value: i64,\n}").unwrap();
+
+    conn.backup_to(&backup).unwrap();
+    drop(conn);
+
+    let restored = Connection::restore_yydb(&backup).unwrap();
+    assert_eq!(&*restored.get_object(&object).unwrap(), payload.as_slice(), "backup must carry the embedded object");
     cleanup(&path);
+    cleanup(&backup);
 }
 
 #[test]
