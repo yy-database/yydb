@@ -13,5 +13,6 @@ mod sql_binary;
 mod sql_query;
 mod vector_storage;
 mod vos_bytes;
+mod vos_keyed_writes;
 mod vos_transaction;
 mod wire_dispatch;

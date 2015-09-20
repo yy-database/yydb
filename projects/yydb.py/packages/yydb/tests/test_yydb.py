@@ -404,6 +404,21 @@ class NativeTest(unittest.TestCase):
             finally:
                 database.close()
 
+    def test_keyed_update_and_delete_patch_and_remove_one_row(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            database, _ = self._open_docs(directory)
+            try:
+                database.execute(DOC_INSERT, {"id": 1, "name": "kept", "score": 1.0, "embedding": self._vector(1.0, 0.0, 0.0)})
+                database.execute(DOC_INSERT, {"id": 2, "name": "gone", "score": 2.0, "embedding": self._vector(0.0, 1.0, 0.0)})
+                database.execute("Doc::update({ id: $id, name: $name })", {"id": 1, "name": "patched"})
+                database.execute("Doc::delete({ id: $id })", {"id": 2})
+                rows = database.query(DOC_READ)
+                self.assertEqual([row["id"] for row in rows], [1], "the keyed delete must remove exactly one row")
+                self.assertEqual(rows[0]["name"], "patched", "the patched field must change")
+                self.assertEqual(rows[0]["score"], 1.0, "fields outside the patch must keep their stored value")
+            finally:
+                database.close()
+
     def test_update_and_delete_pipelines_are_refused(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
             database, _ = self._open_docs(directory)

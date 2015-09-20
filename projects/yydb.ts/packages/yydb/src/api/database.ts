@@ -701,6 +701,12 @@ export class Database {
     /**
      * Execute a VOS write program with optional named parameters.
      *
+     * Phase 1 accepts `Type::insert({ … })`, a keyed `Type::update({ … })` patch
+     * and a keyed `Type::delete({ … })`. A filtered target, a lambda patch or a
+     * projection patch is refused with `yydb.unsupported` instead of guessing
+     * which rows it would match. An omitted field in a patch keeps its stored
+     * value, and deleting a key that is already gone is a no-op.
+     *
      * `Uint8Array` parameters cross as the tagged `bytes` wire form, so octets
      * reach a `bytes` column verbatim.
      */

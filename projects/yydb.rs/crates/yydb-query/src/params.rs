@@ -300,8 +300,8 @@ pub struct BoundWrite {
 pub fn bind_vos_write(source: &str, named: &BTreeMap<String, Value>) -> Result<BoundWrite> {
     let (parameters, rewritten) = scan_and_rewrite(source, Dialect::Vos)?;
     let program = vos::parse_program(&rewritten).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
-    if !super::dml::has_insert_expr(&program) {
-        return Err(Error::Unsupported("VOS parameter binding for writes requires an insert program"));
+    if !super::dml::has_write_call(&program) {
+        return Err(Error::Unsupported("VOS parameter binding for writes requires an insert, update, or delete program"));
     }
     let values = bind_values(&parameters, named)?;
     Ok(BoundWrite { source: rewritten, values })

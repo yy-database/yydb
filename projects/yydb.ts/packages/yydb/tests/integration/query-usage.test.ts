@@ -216,11 +216,33 @@ test("aggregation and lookup terminals are not executable in Phase 1", async () 
     });
 });
 
-test("update and delete programs are refused before planning", async () => {
+test("keyed update and delete programs patch one row and remove one row", async () => {
     await seededDatabase(async (database) => {
-        const rejection = await rejectDiagnostic(() => database.execute('P.all().filter(x => x.p_id == 1).update(x => x.{ active: false })'));
+        await database.execute("P::update({ p_id: $id, active: false })", { id: 1 });
+        await database.execute("P::delete({ p_id: $id })", { id: 2 });
+
+        const rows = await database.query<{ p_id: number; name: string; score: number; active: boolean }>(
+            "P.all().sort_by(x => x.p_id).collect()",
+        );
+        assert.deepEqual(
+            rows.map((row) => row.p_id),
+            [1, 3],
+            "the keyed delete must remove exactly one row",
+        );
+        const patched = rows[0];
+        assert.equal(patched.active, false, "the patched field must change");
+        assert.equal(patched.name, "delta", "fields outside the patch must keep their stored value");
+        assert.equal(patched.score, 30);
+    });
+});
+
+test("collection update and delete programs stay unsupported", async () => {
+    await seededDatabase(async (database) => {
+        const rejection = await rejectDiagnostic(() =>
+            database.execute("P.all().filter(x => x.p_id == 1).update(x => x.{ active: false })"),
+        );
         assert.equal(rejection.code, "yydb.unsupported");
-        assert.match(rejection.message, /insert program/);
+        assert.match(rejection.message, /table type/);
     });
 });
 

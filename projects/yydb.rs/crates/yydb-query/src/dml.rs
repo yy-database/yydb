@@ -1,4 +1,18 @@
-//! Phase 1 VOS write executor (`TypedObject.insert()`, `Type::insert({ … })`, schema macros).
+//! Phase 1 VOS write executor (`TypedObject.insert()`, `Type::insert({ … })`,
+//! keyed `Type::update({ … })` / `Type::delete({ … })`, schema macros).
+//!
+//! ## Phase 1 write shapes
+//!
+//! | Shape | Effect |
+//! |-------|--------|
+//! | `Type::insert({ … })` / `Type { … }.insert()` | Upsert the whole row |
+//! | `Type::update({ pk: …, field: … })` | Patch a keyed row, omitted fields keep their stored value |
+//! | `Type::delete({ pk: … })` | Remove a keyed row, a missing key is a no-op |
+//!
+//! Every shape takes one plain object literal whose primary-key field selects
+//! the row. Collection forms (`Type.filter(…).update(…)`), lambda patches and
+//! projection patches stay [`Error::Unsupported`]: Phase 1 has no predicate
+//! evaluator here, so it never guesses which rows a filter would match.
 
 use std::collections::BTreeMap;
 
@@ -21,18 +35,20 @@ fn dml_error(message: impl Into<String>) -> Error {
 }
 
 /// Quick AST-level check: does this VOS program look like a write /
-/// mutation (insert, macro call)? Used by [`crate::params::prepare`] to
-/// short-circuit DML programs past the read-pipeline lowerer.
+/// mutation (insert, update, delete, macro call)? Used by
+/// [`crate::params::prepare`] to short-circuit DML programs past the
+/// read-pipeline lowerer.
 pub(crate) fn is_write_program(program: &VosProgram) -> bool {
+    let is_write = |expr: &VosExpr| is_macro_call(expr) || is_write_call(expr);
     for stmt in &program.statements {
         if let VosStmt::Expr(expr) = stmt {
-            if is_macro_call(expr) || is_typed_object_insert(expr) {
+            if is_write(expr) {
                 return true;
             }
         }
     }
     if let Some(result) = &program.result {
-        if is_macro_call(result) || is_typed_object_insert(result) {
+        if is_write(result) {
             return true;
         }
     }
@@ -91,7 +107,15 @@ pub fn try_insert_returning(
         return Ok(None);
     }
     let result = program.result.as_ref().expect("checked above");
-    if is_macro_call(result) || is_typed_object_insert(result) {
+    let is_zero_arg_insert = matches!(
+        result,
+        VosExpr::Call {
+            callee,
+            args,
+            ..
+        } if args.is_empty() && matches!(callee.as_ref(), VosExpr::Member { name, .. } if name == "insert")
+    );
+    if is_macro_call(result) || is_zero_arg_insert {
         return Ok(None);
     }
     let (table, row) = match lower_insert(result, contract, &[], &[]) {
@@ -119,7 +143,7 @@ fn execute_program_with_constraints(
         match stmt {
             VosStmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
             VosStmt::Expr(expr) => {
-                apply_insert(expr, contract, constraints, records, &bindings, params)?;
+                apply_write(expr, contract, constraints, records, &bindings, params)?;
                 wrote = true;
             }
         }
@@ -129,12 +153,12 @@ fn execute_program_with_constraints(
         if is_macro_call(result) {
             return Err(dml_error("macro call could not be expanded (schema document required)"));
         }
-        apply_insert(result, contract, constraints, records, &bindings, params)?;
+        apply_write(result, contract, constraints, records, &bindings, params)?;
         wrote = true;
     }
 
     if !wrote {
-        return Err(dml_error("execute program has no insert statements"));
+        return Err(dml_error("execute program has no write statements"));
     }
     Ok(())
 }
@@ -218,23 +242,15 @@ fn find_macro_body(document: &VosRoot, name: &str) -> Option<VosProgram> {
         .and_then(|declaration| declaration.body_program.clone())
 }
 
-/// Whether a program contains at least one `.insert(...)` expression.
+/// Whether a program contains at least one `.insert(…)`, `.update(…)` or
+/// `.delete(…)` expression.
 ///
 /// Used by parameter binding to refuse a read pipeline before it can enter the
 /// DML executor. Broader than [`is_write_program`], which only recognizes the
 /// zero-argument `Type { … }.insert()` shape consumed by `prepare`.
-pub(crate) fn has_insert_expr(program: &VosProgram) -> bool {
-    let is_insert = |expr: &VosExpr| {
-        matches!(
-            expr,
-            VosExpr::Call {
-                callee,
-                ..
-            } if matches!(callee.as_ref(), VosExpr::Member { name, .. } if name == "insert")
-        )
-    };
-    program.statements.iter().any(|stmt| matches!(stmt, VosStmt::Expr(expr) if is_insert(expr)))
-        || program.result.as_ref().is_some_and(is_insert)
+pub(crate) fn has_write_call(program: &VosProgram) -> bool {
+    program.statements.iter().any(|stmt| matches!(stmt, VosStmt::Expr(expr) if is_write_call(expr)))
+        || program.result.as_ref().is_some_and(is_write_call)
 }
 
 fn is_macro_call(expr: &VosExpr) -> bool {
@@ -248,19 +264,132 @@ fn is_macro_call(expr: &VosExpr) -> bool {
     )
 }
 
-fn is_typed_object_insert(expr: &VosExpr) -> bool {
+/// Whether `expr` is `.insert(…)`, `.update(…)` or `.delete(…)`.
+fn is_write_call(expr: &VosExpr) -> bool {
     matches!(
         expr,
         VosExpr::Call {
             callee,
-            args,
             ..
-        } if args.is_empty()
-            && matches!(
-                callee.as_ref(),
-                VosExpr::Member { name, .. } if name == "insert"
-            )
+        } if matches!(
+            callee.as_ref(),
+            VosExpr::Member { name, .. } if matches!(name.as_str(), "insert" | "update" | "delete")
+        )
     )
+}
+
+fn apply_write(
+    expr: &VosExpr,
+    contract: &ResolvedContract,
+    constraints: &[TableUniqueConstraint],
+    records: &mut BTreeMap<String, Vec<u8>>,
+    bindings: &[(String, VosExpr)],
+    params: &[Value],
+) -> Result<()> {
+    let VosExpr::Call { callee, .. } = expr
+    else {
+        return Err(dml_error("Phase 1 execute expects a write expression"));
+    };
+    let VosExpr::Member { name, .. } = callee.as_ref()
+    else {
+        return Err(dml_error("Phase 1 execute expects a write expression"));
+    };
+    match name.as_str() {
+        "insert" => apply_insert(expr, contract, constraints, records, bindings, params),
+        "update" => {
+            let (table, pk_text, patch) = lower_keyed_write(expr, contract, "update", bindings, params)?;
+            apply_update(contract, constraints, records, &table, &pk_text, &patch)
+        }
+        "delete" => {
+            let (table, pk_text, _) = lower_keyed_write(expr, contract, "delete", bindings, params)?;
+            apply_delete(contract, records, &table, &pk_text)
+        }
+        _ => Err(Error::Unsupported("Phase 1 execute supports `.insert()`, `.update()` and `.delete()` only")),
+    }
+}
+
+/// Lower `Type::update({ … })` / `Type::delete({ … })` to a table, primary key
+/// text and the object argument.
+fn lower_keyed_write(
+    expr: &VosExpr,
+    contract: &ResolvedContract,
+    verb: &str,
+    bindings: &[(String, VosExpr)],
+    params: &[Value],
+) -> Result<(String, String, QueryRow)> {
+    let VosExpr::Call { callee, args, .. } = expr
+    else {
+        return Err(dml_error("Phase 1 execute expects a write expression"));
+    };
+    let VosExpr::Member { object, .. } = callee.as_ref()
+    else {
+        return Err(dml_error("Phase 1 execute expects a write expression"));
+    };
+    let table = match object.as_ref() {
+        VosExpr::Name { name, .. } => name.clone(),
+        _ => {
+            return Err(Error::Unsupported(
+                "Phase 1 keyed writes target a table type (`Type::update({ … })` or `Type::delete({ … })`), not a \
+                 filtered query",
+            ));
+        }
+    };
+    if args.len() != 1 {
+        return Err(Error::Unsupported("Phase 1 keyed writes require exactly one plain object argument"));
+    }
+    let entry = table_type_by_name(contract, &table)?;
+    let VosExpr::AnonObject { fields, .. } = expand_bindings(&args[0], bindings)?
+    else {
+        return Err(Error::Unsupported(
+            "Phase 1 keyed writes require a plain `{ … }` object, not a lambda or projection",
+        ));
+    };
+    let object = lower_field_inits(entry, &fields, params)?;
+    let pk_field = primary_field_name(entry)?;
+    let pk = object
+        .get(pk_field)
+        .ok_or_else(|| dml_error(format!("`.{verb}()` object must carry the primary key field `{pk_field}`")))?;
+    let pk_text = constraints::value_text(pk)?;
+    Ok((table, pk_text, object))
+}
+
+fn apply_update(
+    contract: &ResolvedContract,
+    constraints: &[TableUniqueConstraint],
+    records: &mut BTreeMap<String, Vec<u8>>,
+    table: &str,
+    pk_text: &str,
+    patch: &QueryRow,
+) -> Result<()> {
+    let entry = table_type_by_name(contract, table)?;
+    let pk_field = primary_field_name(entry)?;
+    let storage_name = table_storage_name(entry)?.to_string();
+    let mut merged = {
+        if !records.contains_key(&store::row_key(&storage_name, pk_text)) {
+            return Err(dml_error(format!("update target `{table}` primary key `{pk_text}` does not exist")));
+        }
+        store::load_row(records, &storage_name, pk_text)?
+    };
+    for (field, value) in patch {
+        merged.insert(field.clone(), value.clone());
+    }
+    constraints::check(records, constraints, &storage_name, pk_field, pk_text, &merged)?;
+    store::upsert_row(records, &storage_name, pk_text, &merged)
+}
+
+fn apply_delete(
+    contract: &ResolvedContract,
+    records: &mut BTreeMap<String, Vec<u8>>,
+    table: &str,
+    pk_text: &str,
+) -> Result<()> {
+    let entry = table_type_by_name(contract, table)?;
+    let storage_name = table_storage_name(entry)?.to_string();
+    // The object argument may carry more than the key, but only the key is
+    // matched, so a stale caller still deletes exactly one row and a key that
+    // is already gone is a no-op.
+    store::remove_row(records, &store::row_key(&storage_name, pk_text));
+    Ok(())
 }
 
 fn apply_insert(
