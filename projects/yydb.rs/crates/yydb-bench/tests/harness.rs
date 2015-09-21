@@ -10,7 +10,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use yydb_bench::{BenchConfig, run};
 
 fn small_config() -> BenchConfig {
-    BenchConfig { rows: 400, point_ops: 200, range_scans: 8, range_len: 25, batch_size: 50, single_inserts: 20, value_bytes: 32 }
+    BenchConfig {
+        rows: 400,
+        point_ops: 200,
+        range_scans: 8,
+        range_len: 25,
+        batch_size: 50,
+        single_inserts: 20,
+        value_bytes: 32,
+    }
 }
 
 fn temp_dir(label: &str) -> std::path::PathBuf {

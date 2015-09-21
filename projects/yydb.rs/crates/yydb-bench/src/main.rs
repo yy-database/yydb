@@ -4,8 +4,7 @@
 //! [--batch-size N] [--single-inserts N] [--value-bytes N] [--dir PATH]
 //! [--baseline-out PATH]`
 
-use std::io::Write;
-use std::path::PathBuf;
+use std::{io::Write, path::PathBuf};
 
 use yydb_bench::{Baseline, BenchConfig, run};
 
@@ -30,7 +29,9 @@ fn main() {
             "--single-inserts" => config.single_inserts = value(),
             "--value-bytes" => config.value_bytes = value(),
             "--dir" => dir = PathBuf::from(args.next().unwrap_or_else(|| panic!("--dir expects a path"))),
-            "--baseline-out" => baseline_out = Some(PathBuf::from(args.next().unwrap_or_else(|| panic!("--baseline-out expects a path")))),
+            "--baseline-out" => {
+                baseline_out = Some(PathBuf::from(args.next().unwrap_or_else(|| panic!("--baseline-out expects a path"))))
+            }
             other => panic!("unknown argument `{other}`"),
         }
     }
@@ -52,12 +53,16 @@ fn print_report(baseline: &Baseline) {
     let config = &baseline.config;
     println!(
         "yydb-bench · os={} · rows={} · point-ops={} · range={}x{} · batch={} · single={} · value={}B",
-        baseline.os, config.rows, config.point_ops, config.range_scans, config.range_len, config.batch_size, config.single_inserts, config.value_bytes
+        baseline.os,
+        config.rows,
+        config.point_ops,
+        config.range_scans,
+        config.range_len,
+        config.batch_size,
+        config.single_inserts,
+        config.value_bytes
     );
-    println!(
-        "{:<24} {:>14} {:>14} {:>10}",
-        "workload", "yydb", "sqlite", "yydb/sqlite"
-    );
+    println!("{:<24} {:>14} {:>14} {:>10}", "workload", "yydb", "sqlite", "yydb/sqlite");
     row("batch load (ns)", baseline.yydb.batch_load_ns, baseline.sqlite.batch_load_ns);
     row("single insert (ns/op)", baseline.yydb.single_insert_ns_per_op, baseline.sqlite.single_insert_ns_per_op);
     row("point get cold (ns/op)", baseline.yydb.point_get_ns_per_op, baseline.sqlite.point_get_ns_per_op);

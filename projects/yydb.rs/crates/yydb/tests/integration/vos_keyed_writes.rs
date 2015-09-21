@@ -107,9 +107,7 @@ fn failed_keyed_update_leaves_the_row_unchanged() {
     conn.execute_vos_write(&insert(1, "alpha", "Alpha")).unwrap();
     conn.execute_vos_write(&insert(2, "beta", "Beta")).unwrap();
 
-    let error = conn
-        .execute_vos_write(&update(2, r#"slug: "alpha""#))
-        .expect_err("a unique conflict must fail the patch");
+    let error = conn.execute_vos_write(&update(2, r#"slug: "alpha""#)).expect_err("a unique conflict must fail the patch");
     assert!(matches!(error, Error::UniqueViolation { .. }), "unexpected error: {error}");
 
     let rows = conn.query_vos("Doc.all().collect()").unwrap();

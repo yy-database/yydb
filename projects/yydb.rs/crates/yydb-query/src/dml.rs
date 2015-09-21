@@ -340,9 +340,7 @@ fn lower_keyed_write(
     let entry = table_type_by_name(contract, &table)?;
     let VosExpr::AnonObject { fields, .. } = expand_bindings(&args[0], bindings)?
     else {
-        return Err(Error::Unsupported(
-            "Phase 1 keyed writes require a plain `{ … }` object, not a lambda or projection",
-        ));
+        return Err(Error::Unsupported("Phase 1 keyed writes require a plain `{ … }` object, not a lambda or projection"));
     };
     let object = lower_field_inits(entry, &fields, params)?;
     let pk_field = primary_field_name(entry)?;

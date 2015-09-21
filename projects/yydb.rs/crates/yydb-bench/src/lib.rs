@@ -8,8 +8,7 @@
 //! across machines and builds. Compare engines within one run, or compare
 //! runs on the same machine.
 
-use std::path::Path;
-use std::time::Instant;
+use std::{path::Path, time::Instant};
 
 use serde::Serialize;
 use yydb::Value;
@@ -35,7 +34,15 @@ pub struct BenchConfig {
 
 impl Default for BenchConfig {
     fn default() -> Self {
-        Self { rows: 20_000, point_ops: 10_000, range_scans: 200, range_len: 100, batch_size: 1_000, single_inserts: 200, value_bytes: 64 }
+        Self {
+            rows: 20_000,
+            point_ops: 10_000,
+            range_scans: 200,
+            range_len: 100,
+            batch_size: 1_000,
+            single_inserts: 200,
+            value_bytes: 64,
+        }
     }
 }
 
@@ -165,13 +172,13 @@ fn yydb_insert(conn: &yydb::Connection, index: usize, cfg: &BenchConfig) -> Resu
 }
 
 fn yydb_point_pass(conn: &yydb::Connection, cfg: &BenchConfig, context: &str) -> Result<u128, String> {
-    let statement = conn.prepare_sql("SELECT payload FROM Bench WHERE id = ?1").map_err(|e| format!("{context} prepare: {e}"))?;
+    let statement =
+        conn.prepare_sql("SELECT payload FROM Bench WHERE id = ?1").map_err(|e| format!("{context} prepare: {e}"))?;
     let started = Instant::now();
     for op in 0..cfg.point_ops {
         let index = (op * 7919) % cfg.rows.max(1);
-        let rows = conn
-            .query_prepared_ordered(&statement, &[Value::Text(key_at(index))])
-            .map_err(|e| format!("{context}: {e}"))?;
+        let rows =
+            conn.query_prepared_ordered(&statement, &[Value::Text(key_at(index))]).map_err(|e| format!("{context}: {e}"))?;
         if rows.len() != 1 {
             return Err(format!("{context} returned {} rows for `{}`", rows.len(), key_at(index)));
         }
@@ -190,9 +197,7 @@ fn yydb_range_pass(conn: &yydb::Connection, cfg: &BenchConfig) -> Result<u128, S
         let end_index = (start_index + cfg.range_len).min(cfg.rows);
         let from = Value::Text(key_at(start_index));
         let to = Value::Text(key_at(end_index));
-        let rows = conn
-            .query_prepared_ordered(&statement, &[from, to])
-            .map_err(|e| format!("yydb range scan: {e}"))?;
+        let rows = conn.query_prepared_ordered(&statement, &[from, to]).map_err(|e| format!("yydb range scan: {e}"))?;
         if rows.len() != end_index - start_index {
             return Err(format!("yydb range scan returned {} rows, expected {}", rows.len(), end_index - start_index));
         }
@@ -239,7 +244,8 @@ fn run_sqlite(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
     let reopened = rusqlite::Connection::open(&path).map_err(|e| format!("sqlite reopen: {e}"))?;
     for op in 0..100usize {
         let index = (op * 7919) % cfg.rows.max(1);
-        let mut statement = reopened.prepare("SELECT payload FROM Bench WHERE id = ?1").map_err(|e| format!("sqlite reopen prepare: {e}"))?;
+        let mut statement =
+            reopened.prepare("SELECT payload FROM Bench WHERE id = ?1").map_err(|e| format!("sqlite reopen prepare: {e}"))?;
         let count = count_rows(&mut statement, rusqlite::params![key_at(index)], "sqlite reopen point get")?;
         if count != 1 {
             return Err(format!("sqlite reopen point get returned {count} rows"));
@@ -260,13 +266,17 @@ fn run_sqlite(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
 }
 
 fn sqlite_insert(conn: &rusqlite::Connection, index: usize, cfg: &BenchConfig) -> Result<(), String> {
-    conn.execute("INSERT INTO Bench (id, payload) VALUES (?1, ?2)", rusqlite::params![key_at(index), value_at(index, cfg.value_bytes)])
-        .map_err(|e| format!("sqlite insert `{}`: {e}", key_at(index)))?;
+    conn.execute(
+        "INSERT INTO Bench (id, payload) VALUES (?1, ?2)",
+        rusqlite::params![key_at(index), value_at(index, cfg.value_bytes)],
+    )
+    .map_err(|e| format!("sqlite insert `{}`: {e}", key_at(index)))?;
     Ok(())
 }
 
 fn sqlite_point_pass(conn: &rusqlite::Connection, cfg: &BenchConfig, context: &str) -> Result<u128, String> {
-    let mut statement = conn.prepare("SELECT payload FROM Bench WHERE id = ?1").map_err(|e| format!("{context} prepare: {e}"))?;
+    let mut statement =
+        conn.prepare("SELECT payload FROM Bench WHERE id = ?1").map_err(|e| format!("{context} prepare: {e}"))?;
     let started = Instant::now();
     for op in 0..cfg.point_ops {
         let index = (op * 7919) % cfg.rows.max(1);

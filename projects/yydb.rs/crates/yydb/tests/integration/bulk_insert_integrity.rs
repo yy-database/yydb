@@ -62,7 +62,12 @@ fn delete_journal_bulk_inserts_keep_every_row() {
     let total = 2_000usize;
     load(&conn, total);
     let missing = missing_keys(&conn, total);
-    assert!(missing.is_empty(), "lost {} rows (delete journal), first missing: {:?}", missing.len(), &missing[..missing.len().min(8)]);
+    assert!(
+        missing.is_empty(),
+        "lost {} rows (delete journal), first missing: {:?}",
+        missing.len(),
+        &missing[..missing.len().min(8)]
+    );
     conn.close();
     let _ = std::fs::remove_file(&path);
 }
@@ -76,13 +81,23 @@ fn durable_bulk_inserts_keep_every_row_across_reopen() {
     let total = 2_000usize;
     load(&conn, total);
     let missing = missing_keys(&conn, total);
-    assert!(missing.is_empty(), "lost {} rows before reopen, first missing: {:?}", missing.len(), &missing[..missing.len().min(8)]);
+    assert!(
+        missing.is_empty(),
+        "lost {} rows before reopen, first missing: {:?}",
+        missing.len(),
+        &missing[..missing.len().min(8)]
+    );
     conn.close();
     drop(conn);
 
     let reopened = Connection::open_with_flags(&path, yydb::OpenFlags::wal()).expect("reopen");
     let missing = missing_keys(&reopened, total);
-    assert!(missing.is_empty(), "lost {} rows after reopen, first missing: {:?}", missing.len(), &missing[..missing.len().min(8)]);
+    assert!(
+        missing.is_empty(),
+        "lost {} rows after reopen, first missing: {:?}",
+        missing.len(),
+        &missing[..missing.len().min(8)]
+    );
     reopened.close();
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(std::env::temp_dir().join(format!("yydb-bulk-integrity-{nonce}.yydb{suffix}")));

@@ -331,9 +331,7 @@ fn index_deletes_emptying_leaves_keep_extract_max_safe() {
     let mut writer = SqliteWriter::create(4096).expect("create database");
     let mut id = column("id", "INTEGER");
     id.primary_key = true;
-    writer
-        .create_table("t", &[id, column("a", "INTEGER"), column("b", "TEXT"), column("c", "REAL")])
-        .expect("create table");
+    writer.create_table("t", &[id, column("a", "INTEGER"), column("b", "TEXT"), column("c", "REAL")]).expect("create table");
     writer.create_index("t_a", "t", &["a".to_string()], false).expect("create index a");
     writer.create_index("t_b", "t", &["b".to_string()], false).expect("create index b");
     writer.create_index("t_c", "t", &["c".to_string()], false).expect("create index c");
@@ -354,7 +352,11 @@ fn index_deletes_emptying_leaves_keep_extract_max_safe() {
     for n in 0..rows / 20 {
         let index = n * 613 % rows + 1;
         writer
-            .update("t", index, &[UpdateValue::Keep, UpdateValue::Set(WriteValue::Integer(index + 1)), UpdateValue::Keep, UpdateValue::Keep])
+            .update(
+                "t",
+                index,
+                &[UpdateValue::Keep, UpdateValue::Set(WriteValue::Integer(index + 1)), UpdateValue::Keep, UpdateValue::Keep],
+            )
             .expect("update");
     }
     let mut deleted = 0i64;

@@ -59,8 +59,8 @@ pub(crate) fn diagnose(
     // the gap below is reported as `missing_blob` instead of failing the probe.
     // Reclamation keeps the strict scan and refuses to delete anything.
     let referenced = refs::referenced_hashes_tolerant(records, "", objects)?;
-    let single_file_layout = objects.is_embedded()
-        && file_path.is_some_and(|path| path.extension().and_then(|ext| ext.to_str()) != Some("yydx"));
+    let single_file_layout =
+        objects.is_embedded() && file_path.is_some_and(|path| path.extension().and_then(|ext| ext.to_str()) != Some("yydx"));
     if objects.persist_to_disk() {
         // 1. Raw `yydb:object:` prefixes — carry the owning key as a hint so
         //    operators can jump straight to the broken record.
@@ -128,8 +128,7 @@ pub(crate) fn diagnose(
             key_hint: None,
         });
     }
-    let orphans: Vec<ObjectRef> =
-        stored_objects.into_iter().filter(|object| !referenced.contains(&object.hash)).collect();
+    let orphans: Vec<ObjectRef> = stored_objects.into_iter().filter(|object| !referenced.contains(&object.hash)).collect();
     let orphan_object_count = orphans.len() as u64;
 
     let namespaces = collect_namespace_stats(records);

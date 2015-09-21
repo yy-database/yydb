@@ -511,10 +511,12 @@ impl ObjectStore {
         if self.persist_to_disk() {
             return Ok(());
         }
-        let catalog: Vec<ObjectRef> =
-            self.catalog.lock().unwrap_or_else(|p| p.into_inner()).values().cloned().collect();
+        let catalog: Vec<ObjectRef> = self.catalog.lock().unwrap_or_else(|p| p.into_inner()).values().cloned().collect();
         for object in catalog {
-            let Some(bytes) = self.local_payload(&object) else { continue };
+            let Some(bytes) = self.local_payload(&object)
+            else {
+                continue;
+            };
             let hash_hex = object.hash_hex();
             let meta_key = format!("{EMBEDDED_OBJECT_PREFIX}{hash_hex}/meta");
             records.entry(meta_key).or_insert_with(|| format!("{}:{}", object.kind.as_str(), object.size).into_bytes());
@@ -535,14 +537,16 @@ impl ObjectStore {
         if self.persist_to_disk() {
             return Ok(());
         }
-        let keys: Vec<String> =
-            records.keys().filter(|key| key.starts_with(EMBEDDED_OBJECT_PREFIX)).cloned().collect();
+        let keys: Vec<String> = records.keys().filter(|key| key.starts_with(EMBEDDED_OBJECT_PREFIX)).cloned().collect();
         if keys.is_empty() {
             return Ok(());
         }
         let mut groups: BTreeMap<String, EmbeddedGroup> = BTreeMap::new();
         for key in keys {
-            let Some(value) = records.remove(&key) else { continue };
+            let Some(value) = records.remove(&key)
+            else {
+                continue;
+            };
             let rest = &key[EMBEDDED_OBJECT_PREFIX.len()..];
             let (hash_hex, part) = rest.split_once('/').ok_or(Error::Corrupt("embedded object key is malformed"))?;
             let group = groups.entry(hash_hex.to_owned()).or_default();
@@ -550,8 +554,7 @@ impl ObjectStore {
                 group.meta = Some(decode_embedded_meta(&value)?);
             }
             else {
-                let index: usize =
-                    part.parse().map_err(|_| Error::Corrupt("embedded object chunk index is not a number"))?;
+                let index: usize = part.parse().map_err(|_| Error::Corrupt("embedded object chunk index is not a number"))?;
                 group.chunks.insert(index, value);
             }
         }

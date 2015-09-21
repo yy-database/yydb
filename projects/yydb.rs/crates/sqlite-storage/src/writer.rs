@@ -535,7 +535,14 @@ impl SqliteWriter {
         Ok(out)
     }
 
-    fn insert_master_row(&mut self, kind: &str, name: &str, table_name: &str, root_page: u32, sql: Option<&str>) -> Result<i64> {
+    fn insert_master_row(
+        &mut self,
+        kind: &str,
+        name: &str,
+        table_name: &str,
+        root_page: u32,
+        sql: Option<&str>,
+    ) -> Result<i64> {
         let rowid = self.max_rowid(1)?.saturating_add(1);
         let sql_value = match sql {
             Some(text) => WriteValue::Text(text.to_string()),
@@ -629,9 +636,8 @@ impl SqliteWriter {
                         .filter(|(index, column)| (column.primary_key || column.unique) && Some(*index) != rowid_alias)
                         .map(|(index, _)| index)
                         .collect();
-                    let position = *constraint_columns
-                        .get(number - 1)
-                        .ok_or(Error::Corrupt("sqlite autoindex number out of range"))?;
+                    let position =
+                        *constraint_columns.get(number - 1).ok_or(Error::Corrupt("sqlite autoindex number out of range"))?;
                     (vec![position], true)
                 }
             };
@@ -959,8 +965,7 @@ impl SqliteWriter {
                 self.rebuild_leaf(new_root, PAGE_TABLE_INTERIOR, &cells);
                 let offset = self.page_offset(new_root);
                 let header_relative = Self::header_offset(new_root);
-                self.pages[offset + header_relative + 8..offset + header_relative + 12]
-                    .copy_from_slice(&left.to_be_bytes());
+                self.pages[offset + header_relative + 8..offset + header_relative + 12].copy_from_slice(&left.to_be_bytes());
                 Ok(new_root)
             }
             None => Ok(page),
@@ -1407,8 +1412,7 @@ impl SqliteWriter {
                 self.rebuild_leaf(new_root, PAGE_INDEX_INTERIOR, &cells);
                 let offset = self.page_offset(new_root);
                 let header_relative = Self::header_offset(new_root);
-                self.pages[offset + header_relative + 8..offset + header_relative + 12]
-                    .copy_from_slice(&left.to_be_bytes());
+                self.pages[offset + header_relative + 8..offset + header_relative + 12].copy_from_slice(&left.to_be_bytes());
                 Ok(new_root)
             }
             None => Ok(root),
@@ -1555,7 +1559,6 @@ impl SqliteWriter {
         Ok(Some(IndexSplit { dividers: vec![moved_payload], pages: vec![right_page] }))
     }
 
-
     fn index_leaf_entries(&self, page: u32) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let offset = self.page_offset(page);
         let header_relative = Self::header_offset(page);
@@ -1625,7 +1628,8 @@ impl SqliteWriter {
     ) -> Result<bool> {
         let wanted = decode_record(key, TextEncoding::Utf8, Default::default())
             .map_err(|_| Error::Corrupt("sqlite index record decode failed"))?;
-        let Some(entries) = self.index_entries.get(&master_rowid) else {
+        let Some(entries) = self.index_entries.get(&master_rowid)
+        else {
             return Ok(false);
         };
         for payload in entries {
