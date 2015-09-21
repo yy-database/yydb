@@ -5,7 +5,7 @@ use vos::syntax::{VosBinaryOp, VosExpr, VosFieldInit, VosLiteral, VosProgram, Vo
 use yydb_types::{Error, Result};
 
 use super::{
-    ops::{BoundValue, CmpOp, CountExpr, Pred, ProjectExpr, ProjectField, QueryOp, SortKey},
+    ops::{BoundValue, CmpOp, CountExpr, Pred, ProjectExpr, ProjectField, QueryOp, SortKey, TextOp},
     params::ParameterDescriptor,
 };
 
@@ -210,6 +210,33 @@ fn lower_pred_body(expr: &VosExpr, param: Option<&str>, parameters: &[ParameterD
                 _ => return Err(query_error("unsupported comparison in filter")),
             };
             Ok(Pred::FieldCmp { path, op: cmp, value })
+        }
+        VosExpr::Call { callee, args, .. } => {
+            let VosExpr::Member { object, name, .. } = callee.as_ref()
+            else {
+                return Err(query_error("unsupported call shape in a filter predicate"));
+            };
+            let op = match name.as_str() {
+                "contains" => TextOp::Contains,
+                "startsWith" => TextOp::StartsWith,
+                "endsWith" => TextOp::EndsWith,
+                other => return Err(query_error(format!("unsupported predicate method `.{other}`"))),
+            };
+            if args.len() != 1 {
+                return Err(query_error(format!("`.{name}()` requires exactly one text argument")));
+            }
+            let path = lower_field_path(object, param)?;
+            if path.is_empty() {
+                return Err(query_error(format!("`.{name}()` requires a field access on the left")));
+            }
+            let value = match &args[0] {
+                VosExpr::Literal(VosLiteral::String(text)) => BoundValue::Literal(Value::Text(text.clone())),
+                VosExpr::Name { name, .. } => name_to_slot(name, parameters)?,
+                _ => {
+                    return Err(query_error(format!("`.{name}()` requires a text literal or parameter as its argument")));
+                }
+            };
+            Ok(Pred::TextTest { path, op, value })
         }
         _ => {
             let path = lower_field_path(expr, param)?;

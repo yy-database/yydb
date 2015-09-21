@@ -164,6 +164,31 @@ test("Phase-1 filters accept boolean field paths and `==` / `>` comparisons", as
     });
 });
 
+test("text predicates compare Unicode code points without folding or normalizing", async () => {
+    await seededDatabase(async (database) => {
+        const contains = await database.query<{ p_id: number }>('P.all().filter(x => x.name.contains("elt")).collect()');
+        assert.deepEqual(contains.map((row) => row.p_id), [1]);
+
+        const starts = await database.query<{ p_id: number }>('P.all().filter(x => x.name.startsWith("ch")).collect()');
+        assert.deepEqual(starts.map((row) => row.p_id), [3]);
+
+        const ends = await database.query<{ p_id: number }>('P.all().filter(x => x.name.endsWith("ha")).collect()');
+        assert.deepEqual(ends.map((row) => row.p_id), [2]);
+
+        const cased = await database.query<{ p_id: number }>('P.all().filter(x => x.name.startsWith("Delta")).collect()');
+        assert.deepEqual(cased, [], "matching is case sensitive");
+    });
+});
+
+test("a text predicate on a non-text field is refused instead of matching nothing", async () => {
+    await seededDatabase(async (database) => {
+        const rejection = await rejectDiagnostic(() => database.query('P.all().filter(x => x.score.contains("3")).collect()'));
+        assert.equal(rejection.code, "yydb.schema.invalid");
+        assert.match(rejection.message, /requires a text field/);
+        assert.match(rejection.message, /`score`/);
+    });
+});
+
 test("ordering and windowing pipelines run over the seeded rows", async () => {
     await seededDatabase(async (database) => {
         const ascending = await database.query<{ p_id: number }>("P.all().sort_by(x => x.score).collect()");
@@ -192,10 +217,9 @@ test("unsupported pipeline spellings are refused with stable diagnostics", async
     await seededDatabase(async (database) => {
         const rejections: ReadonlyArray<readonly [string, RegExp]> = [
             ["P.all().sortBy(x => x.score).collect()", /unsupported pipeline method/],
-            ["P.all().filter(x => x.name.eq(\"alpha\")).collect()", /field paths rooted at the lambda parameter/],
-            ["P.all().filter(x => x.name.startsWith(\"d\")).collect()", /field paths rooted at the lambda parameter/],
+            ["P.all().filter(x => x.name.eq(\"alpha\")).collect()", /unsupported predicate method/],
             ["P.all().filter(x => !x.active).collect()", /field paths rooted at the lambda parameter/],
-            ["P.all().filter(x => x.active && x.score.gt(15)).collect()", /field paths rooted at the lambda parameter/],
+            ["P.all().filter(x => x.active && x.score.gt(15)).collect()", /unsupported predicate method/],
             ["P.all().map(x => x.{ label: name }).collect()", /field paths rooted at the lambda parameter/],
         ];
         for (const [source, pattern] of rejections) {

@@ -16,7 +16,7 @@ use super::{
     lower,
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, CountExpr, Expr, JoinKind, OUTER_ROW_MARKER, Pred, ProjectExpr,
-        ProjectField, QueryOp, QueryRow, ScalarFunction, SetOpKind, WindowField, WindowFrame, WindowFrameBound,
+        ProjectField, QueryOp, QueryRow, ScalarFunction, SetOpKind, TextOp, WindowField, WindowFrame, WindowFrameBound,
         WindowFrameUnit, WindowFunction,
     },
     resolve, store,
@@ -181,9 +181,16 @@ fn execute_ops_in(
                 }
                 else {
                     let predicate = resolve_subquery_predicates_in(predicate, contract, records, bound_values, None)?;
-                    rows.retain(|row| {
-                        eval_pred_in(&predicate, row, table, contract, records, bound_values, outer) == Some(true)
-                    });
+                    // A predicate that cannot be evaluated against a value at all
+                    // aborts the query, so retention is a loop rather than a
+                    // `retain` closure that has no way to propagate the error.
+                    let mut kept: Vec<QueryRow> = Vec::with_capacity(rows.len());
+                    for row in std::mem::take(&mut rows) {
+                        if eval_pred_in(&predicate, &row, table, contract, records, bound_values, outer)? == Some(true) {
+                            kept.push(row);
+                        }
+                    }
+                    rows = kept;
                 }
             }
             QueryOp::Join { kind, right, right_alias, on } => {
@@ -544,7 +551,7 @@ fn eval_pred_for_row(
     else {
         resolve_subquery_predicates_in(predicate, contract, records, bound_values, None)?
     };
-    Ok(eval_pred_in(&predicate, row, table, contract, records, bound_values, outer) == Some(true))
+    Ok(eval_pred_in(&predicate, row, table, contract, records, bound_values, outer)? == Some(true))
 }
 
 /// Run one subquery pipeline.
@@ -569,6 +576,15 @@ fn execute_subquery(
     execute_ops_in(ops, contract, records, bound_values, Some(outer))
 }
 
+/// Author-facing method name of a [`TextOp`], used in diagnostics.
+fn text_op_name(op: TextOp) -> &'static str {
+    match op {
+        TextOp::Contains => "contains",
+        TextOp::StartsWith => "startsWith",
+        TextOp::EndsWith => "endsWith",
+    }
+}
+
 pub(crate) fn eval_pred(
     pred: &Pred,
     row: &QueryRow,
@@ -576,8 +592,8 @@ pub(crate) fn eval_pred(
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
-) -> bool {
-    eval_pred_in(pred, row, table, contract, records, bound_values, None) == Some(true)
+) -> Result<bool> {
+    Ok(eval_pred_in(pred, row, table, contract, records, bound_values, None)? == Some(true))
 }
 
 /// Evaluate one predicate to SQL three-valued logic.
@@ -585,6 +601,10 @@ pub(crate) fn eval_pred(
 /// `Some(true)` keeps a row, `Some(false)` and `None` (unknown) both drop it
 /// from a `WHERE` clause, but the distinction matters under `NOT`: negating
 /// unknown stays unknown instead of turning it into `TRUE`.
+///
+/// A predicate that cannot be evaluated against a value at all — such as a
+/// text test on a non-text column — returns `Err` instead of pretending the
+/// row did not match.
 fn eval_pred_in(
     pred: &Pred,
     row: &QueryRow,
@@ -593,8 +613,8 @@ fn eval_pred_in(
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
-) -> Option<bool> {
-    match pred {
+) -> Result<Option<bool>> {
+    Ok(match pred {
         Pred::True => Some(true),
         Pred::False => Some(false),
         // A bare boolean value is unknown when the field is `NULL`, so
@@ -604,7 +624,7 @@ fn eval_pred_in(
             let right = match resolve_bound_value(value, bound_values) {
                 Ok(v) => v,
                 // An unresolved slot is unknown rather than a guessed value.
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             match (&left, &right) {
                 (Value::Bool(a), Value::Bool(b)) => Some(a == b),
@@ -618,28 +638,58 @@ fn eval_pred_in(
             let left = read_path(path, row, table, contract, records, outer);
             let right = match resolve_bound_value(value, bound_values) {
                 Ok(v) => v,
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             cmp_values(&left, *op, &right)
+        }
+        // Text tests are exact on code points. A `NULL` field is unknown, and a
+        // value of any other type is refused: a query that asks for text cannot
+        // silently treat `7` as "does not contain".
+        Pred::TextTest { path, op, value } => {
+            let needle = resolve_bound_value(value, bound_values)?;
+            let Value::Text(needle) = needle
+            else {
+                return Err(query_runtime_error(format!(
+                    "`.{}()` requires a text argument, but it received a `{}` value",
+                    text_op_name(*op),
+                    needle.kind()
+                )));
+            };
+            match read_path(path, row, table, contract, records, outer) {
+                Value::Text(text) => Some(match op {
+                    TextOp::Contains => text.contains(needle.as_str()),
+                    TextOp::StartsWith => text.starts_with(needle.as_str()),
+                    TextOp::EndsWith => text.ends_with(needle.as_str()),
+                }),
+                Value::Null => None,
+                other => {
+                    return Err(query_runtime_error(format!(
+                        "`.{}()` requires a text field, but `{}` holds a `{}` value",
+                        text_op_name(*op),
+                        path.join("."),
+                        other.kind()
+                    )));
+                }
+            }
         }
         // A join condition is a SQL comparison: either side `NULL` is unknown.
         Pred::FieldCmpField { left_path, op, right_path } => {
             let left = read_path(left_path, row, table, contract, records, outer);
             let right = read_path(right_path, row, table, contract, records, outer);
             if matches!(left, Value::Null) || matches!(right, Value::Null) {
-                return None;
+                return Ok(None);
             }
             cmp_values(&left, *op, &right)
         }
         Pred::And(left, right) => truth_and(
-            eval_pred_in(left, row, table, contract, records, bound_values, outer),
-            eval_pred_in(right, row, table, contract, records, bound_values, outer),
+            eval_pred_in(left, row, table, contract, records, bound_values, outer)?,
+            eval_pred_in(right, row, table, contract, records, bound_values, outer)?,
         ),
         Pred::Or(left, right) => truth_or(
-            eval_pred_in(left, row, table, contract, records, bound_values, outer),
-            eval_pred_in(right, row, table, contract, records, bound_values, outer),
+            eval_pred_in(left, row, table, contract, records, bound_values, outer)?,
+            eval_pred_in(right, row, table, contract, records, bound_values, outer)?,
         ),
-        Pred::Not(inner) => eval_pred_in(inner, row, table, contract, records, bound_values, outer).map(|truth| !truth),
+        Pred::Not(inner) => eval_pred_in(inner, row, table, contract, records, bound_values, outer)?.map(|truth| !truth),
         Pred::InSet { path, values, negated } => {
             let left = read_path(path, row, table, contract, records, outer);
             in_set_truth(&left, values).map(|truth| truth != *negated)
@@ -649,7 +699,7 @@ fn eval_pred_in(
         Pred::FieldCmpScalar { path, op, value } => {
             let left = read_path(path, row, table, contract, records, outer);
             if matches!(left, Value::Null) || matches!(value, Value::Null) {
-                return None;
+                return Ok(None);
             }
             cmp_values(&left, *op, value)
         }
@@ -657,14 +707,14 @@ fn eval_pred_in(
         Pred::ExprCmp { expr, op, value } => {
             let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             let right = match resolve_bound_value(value, bound_values) {
                 Ok(v) => v,
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             if matches!(left, Value::Null) || matches!(right, Value::Null) {
-                return None;
+                return Ok(None);
             }
             cmp_values(&left, *op, &right)
         }
@@ -673,7 +723,7 @@ fn eval_pred_in(
         Pred::ExprIsNull { expr, negated } => {
             let value = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             let is_null = matches!(value, Value::Null);
             Some(if *negated { !is_null } else { is_null })
@@ -683,7 +733,7 @@ fn eval_pred_in(
         Pred::ExprIsTruth { expr, value, negated } => {
             let evaluated = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             let matches_value = matches!((&evaluated, value), (Value::Bool(actual), expected) if actual == expected);
             Some(if *negated { !matches_value } else { matches_value })
@@ -692,21 +742,27 @@ fn eval_pred_in(
         Pred::ExprBetween { expr, low, high, negated } => {
             let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             let low = match resolve_bound_value(low, bound_values) {
                 Ok(v) => v,
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             let high = match resolve_bound_value(high, bound_values) {
                 Ok(v) => v,
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             if matches!(left, Value::Null) || matches!(low, Value::Null) || matches!(high, Value::Null) {
-                return None;
+                return Ok(None);
             }
-            let above_low = cmp_values(&left, CmpOp::Ge, &low)?;
-            let below_high = cmp_values(&left, CmpOp::Le, &high)?;
+            let Some(above_low) = cmp_values(&left, CmpOp::Ge, &low)
+            else {
+                return Ok(None);
+            };
+            let Some(below_high) = cmp_values(&left, CmpOp::Le, &high)
+            else {
+                return Ok(None);
+            };
             let in_range = above_low && below_high;
             Some(if *negated { !in_range } else { in_range })
         }
@@ -715,13 +771,13 @@ fn eval_pred_in(
         Pred::ExprInList { expr, list, negated } => {
             let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             let mut values = Vec::with_capacity(list.len());
             for item in list {
                 values.push(match resolve_bound_value(item, bound_values) {
                     Ok(v) => v,
-                    Err(_) => return None,
+                    Err(_) => return Ok(None),
                 });
             }
             in_set_truth(&left, &values).map(|truth| truth != *negated)
@@ -729,7 +785,7 @@ fn eval_pred_in(
         Pred::ExprInSet { expr, values, negated } => {
             let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
-                Err(_) => return None,
+                Err(_) => return Ok(None),
             };
             in_set_truth(&left, values).map(|truth| truth != *negated)
         }
@@ -740,7 +796,7 @@ fn eval_pred_in(
         | Pred::FieldCmpSubquery { .. }
         | Pred::SubqueryAsBool { .. }
         | Pred::ExprInSubquery { .. } => Some(false),
-    }
+    })
 }
 
 /// SQL `AND` over two three-valued operands: `FALSE` dominates, `TRUE` needs
@@ -916,10 +972,9 @@ fn compare_values(left: &Value, right: &Value) -> std::cmp::Ordering {
         // File identity is the content digest; metadata labels never compare.
         (Value::File(a), Value::File(b)) => a.digest.cmp(&b.digest),
         // Deterministic structural order for sorting only (see fn docs).
-        (Value::Vector(a), Value::Vector(b)) => a
-            .dim
-            .cmp(&b.dim)
-            .then_with(|| a.data.iter().map(|component| component.to_bits()).cmp(b.data.iter().map(|component| component.to_bits()))),
+        (Value::Vector(a), Value::Vector(b)) => a.dim.cmp(&b.dim).then_with(|| {
+            a.data.iter().map(|component| component.to_bits()).cmp(b.data.iter().map(|component| component.to_bits()))
+        }),
         _ => value_kind_rank(left).cmp(&value_kind_rank(right)),
     }
 }
@@ -2709,7 +2764,8 @@ mod comparison_semantics_tests {
             assert_eq!(cmp_values(&vector_a, op, &vector_b), None, "vector `{op:?}` must stay unknown");
         }
 
-        let object = Value::Object(ObjectRef { algo: yydb_types::HashAlgo::Blake3, hash: [1; 32], size: 8, kind: ObjectKind::Blob });
+        let object =
+            Value::Object(ObjectRef { algo: yydb_types::HashAlgo::Blake3, hash: [1; 32], size: 8, kind: ObjectKind::Blob });
         assert_eq!(cmp_values(&object, CmpOp::Eq, &object), None);
         assert_eq!(cmp_values(&object, CmpOp::Ne, &object), None);
     }

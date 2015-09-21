@@ -470,7 +470,7 @@ fn conflict_update_row(
 ) -> Result<Option<QueryRow>> {
     if let Some(predicate) = predicate {
         let predicate = exec::resolve_subquery_predicates(predicate, None, records, bound_values)?;
-        if !exec::eval_pred(&predicate, matched, table, None, records, bound_values) {
+        if !exec::eval_pred(&predicate, matched, table, None, records, bound_values)? {
             return Ok(None);
         }
     }
@@ -593,7 +593,7 @@ fn update_rows(
         let entries = store::load_table_entries(records, &storage)?;
         for (key, mut row) in entries {
             if let Some(predicate) = predicate {
-                if !exec::eval_pred(predicate, &row, table, None, records, bound_values) {
+                if !exec::eval_pred(predicate, &row, table, None, records, bound_values)? {
                     continue;
                 }
             }
@@ -637,7 +637,7 @@ fn delete_rows(
         let entries = store::load_table_entries(records, &storage)?;
         for (key, row) in entries {
             if let Some(predicate) = predicate {
-                if !exec::eval_pred(predicate, &row, table, None, records, bound_values) {
+                if !exec::eval_pred(predicate, &row, table, None, records, bound_values)? {
                     continue;
                 }
             }

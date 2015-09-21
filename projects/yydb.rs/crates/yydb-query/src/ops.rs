@@ -32,6 +32,22 @@ pub enum CmpOp {
     Ge,
 }
 
+/// Which text test a [`Pred::TextTest`] applies.
+///
+/// Matching compares **Unicode code points**, not bytes and not grapheme
+/// clusters: `"e\u{301}"` does not match `"é"`, `"STRASSE"` does not match
+/// `"straße"`, and no normalization or case folding is applied. An empty needle
+/// matches every text for all three tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextOp {
+    /// The field carries the needle as a contiguous code point run.
+    Contains,
+    /// The field begins with the needle.
+    StartsWith,
+    /// The field ends with the needle.
+    EndsWith,
+}
+
 /// Bound value: either a literal baked into the plan at prepare time, or a
 /// named/slot parameter resolved at bind time.
 #[derive(Debug, Clone, PartialEq)]
@@ -129,6 +145,20 @@ pub enum Pred {
         /// Comparison operator.
         op: CmpOp,
         /// Right-hand side.
+        value: BoundValue,
+    },
+    /// Text test on a text field.
+    ///
+    /// The predicate is exact on Unicode code points: no case folding, no
+    /// normalization and no grapheme-cluster segmentation. A `NULL` field never
+    /// matches, and any other non-text value is a query error rather than a
+    /// silent `false`.
+    TextTest {
+        /// Field path relative to the row being filtered.
+        path: Vec<String>,
+        /// Which test to apply.
+        op: TextOp,
+        /// Needle, taken literally.
         value: BoundValue,
     },
     /// Comparison between two row fields (used by JOIN ON conditions).

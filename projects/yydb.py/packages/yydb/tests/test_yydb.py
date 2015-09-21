@@ -331,6 +331,29 @@ class NativeTest(unittest.TestCase):
             finally:
                 database.close()
 
+    def test_text_predicates_compare_unicode_code_points(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
+            database, _ = self._open_docs(directory)
+            try:
+                for index in range(1, 4):
+                    database.execute(
+                        DOC_INSERT,
+                        {"id": index, "name": f"doc-{index}-中文", "score": index + 0.5, "embedding": self._vector(float(index), 0.0, 0.0)},
+                    )
+
+                self.assertEqual([row["id"] for row in database.query('Doc.all().filter(x => x.name.contains("文")).collect()')], [1, 2, 3])
+                self.assertEqual([row["id"] for row in database.query('Doc.all().filter(x => x.name.startsWith("doc-2")).collect()')], [2])
+                self.assertEqual([row["id"] for row in database.query('Doc.all().filter(x => x.name.endsWith("-中文")).collect()')], [1, 2, 3])
+                self.assertEqual(database.query('Doc.all().filter(x => x.name.startsWith("Doc")).collect()'), [], "matching is case sensitive")
+
+                with self.assertRaises(YydbError) as caught:
+                    database.query('Doc.all().filter(x => x.score.contains("5")).collect()')
+                self.assertEqual(caught.exception.code, NATIVE_ERROR)
+                self.assertIn("requires a text field", caught.exception.message)
+                self.assertIn("score", caught.exception.message)
+            finally:
+                database.close()
+
     def test_upsert_updates_existing_key_and_survives_reopen(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yydb-python-") as directory:
             database, path = self._open_docs(directory)

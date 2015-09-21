@@ -1858,6 +1858,7 @@ fn reject_excluded_paths(predicate: &Pred) -> Result<()> {
         Pred::True | Pred::False => Ok(()),
         Pred::FieldBool { path, .. } => check(path),
         Pred::FieldCmp { path, .. } => check(path),
+        Pred::TextTest { path, .. } => check(path),
         Pred::FieldCmpField { left_path, right_path, .. } => {
             check(left_path)?;
             check(right_path)
