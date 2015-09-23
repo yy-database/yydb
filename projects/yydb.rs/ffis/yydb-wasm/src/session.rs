@@ -546,7 +546,8 @@ impl MemorySession {
     /// Registers the plan in this session's internal registry and returns
     /// JSON `{ ok, statementId, parameters, queryKind, sourceFingerprint,
     /// readSet, writeSet, source, error }`. No schema binding required —
-    /// plan building is pure parse + lower.
+    /// plan building is pure parse + lower. A write program has no reusable
+    /// read plan, so it is refused here and must go through the write surface.
     #[wasm_bindgen(js_name = prepareJson)]
     pub fn prepare_json(&mut self, source: &str) -> String {
         if self.closed {
@@ -554,6 +555,10 @@ impl MemorySession {
         }
         match self.conn.prepare_vos(source) {
             Ok(stmt) => {
+                if stmt.query_kind != yydb_query::QueryKind::Read {
+                    let error = Error::Schema { message: "Phase 1 only executes pipelines ending in `.collect()`".into() };
+                    return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string();
+                }
                 let id = format!("stmt-{}", self.stmts.len() + 1);
                 self.stmts.insert(id.clone(), stmt.clone());
                 match serde_json::to_value(&stmt) {
@@ -976,6 +981,8 @@ impl PersistentSession {
     }
 
     /// Prepare a VOS read pipeline into a reusable query plan (Persistent session variant).
+    /// A write program has no reusable read plan, so it is refused here and
+    /// must go through the write surface.
     #[wasm_bindgen(js_name = prepareJson)]
     pub fn prepare_json(&mut self, source: &str) -> String {
         if self.closed {
@@ -983,6 +990,10 @@ impl PersistentSession {
         }
         match self.conn.prepare_vos(source) {
             Ok(stmt) => {
+                if stmt.query_kind != yydb_query::QueryKind::Read {
+                    let error = Error::Schema { message: "Phase 1 only executes pipelines ending in `.collect()`".into() };
+                    return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string();
+                }
                 let id = format!("stmt-{}", self.stmts.len() + 1);
                 self.stmts.insert(id.clone(), stmt.clone());
                 match serde_json::to_value(&stmt) {

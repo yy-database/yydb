@@ -440,9 +440,16 @@ impl Database {
     /// [`Statement::close`].
     ///
     /// Requires no schema binding — plan building is a pure parse + lower pass.
+    /// A write program has no reusable read plan, so it is refused here and
+    /// must go through [`Self::execute_vos_write`].
     #[napi]
     pub fn prepare(&self, source: String) -> Result<Statement> {
         let stmt = self.handle()?.prepare_vos(&source).map_err(reason)?;
+        if stmt.query_kind != yydb::query::QueryKind::Read {
+            return Err(reason(yydb::Error::Schema {
+                message: "Phase 1 only executes pipelines ending in `.collect()`".into(),
+            }));
+        }
         let id = register_stmt(stmt);
         Ok(Statement { statement_id: id })
     }
