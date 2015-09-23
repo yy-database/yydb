@@ -1,7 +1,6 @@
 //! `YDPG` file-backed pager with optional `YYWL` v0 sidecar.
 
 use std::{
-    collections::BTreeMap,
     fs::OpenOptions,
     io::{Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -80,9 +79,10 @@ impl FilePager {
     where
         F: FnOnce(&mut MemoryPager) -> Result<()>,
     {
-        let before = self.inner.pages_snapshot();
+        self.inner.clear_dirty();
         mutate(&mut self.inner)?;
-        self.publish_delta(&before, blob_refs)
+        let changed = self.inner.take_dirty_pages();
+        self.publish_pages(changed, blob_refs)
     }
 
     /// User KV put with durability.
@@ -108,10 +108,11 @@ impl FilePager {
 
     /// User KV delete.
     pub fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
-        let before = self.inner.pages_snapshot();
+        self.inner.clear_dirty();
         let deleted = RecordTree::open(&mut self.inner).delete(&TreeKey::user_record(key))?;
         if deleted {
-            self.publish_delta(&before, &[])?;
+            let changed = self.inner.take_dirty_pages();
+            self.publish_pages(changed, &[])?;
         }
         Ok(deleted)
     }
@@ -188,14 +189,7 @@ impl FilePager {
         Ok(())
     }
 
-    fn publish_delta(&mut self, before: &BTreeMap<u32, Vec<u8>>, blob_refs: &[BlobManifestDelta]) -> Result<()> {
-        let after = self.inner.pages_snapshot();
-        let mut changed = Vec::new();
-        for (page_id, image) in &after {
-            if before.get(page_id) != Some(image) {
-                changed.push((*page_id, image.clone()));
-            }
-        }
+    fn publish_pages(&mut self, changed: Vec<(u32, Vec<u8>)>, blob_refs: &[BlobManifestDelta]) -> Result<()> {
         if changed.is_empty() && blob_refs.is_empty() {
             return Ok(());
         }

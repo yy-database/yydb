@@ -1,6 +1,6 @@
 //! In-memory page map backend for format v0 engine development.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use yydb_types::{Error, Result};
 
@@ -18,6 +18,11 @@ use crate::{
 #[derive(Debug, Clone, Default)]
 pub struct MemoryPager {
     pages: BTreeMap<u32, Vec<u8>>,
+    /// Pages written since the last [`Self::clear_dirty`]. A publish transaction
+    /// brackets its mutation with `clear_dirty` / `take_dirty_pages` so the
+    /// changed-page set comes from the writes themselves instead of a full
+    /// before/after page-map comparison.
+    dirty: BTreeSet<u32>,
 }
 
 impl MemoryPager {
@@ -46,7 +51,25 @@ impl MemoryPager {
             return Err(Error::Corrupt("page image wrong size"));
         }
         self.pages.insert(page_id, image);
+        self.dirty.insert(page_id);
         Ok(())
+    }
+
+    /// Forget the dirty set without consuming it, used when a transaction is
+    /// abandoned before publishing.
+    pub fn clear_dirty(&mut self) {
+        self.dirty.clear();
+    }
+
+    /// Drain the pages written since the last `clear_dirty` in ascending id
+    /// order. Pages removed from the map while dirty are skipped, which matches
+    /// the old full-diff behaviour where a vanished page was never published.
+    pub fn take_dirty_pages(&mut self) -> Vec<(u32, Vec<u8>)> {
+        let dirty = std::mem::take(&mut self.dirty);
+        dirty
+            .into_iter()
+            .filter_map(|page_id| self.pages.get(&page_id).map(|image| (page_id, image.clone())))
+            .collect()
     }
 
     /// Page count including page 0.
