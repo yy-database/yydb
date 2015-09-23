@@ -15,7 +15,7 @@ use yydb_types::{Error, Result};
 use crate::{
     journal::{JournalMode, wal_path},
     lock::WriterLock,
-    snapshot::{Snapshot, read_snapshot, write_snapshot},
+    snapshot::{RecordWindow, Snapshot, read_snapshot, read_snapshot_windows, write_snapshot},
 };
 
 /// An open, exclusively locked file-backed database image.
@@ -83,6 +83,16 @@ impl Database {
     /// Load the current durable snapshot.
     pub fn snapshot(&mut self) -> Result<Snapshot> {
         read_snapshot(&mut self.pager)
+    }
+
+    /// Load metadata plus the records inside `windows`, skipping every other
+    /// record.
+    ///
+    /// This is the read-path counterpart of [`Database::snapshot`]: a narrowed
+    /// statement only needs the reserved rows and the record-key window its plan
+    /// can read, so the record tree never walks the rest of the database.
+    pub fn snapshot_windows(&mut self, windows: &[RecordWindow]) -> Result<Snapshot> {
+        read_snapshot_windows(&mut self.pager, windows)
     }
 
     /// Commit a snapshot, publishing `blob_refs` into the WAL transaction when set.

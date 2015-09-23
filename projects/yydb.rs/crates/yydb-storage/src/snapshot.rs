@@ -10,6 +10,10 @@ use yydb_formats::{FilePager, KEY_KIND_USER, MemoryPager, TREE_RECORD};
 use yydb_types::{Error, Result};
 
 const META_PREFIX: &[u8] = b"__yydb/meta/";
+const META_PREFIX_TEXT: &str = "__yydb/meta/";
+/// Smallest key above every `__yydb/meta/` key: `'0'` (0x30) follows the
+/// separator `'/'` (0x2F), so the prefix range ends before it.
+const META_END_TEXT: &str = "__yydb/meta0";
 
 /// Durable database image handed between storage and the engine.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -30,6 +34,9 @@ pub trait PagerKv {
     fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool>;
     /// Scan every stored row with its physical key.
     fn scan_kv(&mut self) -> Result<Vec<(yydb_formats::TreeKey, Vec<u8>)>>;
+    /// Scan rows whose user key lies in `[start, end)`. `end = None` means
+    /// "to the last key".
+    fn scan_kv_range(&mut self, start: &str, end: Option<&str>) -> Result<Vec<(yydb_formats::TreeKey, Vec<u8>)>>;
 }
 
 impl PagerKv for FilePager {
@@ -47,6 +54,10 @@ impl PagerKv for FilePager {
 
     fn scan_kv(&mut self) -> Result<Vec<(yydb_formats::TreeKey, Vec<u8>)>> {
         FilePager::scan_kv(self)
+    }
+
+    fn scan_kv_range(&mut self, start: &str, end: Option<&str>) -> Result<Vec<(yydb_formats::TreeKey, Vec<u8>)>> {
+        FilePager::scan_kv_range(self, start, end.map(str::as_bytes))
     }
 }
 
@@ -66,23 +77,64 @@ impl PagerKv for MemoryPager {
     fn scan_kv(&mut self) -> Result<Vec<(yydb_formats::TreeKey, Vec<u8>)>> {
         MemoryPager::scan_kv(self)
     }
+
+    fn scan_kv_range(&mut self, start: &str, end: Option<&str>) -> Result<Vec<(yydb_formats::TreeKey, Vec<u8>)>> {
+        MemoryPager::scan_kv_range(self, start, end.map(str::as_bytes))
+    }
 }
 
 /// Load a [`Snapshot`] from any pager.
 pub fn read_snapshot<P: PagerKv>(pager: &mut P) -> Result<Snapshot> {
     let mut snapshot = Snapshot::default();
     for (key, value) in pager.scan_kv()? {
-        if key.tree_id != TREE_RECORD || key.key_kind != KEY_KIND_USER {
-            continue;
-        }
-        if key.encoded.starts_with(META_PREFIX) {
-            snapshot.metadata.insert(key.encoded, value);
-            continue;
-        }
-        let name = String::from_utf8(key.encoded).map_err(|_| Error::Corrupt("record key is not UTF-8"))?;
-        snapshot.records.insert(name, value);
+        insert_row(&mut snapshot, key, value)?;
     }
     Ok(snapshot)
+}
+
+/// Half-open user-record key window `[start, end)`.
+///
+/// Record keys are the physical `__yydb/v0/row/<table>/<pk>` names, so a window
+/// over one table's primary-key range lets the record tree descend straight to
+/// the leaves that can hold the rows of one statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordWindow {
+    /// Inclusive lower record name.
+    pub start: String,
+    /// Exclusive upper record name. `None` reads to the last key.
+    pub end: Option<String>,
+}
+
+/// Load a [`Snapshot`] whose user records are confined to `windows`.
+///
+/// Reserved metadata rows are always read in full: they are few and the engine
+/// needs the schema and contract for every statement. Callers own the rule that
+/// the windows cover every row a plan can read, and an empty window list means
+/// "metadata only".
+pub fn read_snapshot_windows<P: PagerKv>(pager: &mut P, windows: &[RecordWindow]) -> Result<Snapshot> {
+    let mut snapshot = Snapshot::default();
+    for (key, value) in pager.scan_kv_range(META_PREFIX_TEXT, Some(META_END_TEXT))? {
+        insert_row(&mut snapshot, key, value)?;
+    }
+    for window in windows {
+        for (key, value) in pager.scan_kv_range(&window.start, window.end.as_deref())? {
+            insert_row(&mut snapshot, key, value)?;
+        }
+    }
+    Ok(snapshot)
+}
+
+fn insert_row(snapshot: &mut Snapshot, key: yydb_formats::TreeKey, value: Vec<u8>) -> Result<()> {
+    if key.tree_id != TREE_RECORD || key.key_kind != KEY_KIND_USER {
+        return Ok(());
+    }
+    if key.encoded.starts_with(META_PREFIX) {
+        snapshot.metadata.insert(key.encoded, value);
+        return Ok(());
+    }
+    let name = String::from_utf8(key.encoded).map_err(|_| Error::Corrupt("record key is not UTF-8"))?;
+    snapshot.records.insert(name, value);
+    Ok(())
 }
 
 /// Persist a [`Snapshot`] through incremental btree mutations.

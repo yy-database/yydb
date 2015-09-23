@@ -78,3 +78,70 @@ fn internal_page_roundtrip() {
     assert_eq!(decoded.child_index_for(&TreeKey::user_record("a")), 0);
     assert_eq!(decoded.child_index_for(&TreeKey::user_record("z")), 1);
 }
+
+/// Reference: apply the same half-open key window to a full scan.
+fn window_of(all: &[(TreeKey, Vec<u8>)], start: &str, end: Option<&str>) -> Vec<(TreeKey, Vec<u8>)> {
+    let start = TreeKey::user_record(start);
+    let end = end.map(TreeKey::user_record);
+    all.iter().filter(|(key, _)| *key >= start && end.as_ref().is_none_or(|end| key < end)).cloned().collect()
+}
+
+fn assert_windows_match_full_scan(pager: &mut MemoryPager, cases: &[(String, Option<String>)]) {
+    let all = pager.scan_kv().unwrap();
+    for (start, end) in cases {
+        let got = pager.scan_kv_range(start, end.as_deref().map(str::as_bytes)).unwrap();
+        let want = window_of(&all, start, end.as_deref());
+        assert_eq!(got, want, "window {start:?}..{end:?}");
+    }
+}
+
+/// Range scans must locate their first leaf from the index instead of walking
+/// every leaf: the window result has to equal the filtered full scan after both
+/// leaf and internal splits.
+#[test]
+fn range_scan_matches_full_scan_after_splits() {
+    let id = [5, 5, 5, 5, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 11];
+    let mut pager = MemoryPager::new_empty(id, 0x01);
+    let total = 2_000usize;
+    let payload = vec![b'v'; 64];
+    for i in 0..total {
+        pager.put_kv(format!("key-{i:010}"), &payload).unwrap();
+    }
+    assert_eq!(pager.scan_kv().unwrap().len(), total);
+
+    let cases = [
+        ("key-0000000000".to_string(), None),
+        ("key-0000000000".to_string(), Some("key-0000000001".to_string())),
+        ("key-0000000005".to_string(), Some("key-0000000005".to_string())),
+        ("key-0000000500".to_string(), Some("key-0000000510".to_string())),
+        ("key-0000001990".to_string(), Some("key-0000002100".to_string())),
+        ("key-0000002000".to_string(), None),
+        ("".to_string(), None),
+        ("zzz".to_string(), None),
+        ("zzz".to_string(), Some("aaa".to_string())),
+    ];
+    assert_windows_match_full_scan(&mut pager, &cases);
+}
+
+/// Cells that nearly fill a page force splits on almost every insert, so the
+/// leaf layout is denser than any uniform stride predicts.
+#[test]
+fn range_scan_matches_full_scan_with_oversized_cells() {
+    let id = [6, 6, 6, 6, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 12];
+    let mut pager = MemoryPager::new_empty(id, 0x01);
+    let total = 300usize;
+    let payload = vec![b'y'; 2_000];
+    for i in 0..total {
+        pager.put_kv(format!("big-{i:06}"), &payload).unwrap();
+    }
+    assert_eq!(pager.scan_kv().unwrap().len(), total);
+
+    let cases = [
+        ("big-000000".to_string(), None),
+        ("big-000000".to_string(), Some("big-000010".to_string())),
+        ("big-000123".to_string(), Some("big-000124".to_string())),
+        ("big-000290".to_string(), Some("big-000300".to_string())),
+        ("big-000500".to_string(), None),
+    ];
+    assert_windows_match_full_scan(&mut pager, &cases);
+}

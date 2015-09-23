@@ -12,7 +12,7 @@ use crate::{
 use yydb_query::{PreparedStatement, QueryRow, fingerprint as fp, prepare as prepare_source};
 use yydb_types::Value;
 
-use super::Connection;
+use super::{Backend, Connection};
 
 impl Connection {
     fn object_resolver(&self) -> Arc<dyn yydb_query::ObjectResolver> {
@@ -59,11 +59,10 @@ impl Connection {
         // The frontend already classifies ops and fills `query_kind` — the
         // engine path only adds schema fingerprint / revision on top.
         let mut stmt = frontend(source)?;
-        let state = self.active_state_unlocked()?;
-        if let Some(schema) = &state.schema {
-            stmt.schema_fingerprint = fp(&schema.document);
-            stmt.schema_revision = state.identity_history.as_ref().map(|h| h.revision).unwrap_or(0);
-        }
+        let state = if self.has_open_transaction() { self.active_state_unlocked()? } else { self.read_state_metadata()? };
+        let (fingerprint, revision) = schema_basis(&state);
+        stmt.schema_fingerprint = fingerprint;
+        stmt.schema_revision = revision;
         Ok(stmt)
     }
 
@@ -94,12 +93,56 @@ impl Connection {
     fn run_prepared_read(&self, stmt: &PreparedStatement, values: &[Value]) -> Result<Vec<QueryRow>> {
         self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let state = self.active_state_unlocked()?;
-        self.check_schema_drift(stmt, &state)?;
+        // A transaction already owns one full snapshot, so narrowing here
+        // would read less than the snapshot the caller expects.
+        if self.has_open_transaction() {
+            let state = self.active_state_unlocked()?;
+            self.check_schema_drift(stmt, &state)?;
+            let contract = resolved_contract(&state)?;
+            return self.execute_with(stmt, values, &contract, &state.records);
+        }
 
-        let contract = resolved_contract(&state)?;
+        // Phase one: metadata only. The decoded contract is what lets the
+        // query layer prove which record-key window one statement can reach.
+        let metadata = self.read_state_metadata()?;
+        self.check_schema_drift(stmt, &metadata)?;
+        let contract = resolved_contract(&metadata)?;
+        let Some(window) = yydb_query::read_window(&stmt.ops, &contract, values)?
+        else {
+            let state = self.read_state()?;
+            self.check_schema_drift(stmt, &state)?;
+            let contract = resolved_contract(&state)?;
+            return self.execute_with(stmt, values, &contract, &state.records);
+        };
+
+        // Memory-backed connections already hold every row.
+        if matches!(self.backend.as_ref(), Backend::Memory { .. }) {
+            return self.execute_with(stmt, values, &contract, &metadata.records);
+        }
+
+        // Phase two: metadata plus the window, read as one pager transaction.
+        let state = self.read_state_window(&window)?;
+        if schema_basis(&state) != schema_basis(&metadata) {
+            // The durable schema moved between the two reads, so the window
+            // was derived from a contract that no longer describes the data.
+            // Fall back to a single full snapshot rather than trust it.
+            let state = self.read_state()?;
+            self.check_schema_drift(stmt, &state)?;
+            let contract = resolved_contract(&state)?;
+            return self.execute_with(stmt, values, &contract, &state.records);
+        }
+        self.execute_with(stmt, values, &contract, &state.records)
+    }
+
+    fn execute_with(
+        &self,
+        stmt: &PreparedStatement,
+        values: &[Value],
+        contract: &vos::ResolvedContract,
+        records: &BTreeMap<String, Vec<u8>>,
+    ) -> Result<Vec<QueryRow>> {
         yydb_query::with_object_resolver(Some(self.object_resolver()), || {
-            yydb_query::execute_prepared(stmt, values, Some(&contract), &state.records)
+            yydb_query::execute_prepared(stmt, values, Some(contract), records)
         })
     }
 
@@ -266,4 +309,12 @@ fn resolved_contract(state: &super::State) -> Result<vos::ResolvedContract> {
         .resolved_contract
         .clone()
         .ok_or_else(|| Error::Schema { message: "query requires ensure_schema before execution".into() })
+}
+
+/// Durable schema identity a read window was derived from: the schema
+/// document fingerprint and the identity-manifest revision.
+fn schema_basis(state: &super::State) -> (String, u64) {
+    let fingerprint = state.schema.as_ref().map(|schema| fp(&schema.document)).unwrap_or_default();
+    let revision = state.identity_history.as_ref().map(|history| history.revision).unwrap_or(0);
+    (fingerprint, revision)
 }

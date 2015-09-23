@@ -1,4 +1,5 @@
-use crate::{Result, journal::JournalMode, kv::lease, storage::snapshot};
+use crate::{Result, journal::JournalMode, kv::lease, objects::EMBEDDED_OBJECT_PREFIX, storage::snapshot};
+use yydb_storage::snapshot::RecordWindow;
 
 use super::{Backend, Connection, State, is_yydx_main_path};
 
@@ -21,6 +22,11 @@ impl Connection {
         }
     }
 
+    /// Whether a transaction snapshot is currently open.
+    pub(crate) fn has_open_transaction(&self) -> bool {
+        self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_some()
+    }
+
     pub(crate) fn replace_active_state_unlocked(&self, state: State) -> Result<()> {
         let mut slot = self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if slot.is_some() {
@@ -41,6 +47,53 @@ impl Connection {
         let mut state = self.active_state_unlocked()?;
         f(&mut state)?;
         self.replace_active_state_unlocked(state)
+    }
+
+    /// Read reserved metadata only and decode the schema and contract without
+    /// materializing a single table row.
+    ///
+    /// Reads use this as the first phase: the decoded contract tells the query
+    /// layer which record-key window one statement can actually reach.
+    pub(crate) fn read_state_metadata(&self) -> Result<State> {
+        match self.backend.as_ref() {
+            Backend::File { database, .. } => {
+                let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                snapshot::state_from_snapshot(&database.snapshot_windows(&[])?)
+            }
+            Backend::Memory { state } => Ok(state.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()),
+        }
+    }
+
+    /// Read metadata plus the rows inside `window` in one pager transaction.
+    ///
+    /// The window is a **superset** of what the statement may read: execution
+    /// still applies every filter, so an over-wide window can only cost extra
+    /// reads and never change the result. Single-file `.yydb` images also pull
+    /// the embedded object prefix, because
+    /// [`Self::read_state`] would otherwise hand the resolver an incomplete
+    /// object catalog.
+    pub(crate) fn read_state_window(&self, window: &yydb_query::ReadWindow) -> Result<State> {
+        match self.backend.as_ref() {
+            Backend::File { database, .. } => {
+                let mut windows = vec![RecordWindow { start: window.start.clone(), end: window.end.clone() }];
+                if self.is_single_file_yydb() {
+                    windows.push(RecordWindow {
+                        start: EMBEDDED_OBJECT_PREFIX.to_owned(),
+                        end: Some(format!("{EMBEDDED_OBJECT_PREFIX}g")),
+                    });
+                }
+                let snapshot = {
+                    let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    database.snapshot_windows(&windows)?
+                };
+                let mut state = snapshot::state_from_snapshot(&snapshot)?;
+                if self.is_single_file_yydb() {
+                    self.objects.take_embedded_records(&mut state.records)?;
+                }
+                Ok(state)
+            }
+            Backend::Memory { state } => Ok(state.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()),
+        }
     }
 
     pub(crate) fn read_state(&self) -> Result<State> {

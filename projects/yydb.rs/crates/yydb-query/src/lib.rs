@@ -25,6 +25,7 @@ mod resolve;
 mod result;
 mod sql;
 mod store;
+mod window;
 mod write;
 
 use std::collections::BTreeMap;
@@ -51,6 +52,7 @@ pub use store::{
     BytesPlacementHook, ObjectResolver, ROW_PREFIX, VectorPlacementHook, upsert_row, with_bytes_placement,
     with_object_resolver, with_vector_placement,
 };
+pub use window::{ReadWindow, read_window};
 pub use write::WriteOutcome;
 
 /// Execute a VOS read pipeline against stored table rows.

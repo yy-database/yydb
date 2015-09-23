@@ -100,6 +100,12 @@ impl FilePager {
         RecordTree::open(&mut self.inner).scan_all()
     }
 
+    /// Enumerate record-tree cells whose user key lies in `[start, end)`.
+    pub fn scan_kv_range(&mut self, start: impl AsRef<[u8]>, end: Option<&[u8]>) -> Result<Vec<(TreeKey, Vec<u8>)>> {
+        let end = end.map(TreeKey::user_record);
+        RecordTree::open(&mut self.inner).scan_range(&TreeKey::user_record(start), end.as_ref())
+    }
+
     /// User KV delete.
     pub fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
         let before = self.inner.pages_snapshot();

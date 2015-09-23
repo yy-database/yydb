@@ -76,6 +76,25 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
         Ok(out)
     }
 
+    /// Visit the keys in `[start, end)` in ascending order.
+    ///
+    /// The walk descends only into subtrees that can hold keys inside the
+    /// window, so a narrow window costs one root-to-leaf path plus the leaves it
+    /// actually covers instead of the height-independent full traversal of
+    /// [`scan_all`](Self::scan_all). Cell keys are still tested one by one, so
+    /// the result matches the same window over a full scan.
+    ///
+    /// `end` is exclusive and `None` means "to the last key".
+    pub fn scan_range(&mut self, start: &TreeKey, end: Option<&TreeKey>) -> Result<Vec<(TreeKey, Vec<u8>)>> {
+        let root = self.pager.header()?.slot.record_root;
+        if root == 0 {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::new();
+        self.scan_page_range(root, start, end, &mut out)?;
+        Ok(out)
+    }
+
     /// Delete a key when present.
     pub fn delete(&mut self, key: &TreeKey) -> Result<bool> {
         let root = self.pager.header()?.slot.record_root;
@@ -189,6 +208,50 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
                 let node = InternalPage::decode(page_id, &page.1)?;
                 for idx in 0..node.entries.len() {
                     self.scan_page(node.child_page_id(idx), out)?;
+                }
+            }
+            _ => return Err(Error::Corrupt("unexpected page type")),
+        }
+        Ok(())
+    }
+
+    /// Range walk with subtree pruning. Mirrors [`Self::scan_page`] but skips
+    /// children that cannot hold a key inside `[start, end)`.
+    fn scan_page_range(
+        &mut self,
+        page_id: u32,
+        start: &TreeKey,
+        end: Option<&TreeKey>,
+        out: &mut Vec<(TreeKey, Vec<u8>)>,
+    ) -> Result<()> {
+        let page = self.load_page(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
+        match page.0.page_type {
+            PAGE_TYPE_LEAF => {
+                let leaf = LeafPage::decode(page_id, &page.1)?;
+                for cell in leaf.cells() {
+                    if cell.key < *start {
+                        continue;
+                    }
+                    if end.is_some_and(|end| cell.key >= *end) {
+                        break;
+                    }
+                    out.push((cell.key.clone(), cell.value.clone()));
+                }
+            }
+            PAGE_TYPE_INTERNAL => {
+                let node = InternalPage::decode(page_id, &page.1)?;
+                for idx in 0..node.entries.len() {
+                    let lower = &node.entries[idx].separator;
+                    // Child `idx` only holds keys below its successor's
+                    // separator, so it is entirely below `start` when that
+                    // separator is not greater than `start`.
+                    if node.entries.get(idx + 1).is_some_and(|next| next.separator <= *start) {
+                        continue;
+                    }
+                    if end.is_some_and(|end| *lower >= *end) {
+                        break;
+                    }
+                    self.scan_page_range(node.child_page_id(idx), start, end, out)?;
                 }
             }
             _ => return Err(Error::Corrupt("unexpected page type")),

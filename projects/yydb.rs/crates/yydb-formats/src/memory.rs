@@ -115,6 +115,12 @@ impl MemoryPager {
     pub fn scan_kv(&mut self) -> Result<Vec<(TreeKey, Vec<u8>)>> {
         RecordTree::open(self).scan_all()
     }
+
+    /// Enumerate record-tree cells whose user key lies in `[start, end)`.
+    pub fn scan_kv_range(&mut self, start: impl AsRef<[u8]>, end: Option<&[u8]>) -> Result<Vec<(TreeKey, Vec<u8>)>> {
+        let end = end.map(TreeKey::user_record);
+        RecordTree::open(self).scan_range(&TreeKey::user_record(start), end.as_ref())
+    }
 }
 
 impl PageStore for MemoryPager {

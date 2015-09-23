@@ -6,6 +6,7 @@ mod execution_udf;
 mod file_fields;
 mod host_micro_udf;
 mod main_snapshot;
+mod read_path_window;
 mod scalar_mapping;
 mod schema_metadata;
 mod schema_pragma;
