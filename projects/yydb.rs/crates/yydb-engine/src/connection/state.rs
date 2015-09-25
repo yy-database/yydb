@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::{Result, journal::JournalMode, kv::lease, objects::EMBEDDED_OBJECT_PREFIX, storage::snapshot};
 use yydb_storage::snapshot::RecordWindow;
 
@@ -213,17 +215,31 @@ impl Connection {
     /// Apply one write and publish only its records when the statement names
     /// the rows it can touch.
     ///
-    /// `plan` receives reserved metadata and returns the record windows the
-    /// statement can reach, or `None` when that cannot be proven. Everything
-    /// else keeps the full publish path: an open transaction, an in-memory
-    /// image, a `.yydx` image and any unbounded shape behave exactly as before.
+    /// `plan` receives the active state and returns the record windows the
+    /// statement can reach, or `None` when that cannot be proven. An open
+    /// transaction applies the statement in place inside those windows instead
+    /// of cloning the whole transaction state per write. Everything unprovable,
+    /// the in-memory backend and `.yydx` images keep the full publish path.
     pub(crate) fn mutate_narrowed_write_unlocked<P, F>(&self, plan: P, f: F) -> Result<()>
     where
         P: FnOnce(&State) -> Result<Option<Vec<yydb_query::ReadWindow>>>,
         F: FnOnce(&mut State) -> Result<()>,
     {
-        if self.has_open_transaction() || !self.is_single_file_yydb() || self.publishes_everything() {
+        if self.publishes_everything() || !self.is_single_file_yydb() {
             return self.mutate_active_state_unlocked(f);
+        }
+        if self.has_open_transaction() {
+            let windows = {
+                let slot = self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                match slot.as_ref() {
+                    Some(state) => plan(state)?,
+                    None => None,
+                }
+            };
+            return match windows {
+                Some(windows) => self.mutate_transaction_windows(&windows, f),
+                None => self.mutate_active_state_unlocked(f),
+            };
         }
         let metadata = self.read_state_metadata()?;
         let Some(windows) = plan(&metadata)?
@@ -234,5 +250,62 @@ impl Connection {
         f(&mut state)?;
         self.write_state_delta(state, &prior)?;
         Ok(())
+    }
+
+    /// Apply `f` to the open transaction state in place and undo it inside
+    /// `windows` if `f` fails.
+    ///
+    /// The rows inside the windows are copied first, so a failing statement
+    /// leaves the transaction exactly as it was without cloning the whole
+    /// record map per write. The window copy is the only per-statement state
+    /// cost, and it is bounded by what the statement can reach.
+    fn mutate_transaction_windows<F>(&self, windows: &[yydb_query::ReadWindow], f: F) -> Result<()>
+    where
+        F: FnOnce(&mut State) -> Result<()>,
+    {
+        let mut slot = self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(state) = slot.as_mut()
+        else {
+            drop(slot);
+            return self.mutate_active_state_unlocked(f);
+        };
+        let prior = window_rows(&state.records, windows);
+        match f(&mut *state) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                restore_window_rows(&mut state.records, windows, prior);
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Rows inside `windows`, copied so a failing statement can restore them.
+fn window_rows(records: &BTreeMap<String, Vec<u8>>, windows: &[yydb_query::ReadWindow]) -> Vec<(String, Vec<u8>)> {
+    let mut rows = Vec::new();
+    for window in windows {
+        let collected = match window.end.as_ref() {
+            Some(end) => records.range(window.start.clone()..end.clone()),
+            None => records.range(window.start.clone()..),
+        };
+        rows.extend(collected.map(|(key, value)| (key.clone(), value.clone())));
+    }
+    rows
+}
+
+/// Restore `records` inside `windows` to exactly `prior`.
+fn restore_window_rows(
+    records: &mut BTreeMap<String, Vec<u8>>,
+    windows: &[yydb_query::ReadWindow],
+    prior: Vec<(String, Vec<u8>)>,
+) {
+    let keep: BTreeSet<&str> = prior.iter().map(|(key, _)| key.as_str()).collect();
+    for (key, _) in window_rows(records, windows) {
+        if !keep.contains(key.as_str()) {
+            records.remove(&key);
+        }
+    }
+    for (key, value) in prior {
+        records.insert(key, value);
     }
 }

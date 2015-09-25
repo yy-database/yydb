@@ -73,8 +73,17 @@ impl Connection {
         // The frontend already classifies ops and fills `query_kind` — the
         // engine path only adds schema fingerprint / revision on top.
         let mut stmt = frontend(source)?;
-        let state = if self.has_open_transaction() { self.active_state_unlocked()? } else { self.read_state_metadata()? };
-        let (fingerprint, revision) = schema_basis(&state);
+        // Only the schema basis is needed here. An open transaction can read it
+        // straight from its snapshot instead of cloning the whole state per
+        // statement, which is what kept a batch load quadratic.
+        let basis = {
+            let slot = self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            slot.as_ref().map(schema_basis)
+        };
+        let (fingerprint, revision) = match basis {
+            Some(basis) => basis,
+            None => schema_basis(&self.read_state_metadata()?),
+        };
         stmt.schema_fingerprint = fingerprint;
         stmt.schema_revision = revision;
         Ok(stmt)

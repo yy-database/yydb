@@ -247,3 +247,57 @@ fn narrowed_delete_and_patch_leave_unrelated_rows_untouched() {
     reopened.close();
     cleanup(&path);
 }
+
+/// A transaction batch: every statement after `begin` reaches the in-place
+/// transaction path instead of cloning the whole state per write.
+fn apply_transaction_batch(conn: &Connection) {
+    conn.ensure_schema(SCHEMA).unwrap();
+    for chunk_start in (0..600).step_by(200) {
+        conn.begin().unwrap();
+        for doc_id in chunk_start..chunk_start + 200 {
+            insert_doc(conn, doc_id, &format!("row-{doc_id}"));
+        }
+        conn.commit().unwrap();
+    }
+    conn.begin().unwrap();
+    conn.execute_vos_write(r#"Doc::update({ doc_id: 7, title: "patched in a transaction" })"#).unwrap();
+    conn.execute_vos_write(r#"Doc::delete({ doc_id: 42 })"#).unwrap();
+    insert_keyed(conn, "txn", "TXN", 1);
+    conn.commit().unwrap();
+    conn.begin().unwrap();
+    conn.execute_vos_write(r#"Doc::delete({ doc_id: 7 })"#).unwrap();
+    conn.rollback().unwrap();
+}
+
+#[test]
+fn a_transaction_batch_matches_a_full_rebuild() {
+    run_pair_with("publish-equivalence-txn-batch", OpenFlags::wal(), apply_transaction_batch);
+}
+
+/// A failing statement must undo itself inside the windows it touched and
+/// leave the rest of the transaction exactly as it was.
+#[test]
+fn a_failed_statement_inside_a_transaction_leaves_earlier_writes_intact() {
+    let path = temp_db("publish-equivalence-txn-failure");
+    let conn = Connection::open(&path).unwrap();
+    conn.ensure_schema(SCHEMA).unwrap();
+    conn.begin().unwrap();
+    insert_doc(&conn, 1, "one");
+    insert_keyed(&conn, "a", "A", 1);
+    let error = conn.execute_vos_write(r#"Keyed::insert({ key: "b", code: "A", n: 2 })"#).expect_err("duplicate code");
+    assert!(matches!(error, Error::UniqueViolation { .. }), "unexpected error: {error}");
+    insert_doc(&conn, 2, "two");
+    conn.commit().unwrap();
+
+    let docs = rows(&conn, "Doc");
+    assert_eq!(docs.len(), 2, "the two successful inserts must survive the rejected one");
+    assert_eq!(rows(&conn, "Keyed").len(), 1, "the rejected insert must leave no row behind");
+
+    conn.close();
+    drop(conn);
+    let reopened = reopen(&path);
+    assert_eq!(rows(&reopened, "Doc"), docs);
+    assert_eq!(rows(&reopened, "Keyed").len(), 1);
+    reopened.close();
+    cleanup(&path);
+}
