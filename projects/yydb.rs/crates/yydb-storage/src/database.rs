@@ -15,7 +15,7 @@ use yydb_types::{Error, Result};
 use crate::{
     journal::{JournalMode, wal_path},
     lock::WriterLock,
-    snapshot::{RecordWindow, Snapshot, read_snapshot, read_snapshot_windows, write_snapshot},
+    snapshot::{RecordDelta, RecordWindow, Snapshot, read_snapshot, read_snapshot_windows, write_delta, write_snapshot},
 };
 
 /// An open, exclusively locked file-backed database image.
@@ -98,6 +98,19 @@ impl Database {
     /// Commit a snapshot, publishing `blob_refs` into the WAL transaction when set.
     pub fn commit(&mut self, snapshot: &Snapshot, blob_refs: &[BlobManifestDelta]) -> Result<()> {
         self.pager.mutate_with_publish_blob_refs(|inner| write_snapshot(inner, snapshot), blob_refs)
+    }
+
+    /// Commit a caller-supplied [`RecordDelta`] instead of scanning for changes.
+    ///
+    /// The delta carries exactly the records the statement touched, so publishing
+    /// never walks the record tree to discover what changed.
+    pub fn commit_delta(
+        &mut self,
+        metadata: &std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
+        delta: &RecordDelta,
+        blob_refs: &[BlobManifestDelta],
+    ) -> Result<()> {
+        self.pager.mutate_with_publish_blob_refs(|inner| write_delta(inner, metadata, delta), blob_refs)
     }
 
     /// Fold WAL frames into the main file.

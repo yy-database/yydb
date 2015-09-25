@@ -15,9 +15,9 @@ use vos::types::{CanonicalScalar, ResolvedCanonicalType, ResolvedContract, Resol
 use yydb_types::{Error, Result, Value};
 
 use super::{
-    catalog::{primary_field_name, table_row_key_name, table_type_by_name},
+    catalog::{self, primary_field_name, table_row_key_name, table_type_by_name},
     constraints,
-    ops::{BoundValue, CmpOp, Expr, Pred, QueryOp},
+    ops::{BoundValue, CmpOp, Expr, Pred, QueryOp, ReturningProjection, WriteOp},
     store,
 };
 
@@ -211,4 +211,118 @@ fn lower_end(slot: &mut Option<String>, candidate: String) {
         Some(current) if current <= candidate => current,
         _ => candidate,
     });
+}
+
+/// Record windows a write program must read before it runs.
+///
+/// A write may be narrowed only when the program can touch no row outside the
+/// returned windows. Every accepted shape names its rows by primary key:
+/// `INSERT … VALUES` names each stored key from the row's key column, and
+/// `UPDATE` / `DELETE` turn their primary-key predicate into a record-key
+/// range. Everything else — an `INSERT … SELECT` source, an `ON CONFLICT`
+/// clause, a `RETURNING` projection, a uniqueness rule on an updated table, an
+/// unbounded or subquery predicate — returns `None` and keeps the full read.
+///
+/// The union of the windows is a superset of every row the statement can
+/// change, so the executor can still filter inside it and a caller that
+/// publishes only the window differences leaves every other row untouched.
+pub fn write_windows(
+    ops: &[WriteOp],
+    contract: &ResolvedContract,
+    declared: &[yydb_types::TableUniqueConstraint],
+    bound_values: &[Value],
+) -> Result<Option<Vec<ReadWindow>>> {
+    // Uniqueness checks read the whole table, so both the rules the schema
+    // document declares and the ones a host adds must force the full path.
+    let rules = constraints::merge(constraints::from_contract(contract)?, declared);
+    let mut windows = Vec::new();
+    for op in ops {
+        match op {
+            WriteOp::Insert { table, rows, conflict, returning } => {
+                if conflict.is_some() || matches!(returning, Some(ReturningProjection::Fields(_))) {
+                    return Ok(None);
+                }
+                let entry = table_type_by_name(contract, table)?;
+                let pk_field = primary_field_name(entry)?;
+                let storage = table_row_key_name(contract, table)?;
+                if constraints::has_rules(&rules, &storage) {
+                    return Ok(None);
+                }
+                for fields in rows {
+                    // The primary-key column is matched through the catalog so a
+                    // differently cased author name still resolves to the key.
+                    let Some(slot) = fields.iter().find_map(|field| {
+                        catalog::field_on_table(entry, &field.name)
+                            .ok()
+                            .filter(|slot| slot.canonical_name == pk_field)
+                            .map(|slot| (field, slot))
+                    })
+                    else {
+                        return Ok(None);
+                    };
+                    let Ok(value) = resolve_bound(&slot.0.value, bound_values)
+                    else {
+                        return Ok(None);
+                    };
+                    let Ok(text) = constraints::value_text(&value)
+                    else {
+                        return Ok(None);
+                    };
+                    windows.push(single_key_window(&storage, &text));
+                }
+            }
+            WriteOp::Update { table, predicate: Some(predicate), .. } => {
+                let entry = table_type_by_name(contract, table)?;
+                let storage = table_row_key_name(contract, table)?;
+                if constraints::has_rules(&rules, &storage) {
+                    return Ok(None);
+                }
+                let Some(window) = predicate_window(predicate, entry, &storage, bound_values)?
+                else {
+                    return Ok(None);
+                };
+                windows.push(window);
+            }
+            WriteOp::Delete { table, predicate: Some(predicate) } => {
+                let entry = table_type_by_name(contract, table)?;
+                let storage = table_row_key_name(contract, table)?;
+                let Some(window) = predicate_window(predicate, entry, &storage, bound_values)?
+                else {
+                    return Ok(None);
+                };
+                windows.push(window);
+            }
+            _ => return Ok(None),
+        }
+    }
+    if windows.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(windows))
+}
+
+/// The record-key range one `UPDATE` / `DELETE` predicate can match.
+fn predicate_window(
+    predicate: &Pred,
+    entry: &ResolvedTypeContract,
+    storage_table: &str,
+    bound_values: &[Value],
+) -> Result<Option<ReadWindow>> {
+    // A nested pipeline reads rows of other tables, which a narrowed record map
+    // could not answer.
+    if pred_has_subquery(predicate) {
+        return Ok(None);
+    }
+    let pk_field = primary_field_name(entry)?;
+    let pk_is_text = text_primary_field(entry, pk_field);
+    let mut start: Option<String> = None;
+    let mut end: Option<String> = None;
+    collect_bounds(predicate, pk_field, pk_is_text, storage_table, bound_values, &mut start, &mut end)?;
+    Ok(start.map(|start| ReadWindow { start, end }))
+}
+
+/// The one record a `table` row with primary-key text `pk_text` occupies.
+fn single_key_window(storage_table: &str, pk_text: &str) -> ReadWindow {
+    let key = store::row_key(storage_table, pk_text);
+    ReadWindow { end: Some(format!("{key}\u{0}")), start: key }
 }

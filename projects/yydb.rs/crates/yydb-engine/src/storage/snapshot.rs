@@ -6,12 +6,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use yydb_storage::{BLOB_REF_OP_DELETE, BLOB_REF_OP_PUT, BlobManifestDelta, Snapshot};
+use yydb_storage::{BLOB_REF_OP_DELETE, BLOB_REF_OP_PUT, BlobManifestDelta, RecordDelta, Snapshot};
 use yydb_types::{Error, Result};
 
 use crate::{
     connection::State,
-    objects::{ObjectStore, references::OBJECT_REF_PREFIX},
+    objects::{EMBEDDED_OBJECT_PREFIX, ObjectStore, references::OBJECT_REF_PREFIX},
 };
 
 const META_SCHEMA: &[u8] = b"__yydb/meta/schema";
@@ -120,6 +120,60 @@ fn decode_hash_hex(hash_hex: &str) -> Option<[u8; 32]> {
         hash[index] = byte;
     }
     Some(hash)
+}
+
+/// Records that already existed before a narrowed write ran.
+///
+/// A narrowed write reads only reserved metadata and the record keys its
+/// statement addresses, so it never holds a full snapshot to diff. This keeps
+/// exactly what the image held for those keys: ordinary records by value, plus
+/// the keys of embedded object records, which are content addressed and
+/// therefore identical whenever the key is identical.
+pub(crate) struct PriorRecords {
+    /// Non-object records inside the read window, with their stored bytes.
+    pub(crate) rows: BTreeMap<String, Vec<u8>>,
+    /// Embedded object record keys the image already carries.
+    pub(crate) objects: BTreeSet<String>,
+}
+
+/// Split a record map into comparable user rows and already-durable object keys.
+///
+/// Reserved `__yydb/meta/` rows are dropped because every publication rewrites
+/// them as a group, so they are never part of a record delta.
+pub(crate) fn prior_records(records: &BTreeMap<String, Vec<u8>>) -> PriorRecords {
+    let mut prior = PriorRecords { rows: BTreeMap::new(), objects: BTreeSet::new() };
+    for (key, value) in records {
+        if key.starts_with(META_PREFIX) {
+            continue;
+        }
+        if key.starts_with(EMBEDDED_OBJECT_PREFIX) {
+            prior.objects.insert(key.clone());
+        }
+        else {
+            prior.rows.insert(key.clone(), value.clone());
+        }
+    }
+    prior
+}
+
+/// Diff the records about to be published against [`PriorRecords`].
+pub(crate) fn record_delta(next: &BTreeMap<String, Vec<u8>>, prior: &PriorRecords) -> RecordDelta {
+    let mut delta = RecordDelta::default();
+    for (key, value) in next {
+        if key.starts_with(EMBEDDED_OBJECT_PREFIX) && prior.objects.contains(key) {
+            continue;
+        }
+        if prior.rows.get(key) == Some(value) {
+            continue;
+        }
+        delta.puts.push((key.clone(), value.clone()));
+    }
+    for key in prior.rows.keys() {
+        if !next.contains_key(key) {
+            delta.deletes.push(key.clone());
+        }
+    }
+    delta
 }
 
 fn encode_schema(schema: &Option<crate::SchemaVersion>) -> Result<Vec<u8>> {

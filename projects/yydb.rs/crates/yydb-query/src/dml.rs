@@ -278,6 +278,127 @@ fn is_write_call(expr: &VosExpr) -> bool {
     )
 }
 
+/// Record keys a point write needs to read before it runs, when every write in
+/// the program is a keyed write on a table without uniqueness rules.
+///
+/// The engine uses this to publish only the records a statement changed instead
+/// of materializing the database. `None` means "cannot prove this is a point
+/// write": the caller must fall back to the full path and let the real executor
+/// report any error.
+///
+/// Every keyed write names exactly the primary-key record it addresses. Reads
+/// need it because they merge or resolve against the stored row, and inserts
+/// want it so an insert that rewrites the same bytes publishes no page at all.
+///
+/// Any table carrying a uniqueness rule falls back, because its conflict check
+/// loads the whole table. Macros are expanded first, so a macro that expands to
+/// keyed writes is accepted and one that expands to anything else is not.
+pub fn point_write_keys(
+    source: &str,
+    contract: &ResolvedContract,
+    declared: &[TableUniqueConstraint],
+    schema_document: Option<&str>,
+    params: &[Value],
+) -> Result<Option<Vec<String>>> {
+    let program = vos::parse_program(source).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
+    let constraints = constraints::merge(constraints::from_contract(contract)?, declared);
+    let Ok(expanded) = expand_program(&program, schema_document)
+    else {
+        return Ok(None);
+    };
+    let mut bindings: Vec<(String, VosExpr)> = Vec::new();
+    let mut keys = Vec::new();
+    let mut wrote = false;
+    for stmt in &expanded.statements {
+        match stmt {
+            VosStmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
+            VosStmt::Expr(expr) => {
+                let Ok(Some(key)) = plan_point_key(expr, contract, &constraints, &bindings, params)
+                else {
+                    return Ok(None);
+                };
+                keys.push(key);
+                wrote = true;
+            }
+        }
+    }
+    if let Some(result) = &expanded.result {
+        let Ok(Some(key)) = plan_point_key(result, contract, &constraints, &bindings, params)
+        else {
+            return Ok(None);
+        };
+        keys.push(key);
+        wrote = true;
+    }
+    if !wrote {
+        return Ok(None);
+    }
+    keys.sort();
+    keys.dedup();
+    Ok(Some(keys))
+}
+
+/// One keyed write's record key, or `None` when the expression is not a Phase 1
+/// point write on a rule-free table.
+fn plan_point_key(
+    expr: &VosExpr,
+    contract: &ResolvedContract,
+    constraints: &[TableUniqueConstraint],
+    bindings: &[(String, VosExpr)],
+    params: &[Value],
+) -> Result<Option<String>> {
+    let VosExpr::Call { callee, .. } = expr
+    else {
+        return Ok(None);
+    };
+    let VosExpr::Member { name, .. } = callee.as_ref()
+    else {
+        return Ok(None);
+    };
+    let (table, pk_text) = match name.as_str() {
+        "insert" => {
+            let Ok((table, row)) = lower_insert(expr, contract, bindings, params)
+            else {
+                return Ok(None);
+            };
+            let Ok(entry) = table_type_by_name(contract, &table)
+            else {
+                return Ok(None);
+            };
+            let Ok(pk_field) = primary_field_name(entry)
+            else {
+                return Ok(None);
+            };
+            let Some(pk) = row.get(pk_field)
+            else {
+                return Ok(None);
+            };
+            let Ok(pk_text) = constraints::value_text(pk)
+            else {
+                return Ok(None);
+            };
+            (table, pk_text)
+        }
+        "update" | "delete" => {
+            let Ok((table, pk_text, _)) = lower_keyed_write(expr, contract, name.as_str(), bindings, params)
+            else {
+                return Ok(None);
+            };
+            (table, pk_text)
+        }
+        _ => return Ok(None),
+    };
+    let Ok(entry) = table_type_by_name(contract, &table)
+    else {
+        return Ok(None);
+    };
+    let storage_name = table_storage_name(entry)?;
+    if constraints::has_rules(constraints, storage_name) {
+        return Ok(None);
+    }
+    Ok(Some(store::row_key(storage_name, &pk_text)))
+}
+
 fn apply_write(
     expr: &VosExpr,
     contract: &ResolvedContract,

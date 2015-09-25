@@ -96,6 +96,45 @@ impl Connection {
         }
     }
 
+    /// Read reserved metadata plus exactly the rows inside `windows`, together
+    /// with what the image held for them before the statement ran.
+    ///
+    /// A single-key window is `[key, key + NUL)`, so the record tree descends to
+    /// that leaf per key instead of walking every row. A single-file image also
+    /// pulls the embedded object prefix, because publication has to know which
+    /// object records are already durable.
+    fn read_state_windows(&self, windows: &[yydb_query::ReadWindow]) -> Result<(State, snapshot::PriorRecords)> {
+        match self.backend.as_ref() {
+            Backend::File { database, .. } => {
+                let mut record_windows: Vec<RecordWindow> = windows
+                    .iter()
+                    .map(|window| RecordWindow { start: window.start.clone(), end: window.end.clone() })
+                    .collect();
+                if self.is_single_file_yydb() {
+                    record_windows.push(RecordWindow {
+                        start: EMBEDDED_OBJECT_PREFIX.to_owned(),
+                        end: Some(format!("{EMBEDDED_OBJECT_PREFIX}g")),
+                    });
+                }
+                let snapshot = {
+                    let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    database.snapshot_windows(&record_windows)?
+                };
+                let mut state = snapshot::state_from_snapshot(&snapshot)?;
+                let prior = snapshot::prior_records(&state.records);
+                if self.is_single_file_yydb() {
+                    self.objects.take_embedded_records(&mut state.records)?;
+                }
+                Ok((state, prior))
+            }
+            Backend::Memory { state } => {
+                let state = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+                let prior = snapshot::prior_records(&state.records);
+                Ok((state, prior))
+            }
+        }
+    }
+
     pub(crate) fn read_state(&self) -> Result<State> {
         let mut state = match self.backend.as_ref() {
             Backend::File { database, .. } => {
@@ -130,10 +169,12 @@ impl Connection {
                     None
                 };
                 let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                let before = database.snapshot()?.records;
                 let next = snapshot::snapshot_from_state(&state)?;
                 let blob_refs = match blob_objects {
-                    Some(objects) => snapshot::blob_deltas(&before, &next.records, objects)?,
+                    Some(objects) => {
+                        let before = database.snapshot()?.records;
+                        snapshot::blob_deltas(&before, &next.records, objects)?
+                    }
                     None => Vec::new(),
                 };
                 database.commit(&next, &blob_refs)?;
@@ -143,5 +184,55 @@ impl Connection {
             }
         }
         Ok(sequence)
+    }
+
+    /// Publish only the records one narrowed write changed.
+    ///
+    /// `prior` holds what the image contained for the keys the statement could
+    /// reach, so the published delta is the exact change set and publication
+    /// never scans the record tree to discover what changed.
+    fn write_state_delta(&self, mut state: State, prior: &snapshot::PriorRecords) -> Result<yydb_types::CommitSequence> {
+        if self.is_single_file_yydb() {
+            self.objects.embed_into(&mut state.records)?;
+        }
+        let sequence = lease::bump_commit_sequence(&mut state.records);
+        let next = snapshot::snapshot_from_state(&state)?;
+        let delta = snapshot::record_delta(&next.records, prior);
+        match self.backend.as_ref() {
+            Backend::File { database, .. } => {
+                let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                database.commit_delta(&next.metadata, &delta, &[])?;
+            }
+            Backend::Memory { state: slot } => {
+                *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = state;
+            }
+        }
+        Ok(sequence)
+    }
+
+    /// Apply one write and publish only its records when the statement names
+    /// the rows it can touch.
+    ///
+    /// `plan` receives reserved metadata and returns the record windows the
+    /// statement can reach, or `None` when that cannot be proven. Everything
+    /// else keeps the full publish path: an open transaction, an in-memory
+    /// image, a `.yydx` image and any unbounded shape behave exactly as before.
+    pub(crate) fn mutate_narrowed_write_unlocked<P, F>(&self, plan: P, f: F) -> Result<()>
+    where
+        P: FnOnce(&State) -> Result<Option<Vec<yydb_query::ReadWindow>>>,
+        F: FnOnce(&mut State) -> Result<()>,
+    {
+        if self.has_open_transaction() || !self.is_single_file_yydb() || self.publishes_everything() {
+            return self.mutate_active_state_unlocked(f);
+        }
+        let metadata = self.read_state_metadata()?;
+        let Some(windows) = plan(&metadata)?
+        else {
+            return self.mutate_active_state_unlocked(f);
+        };
+        let (mut state, prior) = self.read_state_windows(&windows)?;
+        f(&mut state)?;
+        self.write_state_delta(state, &prior)?;
+        Ok(())
     }
 }

@@ -27,6 +27,20 @@ impl Connection {
         Arc::new(YydbVectorPolicy::new(Arc::clone(&self.objects)))
     }
 
+    /// Run `body` with the object resolver and byte/vector placement hooks in
+    /// scope.
+    ///
+    /// Planning a write and executing it both evaluate field initializers, so
+    /// both must see the same storage policies or a keyed plan could disagree
+    /// with the row the executor builds.
+    fn with_write_hooks<T>(&self, body: impl FnOnce() -> T) -> T {
+        yydb_query::with_object_resolver(Some(self.object_resolver()), || {
+            yydb_query::with_bytes_placement(Some(self.bytes_policy()), || {
+                yydb_query::with_vector_placement(Some(self.vector_policy()), body)
+            })
+        })
+    }
+
     /// Prepare a VOS read pipeline into a reusable query plan.
     ///
     /// The returned [`PreparedStatement`] carries the lowered op tree, named
@@ -210,6 +224,11 @@ impl Connection {
         self.query_sql_with_params(source, &[])
     }
 
+    /// Exact record windows for the keys a VOS point write names.
+    fn key_windows(keys: Vec<String>) -> Vec<yydb_query::ReadWindow> {
+        keys.into_iter().map(|key| yydb_query::ReadWindow { end: Some(format!("{key}\u{0}")), start: key }).collect()
+    }
+
     /// Execute a VOS write program (inserts and schema macros).
     ///
     /// Mutates the active connection state. When a transaction is open, changes
@@ -217,23 +236,25 @@ impl Connection {
     pub fn execute_vos_write(&self, source: &str) -> Result<()> {
         self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.mutate_active_state_unlocked(|state| {
-            let contract = resolved_contract(state)?;
-            let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
-            yydb_query::with_object_resolver(Some(self.object_resolver()), || {
-                yydb_query::with_bytes_placement(Some(self.bytes_policy()), || {
-                    yydb_query::with_vector_placement(Some(self.vector_policy()), || {
-                        yydb_query::execute_write_with_constraints(
-                            source,
-                            &contract,
-                            &state.unique_constraints,
-                            schema_document,
-                            &mut state.records,
-                        )
-                    })
+        self.mutate_narrowed_write_unlocked(
+            |metadata| {
+                let contract = resolved_contract(metadata)?;
+                let schema_document = metadata.schema.as_ref().map(|schema| schema.document.as_str());
+                self.with_write_hooks(|| {
+                    yydb_query::point_write_keys(source, &contract, &metadata.unique_constraints, schema_document, &[])
                 })
-            })
-        })
+                .map(|keys| keys.map(Self::key_windows))
+            },
+            |state| {
+                let contract = resolved_contract(state)?;
+                let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
+                let records = &mut state.records;
+                let constraints = &state.unique_constraints;
+                self.with_write_hooks(|| {
+                    yydb_query::execute_write_with_constraints(source, &contract, constraints, schema_document, records)
+                })
+            },
+        )
     }
 
     /// Execute a VOS insert program with named `$name` parameter bindings.
@@ -246,25 +267,41 @@ impl Connection {
     pub fn execute_vos_write_with_params(&self, source: &str, named: &BTreeMap<String, Value>) -> Result<()> {
         self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.mutate_active_state_unlocked(|state| {
-            let plan = yydb_query::bind_vos_write(source, named)?;
-            let contract = resolved_contract(state)?;
-            let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
-            yydb_query::with_object_resolver(Some(self.object_resolver()), || {
-                yydb_query::with_bytes_placement(Some(self.bytes_policy()), || {
-                    yydb_query::with_vector_placement(Some(self.vector_policy()), || {
-                        yydb_query::execute_write_with_params(
-                            &plan.source,
-                            &contract,
-                            &state.unique_constraints,
-                            schema_document,
-                            &mut state.records,
-                            &plan.values,
-                        )
-                    })
+        self.mutate_narrowed_write_unlocked(
+            |metadata| {
+                let plan = yydb_query::bind_vos_write(source, named)?;
+                let contract = resolved_contract(metadata)?;
+                let schema_document = metadata.schema.as_ref().map(|schema| schema.document.as_str());
+                self.with_write_hooks(|| {
+                    yydb_query::point_write_keys(
+                        &plan.source,
+                        &contract,
+                        &metadata.unique_constraints,
+                        schema_document,
+                        &plan.values,
+                    )
                 })
-            })
-        })
+                .map(|keys| keys.map(Self::key_windows))
+            },
+            |state| {
+                let plan = yydb_query::bind_vos_write(source, named)?;
+                let contract = resolved_contract(state)?;
+                let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
+                let records = &mut state.records;
+                let constraints = &state.unique_constraints;
+                let values = &plan.values;
+                self.with_write_hooks(|| {
+                    yydb_query::execute_write_with_params(
+                        &plan.source,
+                        &contract,
+                        constraints,
+                        schema_document,
+                        records,
+                        values,
+                    )
+                })
+            },
+        )
     }
 
     /// Execute a SQL write statement (INSERT / UPDATE / DELETE) with positional
@@ -281,25 +318,33 @@ impl Connection {
         self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut affected = 0;
-        self.mutate_active_state_unlocked(|state| {
-            self.check_schema_drift(&stmt, state)?;
-            let contract = resolved_contract(state)?;
-            let outcome = yydb_query::with_object_resolver(Some(self.object_resolver()), || {
-                yydb_query::with_bytes_placement(Some(self.bytes_policy()), || {
-                    yydb_query::with_vector_placement(Some(self.vector_policy()), || {
-                        yydb_query::execute_write_prepared(
-                            &stmt,
-                            &values,
-                            &contract,
-                            &state.unique_constraints,
-                            &mut state.records,
-                        )
-                    })
+        self.mutate_narrowed_write_unlocked(
+            |metadata| {
+                let contract = resolved_contract(metadata)?;
+                self.with_write_hooks(|| {
+                    yydb_query::write_windows(&stmt.write_ops, &contract, &metadata.unique_constraints, &values)
                 })
-            })?;
-            affected = outcome.affected;
-            Ok(())
-        })?;
+            },
+            |state| {
+                self.check_schema_drift(&stmt, state)?;
+                let contract = resolved_contract(state)?;
+                let outcome = yydb_query::with_object_resolver(Some(self.object_resolver()), || {
+                    yydb_query::with_bytes_placement(Some(self.bytes_policy()), || {
+                        yydb_query::with_vector_placement(Some(self.vector_policy()), || {
+                            yydb_query::execute_write_prepared(
+                                &stmt,
+                                &values,
+                                &contract,
+                                &state.unique_constraints,
+                                &mut state.records,
+                            )
+                        })
+                    })
+                })?;
+                affected = outcome.affected;
+                Ok(())
+            },
+        )?;
         Ok(affected)
     }
 }

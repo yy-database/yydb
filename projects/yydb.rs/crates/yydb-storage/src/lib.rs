@@ -20,7 +20,7 @@ pub use blob::BlobStore;
 pub use database::{Database, file_is_ydpg, snapshot_from_main_bytes, snapshot_to_main_bytes};
 pub use journal::{JournalMode, OpenFlags, shm_path, wal_path};
 pub use lock::{LockMode, WriterLock};
-pub use snapshot::{PagerKv, Snapshot};
+pub use snapshot::{PagerKv, RecordDelta, Snapshot};
 
 // Physical layout vocabulary that upper layers need while staying one hop away
 // from `yydb-formats`: CAS chunk hashes and WAL blob-manifest deltas are part of

@@ -66,10 +66,7 @@ impl MemoryPager {
     /// the old full-diff behaviour where a vanished page was never published.
     pub fn take_dirty_pages(&mut self) -> Vec<(u32, Vec<u8>)> {
         let dirty = std::mem::take(&mut self.dirty);
-        dirty
-            .into_iter()
-            .filter_map(|page_id| self.pages.get(&page_id).map(|image| (page_id, image.clone())))
-            .collect()
+        dirty.into_iter().filter_map(|page_id| self.pages.get(&page_id).map(|image| (page_id, image.clone()))).collect()
     }
 
     /// Page count including page 0.

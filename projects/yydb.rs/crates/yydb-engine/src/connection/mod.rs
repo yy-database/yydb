@@ -70,6 +70,10 @@ pub struct Connection {
     pub(crate) udfs: Mutex<UdfSubsystem>,
     pub(crate) objects: std::sync::Arc<ObjectStore>,
     pub(crate) closed: std::sync::Arc<AtomicBool>,
+    /// When set, every write publishes through the full rebuild path instead of
+    /// the incremental narrowing. Test-only: it exists so a suite can prove the
+    /// two publication paths produce the same durable state.
+    pub(crate) full_publish: std::sync::Arc<AtomicBool>,
 }
 
 impl Connection {
@@ -107,6 +111,7 @@ impl Connection {
                 ObjectStore::open_ephemeral()
             }),
             closed: std::sync::Arc::new(AtomicBool::new(false)),
+            full_publish: std::sync::Arc::new(AtomicBool::new(false)),
         };
         // Force recovery path once so a leftover WAL is applied.
         let _ = connection.read_state()?;
@@ -124,6 +129,7 @@ impl Connection {
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: std::sync::Arc::new(ObjectStore::open_ephemeral()),
             closed: std::sync::Arc::new(AtomicBool::new(false)),
+            full_publish: std::sync::Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -142,7 +148,24 @@ impl Connection {
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: std::sync::Arc::clone(&self.objects),
             closed: std::sync::Arc::clone(&self.closed),
+            full_publish: std::sync::Arc::clone(&self.full_publish),
         }
+    }
+
+    /// Whether writes must publish through the full rebuild path.
+    pub(crate) fn publishes_everything(&self) -> bool {
+        self.full_publish.load(Ordering::SeqCst)
+    }
+
+    /// Force every write on this connection and its sessions through the full
+    /// rebuild path.
+    ///
+    /// **Not part of the `@yydb/yydb` public author surface.** It exists so a
+    /// conformance suite can run the same operation sequence twice and prove the
+    /// incremental and full publication paths end in the same durable state.
+    #[doc(hidden)]
+    pub fn set_full_publish(&self, full: bool) {
+        self.full_publish.store(full, Ordering::SeqCst);
     }
 
     /// Serialize the current database as a checkpointed `YDPG` main-file byte image.

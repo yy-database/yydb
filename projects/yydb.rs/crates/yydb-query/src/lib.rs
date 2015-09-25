@@ -52,7 +52,7 @@ pub use store::{
     BytesPlacementHook, ObjectResolver, ROW_PREFIX, VectorPlacementHook, upsert_row, with_bytes_placement,
     with_object_resolver, with_vector_placement,
 };
-pub use window::{ReadWindow, read_window};
+pub use window::{ReadWindow, read_window, write_windows};
 pub use write::WriteOutcome;
 
 /// Execute a VOS read pipeline against stored table rows.
@@ -98,6 +98,20 @@ pub fn execute_write_with_params(
     params: &[Value],
 ) -> yydb_types::Result<()> {
     dml::execute_with_params(source, contract, declared, schema_document, records, params)
+}
+
+/// Record keys a point write must read before it runs.
+///
+/// Returns `None` when the program cannot be proven to be keyed writes on
+/// rule-free tables, in which case the caller must take the full path.
+pub fn point_write_keys(
+    source: &str,
+    contract: &ResolvedContract,
+    declared: &[TableUniqueConstraint],
+    schema_document: Option<&str>,
+    params: &[Value],
+) -> yydb_types::Result<Option<Vec<String>>> {
+    dml::point_write_keys(source, contract, declared, schema_document, params)
 }
 
 /// Run a single `Type::insert({ … })` program and return the stored row when recognized.

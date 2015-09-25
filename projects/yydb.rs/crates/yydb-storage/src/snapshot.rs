@@ -159,6 +159,40 @@ pub fn write_snapshot<P: PagerKv>(pager: &mut P, snapshot: &Snapshot) -> Result<
     Ok(())
 }
 
+/// Exact record-level change set supplied by a caller that already knows which
+/// keys its statement touched.
+///
+/// [`write_snapshot`] has to scan every stored record to discover what changed.
+/// A caller that applied one keyed mutation in memory knows the change set
+/// exactly, so [`write_delta`] publishes it without scanning.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct RecordDelta {
+    /// Records to insert or replace, with their new bytes.
+    pub puts: Vec<(String, Vec<u8>)>,
+    /// Record names to remove. A key that is already absent is a no-op.
+    pub deletes: Vec<String>,
+}
+
+/// Persist a [`RecordDelta`] through incremental btree mutations.
+///
+/// Reserved metadata rows are rewritten as a group exactly like
+/// [`write_snapshot`] does, because their codec belongs to the caller and
+/// absence never means deletion. The delta owns every user record: it must
+/// list each record the statement added, replaced or removed, and it must not
+/// name reserved `__yydb/meta/` rows in `deletes`.
+pub fn write_delta<P: PagerKv>(pager: &mut P, metadata: &BTreeMap<Vec<u8>, Vec<u8>>, delta: &RecordDelta) -> Result<()> {
+    for (key, value) in metadata {
+        pager.put_kv(key, value)?;
+    }
+    for (key, value) in &delta.puts {
+        pager.put_kv(key.as_bytes(), value)?;
+    }
+    for key in &delta.deletes {
+        pager.delete_kv(key.as_bytes())?;
+    }
+    Ok(())
+}
+
 fn read_rows(pager: &mut impl PagerKv) -> Result<BTreeMap<String, Vec<u8>>> {
     let mut rows = BTreeMap::new();
     for (key, value) in pager.scan_kv()? {
