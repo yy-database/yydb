@@ -63,6 +63,58 @@ pub struct EngineReport {
     pub range_scan_ns_per_row: u128,
     /// Close, reopen, then 100 point gets (includes the open).
     pub reopen_point_get_ns: u128,
+    /// Publication attribution; only YYDB writes through a WAL sidecar report it.
+    pub publish: Option<PublishReport>,
+}
+
+/// Attribution of YYDB write time between frame encoding, WAL append, the
+/// durability barrier and the `-shm` mirror.
+///
+/// `commits`, `frames`, `page_images`, `encode_ns`, `append_ns`, `sync_ns`,
+/// `fsyncs`, `shm_writes` and `shm_ns` are cumulative for the whole run.
+/// `single_insert_*_per_op` are the deltas across the autocommit insert loop.
+#[derive(Debug, Clone, Serialize)]
+pub struct PublishReport {
+    /// Committed WAL transactions across the run.
+    pub commits: u64,
+    /// Frames appended across those transactions.
+    pub frames: u64,
+    /// Page-image frames appended across those transactions.
+    pub page_images: u64,
+    /// WAL bytes appended across those transactions.
+    pub appended_bytes: u64,
+    /// Time encoding frames and the commit digest.
+    pub encode_ns: u128,
+    /// Time inside the WAL append call.
+    pub append_ns: u128,
+    /// Time inside the durability barrier.
+    pub sync_ns: u128,
+    /// Durability barrier calls.
+    pub fsyncs: u64,
+    /// `-shm` mirror writes.
+    pub shm_writes: u64,
+    /// Time spent writing the `-shm` mirror.
+    pub shm_ns: u128,
+    /// Time spent inside `commit()` during the batch load.
+    pub batch_commit_ns: u128,
+    /// Number of `commit()` calls during the batch load.
+    pub batch_commits: u64,
+    /// WAL frames per autocommit insert.
+    pub single_insert_frames_per_op: u128,
+    /// Durability barriers per autocommit insert.
+    pub single_insert_fsyncs_per_op: u128,
+    /// Frame encoding time per autocommit insert.
+    pub single_insert_encode_ns_per_op: u128,
+    /// WAL append time per autocommit insert.
+    pub single_insert_append_ns_per_op: u128,
+    /// Durability barrier time per autocommit insert.
+    pub single_insert_sync_ns_per_op: u128,
+    /// `-shm` mirror time per autocommit insert.
+    pub single_insert_shm_ns_per_op: u128,
+    /// Main `YDPG` file length after the batch load and single inserts.
+    pub main_file_bytes: u64,
+    /// WAL sidecar length at the same point.
+    pub wal_file_bytes: u64,
 }
 
 /// One recorded baseline: scale, environment and both engine reports.
@@ -108,25 +160,37 @@ fn run_yydb(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
     conn.ensure_schema("table Bench { @@id: utf8, payload: bytes }").map_err(|e| format!("yydb schema: {e}"))?;
 
     let started = Instant::now();
+    let mut batch_commit_ns = 0_u128;
+    let mut batch_commits = 0_u64;
     for chunk_start in (0..cfg.rows).step_by(cfg.batch_size.max(1)) {
         conn.begin().map_err(|e| format!("yydb begin: {e}"))?;
         for index in chunk_start..(chunk_start + cfg.batch_size.max(1)).min(cfg.rows) {
             yydb_insert(&conn, index, cfg)?;
         }
+        let commit_started = Instant::now();
         conn.commit().map_err(|e| format!("yydb commit: {e}"))?;
+        batch_commit_ns += commit_started.elapsed().as_nanos();
+        batch_commits += 1;
     }
     let batch_load_ns = started.elapsed().as_nanos();
     verify_yydb_count(&conn, cfg.rows, "yydb post-load count")?;
 
+    let before_single = publish_stats(&conn);
     let started = Instant::now();
     for index in 0..cfg.single_inserts {
         yydb_insert(&conn, cfg.rows + index, cfg)?;
     }
     let single_insert_ns_per_op = started.elapsed().as_nanos() / cfg.single_inserts.max(1) as u128;
+    let after_single = publish_stats(&conn);
+    let single_delta = stats_delta(&before_single, &after_single);
+    let single_ops = cfg.single_inserts.max(1) as u128;
 
     let point_get_ns_per_op = yydb_point_pass(&conn, cfg, "yydb cold point get")?;
     let point_get_warm_ns_per_op = yydb_point_pass(&conn, cfg, "yydb warm point get")?;
     let range_scan_ns_per_row = yydb_range_pass(&conn, cfg)?;
+
+    let main_file_bytes = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+    let wal_file_bytes = std::fs::metadata(dir.join("bench.yydb-wal")).map(|meta| meta.len()).unwrap_or(0);
 
     conn.close();
     // The writer lock is released when the handle is dropped, not on `close`.
@@ -145,6 +209,29 @@ fn run_yydb(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
     let reopen_point_get_ns = started.elapsed().as_nanos();
     reopened.close();
 
+    let publish = PublishReport {
+        commits: after_single.wal.commits,
+        frames: after_single.wal.frames,
+        page_images: after_single.wal.page_images,
+        appended_bytes: after_single.wal.appended_bytes,
+        encode_ns: after_single.wal.encode_ns,
+        append_ns: after_single.wal.append_ns,
+        sync_ns: after_single.wal.sync_ns,
+        fsyncs: after_single.wal.fsyncs,
+        shm_writes: after_single.shm_writes,
+        shm_ns: after_single.shm_ns,
+        batch_commit_ns,
+        batch_commits,
+        single_insert_frames_per_op: single_delta.wal.frames as u128 / single_ops,
+        single_insert_fsyncs_per_op: single_delta.wal.fsyncs as u128 / single_ops,
+        single_insert_encode_ns_per_op: single_delta.wal.encode_ns / single_ops,
+        single_insert_append_ns_per_op: single_delta.wal.append_ns / single_ops,
+        single_insert_sync_ns_per_op: single_delta.wal.sync_ns / single_ops,
+        single_insert_shm_ns_per_op: single_delta.shm_ns / single_ops,
+        main_file_bytes,
+        wal_file_bytes,
+    };
+
     Ok(EngineReport {
         engine: "yydb",
         batch_load_ns,
@@ -153,7 +240,29 @@ fn run_yydb(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
         point_get_warm_ns_per_op,
         range_scan_ns_per_row,
         reopen_point_get_ns,
+        publish: Some(publish),
     })
+}
+
+fn publish_stats(conn: &yydb::Connection) -> yydb_storage::PublishStats {
+    conn.publish_stats().unwrap_or_default()
+}
+
+fn stats_delta(before: &yydb_storage::PublishStats, after: &yydb_storage::PublishStats) -> yydb_storage::PublishStats {
+    yydb_storage::PublishStats {
+        wal: yydb_storage::WalWriteStats {
+            commits: after.wal.commits - before.wal.commits,
+            frames: after.wal.frames - before.wal.frames,
+            page_images: after.wal.page_images - before.wal.page_images,
+            appended_bytes: after.wal.appended_bytes - before.wal.appended_bytes,
+            encode_ns: after.wal.encode_ns - before.wal.encode_ns,
+            append_ns: after.wal.append_ns - before.wal.append_ns,
+            sync_ns: after.wal.sync_ns - before.wal.sync_ns,
+            fsyncs: after.wal.fsyncs - before.wal.fsyncs,
+        },
+        shm_writes: after.shm_writes - before.shm_writes,
+        shm_ns: after.shm_ns - before.shm_ns,
+    }
 }
 
 fn verify_yydb_count(conn: &yydb::Connection, expected: usize, context: &str) -> Result<(), String> {
@@ -262,6 +371,7 @@ fn run_sqlite(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
         point_get_warm_ns_per_op,
         range_scan_ns_per_row,
         reopen_point_get_ns,
+        publish: None,
     })
 }
 

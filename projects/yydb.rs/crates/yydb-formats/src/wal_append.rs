@@ -5,6 +5,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use yydb_types::{Error, Result};
@@ -79,6 +80,31 @@ impl WalSink for FileWalSink {
     }
 }
 
+/// Cumulative counters for committed WAL appends.
+///
+/// Measurement surface only: the counters record what the writer already did,
+/// so reading them never changes the frames, the durability barrier or the
+/// commit LSN.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct WalWriteStats {
+    /// Committed transactions appended by this writer.
+    pub commits: u64,
+    /// Frames written across those transactions, including begin and commit.
+    pub frames: u64,
+    /// Page-image frames written across those transactions.
+    pub page_images: u64,
+    /// Bytes handed to the sink across those transactions.
+    pub appended_bytes: u64,
+    /// Time spent encoding frames and the commit digest.
+    pub encode_ns: u128,
+    /// Time spent inside [`WalSink::append`].
+    pub append_ns: u128,
+    /// Time spent inside [`WalSink::sync`], the durability barrier.
+    pub sync_ns: u128,
+    /// Durability barrier calls, one per committed transaction today.
+    pub fsyncs: u64,
+}
+
 /// Append-only WAL writer for page-image transactions.
 pub struct WalWriter {
     path: PathBuf,
@@ -88,6 +114,8 @@ pub struct WalWriter {
     durability: WalDurability,
     sink: Box<dyn WalSink>,
     poisoned: bool,
+    file_bytes: u64,
+    stats: WalWriteStats,
 }
 
 impl WalWriter {
@@ -103,8 +131,10 @@ impl WalWriter {
         let path = path.as_ref().to_path_buf();
         let mut next_lsn = base_checkpoint_lsn + 1;
         let mut next_txid = 1_u64;
+        let file_bytes;
         if path.exists() {
             let bytes = std::fs::read(&path)?;
+            file_bytes = bytes.len() as u64;
             let scan = scan_wal(&bytes)?;
             if !matches!(scan.tail, WalTail::Clean) {
                 return Err(Error::Corrupt("wal torn tail requires recovery before append"));
@@ -118,6 +148,7 @@ impl WalWriter {
             let mut file = File::create(&path)?;
             file.write_all(&header)?;
             file.sync_all()?;
+            file_bytes = header.len() as u64;
         }
         let sink = FileWalSink::open(&path)?;
         Ok(Self {
@@ -128,6 +159,8 @@ impl WalWriter {
             durability: WalDurability::SyncOnCommit,
             sink: Box::new(sink),
             poisoned: false,
+            file_bytes,
+            stats: WalWriteStats::default(),
         })
     }
 
@@ -144,6 +177,8 @@ impl WalWriter {
             durability: WalDurability::SyncOnCommit,
             sink,
             poisoned: false,
+            file_bytes: 0,
+            stats: WalWriteStats::default(),
         }
     }
 
@@ -162,14 +197,31 @@ impl WalWriter {
             return Err(Error::Corrupt(WRITER_POISONED));
         }
         let txid = self.next_txid;
+        let started = Instant::now();
         let (bytes, commit_lsn, next_lsn) = encode_commit(self.next_lsn, txid, pages, blob_refs)?;
-        let written = self.sink.append(&bytes).and_then(|()| match self.durability {
-            WalDurability::SyncOnCommit => self.sink.sync(),
+        self.stats.encode_ns += started.elapsed().as_nanos();
+        let byte_len = bytes.len() as u64;
+        let append_started = Instant::now();
+        let appended = self.sink.append(&bytes);
+        self.stats.append_ns += append_started.elapsed().as_nanos();
+        let written = appended.and_then(|()| match self.durability {
+            WalDurability::SyncOnCommit => {
+                let sync_started = Instant::now();
+                self.stats.fsyncs += 1;
+                let synced = self.sink.sync();
+                self.stats.sync_ns += sync_started.elapsed().as_nanos();
+                synced
+            }
         });
         match written {
             Ok(()) => {
                 self.next_txid = txid + 1;
                 self.next_lsn = next_lsn;
+                self.file_bytes += byte_len;
+                self.stats.commits += 1;
+                self.stats.frames += 2 + pages.len() as u64 + u64::from(!blob_refs.is_empty());
+                self.stats.page_images += pages.len() as u64;
+                self.stats.appended_bytes += byte_len;
                 Ok(commit_lsn)
             }
             Err(error) => {
@@ -177,6 +229,16 @@ impl WalWriter {
                 Err(Error::Io(error))
             }
         }
+    }
+
+    /// Cumulative append counters for this writer.
+    pub fn write_stats(&self) -> WalWriteStats {
+        self.stats
+    }
+
+    /// Byte length of the WAL sidecar after the last successful append.
+    pub fn file_bytes(&self) -> u64 {
+        self.file_bytes
     }
 
     /// Sidecar path.

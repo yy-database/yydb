@@ -4,6 +4,7 @@ use std::{
     fs::OpenOptions,
     io::{Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use yydb_types::{Error, Result};
@@ -18,13 +19,27 @@ use crate::{
     key::TreeKey,
     memory::MemoryPager,
     pager::PageStore,
-    shm::{shm_sidecar_path, sync_shm_from_wal},
+    shm::{shm_sidecar_path, sync_shm_from_commit, sync_shm_from_wal},
     wal::{committed_tail_lsn, committed_transactions},
     wal_append::{
-        RecoveryReport, WalWriter, read_wal_file, replay_wal_pages_after, truncate_wal_records, truncate_wal_torn_tail,
-        wal_sidecar_path,
+        RecoveryReport, WalWriteStats, WalWriter, read_wal_file, replay_wal_pages_after, truncate_wal_records,
+        truncate_wal_torn_tail, wal_sidecar_path,
     },
 };
+
+/// Cumulative publication counters for [`FilePager`].
+///
+/// Measurement surface only. Counters describe the work a publication already
+/// performed, so reading them never changes frames, ordering or durability.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct PublishStats {
+    /// WAL append counters, including one durability barrier per commit.
+    pub wal: WalWriteStats,
+    /// `-shm` mirror writes performed after commits.
+    pub shm_writes: u64,
+    /// Time spent writing the `-shm` mirror.
+    pub shm_ns: u128,
+}
 
 /// Persistent page store backed by a single `YDPG` main file.
 pub struct FilePager {
@@ -33,6 +48,8 @@ pub struct FilePager {
     wal_enabled: bool,
     wal: Option<WalWriter>,
     last_recovery: RecoveryReport,
+    shm_writes: u64,
+    shm_ns: u128,
 }
 
 impl FilePager {
@@ -44,8 +61,15 @@ impl FilePager {
         }
         let existed = path.exists();
         let inner = if existed { load_main_file(&path)? } else { MemoryPager::new_empty(fresh_database_id(), 0x01) };
-        let mut file_pager =
-            Self { path: path.clone(), inner, wal_enabled: enable_wal, wal: None, last_recovery: RecoveryReport::default() };
+        let mut file_pager = Self {
+            path: path.clone(),
+            inner,
+            wal_enabled: enable_wal,
+            wal: None,
+            last_recovery: RecoveryReport::default(),
+            shm_writes: 0,
+            shm_ns: 0,
+        };
         if !existed {
             file_pager.persist_all()?;
         }
@@ -196,8 +220,12 @@ impl FilePager {
         if self.wal_enabled {
             self.ensure_wal()?;
             if let Some(wal) = self.wal.as_mut() {
-                wal.append_commit(&changed, blob_refs)?;
+                let commit_lsn = wal.append_commit(&changed, blob_refs)?;
+                let _ = commit_lsn;
+                let shm_started = Instant::now();
                 sync_shm_from_wal(&self.path, wal.path())?;
+                self.shm_ns += shm_started.elapsed().as_nanos();
+                self.shm_writes += 1;
             }
         }
         else {
@@ -206,6 +234,19 @@ impl FilePager {
             }
         }
         Ok(())
+    }
+
+    /// Cumulative publication counters since the pager was opened.
+    ///
+    /// Not part of the storage contract: callers use these numbers to attribute
+    /// write cost between frame encoding, the durability barrier and the shm
+    /// mirror. They never change publication behavior.
+    pub fn publish_stats(&self) -> PublishStats {
+        PublishStats {
+            wal: self.wal.as_ref().map(WalWriter::write_stats).unwrap_or_default(),
+            shm_writes: self.shm_writes,
+            shm_ns: self.shm_ns,
+        }
     }
 
     fn committed_wal_tail_lsn(&self) -> Result<u64> {

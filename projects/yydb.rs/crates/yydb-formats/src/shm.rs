@@ -77,16 +77,27 @@ pub fn shm_sidecar_path(main: &Path) -> PathBuf {
 }
 
 /// Mirror committed WAL tail metadata into the `-shm` sidecar.
+///
+/// This path re-parses the whole WAL, so callers that already appended a
+/// committed transaction and know its tail should use
+/// [`sync_shm_from_commit`] instead.
 pub fn sync_shm_from_wal(main: &Path, wal: &Path) -> Result<()> {
     let wal_bytes = std::fs::read(wal)?;
     let parsed = parse_wal_recover(&wal_bytes)?;
-    let block = ShmBlock {
-        format_version: 0,
-        writer_epoch: 0,
-        active_readers: 0,
-        wal_tail_lsn: committed_tail_lsn(&parsed),
-        wal_file_bytes: wal_bytes.len() as u64,
-    };
+    write_shm(main, committed_tail_lsn(&parsed), wal_bytes.len() as u64)
+}
+
+/// Mirror a WAL tail that the writer already reported into the `-shm` sidecar.
+///
+/// `tail_lsn` must come from a successful append and `wal_file_bytes` must be
+/// the sidecar length after that append, so the block is byte-identical to
+/// what [`sync_shm_from_wal`] would derive from a fresh parse.
+pub fn sync_shm_from_commit(main: &Path, tail_lsn: u64, wal_file_bytes: u64) -> Result<()> {
+    write_shm(main, tail_lsn, wal_file_bytes)
+}
+
+fn write_shm(main: &Path, tail_lsn: u64, wal_file_bytes: u64) -> Result<()> {
+    let block = ShmBlock { format_version: 0, writer_epoch: 0, active_readers: 0, wal_tail_lsn: tail_lsn, wal_file_bytes };
     std::fs::write(shm_sidecar_path(main), encode_shm(&block))?;
     Ok(())
 }

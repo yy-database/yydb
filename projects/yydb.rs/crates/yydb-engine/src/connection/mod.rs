@@ -168,6 +168,22 @@ impl Connection {
         self.full_publish.store(full, Ordering::SeqCst);
     }
 
+    /// Cumulative WAL publication counters for this database handle.
+    ///
+    /// **Not part of the `@yydb/yydb` public author surface.** It exists so the
+    /// measurement harness can attribute write cost between frame encoding, the
+    /// durability barrier and the shm mirror. Reading it never changes behavior.
+    #[doc(hidden)]
+    pub fn publish_stats(&self) -> Option<yydb_storage::PublishStats> {
+        match self.backend.as_ref() {
+            Backend::File { database, .. } => {
+                let database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                Some(database.publish_stats())
+            }
+            Backend::Memory { .. } => None,
+        }
+    }
+
     /// Serialize the current database as a checkpointed `YDPG` main-file byte image.
     pub fn main_snapshot(&self) -> Result<Vec<u8>> {
         match self.backend.as_ref() {

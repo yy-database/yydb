@@ -30,7 +30,7 @@ pub use blob_refs::{
 pub use btree::RecordTree;
 pub use crc32c::crc32c;
 pub use doctor::diagnose_file;
-pub use file::{FilePager, main_bytes_from_memory_pager, memory_pager_from_main_bytes};
+pub use file::{FilePager, PublishStats, main_bytes_from_memory_pager, memory_pager_from_main_bytes};
 pub use header::{
     DatabaseHeader, DatabaseHeaderSlot, PAGE_MAGIC, PAGE_SIZE, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B, encode_empty_page0,
     inactive_slot_offset, parse_page0, slot_offset_for_kind,
@@ -41,15 +41,18 @@ pub use leaf::{LeafCell, LeafPage};
 pub use memory::MemoryPager;
 pub use page::{PAGE_HEADER_LEN, PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF, PageHeader, encode_page};
 pub use pager::PageStore;
-pub use shm::{SHM_BYTES, SHM_MAGIC, ShmBlock, encode_empty_shm, encode_shm, parse_shm, shm_sidecar_path, sync_shm_from_wal};
+pub use shm::{
+    SHM_BYTES, SHM_MAGIC, ShmBlock, encode_empty_shm, encode_shm, parse_shm, shm_sidecar_path, sync_shm_from_commit,
+    sync_shm_from_wal,
+};
 pub use wal::{
     MAX_WAL_RECORD_BYTES, WAL_HEADER_BYTES, WAL_MAGIC, WAL_RECORD_HEADER_BYTES, WAL_RECORD_TRAILER_BYTES, WalFile, WalFrame,
     WalHeader, WalRecordError, WalScan, WalTail, committed_tail_lsn, committed_transactions, parse_frame, parse_header,
     parse_wal, parse_wal_recover, scan_wal, wal_frame_offsets,
 };
 pub use wal_append::{
-    FileWalSink, RecoveryReport, WalDurability, WalSink, WalWriter, encode_frame, encode_wal_header, read_wal_file,
-    replay_wal_pages, replay_wal_pages_after, strip_incomplete_txn_after_last_page_image, strip_trailing_txn_commit,
-    truncate_wal_after_frame, truncate_wal_records, truncate_wal_to_recoverable_prefix, truncate_wal_torn_tail,
-    wal_recoverable_byte_len, wal_sidecar_path,
+    FileWalSink, RecoveryReport, WalDurability, WalSink, WalWriteStats, WalWriter, encode_frame, encode_wal_header,
+    read_wal_file, replay_wal_pages, replay_wal_pages_after, strip_incomplete_txn_after_last_page_image,
+    strip_trailing_txn_commit, truncate_wal_after_frame, truncate_wal_records, truncate_wal_to_recoverable_prefix,
+    truncate_wal_torn_tail, wal_recoverable_byte_len, wal_sidecar_path,
 };

@@ -7,8 +7,8 @@ use std::{
 };
 
 use yydb_formats::{
-    BlobManifestDelta, FilePager, MemoryPager, PAGE_MAGIC, RecoveryReport, WAL_MAGIC, main_bytes_from_memory_pager,
-    memory_pager_from_main_bytes, parse_wal_recover,
+    BlobManifestDelta, FilePager, MemoryPager, PAGE_MAGIC, PublishStats, RecoveryReport, WAL_MAGIC,
+    main_bytes_from_memory_pager, memory_pager_from_main_bytes, parse_wal_recover,
 };
 use yydb_types::{Error, Result};
 
@@ -93,6 +93,14 @@ impl Database {
     /// can read, so the record tree never walks the rest of the database.
     pub fn snapshot_windows(&mut self, windows: &[RecordWindow]) -> Result<Snapshot> {
         read_snapshot_windows(&mut self.pager, windows)
+    }
+
+    /// Cumulative publication counters for this database handle.
+    ///
+    /// Measurement surface: frame counts, durability barriers and time spent in
+    /// each publication stage. Reading them never alters publication behavior.
+    pub fn publish_stats(&self) -> PublishStats {
+        self.pager.publish_stats()
     }
 
     /// Commit a snapshot, publishing `blob_refs` into the WAL transaction when set.

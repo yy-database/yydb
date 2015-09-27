@@ -21,3 +21,4 @@ rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 yydb = { workspace = true }
+yydb-storage = { workspace = true }

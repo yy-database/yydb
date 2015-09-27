@@ -69,6 +69,38 @@ fn print_report(baseline: &Baseline) {
     row("point get warm (ns/op)", baseline.yydb.point_get_warm_ns_per_op, baseline.sqlite.point_get_warm_ns_per_op);
     row("range scan (ns/row)", baseline.yydb.range_scan_ns_per_row, baseline.sqlite.range_scan_ns_per_row);
     row("reopen+100 gets (ns)", baseline.yydb.reopen_point_get_ns, baseline.sqlite.reopen_point_get_ns);
+    if let Some(publish) = &baseline.yydb.publish {
+        println!();
+        println!(
+            "yydb publication · commits={} · frames={} · page-images={} · fsyncs={}",
+            publish.commits, publish.frames, publish.page_images, publish.fsyncs
+        );
+        println!(
+            "  batch commit share   {:>10.1}%  ({} of {})",
+            publish.batch_commit_ns as f64 / baseline.yydb.batch_load_ns.max(1) as f64 * 100.0,
+            publish.batch_commit_ns,
+            baseline.yydb.batch_load_ns
+        );
+        println!(
+            "  per autocommit insert: frames={} fsyncs={}",
+            publish.single_insert_frames_per_op, publish.single_insert_fsyncs_per_op
+        );
+        println!(
+            "    encode {:>8} ns · append {:>8} ns · fsync {:>8} ns · shm {:>8} ns",
+            publish.single_insert_encode_ns_per_op,
+            publish.single_insert_append_ns_per_op,
+            publish.single_insert_sync_ns_per_op,
+            publish.single_insert_shm_ns_per_op
+        );
+        let op = baseline.yydb.single_insert_ns_per_op;
+        let attributed = publish.single_insert_encode_ns_per_op
+            + publish.single_insert_append_ns_per_op
+            + publish.single_insert_sync_ns_per_op
+            + publish.single_insert_shm_ns_per_op;
+        println!("    op total {:>8} ns · non-fsync CPU {:>8} ns", op, op.saturating_sub(publish.single_insert_sync_ns_per_op));
+        println!("    attributed {:>8} ns of {}", attributed, op);
+        println!("  main file {} B · wal {} B", publish.main_file_bytes, publish.wal_file_bytes);
+    }
     println!("Raw numbers only: no absolute SLO is asserted. Compare on the same machine.");
 }
 
