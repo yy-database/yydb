@@ -241,6 +241,12 @@ impl WalWriter {
         self.file_bytes
     }
 
+    /// Re-read the sidecar length after an external truncation.
+    pub fn refresh_file_bytes(&mut self) -> Result<()> {
+        self.file_bytes = std::fs::metadata(&self.path).map(|meta| meta.len()).unwrap_or(0);
+        Ok(())
+    }
+
     /// Sidecar path.
     pub fn path(&self) -> &Path {
         &self.path

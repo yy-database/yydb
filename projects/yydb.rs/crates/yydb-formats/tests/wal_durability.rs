@@ -7,8 +7,8 @@ use std::{
 };
 
 use yydb_formats::{
-    PAGE_SIZE, WalDurability, WalSink, WalTail, WalWriter, committed_transactions, encode_wal_header, replay_wal_pages,
-    scan_wal, truncate_wal_torn_tail,
+    PAGE_SIZE, WalDurability, WalSink, WalTail, WalWriter, committed_transactions, encode_wal_header, parse_shm,
+    replay_wal_pages, scan_wal, sync_shm_from_commit, sync_shm_from_wal, truncate_wal_torn_tail,
 };
 use yydb_types::Error;
 
@@ -166,4 +166,30 @@ fn wal_writer_rejects_append_after_torn_tail() {
     assert_eq!(writer.database_id(), DB_ID);
 
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn shm_mirror_from_commit_matches_a_full_wal_parse() {
+    let wal_path = temp_path("shm-mirror");
+    let main = std::env::temp_dir().join(format!("yydb-shm-mirror-{}.yydb", std::process::id()));
+    let _ = std::fs::remove_file(&wal_path);
+    let _ = std::fs::remove_file(&main);
+    let _ = std::fs::remove_file(yydb_formats::shm_sidecar_path(&main));
+
+    let mut writer = WalWriter::open(&wal_path, DB_ID, 0).unwrap();
+    writer.append_commit(&[(1, page(0x11))], &[]).unwrap();
+    let commit_lsn = writer.append_commit(&[(2, page(0x22))], &[]).unwrap();
+    let wal_bytes = writer.file_bytes();
+    assert_eq!(wal_bytes, std::fs::metadata(&wal_path).unwrap().len());
+
+    sync_shm_from_wal(&main, &wal_path).unwrap();
+    let parsed = parse_shm(&std::fs::read(yydb_formats::shm_sidecar_path(&main)).unwrap()).unwrap();
+
+    sync_shm_from_commit(&main, commit_lsn, wal_bytes).unwrap();
+    let mirrored = parse_shm(&std::fs::read(yydb_formats::shm_sidecar_path(&main)).unwrap()).unwrap();
+    assert_eq!(mirrored, parsed, "a commit-known tail must mirror the same block as a full parse");
+
+    let _ = std::fs::remove_file(&wal_path);
+    let _ = std::fs::remove_file(&main);
+    let _ = std::fs::remove_file(yydb_formats::shm_sidecar_path(&main));
 }

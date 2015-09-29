@@ -169,6 +169,9 @@ impl FilePager {
         let wal_path = wal_sidecar_path(&self.path);
         if self.wal_enabled && wal_path.exists() {
             truncate_wal_torn_tail(&wal_path)?;
+            if let Some(wal) = self.wal.as_mut() {
+                wal.refresh_file_bytes()?;
+            }
         }
         let checkpoint_lsn = self.committed_wal_tail_lsn()?;
         self.persist_data_pages()?;
@@ -221,9 +224,9 @@ impl FilePager {
             self.ensure_wal()?;
             if let Some(wal) = self.wal.as_mut() {
                 let commit_lsn = wal.append_commit(&changed, blob_refs)?;
-                let _ = commit_lsn;
+                let wal_bytes = wal.file_bytes();
                 let shm_started = Instant::now();
-                sync_shm_from_wal(&self.path, wal.path())?;
+                sync_shm_from_commit(&self.path, commit_lsn, wal_bytes)?;
                 self.shm_ns += shm_started.elapsed().as_nanos();
                 self.shm_writes += 1;
             }
