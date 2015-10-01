@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{Result, journal::JournalMode, kv::lease, objects::EMBEDDED_OBJECT_PREFIX, storage::snapshot};
 use yydb_storage::snapshot::RecordWindow;
 
-use super::{Backend, Connection, State, is_yydx_main_path};
+use super::{Backend, Connection, State, TxnJournal, is_yydx_main_path};
 
 impl Connection {
     pub(crate) fn reconcile_leases_on_open(&self) -> Result<()> {
@@ -29,10 +29,31 @@ impl Connection {
         self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_some()
     }
 
+    /// Discard the journal so the next transaction starts with an empty key set.
+    pub(crate) fn reset_transaction_journal(&self) {
+        let mut journal = self.txn_journal.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        journal.keys.clear();
+        journal.prior.clear();
+        journal.wholesale = false;
+    }
+
+    /// Take the journal of the transaction that is ending.
+    pub(crate) fn take_transaction_journal(&self) -> TxnJournal {
+        let mut journal = self.txn_journal.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *journal)
+    }
+
+    /// Record that this transaction's change set cannot be published by key.
+    pub(crate) fn mark_transaction_wholesale_publish(&self) {
+        let mut journal = self.txn_journal.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        journal.wholesale = true;
+    }
+
     pub(crate) fn replace_active_state_unlocked(&self, state: State) -> Result<()> {
         let mut slot = self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if slot.is_some() {
             *slot = Some(state);
+            self.mark_transaction_wholesale_publish();
             Ok(())
         }
         else {
@@ -271,12 +292,68 @@ impl Connection {
         };
         let prior = window_rows(&state.records, windows);
         match f(&mut *state) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                // The published delta is the symmetric difference of the window
+                // before and after this statement. Keys that disappeared must
+                // stay named, so both sides are contributed, and only the first
+                // pre-image of a key is kept because later statements must diff
+                // against what the transaction started from.
+                let mut journal = self.txn_journal.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                for (key, value) in prior {
+                    if journal.keys.insert(key.clone()) {
+                        journal.prior.insert(key, value);
+                    }
+                }
+                for (key, _) in window_rows(&state.records, windows) {
+                    journal.keys.insert(key);
+                }
+                Ok(())
+            }
             Err(error) => {
                 restore_window_rows(&mut state.records, windows, prior);
                 Err(error)
             }
         }
+    }
+
+    /// Publish only the records an open transaction touched.
+    ///
+    /// The journal already holds the first pre-image of every touched key, so
+    /// the user-row delta is a pure in-memory diff against it. The durable
+    /// image is read only for the embedded object prefix, which tells publication
+    /// which content-addressed object rows are already there. Metadata rows are
+    /// rewritten as a group, like every other publication.
+    pub(crate) fn write_transaction_delta(&self, mut state: State, journal: &TxnJournal) -> Result<yydb_types::CommitSequence> {
+        self.objects.embed_into(&mut state.records)?;
+        let sequence = lease::bump_commit_sequence(&mut state.records);
+        let metadata = snapshot::metadata_from_state(&state)?;
+        let (_, prior) = self.read_state_windows(&[])?;
+        let mut delta = yydb_storage::snapshot::RecordDelta::default();
+        for key in &journal.keys {
+            match (state.records.get(key), journal.prior.get(key)) {
+                (Some(value), Some(old)) if value == old => {}
+                (Some(value), _) => delta.puts.push((key.clone(), value.clone())),
+                (None, Some(_)) => delta.deletes.push(key.clone()),
+                (None, None) => {}
+            }
+        }
+        // Embedded object rows are content addressed, so an absent key means an
+        // object the image does not carry yet and an existing key is unchanged.
+        for (key, value) in &state.records {
+            if key.starts_with(EMBEDDED_OBJECT_PREFIX) && !prior.objects.contains(key) {
+                delta.puts.push((key.clone(), value.clone()));
+            }
+        }
+        match self.backend.as_ref() {
+            Backend::File { database, .. } => {
+                let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                database.commit_delta(&metadata, &delta, &[])?;
+            }
+            Backend::Memory { state: slot } => {
+                *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = state;
+            }
+        }
+        Ok(sequence)
     }
 }
 

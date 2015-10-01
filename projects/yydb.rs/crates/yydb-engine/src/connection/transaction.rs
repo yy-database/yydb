@@ -17,6 +17,8 @@ impl Connection {
             return Err(Error::Schema { message: "transaction already open".into() });
         }
         *slot = Some(self.read_state()?);
+        drop(slot);
+        self.reset_transaction_journal();
         Ok(())
     }
 
@@ -26,6 +28,10 @@ impl Connection {
     /// sequence must still equal the one `begin` captured, otherwise the
     /// commit fails with [`Error::TransactionConflict`], publishes nothing and
     /// ends the transaction. The caller retries with a fresh `begin`.
+    ///
+    /// Publication only carries the records the transaction wrote when every
+    /// statement named its windows. A transaction that touched anything unproven
+    /// publishes the whole state instead.
     pub fn commit(&self) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut slot = self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -33,18 +39,25 @@ impl Connection {
         else {
             return Err(Error::Schema { message: "no open transaction".into() });
         };
+        let journal = self.take_transaction_journal();
         // Transaction ends — any live savepoints are discarded with it.
         let mut savepoints = self.savepoints.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         savepoints.clear();
         drop(savepoints);
         drop(slot);
+        // The fence only needs the durable commit sequence, so this read stops
+        // at reserved metadata instead of materializing every row.
         let base = lease::read_u64_meta(&state.records, lease::META_COMMIT_SEQ);
-        let durable = self.read_state()?;
+        let durable = self.read_state_metadata()?;
         let found = lease::read_u64_meta(&durable.records, lease::META_COMMIT_SEQ);
         if found != base {
             return Err(Error::TransactionConflict { expected: base, found });
         }
-        self.write_state(&state)?;
+        if journal.wholesale || self.publishes_everything() || !self.is_single_file_yydb() {
+            self.write_state(&state)?;
+            return Ok(());
+        }
+        self.write_transaction_delta(state, &journal)?;
         Ok(())
     }
 
@@ -59,6 +72,9 @@ impl Connection {
         // Transaction ends — any live savepoints are discarded with it.
         let mut savepoints = self.savepoints.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         savepoints.clear();
+        drop(savepoints);
+        drop(slot);
+        self.reset_transaction_journal();
         Ok(())
     }
 
@@ -84,6 +100,9 @@ impl Connection {
         }
         let state = txn_slot.as_ref().expect("txn slot just proved Some").clone();
         savepoints.push((name.to_owned(), state));
+        drop(savepoints);
+        drop(txn_slot);
+        self.mark_transaction_wholesale_publish();
         Ok(())
     }
 
@@ -110,6 +129,8 @@ impl Connection {
         savepoints.truncate(index);
         drop(savepoints);
         *slot = Some(snapshot);
+        drop(slot);
+        self.mark_transaction_wholesale_publish();
         Ok(())
     }
 

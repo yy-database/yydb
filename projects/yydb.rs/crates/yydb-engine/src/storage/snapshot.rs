@@ -48,8 +48,25 @@ pub(crate) fn state_from_snapshot(snapshot: &Snapshot) -> Result<State> {
     Ok(State { schema, identity_history, resolved_contract, records, unique_constraints })
 }
 
-/// Encode engine [`State`] into a durable snapshot.
-pub(crate) fn snapshot_from_state(state: &State) -> Result<Snapshot> {
+/// Encode only the reserved metadata rows of [`State`].
+///
+/// Publication that knows its exact record delta still rewrites every metadata
+/// row as a group, because the codec owns those rows and a caller may not model
+/// all of them. This skips encoding the record map, which is the expensive half
+/// of [`snapshot_from_state`].
+pub(crate) fn metadata_from_state(state: &State) -> Result<BTreeMap<Vec<u8>, Vec<u8>>> {
+    let mut metadata = typed_metadata(state)?;
+    for (key, value) in &state.records {
+        if !key.starts_with(META_PREFIX) || TYPED_META_KEYS.contains(&key.as_bytes()) {
+            continue;
+        }
+        metadata.insert(key.as_bytes().to_vec(), value.clone());
+    }
+    Ok(metadata)
+}
+
+/// Typed `State` fields as their reserved metadata rows.
+fn typed_metadata(state: &State) -> Result<BTreeMap<Vec<u8>, Vec<u8>>> {
     let mut metadata = BTreeMap::new();
     metadata.insert(META_SCHEMA.to_vec(), encode_schema(&state.schema)?);
     metadata.insert(META_IDENTITY.to_vec(), encode_identity(&state.identity_history)?);
@@ -57,6 +74,12 @@ pub(crate) fn snapshot_from_state(state: &State) -> Result<Snapshot> {
     if !state.unique_constraints.is_empty() {
         metadata.insert(META_UNIQUE.to_vec(), encode_unique_constraints(&state.unique_constraints)?);
     }
+    Ok(metadata)
+}
+
+/// Encode engine [`State`] into a durable snapshot.
+pub(crate) fn snapshot_from_state(state: &State) -> Result<Snapshot> {
+    let mut metadata = typed_metadata(state)?;
     let mut records = BTreeMap::new();
     for (key, value) in &state.records {
         if key.starts_with(META_PREFIX) {

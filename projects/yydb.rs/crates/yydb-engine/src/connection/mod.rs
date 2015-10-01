@@ -1,7 +1,7 @@
 //! [`Connection`] open paths, storage backends, and state I/O.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::{
         Mutex,
@@ -40,6 +40,26 @@ pub(crate) struct State {
     pub(crate) unique_constraints: Vec<yydb_types::TableUniqueConstraint>,
 }
 
+/// Record keys one open transaction wrote, plus whether that set is exact.
+///
+/// Every statement that can name the record windows it reaches contributes the
+/// keys it held before and after running, together with the bytes the
+/// transaction snapshot held for them the first time they were touched.
+/// Commit diffs the final transaction state against that first pre-image, so
+/// publishing never has to read the durable image for those keys again. A
+/// transaction that ever falls back to a whole-state write, restores a
+/// savepoint, or publishes on a layout where keys cannot express the change
+/// marks itself `wholesale`, and `commit` publishes the whole state instead of
+/// a delta.
+#[derive(Debug, Default)]
+pub(crate) struct TxnJournal {
+    pub(crate) keys: BTreeSet<String>,
+    /// First pre-image of a touched key. A key missing here was absent from the
+    /// image when the transaction first wrote it.
+    pub(crate) prior: BTreeMap<String, Vec<u8>>,
+    pub(crate) wholesale: bool,
+}
+
 pub(crate) enum Backend {
     File { path: PathBuf, database: Mutex<Database> },
     Memory { state: Mutex<State> },
@@ -63,6 +83,9 @@ pub struct Connection {
     pub(crate) backend: std::sync::Arc<Backend>,
     pub(crate) operation_lock: std::sync::Arc<Mutex<()>>,
     pub(crate) txn: Mutex<Option<State>>,
+    /// Record keys the open transaction wrote, or a `wholesale` marker when the
+    /// change cannot be expressed as keys. Reset when the transaction starts.
+    pub(crate) txn_journal: Mutex<TxnJournal>,
     /// Named savepoint snapshots, innermost last. Pushed by `SAVEPOINT`,
     /// consumed by `ROLLBACK TO SAVEPOINT` and `RELEASE SAVEPOINT`.
     /// Emptied when the enclosing transaction ends.
@@ -101,6 +124,7 @@ impl Connection {
         let connection = Self {
             operation_lock: std::sync::Arc::new(Mutex::new(())),
             txn: Mutex::new(None),
+            txn_journal: Mutex::new(TxnJournal::default()),
             savepoints: Mutex::new(Vec::new()),
             backend: std::sync::Arc::new(Backend::File { path: path.clone(), database: Mutex::new(database) }),
             udfs: Mutex::new(UdfSubsystem::default()),
@@ -124,6 +148,7 @@ impl Connection {
         Ok(Self {
             operation_lock: std::sync::Arc::new(Mutex::new(())),
             txn: Mutex::new(None),
+            txn_journal: Mutex::new(TxnJournal::default()),
             savepoints: Mutex::new(Vec::new()),
             backend: std::sync::Arc::new(Backend::Memory { state: Mutex::new(State::default()) }),
             udfs: Mutex::new(UdfSubsystem::default()),
@@ -144,6 +169,7 @@ impl Connection {
             backend: std::sync::Arc::clone(&self.backend),
             operation_lock: std::sync::Arc::clone(&self.operation_lock),
             txn: Mutex::new(None),
+            txn_journal: Mutex::new(TxnJournal::default()),
             savepoints: Mutex::new(Vec::new()),
             udfs: Mutex::new(UdfSubsystem::default()),
             objects: std::sync::Arc::clone(&self.objects),

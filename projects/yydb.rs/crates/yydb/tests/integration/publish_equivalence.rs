@@ -274,6 +274,99 @@ fn a_transaction_batch_matches_a_full_rebuild() {
     run_pair_with("publish-equivalence-txn-batch", OpenFlags::wal(), apply_transaction_batch);
 }
 
+/// A transaction that creates embedded objects must publish the object rows it
+/// added, not just the user rows.
+fn apply_transaction_bytes(conn: &Connection) {
+    conn.ensure_schema(SCHEMA).unwrap();
+    conn.begin().unwrap();
+    insert_blob(conn, 1, octets(INLINE_BYTES_MAX + 1));
+    insert_blob(conn, 2, octets(INLINE_BYTES_MAX * 2));
+    insert_doc(conn, 1, "one");
+    conn.commit().unwrap();
+    // The second transaction replaces one payload, so its delta has to carry
+    // newly embedded object rows on top of the patched user row.
+    conn.begin().unwrap();
+    insert_blob(conn, 1, octets(INLINE_BYTES_MAX * 4));
+    conn.commit().unwrap();
+}
+
+#[test]
+fn a_transaction_that_embeds_objects_matches_a_full_rebuild() {
+    run_pair_with("publish-equivalence-txn-bytes", OpenFlags::wal(), apply_transaction_bytes);
+}
+
+/// A savepoint restores the whole transaction buffer, so the commit that
+/// follows it must publish the restored state, not only the rows written
+/// after the savepoint.
+fn apply_savepoint_sequence(conn: &Connection) {
+    conn.ensure_schema(SCHEMA).unwrap();
+    insert_doc(conn, 1, "one");
+    conn.begin().unwrap();
+    insert_doc(conn, 2, "two");
+    conn.savepoint("before_three").unwrap();
+    insert_doc(conn, 3, "three");
+    conn.execute_vos_write(r#"Doc::delete({ doc_id: 1 })"#).unwrap();
+    conn.rollback_to_savepoint("before_three").unwrap();
+    insert_doc(conn, 4, "four");
+    conn.commit().unwrap();
+}
+
+#[test]
+fn a_savepoint_rollback_commit_matches_a_full_rebuild() {
+    run_pair_with("publish-equivalence-savepoint", OpenFlags::wal(), apply_savepoint_sequence);
+}
+
+/// A key deleted and recreated inside one transaction must publish its final
+/// bytes, and a key created and deleted inside one transaction must vanish from
+/// the image even though it never existed before.
+fn apply_delete_then_insert(conn: &Connection) {
+    conn.ensure_schema(SCHEMA).unwrap();
+    insert_doc(conn, 1, "one");
+    conn.begin().unwrap();
+    conn.execute_vos_write(r#"Doc::delete({ doc_id: 1 })"#).unwrap();
+    insert_doc(conn, 1, "one again");
+    insert_doc(conn, 2, "two then gone");
+    conn.execute_vos_write(r#"Doc::delete({ doc_id: 2 })"#).unwrap();
+    conn.commit().unwrap();
+}
+
+#[test]
+fn a_delete_then_insert_commit_matches_a_full_rebuild() {
+    run_pair_with("publish-equivalence-delete-insert", OpenFlags::wal(), apply_delete_then_insert);
+}
+
+/// A write the planner cannot narrow marks the whole transaction wholesale, so
+/// its commit must still publish every changed row it holds.
+fn apply_unique_rule_transaction(conn: &Connection) {
+    conn.ensure_schema(SCHEMA).unwrap();
+    for doc_id in 1..=20 {
+        insert_doc(conn, doc_id, &format!("row-{doc_id}"));
+    }
+    insert_keyed(conn, "a", "A", 1);
+    conn.begin().unwrap();
+    conn.execute_vos_write(r#"Doc::update({ doc_id: 9, title: "patched" })"#).unwrap();
+    // `Keyed` carries a unique rule, so this statement cannot name its windows.
+    insert_keyed(conn, "b", "B", 2);
+    conn.commit().unwrap();
+}
+
+#[test]
+fn a_unique_rule_write_makes_commit_publish_the_whole_transaction() {
+    run_pair_with("publish-equivalence-unique-rule", OpenFlags::wal(), apply_unique_rule_transaction);
+
+    let path = temp_db("publish-equivalence-unique-rule-durable");
+    let conn = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
+    apply_unique_rule_transaction(&conn);
+    conn.close();
+    drop(conn);
+    let reopened = reopen(&path);
+    assert_eq!(rows(&reopened, "Keyed").len(), 2, "both rule-carrying rows must survive the commit");
+    let docs = rows(&reopened, "Doc");
+    assert_eq!(docs.len(), 20, "the narrowed row and its neighbours must all be durable");
+    reopened.close();
+    cleanup(&path);
+}
+
 /// A failing statement must undo itself inside the windows it touched and
 /// leave the rest of the transaction exactly as it was.
 #[test]
