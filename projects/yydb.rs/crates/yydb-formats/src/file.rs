@@ -22,8 +22,8 @@ use crate::{
     shm::{shm_sidecar_path, sync_shm_from_commit, sync_shm_from_wal},
     wal::{committed_tail_lsn, committed_transactions},
     wal_append::{
-        RecoveryReport, WalWriteStats, WalWriter, read_wal_file, replay_wal_pages_after, truncate_wal_records,
-        truncate_wal_torn_tail, wal_sidecar_path,
+        FRAME_TXN_BEGIN, RecoveryReport, WalWriteStats, WalWriter, read_wal_file, replay_wal_pages_after,
+        truncate_wal_records, truncate_wal_torn_tail, wal_sidecar_path,
     },
 };
 
@@ -48,8 +48,24 @@ pub struct FilePager {
     wal_enabled: bool,
     wal: Option<WalWriter>,
     last_recovery: RecoveryReport,
+    /// WAL scan results the last recovery pass produced, consumed by
+    /// [`FilePager::ensure_wal`] so opening scans the sidecar exactly once.
+    recovered_wal: Option<RecoveredWal>,
+    /// Whether the sidecar holds frames the main file does not yet contain.
+    pending_wal: bool,
     shm_writes: u64,
     shm_ns: u128,
+}
+
+/// Tail state a recovery pass already derived from the WAL sidecar.
+#[derive(Debug, Clone, Copy)]
+struct RecoveredWal {
+    /// Highest frame LSN in the sidecar.
+    tail_lsn: u64,
+    /// Transaction id the next append continues from.
+    next_txid: u64,
+    /// Sidecar length after the torn tail was truncated.
+    file_bytes: u64,
 }
 
 impl FilePager {
@@ -67,6 +83,8 @@ impl FilePager {
             wal_enabled: enable_wal,
             wal: None,
             last_recovery: RecoveryReport::default(),
+            recovered_wal: None,
+            pending_wal: false,
             shm_writes: 0,
             shm_ns: 0,
         };
@@ -160,11 +178,13 @@ impl FilePager {
         self.commit_checkpoint_pages()?;
         if self.wal_enabled {
             self.wal = None;
+            self.recovered_wal = None;
             let wal_path = wal_sidecar_path(&self.path);
             if wal_path.exists() {
                 truncate_wal_records(&wal_path)?;
                 std::fs::remove_file(&wal_path)?;
             }
+            self.pending_wal = false;
             let shm_path = shm_sidecar_path(&self.path);
             if shm_path.exists() {
                 std::fs::remove_file(shm_path)?;
@@ -189,6 +209,12 @@ impl FilePager {
         Ok(checkpoint_lsn)
     }
 
+    /// Whether the `-wal` sidecar holds appended frames that are not yet folded
+    /// into the main file. Cheap: it reads the writer's own byte counter.
+    pub fn has_pending_wal(&self) -> bool {
+        self.wal_enabled && self.pending_wal
+    }
+
     /// Enable `YYWL` v0 journaling for subsequent mutations.
     pub fn enable_wal(&mut self) -> Result<()> {
         self.wal_enabled = true;
@@ -211,6 +237,8 @@ impl FilePager {
             std::fs::remove_file(shm_path)?;
         }
         self.wal = None;
+        self.recovered_wal = None;
+        self.pending_wal = false;
         self.wal_enabled = false;
         Ok(())
     }
@@ -219,8 +247,24 @@ impl FilePager {
         if self.wal_enabled && self.wal.is_none() {
             let header = self.inner.header()?;
             let wal_path = wal_sidecar_path(&self.path);
-            self.wal = Some(WalWriter::open(&wal_path, header.slot.database_id, header.slot.checkpoint_lsn)?);
-            sync_shm_from_wal(&self.path, &wal_path)?;
+            self.wal = Some(match self.recovered_wal.take() {
+                // Recovery already scanned and validated this sidecar, and it
+                // wrote the `-shm` mirror for the same tail, so the writer
+                // continues from those values instead of re-reading the file.
+                Some(recovered) => WalWriter::open_recovered(
+                    &wal_path,
+                    header.slot.database_id,
+                    header.slot.checkpoint_lsn,
+                    recovered.tail_lsn,
+                    recovered.next_txid,
+                    recovered.file_bytes,
+                )?,
+                None => {
+                    let writer = WalWriter::open(&wal_path, header.slot.database_id, header.slot.checkpoint_lsn)?;
+                    sync_shm_from_wal(&self.path, &wal_path)?;
+                    writer
+                }
+            });
         }
         Ok(())
     }
@@ -233,6 +277,7 @@ impl FilePager {
             self.ensure_wal()?;
             if let Some(wal) = self.wal.as_mut() {
                 let commit_lsn = wal.append_commit(&changed, blob_refs)?;
+                self.pending_wal = true;
                 let wal_bytes = wal.file_bytes();
                 let shm_started = Instant::now();
                 sync_shm_from_commit(&self.path, commit_lsn, wal_bytes)?;
@@ -280,6 +325,8 @@ impl FilePager {
         let wal_path = wal_sidecar_path(&self.path);
         if !wal_path.exists() {
             self.last_recovery = RecoveryReport::default();
+            self.recovered_wal = None;
+            self.pending_wal = false;
             return Ok(self.last_recovery);
         }
         let dropped_torn_bytes = truncate_wal_torn_tail(&wal_path)? as u64;
@@ -291,7 +338,12 @@ impl FilePager {
         for (page_id, image) in pages {
             self.inner.put_page(page_id, image)?;
         }
-        sync_shm_from_wal(&self.path, &wal_path)?;
+        let wal_bytes = std::fs::metadata(&wal_path).map(|meta| meta.len()).unwrap_or(0);
+        sync_shm_from_commit(&self.path, committed_tail_lsn(&wal), wal_bytes)?;
+        let tail_lsn = wal.frames.iter().map(|frame| frame.frame_lsn).max().unwrap_or(0);
+        let next_txid = wal.frames.iter().filter(|frame| frame.frame_type == FRAME_TXN_BEGIN).count() as u64 + 1;
+        self.recovered_wal = Some(RecoveredWal { tail_lsn, next_txid, file_bytes: wal_bytes });
+        self.pending_wal = !wal.frames.is_empty();
         self.last_recovery = RecoveryReport {
             dropped_torn_bytes,
             frames: wal.frames.len(),
@@ -314,12 +366,28 @@ impl FilePager {
     }
 
     fn persist_data_pages(&self) -> Result<()> {
-        for (page_id, image) in self.inner.pages_snapshot() {
-            if page_id == 0 {
-                continue;
-            }
-            self.write_page_to_file(page_id, &image)?;
+        let pages: Vec<(u32, Vec<u8>)> =
+            self.inner.pages_snapshot().into_iter().filter(|(page_id, _)| *page_id != 0).collect();
+        if pages.is_empty() {
+            return Ok(());
         }
+        // One handle, one durability barrier. Opening, seeking and syncing per
+        // page turned a checkpoint into one fsync per page, which is the
+        // difference between a few milliseconds and several seconds.
+        let mut file = OpenOptions::new().create(true).read(true).write(true).truncate(false).open(&self.path)?;
+        let last_page = pages.iter().map(|(page_id, _)| *page_id).max().unwrap_or(0);
+        let needed = (u64::from(last_page) + 1) * PAGE_SIZE as u64;
+        if file.metadata()?.len() < needed {
+            file.set_len(needed)?;
+        }
+        for (page_id, image) in &pages {
+            if image.len() != PAGE_SIZE {
+                return Err(Error::Corrupt("page image wrong size"));
+            }
+            file.seek(SeekFrom::Start(u64::from(*page_id) * PAGE_SIZE as u64))?;
+            file.write_all(image)?;
+        }
+        file.sync_all()?;
         Ok(())
     }
 

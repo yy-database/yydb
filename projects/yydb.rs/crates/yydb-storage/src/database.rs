@@ -36,11 +36,12 @@ impl Database {
         if path.exists() && !file_is_ydpg(&path)? {
             return Err(Error::Corrupt("main file is not YDPG format v0"));
         }
-        let writer_lock = WriterLock::acquire(&path)?;
+        let mut writer_lock = WriterLock::acquire(&path)?;
         let enable_wal = journal_mode == JournalMode::Wal;
         let pager = if path.exists() && wal_path(&path).exists() {
             let mut pager = FilePager::open(&path, true)?;
             if !enable_wal {
+                writer_lock.ensure_persisted()?;
                 pager.checkpoint()?;
                 pager.disable_wal()?;
             }
@@ -72,6 +73,7 @@ impl Database {
         if self.journal_mode == mode {
             return Ok(());
         }
+        self.ensure_fence()?;
         match mode {
             JournalMode::Wal => self.pager.enable_wal()?,
             JournalMode::Delete => self.pager.disable_wal()?,
@@ -105,6 +107,7 @@ impl Database {
 
     /// Commit a snapshot, publishing `blob_refs` into the WAL transaction when set.
     pub fn commit(&mut self, snapshot: &Snapshot, blob_refs: &[BlobManifestDelta]) -> Result<()> {
+        self.ensure_fence()?;
         self.pager.mutate_with_publish_blob_refs(|inner| write_snapshot(inner, snapshot), blob_refs)
     }
 
@@ -118,12 +121,24 @@ impl Database {
         delta: &RecordDelta,
         blob_refs: &[BlobManifestDelta],
     ) -> Result<()> {
+        self.ensure_fence()?;
         self.pager.mutate_with_publish_blob_refs(|inner| write_delta(inner, metadata, delta), blob_refs)
+    }
+
+    /// Persist the writer fence epoch before the first publication.
+    fn ensure_fence(&mut self) -> Result<()> {
+        self._writer_lock.ensure_persisted()
     }
 
     /// Fold WAL frames into the main file.
     pub fn checkpoint(&mut self) -> Result<()> {
+        self.ensure_fence()?;
         self.pager.checkpoint()
+    }
+
+    /// Whether the WAL sidecar holds frames not yet folded into the main file.
+    pub fn has_pending_wal(&self) -> bool {
+        self.pager.has_pending_wal()
     }
 
     /// Re-run WAL recovery.

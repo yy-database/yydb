@@ -17,7 +17,8 @@ use crate::{
     wal::{WAL_HEADER_BYTES, WAL_MAGIC, WalFile, WalTail, parse_frame, parse_wal, scan_wal, wal_frame_offsets},
 };
 
-const FRAME_TXN_BEGIN: u8 = 0x01;
+pub(crate) const FRAME_TXN_BEGIN: u8 = 0x01;
+
 const FRAME_PAGE_IMAGE: u8 = 0x02;
 const FRAME_TXN_COMMIT: u8 = 0x04;
 const WRITER_POISONED: &str = "wal writer poisoned after a failed append";
@@ -147,7 +148,9 @@ impl WalWriter {
             let header = encode_wal_header(database_id, base_checkpoint_lsn);
             let mut file = File::create(&path)?;
             file.write_all(&header)?;
-            file.sync_all()?;
+            // No durability barrier: a fresh sidecar holds no committed frames,
+            // so the header may be torn or lost and recovery treats the file as
+            // empty. The first commit's own barrier flushes it.
             file_bytes = header.len() as u64;
         }
         let sink = FileWalSink::open(&path)?;
@@ -155,6 +158,34 @@ impl WalWriter {
             path,
             database_id,
             next_lsn,
+            next_txid,
+            durability: WalDurability::SyncOnCommit,
+            sink: Box::new(sink),
+            poisoned: false,
+            file_bytes,
+            stats: WalWriteStats::default(),
+        })
+    }
+
+    /// Open a WAL sidecar whose frames a recovery pass already scanned.
+    ///
+    /// Recovery reads and validates the whole sidecar and derives exactly these
+    /// values. Handing them over keeps a database open from reading the same
+    /// journal a second and third time.
+    pub fn open_recovered(
+        path: impl AsRef<Path>,
+        database_id: [u8; 16],
+        base_checkpoint_lsn: u64,
+        tail_lsn: u64,
+        next_txid: u64,
+        file_bytes: u64,
+    ) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let sink = FileWalSink::open(&path)?;
+        Ok(Self {
+            path,
+            database_id,
+            next_lsn: tail_lsn.max(base_checkpoint_lsn) + 1,
             next_txid,
             durability: WalDurability::SyncOnCommit,
             sink: Box::new(sink),

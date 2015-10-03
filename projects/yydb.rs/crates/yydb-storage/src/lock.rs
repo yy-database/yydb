@@ -33,19 +33,21 @@ pub struct WriterLock {
     file: File,
     mode: LockMode,
     fence: u64,
+    /// Epoch a writer acquisition computed but has not persisted yet.
+    pending_fence: Option<u64>,
 }
 
 impl WriterLock {
     /// Acquire the exclusive writer lock or fail when another holder exists.
     pub fn acquire(db_path: &Path) -> Result<Self> {
         let (file, fence) = open_and_lock(db_path, LockMode::Writer)?;
-        Ok(Self { file, mode: LockMode::Writer, fence })
+        Ok(Self { file, mode: LockMode::Writer, fence, pending_fence: Some(fence) })
     }
 
     /// Acquire a shared reader lock. Readers do not advance the fence epoch.
     pub fn acquire_reader(db_path: &Path) -> Result<Self> {
         let (file, fence) = open_and_lock(db_path, LockMode::Reader)?;
-        Ok(Self { file, mode: LockMode::Reader, fence })
+        Ok(Self { file, mode: LockMode::Reader, fence, pending_fence: None })
     }
 
     /// Acquisition mode.
@@ -56,6 +58,19 @@ impl WriterLock {
     /// Fence epoch observed or issued by this acquisition.
     pub fn fence(&self) -> u64 {
         self.fence
+    }
+
+    /// Persist the fence epoch if this acquisition has not written it yet.
+    ///
+    /// A fence only has to reach stable storage before the first data
+    /// publication, otherwise a crashed writer's successor could reuse its
+    /// epoch. Opening therefore defers the filesystem barrier to the first
+    /// write instead of paying it on every open.
+    pub fn ensure_persisted(&mut self) -> Result<()> {
+        if let Some(fence) = self.pending_fence.take() {
+            write_fence(&mut self.file, fence)?;
+        }
+        Ok(())
     }
 }
 
@@ -79,9 +94,7 @@ fn open_and_lock(db_path: &Path, mode: LockMode) -> Result<(File, u64)> {
     if mode == LockMode::Reader {
         return Ok((file, observed.unwrap_or(0)));
     }
-    let fence = observed.unwrap_or(0) + 1;
-    write_fence(&mut file, fence)?;
-    Ok((file, fence))
+    Ok((file, observed.unwrap_or(0) + 1))
 }
 
 /// Read the persisted fence. `None` means the metadata was never completed.

@@ -31,11 +31,14 @@ fn is_locked(error: Error) -> bool {
 #[test]
 fn writer_lock_is_exclusive_and_fenced() {
     let path = temp_db("exclusive");
-    let first = WriterLock::acquire(&path).unwrap();
+    let mut first = WriterLock::acquire(&path).unwrap();
     assert_eq!(first.mode(), LockMode::Writer);
     assert_eq!(first.fence(), 1);
 
     assert!(is_locked(WriterLock::acquire(&path).err().unwrap()));
+    // Acquisition computes the epoch but only the first publication has to
+    // persist it, so the restart observes a newer epoch once that happened.
+    first.ensure_persisted().unwrap();
     drop(first);
 
     let second = WriterLock::acquire(&path).unwrap();
@@ -66,8 +69,9 @@ fn interrupted_lock_metadata_allows_restart() {
     let path = temp_db("interrupted");
     std::fs::write(lock_path(&path), b"YYLK\x00").unwrap();
 
-    let recovered = WriterLock::acquire(&path).unwrap();
+    let mut recovered = WriterLock::acquire(&path).unwrap();
     assert_eq!(recovered.fence(), 1, "an incomplete acquisition restarts the epoch");
+    recovered.ensure_persisted().unwrap();
     drop(recovered);
 
     let next = WriterLock::acquire(&path).unwrap();

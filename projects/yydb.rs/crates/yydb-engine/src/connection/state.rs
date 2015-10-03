@@ -6,17 +6,25 @@ use yydb_storage::snapshot::RecordWindow;
 use super::{Backend, Connection, State, TxnJournal, is_yydx_main_path};
 
 impl Connection {
-    /// Reconcile expired leases against an already-read durable state.
+    /// Reconcile expired leases without materializing the whole record tree.
     ///
-    /// Opening a database already reads a full state to force WAL recovery.
-    /// Reading it a second time here would repeat the entire snapshot scan and
-    /// codec decode on every open, so the caller hands its state over instead.
-    pub(crate) fn reconcile_leases_on_open_with(&self, mut state: State) -> Result<()> {
+    /// Opening a database does not need every row. Leases live under one reserved
+    /// key prefix, so only that window is read and the open cost stays
+    /// proportional to the lease count instead of the database size. The rare
+    /// case where a lease actually expired falls back to a full read, because
+    /// publication replaces the durable image wholesale.
+    pub(crate) fn reconcile_leases_on_open(&self) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
-        if lease::reconcile_expired_leases(&mut state.records)? {
-            self.replace_active_state_unlocked(state)?;
+        let metadata = self.read_state_metadata()?;
+        let window =
+            yydb_query::ReadWindow { start: lease::LEASE_PREFIX.to_owned(), end: Some(format!("{}0", lease::LEASE_PREFIX)) };
+        let mut leases = self.read_state_window_with_metadata(&window, &metadata)?;
+        if !lease::reconcile_expired_leases(&mut leases.records)? {
+            return Ok(());
         }
-        Ok(())
+        let mut state = self.read_state()?;
+        lease::reconcile_expired_leases(&mut state.records)?;
+        self.replace_active_state_unlocked(state)
     }
 
     pub(crate) fn active_state_unlocked(&self) -> Result<State> {
@@ -91,7 +99,8 @@ impl Connection {
         }
     }
 
-    /// Read metadata plus the rows inside `window` in one pager transaction.
+    /// Read metadata plus the rows inside `window`, reusing already-decoded
+    /// metadata instead of decoding the schema and contract a second time.
     ///
     /// The window is a **superset** of what the statement may read: execution
     /// still applies every filter, so an over-wide window can only cost extra
@@ -99,13 +108,6 @@ impl Connection {
     /// the embedded object prefix, because
     /// [`Self::read_state`] would otherwise hand the resolver an incomplete
     /// object catalog.
-    pub(crate) fn read_state_window(&self, window: &yydb_query::ReadWindow) -> Result<State> {
-        let metadata = self.read_state_metadata()?;
-        self.read_state_window_with_metadata(window, &metadata)
-    }
-
-    /// Read metadata plus the rows inside `window`, reusing already-decoded
-    /// metadata instead of decoding the schema and contract a second time.
     pub(crate) fn read_state_window_with_metadata(
         &self,
         window: &yydb_query::ReadWindow,

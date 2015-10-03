@@ -137,10 +137,9 @@ impl Connection {
             closed: std::sync::Arc::new(AtomicBool::new(false)),
             full_publish: std::sync::Arc::new(AtomicBool::new(false)),
         };
-        // Force the recovery path once so a leftover WAL is applied, and reuse
-        // that state for lease reconciliation instead of scanning it twice.
-        let state = connection.read_state()?;
-        connection.reconcile_leases_on_open_with(state)?;
+        // `Database::open` already replays a leftover WAL, so opening only reads
+        // the reserved metadata and the lease window instead of every record.
+        connection.reconcile_leases_on_open()?;
         Ok(connection)
     }
 
@@ -272,6 +271,27 @@ impl Connection {
     /// alive for any `Arc` clones still held.
     pub fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
+        self.checkpoint_on_close();
+    }
+
+    /// Fold committed WAL frames into the main file, as SQLite does when the last
+    /// connection closes.
+    ///
+    /// Without it the journal keeps every frame from every session and each
+    /// reopen replays the whole sidecar. A failed checkpoint leaves the WAL
+    /// replayable, so closing stays infallible: the data is still committed and
+    /// recovery reconstructs it.
+    fn checkpoint_on_close(&self) {
+        let Backend::File { database, .. } = self.backend.as_ref() else { return };
+        use std::sync::TryLockError;
+        let mut database = match database.try_lock() {
+            Ok(database) => database,
+            Err(TryLockError::WouldBlock) => return,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        };
+        if database.has_pending_wal() {
+            let _ = database.checkpoint();
+        }
     }
 
     /// Whether this connection (or a parent it was derived from via
