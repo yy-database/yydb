@@ -69,6 +69,7 @@ fn print_report(baseline: &Baseline) {
     row("point get warm (ns/op)", baseline.yydb.point_get_warm_ns_per_op, baseline.sqlite.point_get_warm_ns_per_op);
     row("range scan (ns/row)", baseline.yydb.range_scan_ns_per_row, baseline.sqlite.range_scan_ns_per_row);
     row("reopen+100 gets (ns)", baseline.yydb.reopen_point_get_ns, baseline.sqlite.reopen_point_get_ns);
+    row("empty reopen (ns)", baseline.yydb.empty_reopen_ns, baseline.sqlite.empty_reopen_ns);
     if let Some(publish) = &baseline.yydb.publish {
         println!();
         println!(
@@ -80,6 +81,26 @@ fn print_report(baseline: &Baseline) {
             publish.batch_commit_ns as f64 / baseline.yydb.batch_load_ns.max(1) as f64 * 100.0,
             publish.batch_commit_ns,
             baseline.yydb.batch_load_ns
+        );
+        let batch = &publish.batch;
+        let batch_commits = batch.commits.max(1);
+        println!(
+            "  batch commits={} · frames={} · page-images={} · bytes={} · fsyncs={}",
+            batch.commits, batch.frames, batch.page_images, batch.appended_bytes, batch.fsyncs
+        );
+        println!(
+            "    per commit: frames={} page-images={} bytes={}",
+            batch.frames / batch_commits,
+            batch.page_images / batch_commits,
+            batch.appended_bytes / batch_commits
+        );
+        println!(
+            "    commit attribution: encode {:>10} ns · append {:>10} ns · fsync {:>10} ns · shm {:>10} ns · residual {:>10} ns",
+            batch.encode_ns,
+            batch.append_ns,
+            batch.sync_ns,
+            batch.shm_ns,
+            publish.batch_commit_ns.saturating_sub(batch.encode_ns + batch.append_ns + batch.sync_ns + batch.shm_ns)
         );
         println!(
             "  per autocommit insert: frames={} fsyncs={}",

@@ -63,8 +63,35 @@ pub struct EngineReport {
     pub range_scan_ns_per_row: u128,
     /// Close, reopen, then 100 point gets (includes the open).
     pub reopen_point_get_ns: u128,
+    /// Open and close a database file that holds no schema and no rows.
+    pub empty_reopen_ns: u128,
     /// Publication attribution; only YYDB writes through a WAL sidecar report it.
     pub publish: Option<PublishReport>,
+}
+
+/// Publication volume and time for the batch load's `commit()` calls alone.
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchPublishReport {
+    /// Commits issued by the batch loop.
+    pub commits: u64,
+    /// Frames appended by those commits.
+    pub frames: u64,
+    /// Page-image frames appended by those commits.
+    pub page_images: u64,
+    /// WAL bytes appended by those commits.
+    pub appended_bytes: u64,
+    /// Frame encoding time for those commits.
+    pub encode_ns: u128,
+    /// WAL append time for those commits.
+    pub append_ns: u128,
+    /// Durability barrier time for those commits.
+    pub sync_ns: u128,
+    /// Durability barriers issued by those commits.
+    pub fsyncs: u64,
+    /// `-shm` mirror writes caused by those commits.
+    pub shm_writes: u64,
+    /// `-shm` mirror time caused by those commits.
+    pub shm_ns: u128,
 }
 
 /// Attribution of YYDB write time between frame encoding, WAL append, the
@@ -95,6 +122,8 @@ pub struct PublishReport {
     pub shm_writes: u64,
     /// Time spent writing the `-shm` mirror.
     pub shm_ns: u128,
+    /// Publication attribution of the batch load's commits only.
+    pub batch: BatchPublishReport,
     /// Time spent inside `commit()` during the batch load.
     pub batch_commit_ns: u128,
     /// Number of `commit()` calls during the batch load.
@@ -159,6 +188,22 @@ fn run_yydb(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
     let conn = yydb::Connection::open_with_flags(&path, yydb::OpenFlags::wal()).map_err(|e| format!("yydb open: {e}"))?;
     conn.ensure_schema("table Bench { @@id: utf8, payload: bytes }").map_err(|e| format!("yydb schema: {e}"))?;
 
+    let empty_path = dir.join("empty.yydb");
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(dir.join(format!("empty.yydb{suffix}")));
+    }
+    let created =
+        yydb::Connection::open_with_flags(&empty_path, yydb::OpenFlags::wal()).map_err(|e| format!("yydb empty open: {e}"))?;
+    created.close();
+    drop(created);
+    let empty_started = Instant::now();
+    let reopened_empty = yydb::Connection::open_with_flags(&empty_path, yydb::OpenFlags::wal())
+        .map_err(|e| format!("yydb empty reopen: {e}"))?;
+    reopened_empty.close();
+    let empty_reopen_ns = empty_started.elapsed().as_nanos();
+    drop(reopened_empty);
+
+    let before_batch = publish_stats(&conn);
     let started = Instant::now();
     let mut batch_commit_ns = 0_u128;
     let mut batch_commits = 0_u64;
@@ -173,6 +218,7 @@ fn run_yydb(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
         batch_commits += 1;
     }
     let batch_load_ns = started.elapsed().as_nanos();
+    let batch_delta = stats_delta(&before_batch, &publish_stats(&conn));
     verify_yydb_count(&conn, cfg.rows, "yydb post-load count")?;
 
     let before_single = publish_stats(&conn);
@@ -220,6 +266,18 @@ fn run_yydb(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
         fsyncs: after_single.wal.fsyncs,
         shm_writes: after_single.shm_writes,
         shm_ns: after_single.shm_ns,
+        batch: BatchPublishReport {
+            commits: batch_delta.wal.commits,
+            frames: batch_delta.wal.frames,
+            page_images: batch_delta.wal.page_images,
+            appended_bytes: batch_delta.wal.appended_bytes,
+            encode_ns: batch_delta.wal.encode_ns,
+            append_ns: batch_delta.wal.append_ns,
+            sync_ns: batch_delta.wal.sync_ns,
+            fsyncs: batch_delta.wal.fsyncs,
+            shm_writes: batch_delta.shm_writes,
+            shm_ns: batch_delta.shm_ns,
+        },
         batch_commit_ns,
         batch_commits,
         single_insert_frames_per_op: single_delta.wal.frames as u128 / single_ops,
@@ -240,6 +298,7 @@ fn run_yydb(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
         point_get_warm_ns_per_op,
         range_scan_ns_per_row,
         reopen_point_get_ns,
+        empty_reopen_ns,
         publish: Some(publish),
     })
 }
@@ -322,6 +381,15 @@ fn run_sqlite(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
     conn.execute_batch("PRAGMA journal_mode = WAL; CREATE TABLE Bench (id TEXT PRIMARY KEY, payload BLOB NOT NULL)")
         .map_err(|e| format!("sqlite schema: {e}"))?;
 
+    let empty_path = dir.join("empty.sqlite");
+    let _ = std::fs::remove_file(&empty_path);
+    let created = rusqlite::Connection::open(&empty_path).map_err(|e| format!("sqlite empty open: {e}"))?;
+    drop(created);
+    let empty_started = Instant::now();
+    let reopened_empty = rusqlite::Connection::open(&empty_path).map_err(|e| format!("sqlite empty reopen: {e}"))?;
+    let empty_reopen_ns = empty_started.elapsed().as_nanos();
+    drop(reopened_empty);
+
     let started = Instant::now();
     for chunk_start in (0..cfg.rows).step_by(cfg.batch_size.max(1)) {
         conn.execute_batch("BEGIN").map_err(|e| format!("sqlite begin: {e}"))?;
@@ -371,6 +439,7 @@ fn run_sqlite(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
         point_get_warm_ns_per_op,
         range_scan_ns_per_row,
         reopen_point_get_ns,
+        empty_reopen_ns,
         publish: None,
     })
 }
