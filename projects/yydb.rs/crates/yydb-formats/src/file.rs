@@ -114,6 +114,15 @@ impl FilePager {
         self.mutate_with_publish(|inner| RecordTree::open(inner).put(TreeKey::user_record(key), value.to_vec()))
     }
 
+    /// Insert or replace several user KV rows and publish them as one transaction.
+    pub fn put_kv_batch(&mut self, rows: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let rows = rows.into_iter().map(|(key, value)| (TreeKey::user_record(key), value)).collect();
+        self.mutate_with_publish(|inner| RecordTree::open(inner).put_batch(rows))
+    }
+
     /// User KV get.
     pub fn get_kv(&mut self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         RecordTree::open(&mut self.inner).get(&TreeKey::user_record(key))

@@ -184,6 +184,26 @@ impl LeafPage {
         &self.cells
     }
 
+    /// Take every cell out, leaving this leaf empty.
+    pub fn take_cells(&mut self) -> Vec<LeafCell> {
+        std::mem::take(&mut self.cells)
+    }
+
+    /// Replace every cell. The caller owns ascending key order.
+    pub fn set_cells(&mut self, cells: Vec<LeafCell>) {
+        self.cells = cells;
+    }
+
+    /// Payload bytes used by `cells`, including their directory slots.
+    pub fn payload_usage(cells: &[LeafCell]) -> Result<usize> {
+        payload_usage(cells)
+    }
+
+    /// On-disk cell length without building the encoded buffer.
+    pub fn cell_bytes_len(cell: &LeafCell) -> usize {
+        8 + 2 + cell.key.encoded.len() + cell.value.len()
+    }
+
     /// Split into left (retained) and right leaf. Separator is the first key in `right`.
     pub fn split(&mut self) -> Result<(TreeKey, LeafPage)> {
         if self.cells.len() < 2 {

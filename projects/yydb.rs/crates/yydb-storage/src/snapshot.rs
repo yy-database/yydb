@@ -30,6 +30,13 @@ pub trait PagerKv {
     fn get_kv(&mut self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>>;
     /// Insert or replace one row.
     fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()>;
+    /// Insert or replace several rows as one record-tree mutation.
+    fn put_kv_batch(&mut self, rows: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
+        for (key, value) in rows {
+            self.put_kv(key, &value)?;
+        }
+        Ok(())
+    }
     /// Delete one row, reporting whether it existed.
     fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool>;
     /// Scan every stored row with its physical key.
@@ -46,6 +53,10 @@ impl PagerKv for FilePager {
 
     fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()> {
         FilePager::put_kv(self, key, value)
+    }
+
+    fn put_kv_batch(&mut self, rows: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
+        FilePager::put_kv_batch(self, rows)
     }
 
     fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
@@ -68,6 +79,10 @@ impl PagerKv for MemoryPager {
 
     fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()> {
         MemoryPager::put_kv(self, key, value)
+    }
+
+    fn put_kv_batch(&mut self, rows: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
+        MemoryPager::put_kv_batch(self, rows)
     }
 
     fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
@@ -181,12 +196,10 @@ pub struct RecordDelta {
 /// list each record the statement added, replaced or removed, and it must not
 /// name reserved `__yydb/meta/` rows in `deletes`.
 pub fn write_delta<P: PagerKv>(pager: &mut P, metadata: &BTreeMap<Vec<u8>, Vec<u8>>, delta: &RecordDelta) -> Result<()> {
-    for (key, value) in metadata {
-        pager.put_kv(key, value)?;
-    }
-    for (key, value) in &delta.puts {
-        pager.put_kv(key.as_bytes(), value)?;
-    }
+    let mut rows: Vec<(Vec<u8>, Vec<u8>)> =
+        metadata.iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+    rows.extend(delta.puts.iter().map(|(key, value)| (key.as_bytes().to_vec(), value.clone())));
+    pager.put_kv_batch(rows)?;
     for key in &delta.deletes {
         pager.delete_kv(key.as_bytes())?;
     }

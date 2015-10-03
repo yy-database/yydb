@@ -1,12 +1,14 @@
 //! B+ tree record store over a page pager.
 
+use std::cmp::Ordering;
+
 use yydb_types::{Error, Result};
 
 use crate::{
-    internal::{InternalEntry, InternalPage},
+    internal::{InternalEntry, InternalPage, encoded_entries_bytes},
     key::{TREE_RECORD, TreeKey},
     leaf::{LeafCell, LeafPage},
-    page::{PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF, PageHeader},
+    page::{PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF, PageHeader},
     pager::PageStore,
 };
 
@@ -63,6 +65,62 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
                 Ok(())
             }
         }
+    }
+
+    /// Insert or replace a batch of rows in one tree traversal.
+    ///
+    /// Rows are sorted once, grouped by the leaf that owns their key range and
+    /// merged into that leaf in a single pass. Each touched leaf pays one decode
+    /// and one encode per produced page instead of one pair per row, and new
+    /// pages are packed to the page budget rather than split at half occupancy.
+    /// Duplicate keys keep their last value.
+    pub fn put_batch(&mut self, mut rows: Vec<(TreeKey, Vec<u8>)>) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        let mut entries: Vec<(TreeKey, Vec<u8>)> = Vec::with_capacity(rows.len());
+        for (key, value) in rows {
+            match entries.last_mut() {
+                Some((last_key, last_value)) if *last_key == key => *last_value = value,
+                _ => entries.push((key, value)),
+            }
+        }
+
+        let root = self.pager.header()?.slot.record_root;
+        if root == 0 {
+            let cells = entries.into_iter().map(|(key, value)| LeafCell { key, value }).collect();
+            let groups = pack_leaf_cells(cells)?;
+            let mut children = Vec::with_capacity(groups.len());
+            for cells in groups {
+                let page_id = self.pager.alloc_page_id()?;
+                let mut leaf = LeafPage::empty(page_id, 1, TREE_RECORD);
+                leaf.set_cells(cells);
+                let separator = leaf.cells()[0].key.clone();
+                self.pager.put_page(page_id, leaf.encode()?)?;
+                children.push(InternalEntry { separator, child_page_id: page_id });
+            }
+            if children.len() == 1 {
+                self.pager.set_record_root(children[0].child_page_id)?;
+                return Ok(());
+            }
+            children[0].separator = TreeKey::min_separator(TREE_RECORD);
+            let new_root = self.build_internal_chain(children)?;
+            self.pager.set_record_root(new_root)?;
+            return Ok(());
+        }
+
+        let siblings = self.insert_batch_at(root, entries)?;
+        if !siblings.is_empty() {
+            let mut entries =
+                vec![InternalEntry { separator: TreeKey::min_separator(TREE_RECORD), child_page_id: root }];
+            entries.extend(
+                siblings.into_iter().map(|(separator, child_page_id)| InternalEntry { separator, child_page_id }),
+            );
+            let new_root = self.build_internal_chain(entries)?;
+            self.pager.set_record_root(new_root)?;
+        }
+        Ok(())
     }
 
     /// Visit every key/value in the record tree.
@@ -173,6 +231,135 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
         Ok(LeafInsert { page_id, split: Some((separator, right_id)) })
     }
 
+    /// Apply sorted rows to one subtree, returning the right siblings it created.
+    fn insert_batch_at(&mut self, page_id: u32, entries: Vec<(TreeKey, Vec<u8>)>) -> Result<Vec<(TreeKey, u32)>> {
+        let page = self.load_page(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
+        match page.0.page_type {
+            PAGE_TYPE_LEAF => self.apply_leaf_batch(page_id, &page.1, entries),
+            PAGE_TYPE_INTERNAL => {
+                let node = InternalPage::decode(page_id, &page.1)?;
+                let mut groups: Vec<(usize, Vec<(TreeKey, Vec<u8>)>)> = Vec::new();
+                for (key, value) in entries {
+                    let child_idx = node.child_index_for(&key);
+                    match groups.last_mut() {
+                        Some((last_idx, rows)) if *last_idx == child_idx => rows.push((key, value)),
+                        _ => groups.push((child_idx, vec![(key, value)])),
+                    }
+                }
+                let mut rebuilt = Vec::with_capacity(node.entries.len());
+                let mut cursor = 0usize;
+                for (child_idx, rows) in groups {
+                    if child_idx >= node.entries.len() {
+                        return Err(Error::Corrupt("internal child index out of range"));
+                    }
+                    for entry in &node.entries[cursor..=child_idx] {
+                        rebuilt.push(entry.clone());
+                    }
+                    cursor = child_idx + 1;
+                    let siblings = self.insert_batch_at(node.entries[child_idx].child_page_id, rows)?;
+                    rebuilt.extend(siblings.into_iter().map(|(separator, child_page_id)| InternalEntry {
+                        separator,
+                        child_page_id,
+                    }));
+                }
+                rebuilt.extend(node.entries[cursor..].iter().cloned());
+
+                let groups = pack_internal_entries(rebuilt)?;
+                if groups.len() == 1 {
+                    let entries = groups.into_iter().next().unwrap();
+                    let updated = InternalPage {
+                        page_id,
+                        page_generation: node.page_generation,
+                        tree_id: node.tree_id,
+                        entries,
+                    };
+                    self.pager.put_page(page_id, updated.encode()?)?;
+                    return Ok(Vec::new());
+                }
+                let mut siblings = Vec::with_capacity(groups.len() - 1);
+                for (index, entries) in groups.into_iter().enumerate() {
+                    let separator = entries[0].separator.clone();
+                    if index == 0 {
+                        let updated = InternalPage {
+                            page_id,
+                            page_generation: node.page_generation,
+                            tree_id: node.tree_id,
+                            entries,
+                        };
+                        self.pager.put_page(page_id, updated.encode()?)?;
+                    }
+                    else {
+                        let right_id = self.pager.alloc_page_id()?;
+                        let right = InternalPage {
+                            page_id: right_id,
+                            page_generation: node.page_generation,
+                            tree_id: node.tree_id,
+                            entries,
+                        };
+                        self.pager.put_page(right_id, right.encode()?)?;
+                        siblings.push((separator, right_id));
+                    }
+                }
+                Ok(siblings)
+            }
+            _ => Err(Error::Corrupt("unexpected page type")),
+        }
+    }
+
+    /// Merge rows into one leaf and pack it into as many pages as the budget needs.
+    fn apply_leaf_batch(
+        &mut self,
+        page_id: u32,
+        image: &[u8],
+        entries: Vec<(TreeKey, Vec<u8>)>,
+    ) -> Result<Vec<(TreeKey, u32)>> {
+        let mut leaf = LeafPage::decode(page_id, image)?;
+        let cells = merge_cells(leaf.take_cells(), entries);
+        let groups = pack_leaf_cells(cells)?;
+        let mut siblings = Vec::with_capacity(groups.len() - 1);
+        for (index, cells) in groups.into_iter().enumerate() {
+            let separator = cells[0].key.clone();
+            if index == 0 {
+                let mut first = LeafPage::empty(page_id, leaf.page_generation, leaf.tree_id);
+                first.set_cells(cells);
+                self.pager.put_page(page_id, first.encode()?)?;
+            }
+            else {
+                let right_id = self.pager.alloc_page_id()?;
+                let mut right = LeafPage::empty(right_id, leaf.page_generation, leaf.tree_id);
+                right.set_cells(cells);
+                self.pager.put_page(right_id, right.encode()?)?;
+                siblings.push((separator, right_id));
+            }
+        }
+        Ok(siblings)
+    }
+
+    /// Build one or more internal levels above a sorted child list and return
+    /// the root page id.
+    fn build_internal_chain(&mut self, entries: Vec<InternalEntry>) -> Result<u32> {
+        let mut level = entries;
+        loop {
+            let groups = pack_internal_entries(level)?;
+            if groups.len() == 1 {
+                let page_id = self.pager.alloc_page_id()?;
+                let page = InternalPage::new(page_id, 1, TREE_RECORD, groups.into_iter().next().unwrap())?;
+                self.pager.put_page(page_id, page.encode()?)?;
+                return Ok(page_id);
+            }
+            let mut next = Vec::with_capacity(groups.len());
+            for group in groups {
+                let separator = group[0].separator.clone();
+                let page_id = self.pager.alloc_page_id()?;
+                let page = InternalPage::new(page_id, 1, TREE_RECORD, group)?;
+                self.pager.put_page(page_id, page.encode()?)?;
+                next.push(InternalEntry { separator, child_page_id: page_id });
+            }
+            next[0].separator = TreeKey::min_separator(TREE_RECORD);
+            level = next;
+        }
+    }
+
     fn delete_at(&mut self, page_id: u32, key: &TreeKey) -> Result<bool> {
         let page = self.load_page(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
         match page.0.page_type {
@@ -267,4 +454,121 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
         };
         Ok(Some((PageHeader::parse(&bytes)?, bytes)))
     }
+}
+
+/// Merge sorted existing cells with sorted incoming rows, replacing duplicates.
+fn merge_cells(existing: Vec<LeafCell>, entries: Vec<(TreeKey, Vec<u8>)>) -> Vec<LeafCell> {
+    let mut merged = Vec::with_capacity(existing.len() + entries.len());
+    let mut left = 0usize;
+    let mut right = 0usize;
+    while left < existing.len() && right < entries.len() {
+        match existing[left].key.cmp(&entries[right].0) {
+            Ordering::Less => {
+                merged.push(LeafCell { key: existing[left].key.clone(), value: existing[left].value.clone() });
+                left += 1;
+            }
+            Ordering::Greater => {
+                merged.push(LeafCell { key: entries[right].0.clone(), value: entries[right].1.clone() });
+                right += 1;
+            }
+            Ordering::Equal => {
+                merged.push(LeafCell { key: existing[left].key.clone(), value: entries[right].1.clone() });
+                left += 1;
+                right += 1;
+            }
+        }
+    }
+    while left < existing.len() {
+        merged.push(LeafCell { key: existing[left].key.clone(), value: existing[left].value.clone() });
+        left += 1;
+    }
+    while right < entries.len() {
+        merged.push(LeafCell { key: entries[right].0.clone(), value: entries[right].1.clone() });
+        right += 1;
+    }
+    merged
+}
+
+/// Pack cells into as few leaf pages as the payload budget allows.
+fn pack_leaf_cells(cells: Vec<LeafCell>) -> Result<Vec<Vec<LeafCell>>> {
+    if cells.is_empty() {
+        return Err(Error::Corrupt("leaf page needs at least one cell"));
+    }
+    let mut groups: Vec<Vec<LeafCell>> = Vec::new();
+    let mut current: Vec<LeafCell> = Vec::new();
+    let mut usage = 4usize;
+    for cell in cells {
+        let slot_len = 4 + LeafPage::cell_bytes_len(&cell);
+        if 4 + slot_len > PAGE_PAYLOAD_LEN {
+            return Err(Error::Unsupported("record is too large for one leaf page"));
+        }
+        if !current.is_empty() && usage + slot_len > PAGE_PAYLOAD_LEN {
+            groups.push(std::mem::take(&mut current));
+            usage = 4;
+        }
+        usage += slot_len;
+        current.push(cell);
+    }
+    groups.push(current);
+    Ok(groups)
+}
+
+/// Pack internal entries into pages keeping every page at two or more children.
+fn pack_internal_entries(entries: Vec<InternalEntry>) -> Result<Vec<Vec<InternalEntry>>> {
+    if entries.len() < 2 {
+        return Err(Error::Corrupt("internal page needs two children"));
+    }
+    let mut groups: Vec<Vec<InternalEntry>> = Vec::new();
+    let mut current: Vec<InternalEntry> = Vec::new();
+    let mut usage = 2usize;
+    for entry in entries {
+        let entry_len = 2 + 4 + entry.separator.to_bytes().len();
+        if 2 + entry_len > PAGE_PAYLOAD_LEN {
+            return Err(Error::Unsupported("separator is too large for one internal page"));
+        }
+        if !current.is_empty() && usage + entry_len > PAGE_PAYLOAD_LEN {
+            groups.push(std::mem::take(&mut current));
+            usage = 2;
+        }
+        usage += entry_len;
+        current.push(entry);
+    }
+    groups.push(current);
+
+    // A trailing page with a single child cannot encode; merge it with the
+    // previous page and split that pair at a byte-balanced point.
+    if groups.len() > 1 && groups.last().is_some_and(|last| last.len() < 2) {
+        let tail = groups.pop().unwrap();
+        let mut previous = groups.pop().unwrap();
+        previous.extend(tail);
+        let (left, right) = split_internal_entries(previous)?;
+        groups.push(left);
+        groups.push(right);
+    }
+    Ok(groups)
+}
+
+/// Split an entry list into two encodable, byte-balanced halves.
+fn split_internal_entries(mut entries: Vec<InternalEntry>) -> Result<(Vec<InternalEntry>, Vec<InternalEntry>)> {
+    if entries.len() < 4 {
+        return Err(Error::Corrupt("internal page too small to split"));
+    }
+    let mut best: Option<(usize, usize)> = None;
+    for split_at in 2..entries.len() - 1 {
+        let left = encoded_entries_bytes(&entries[..split_at]);
+        let right = encoded_entries_bytes(&entries[split_at..]);
+        if left > PAGE_PAYLOAD_LEN || right > PAGE_PAYLOAD_LEN {
+            continue;
+        }
+        let imbalance = left.abs_diff(right);
+        if best.is_none_or(|(_, current)| imbalance <= current) {
+            best = Some((split_at, imbalance));
+        }
+    }
+    let Some((split_at, _)) = best
+    else {
+        return Err(Error::Corrupt("internal page cannot split into two encodable halves"));
+    };
+    let right = entries.split_off(split_at);
+    Ok((entries, right))
 }

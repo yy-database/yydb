@@ -162,7 +162,7 @@ impl InternalPage {
 
 /// Payload bytes used by `entries`: child count plus per-entry length, child id
 /// and separator bytes.
-fn encoded_entries_bytes(entries: &[InternalEntry]) -> usize {
+pub(crate) fn encoded_entries_bytes(entries: &[InternalEntry]) -> usize {
     let mut total = 2usize;
     for entry in entries {
         total += 2 + 4 + entry.separator.to_bytes().len();

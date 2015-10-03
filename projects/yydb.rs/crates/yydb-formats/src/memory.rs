@@ -121,6 +121,12 @@ impl MemoryPager {
         RecordTree::open(self).put(TreeKey::user_record(key), value.to_vec())
     }
 
+    /// Insert or replace several user KV rows in one record-tree traversal.
+    pub fn put_kv_batch(&mut self, rows: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
+        let rows = rows.into_iter().map(|(key, value)| (TreeKey::user_record(key), value)).collect();
+        RecordTree::open(self).put_batch(rows)
+    }
+
     /// User KV get from the record tree.
     pub fn get_kv(&mut self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         RecordTree::open(self).get(&TreeKey::user_record(key))
