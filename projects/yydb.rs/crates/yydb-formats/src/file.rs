@@ -397,6 +397,14 @@ impl PageStore for FilePager {
     fn set_record_root(&mut self, page_id: u32) -> Result<()> {
         self.inner.set_record_root(page_id)
     }
+
+    fn decoded_page(&self, page_id: u32) -> Option<std::sync::Arc<crate::pager::DecodedPage>> {
+        self.inner.decoded_page(page_id)
+    }
+
+    fn store_decoded_page(&mut self, page_id: u32, page: std::sync::Arc<crate::pager::DecodedPage>) {
+        self.inner.store_decoded_page(page_id, page);
+    }
 }
 
 /// Load a `MemoryPager` from a contiguous `YDPG` main-file byte image.

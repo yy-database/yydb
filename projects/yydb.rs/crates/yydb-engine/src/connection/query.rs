@@ -144,7 +144,7 @@ impl Connection {
         }
 
         // Phase two: metadata plus the window, read as one pager transaction.
-        let state = self.read_state_window(&window)?;
+        let state = self.read_state_window_with_metadata(&window, &metadata)?;
         if schema_basis(&state) != schema_basis(&metadata) {
             // The durable schema moved between the two reads, so the window
             // was derived from a contract that no longer describes the data.

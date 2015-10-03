@@ -1,6 +1,10 @@
 //! In-memory page map backend for format v0 engine development.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
+};
 
 use yydb_types::{Error, Result};
 
@@ -11,7 +15,7 @@ use crate::{
         seal_header_slot, slot_offset_for_kind,
     },
     key::TreeKey,
-    pager::PageStore,
+    pager::{DecodedPage, PageStore},
 };
 
 /// Process-local page store used by tests and the memory storage profile.
@@ -23,6 +27,10 @@ pub struct MemoryPager {
     /// changed-page set comes from the writes themselves instead of a full
     /// before/after page-map comparison.
     dirty: BTreeSet<u32>,
+    /// Active header parsed from page 0, refreshed whenever page 0 is written.
+    header_cache: RefCell<Option<DatabaseHeader>>,
+    /// Pages decoded by read paths, dropped when the same page id is rewritten.
+    decoded: RefCell<HashMap<u32, Arc<DecodedPage>>>,
 }
 
 impl MemoryPager {
@@ -36,8 +44,13 @@ impl MemoryPager {
 
     /// Load page 0 and return the active database header.
     pub fn header(&self) -> Result<DatabaseHeader> {
+        if let Some(header) = self.header_cache.borrow().as_ref() {
+            return Ok(header.clone());
+        }
         let page0 = self.get_page(0)?.ok_or(Error::Corrupt("missing page0"))?;
-        parse_page0(&page0)
+        let header = parse_page0(&page0)?;
+        *self.header_cache.borrow_mut() = Some(header.clone());
+        Ok(header)
     }
 
     /// Read a page by id.
@@ -52,7 +65,27 @@ impl MemoryPager {
         }
         self.pages.insert(page_id, image);
         self.dirty.insert(page_id);
+        self.decoded.borrow_mut().remove(&page_id);
+        if page_id == 0 {
+            *self.header_cache.borrow_mut() = None;
+        }
         Ok(())
+    }
+
+    /// Decoded page cached by the read paths, if present.
+    pub fn decoded_page(&self, page_id: u32) -> Option<Arc<DecodedPage>> {
+        self.decoded.borrow().get(&page_id).cloned()
+    }
+
+    /// Remember a decoded page. The cache is reset wholesale at a fixed bound
+    /// rather than maintained as an LRU; decoded pages are small relative to
+    /// the page map they shadow.
+    pub fn store_decoded_page(&mut self, page_id: u32, page: Arc<DecodedPage>) {
+        let mut decoded = self.decoded.borrow_mut();
+        if decoded.len() >= 8_192 {
+            decoded.clear();
+        }
+        decoded.insert(page_id, page);
     }
 
     /// Forget the dirty set without consuming it, used when a transaction is
@@ -168,5 +201,13 @@ impl PageStore for MemoryPager {
 
     fn set_record_root(&mut self, page_id: u32) -> Result<()> {
         MemoryPager::set_record_root(self, page_id)
+    }
+
+    fn decoded_page(&self, page_id: u32) -> Option<Arc<DecodedPage>> {
+        MemoryPager::decoded_page(self, page_id)
+    }
+
+    fn store_decoded_page(&mut self, page_id: u32, page: Arc<DecodedPage>) {
+        MemoryPager::store_decoded_page(self, page_id, page);
     }
 }

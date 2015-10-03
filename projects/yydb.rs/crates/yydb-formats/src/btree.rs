@@ -1,6 +1,7 @@
 //! B+ tree record store over a page pager.
 
 use std::cmp::Ordering;
+use std::sync::Arc;
 
 use yydb_types::{Error, Result};
 
@@ -9,7 +10,7 @@ use crate::{
     key::{TREE_RECORD, TreeKey},
     leaf::{LeafCell, LeafPage},
     page::{PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF, PageHeader},
-    pager::PageStore,
+    pager::{DecodedPage, PageStore},
 };
 
 /// Result of inserting into a leaf that may have split.
@@ -163,16 +164,29 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
     }
 
     fn get_at(&mut self, page_id: u32, key: &TreeKey) -> Result<Option<Vec<u8>>> {
-        let page = self.load_page(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
-        match page.0.page_type {
-            PAGE_TYPE_LEAF => Ok(LeafPage::decode(page_id, &page.1)?.get(key).map(|v| v.to_vec())),
-            PAGE_TYPE_INTERNAL => {
-                let node = InternalPage::decode(page_id, &page.1)?;
+        let page = self.load_decoded(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
+        match page.as_ref() {
+            DecodedPage::Leaf(leaf) => Ok(leaf.get(key).map(|v| v.to_vec())),
+            DecodedPage::Internal(node) => {
                 let child = node.child_page_id(node.child_index_for(key));
                 self.get_at(child, key)
             }
             _ => Err(Error::Corrupt("unexpected page type")),
         }
+    }
+
+    /// Load a page through the backend's decoded-page cache.
+    fn load_decoded(&mut self, page_id: u32) -> Result<Option<Arc<DecodedPage>>> {
+        if let Some(page) = self.pager.decoded_page(page_id) {
+            return Ok(Some(page));
+        }
+        let Some(bytes) = self.pager.get_page(page_id)?
+        else {
+            return Ok(None);
+        };
+        let page = Arc::new(DecodedPage::parse(page_id, &bytes)?);
+        self.pager.store_decoded_page(page_id, page.clone());
+        Ok(Some(page))
     }
 
     fn insert_at(&mut self, page_id: u32, key: TreeKey, value: Vec<u8>) -> Result<Option<(TreeKey, u32)>> {
@@ -383,16 +397,14 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
     }
 
     fn scan_page(&mut self, page_id: u32, out: &mut Vec<(TreeKey, Vec<u8>)>) -> Result<()> {
-        let page = self.load_page(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
-        match page.0.page_type {
-            PAGE_TYPE_LEAF => {
-                let leaf = LeafPage::decode(page_id, &page.1)?;
+        let page = self.load_decoded(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
+        match page.as_ref() {
+            DecodedPage::Leaf(leaf) => {
                 for cell in leaf.cells() {
                     out.push((cell.key.clone(), cell.value.clone()));
                 }
             }
-            PAGE_TYPE_INTERNAL => {
-                let node = InternalPage::decode(page_id, &page.1)?;
+            DecodedPage::Internal(node) => {
                 for idx in 0..node.entries.len() {
                     self.scan_page(node.child_page_id(idx), out)?;
                 }
@@ -411,10 +423,9 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
         end: Option<&TreeKey>,
         out: &mut Vec<(TreeKey, Vec<u8>)>,
     ) -> Result<()> {
-        let page = self.load_page(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
-        match page.0.page_type {
-            PAGE_TYPE_LEAF => {
-                let leaf = LeafPage::decode(page_id, &page.1)?;
+        let page = self.load_decoded(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
+        match page.as_ref() {
+            DecodedPage::Leaf(leaf) => {
                 for cell in leaf.cells() {
                     if cell.key < *start {
                         continue;
@@ -425,8 +436,7 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
                     out.push((cell.key.clone(), cell.value.clone()));
                 }
             }
-            PAGE_TYPE_INTERNAL => {
-                let node = InternalPage::decode(page_id, &page.1)?;
+            DecodedPage::Internal(node) => {
                 for idx in 0..node.entries.len() {
                     let lower = &node.entries[idx].separator;
                     // Child `idx` only holds keys below its successor's

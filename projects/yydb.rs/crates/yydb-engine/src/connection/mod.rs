@@ -137,9 +137,10 @@ impl Connection {
             closed: std::sync::Arc::new(AtomicBool::new(false)),
             full_publish: std::sync::Arc::new(AtomicBool::new(false)),
         };
-        // Force recovery path once so a leftover WAL is applied.
-        let _ = connection.read_state()?;
-        connection.reconcile_leases_on_open()?;
+        // Force the recovery path once so a leftover WAL is applied, and reuse
+        // that state for lease reconciliation instead of scanning it twice.
+        let state = connection.read_state()?;
+        connection.reconcile_leases_on_open_with(state)?;
         Ok(connection)
     }
 

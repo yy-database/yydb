@@ -6,9 +6,13 @@ use yydb_storage::snapshot::RecordWindow;
 use super::{Backend, Connection, State, TxnJournal, is_yydx_main_path};
 
 impl Connection {
-    pub(crate) fn reconcile_leases_on_open(&self) -> Result<()> {
+    /// Reconcile expired leases against an already-read durable state.
+    ///
+    /// Opening a database already reads a full state to force WAL recovery.
+    /// Reading it a second time here would repeat the entire snapshot scan and
+    /// codec decode on every open, so the caller hands its state over instead.
+    pub(crate) fn reconcile_leases_on_open_with(&self, mut state: State) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
-        let mut state = self.active_state_unlocked()?;
         if lease::reconcile_expired_leases(&mut state.records)? {
             self.replace_active_state_unlocked(state)?;
         }
@@ -96,6 +100,17 @@ impl Connection {
     /// [`Self::read_state`] would otherwise hand the resolver an incomplete
     /// object catalog.
     pub(crate) fn read_state_window(&self, window: &yydb_query::ReadWindow) -> Result<State> {
+        let metadata = self.read_state_metadata()?;
+        self.read_state_window_with_metadata(window, &metadata)
+    }
+
+    /// Read metadata plus the rows inside `window`, reusing already-decoded
+    /// metadata instead of decoding the schema and contract a second time.
+    pub(crate) fn read_state_window_with_metadata(
+        &self,
+        window: &yydb_query::ReadWindow,
+        metadata: &State,
+    ) -> Result<State> {
         match self.backend.as_ref() {
             Backend::File { database, .. } => {
                 let mut windows = vec![RecordWindow { start: window.start.clone(), end: window.end.clone() }];
@@ -109,13 +124,13 @@ impl Connection {
                     let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     database.snapshot_windows(&windows)?
                 };
-                let mut state = snapshot::state_from_snapshot(&snapshot)?;
+                let mut state = snapshot::state_with_window(metadata, &snapshot)?;
                 if self.is_single_file_yydb() {
                     self.objects.take_embedded_records(&mut state.records)?;
                 }
                 Ok(state)
             }
-            Backend::Memory { state } => Ok(state.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()),
+            Backend::Memory { .. } => Ok(metadata.clone()),
         }
     }
 
@@ -127,6 +142,17 @@ impl Connection {
     /// pulls the embedded object prefix, because publication has to know which
     /// object records are already durable.
     fn read_state_windows(&self, windows: &[yydb_query::ReadWindow]) -> Result<(State, snapshot::PriorRecords)> {
+        let metadata = self.read_state_metadata()?;
+        self.read_state_windows_with_metadata(windows, &metadata)
+    }
+
+    /// Read metadata plus exactly the rows inside `windows`, reusing
+    /// already-decoded metadata.
+    fn read_state_windows_with_metadata(
+        &self,
+        windows: &[yydb_query::ReadWindow],
+        metadata: &State,
+    ) -> Result<(State, snapshot::PriorRecords)> {
         match self.backend.as_ref() {
             Backend::File { database, .. } => {
                 let mut record_windows: Vec<RecordWindow> = windows
@@ -143,7 +169,7 @@ impl Connection {
                     let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     database.snapshot_windows(&record_windows)?
                 };
-                let mut state = snapshot::state_from_snapshot(&snapshot)?;
+                let mut state = snapshot::state_with_window(metadata, &snapshot)?;
                 let prior = snapshot::prior_records(&state.records);
                 if self.is_single_file_yydb() {
                     self.objects.take_embedded_records(&mut state.records)?;
@@ -267,7 +293,7 @@ impl Connection {
         else {
             return self.mutate_active_state_unlocked(f);
         };
-        let (mut state, prior) = self.read_state_windows(&windows)?;
+        let (mut state, prior) = self.read_state_windows_with_metadata(&windows, &metadata)?;
         f(&mut state)?;
         self.write_state_delta(state, &prior)?;
         Ok(())

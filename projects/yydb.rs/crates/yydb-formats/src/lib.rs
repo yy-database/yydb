@@ -40,7 +40,7 @@ pub use key::{KEY_KIND_USER, TREE_CATALOG, TREE_RECORD, TreeKey};
 pub use leaf::{LeafCell, LeafPage};
 pub use memory::MemoryPager;
 pub use page::{PAGE_HEADER_LEN, PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF, PageHeader, encode_page};
-pub use pager::PageStore;
+pub use pager::{DecodedPage, PageStore};
 pub use shm::{
     SHM_BYTES, SHM_MAGIC, ShmBlock, encode_empty_shm, encode_shm, parse_shm, shm_sidecar_path, sync_shm_from_commit,
     sync_shm_from_wal,
