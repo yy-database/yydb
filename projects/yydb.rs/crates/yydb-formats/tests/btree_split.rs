@@ -58,6 +58,47 @@ fn leaf_split_halves_cells() {
     assert!(right.get(&separator).is_some());
 }
 
+/// Sequential appends must fill leaves instead of halving them.
+///
+/// Regression: every edge split halved the page, so a bulk append kept about
+/// half of each leaf empty and produced roughly twice the pages it needed.
+#[test]
+fn sequential_appends_fill_leaves() {
+    let id = [3, 3, 3, 3, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 13];
+    let mut pager = MemoryPager::new_empty(id, 0x01);
+    let total = 5_000usize;
+    let payload = vec![b'v'; 64];
+    for i in 0..total {
+        pager.put_kv(format!("key-{i:010}"), &payload).unwrap();
+    }
+    assert_eq!(pager.scan_kv().unwrap().len(), total);
+    // 88-byte cells fit 44 per page, so 5 000 appends need about 114 leaves.
+    // Balanced edge splits would produce about 228.
+    assert!(pager.page_count() < 130, "page_count={}", pager.page_count());
+    for i in (0..total).step_by(97) {
+        let key = format!("key-{i:010}");
+        assert_eq!(pager.get_kv(&key).unwrap(), Some(payload.clone()), "missing {key}");
+    }
+}
+
+/// Prepending has to keep the mirrored edge dense too.
+#[test]
+fn sequential_prepends_fill_leaves() {
+    let id = [4, 4, 4, 4, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 14];
+    let mut pager = MemoryPager::new_empty(id, 0x01);
+    let total = 5_000usize;
+    let payload = vec![b'v'; 64];
+    for i in (0..total).rev() {
+        pager.put_kv(format!("key-{i:010}"), &payload).unwrap();
+    }
+    assert_eq!(pager.scan_kv().unwrap().len(), total);
+    assert!(pager.page_count() < 130, "page_count={}", pager.page_count());
+    for i in (0..total).step_by(97) {
+        let key = format!("key-{i:010}");
+        assert_eq!(pager.get_kv(&key).unwrap(), Some(payload.clone()), "missing {key}");
+    }
+}
+
 #[test]
 fn internal_page_roundtrip() {
     use yydb_formats::{InternalEntry, TREE_RECORD, TreeKey};

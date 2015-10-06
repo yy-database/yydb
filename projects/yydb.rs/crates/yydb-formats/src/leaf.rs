@@ -224,10 +224,48 @@ impl LeafPage {
     /// even when the same cell fits an otherwise empty page. This picks the most
     /// byte-balanced split point among those where both halves fit, and refuses
     /// the record when no leaf can hold it.
+    ///
+    /// An insert at either edge of the key order is the append (or prepend)
+    /// shape that a sequential writer produces. There the balanced split is
+    /// wrong: it would hand the new sibling half a page and leave the existing
+    /// page half empty, so a bulk append ends up with twice the pages it needs.
+    /// Edge inserts therefore keep every cell the page already held and start
+    /// the sibling with only the incoming row.
     pub fn split_for_insert(&mut self, incoming: LeafCell) -> Result<(TreeKey, LeafPage)> {
         let insert_at = self.cells.iter().position(|cell| cell.key > incoming.key).unwrap_or(self.cells.len());
+        let edge_split = if insert_at == 0 {
+            Some(1)
+        }
+        else if insert_at == self.cells.len() {
+            Some(self.cells.len())
+        }
+        else {
+            None
+        };
         self.cells.insert(insert_at, incoming);
 
+        let split_at = match edge_split {
+            Some(candidate) if self.split_fits(candidate)? => candidate,
+            _ => self.balanced_split()?,
+        };
+
+        let right_cells = self.cells.split_off(split_at);
+        let separator = right_cells[0].key.clone();
+        let right = LeafPage { page_id: 0, page_generation: self.page_generation, tree_id: self.tree_id, cells: right_cells };
+        Ok((separator, right))
+    }
+
+    /// Whether both halves around `split_at` fit one page.
+    fn split_fits(&self, split_at: usize) -> Result<bool> {
+        if split_at == 0 || split_at >= self.cells.len() {
+            return Ok(false);
+        }
+        Ok(payload_usage(&self.cells[..split_at])? <= PAGE_PAYLOAD_LEN
+            && payload_usage(&self.cells[split_at..])? <= PAGE_PAYLOAD_LEN)
+    }
+
+    /// Most byte-balanced split point among those where both halves fit.
+    fn balanced_split(&self) -> Result<usize> {
         let mut best: Option<(usize, usize)> = None;
         for split_at in 1..self.cells.len() {
             let left = payload_usage(&self.cells[..split_at])?;
@@ -240,15 +278,7 @@ impl LeafPage {
                 best = Some((split_at, imbalance));
             }
         }
-        let Some((split_at, _)) = best
-        else {
-            return Err(Error::Unsupported("record is too large for one leaf page"));
-        };
-
-        let right_cells = self.cells.split_off(split_at);
-        let separator = right_cells[0].key.clone();
-        let right = LeafPage { page_id: 0, page_generation: self.page_generation, tree_id: self.tree_id, cells: right_cells };
-        Ok((separator, right))
+        best.map(|(split_at, _)| split_at).ok_or(Error::Unsupported("record is too large for one leaf page"))
     }
 }
 
