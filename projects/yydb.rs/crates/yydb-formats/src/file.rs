@@ -92,8 +92,10 @@ impl FilePager {
             file_pager.persist_all()?;
         }
         if enable_wal {
+            // Recovery reads the sidecar once. The append writer opens on the
+            // first publication instead, so an open that never writes pays
+            // neither the sidecar creation nor the `-shm` mirror.
             file_pager.recover()?;
-            file_pager.ensure_wal()?;
         }
         Ok(file_pager)
     }
@@ -104,8 +106,12 @@ impl FilePager {
     }
 
     /// WAL sidecar path when enabled.
+    ///
+    /// The path is reported for every WAL-enabled handle. The file itself only
+    /// exists once a publication created it, so callers must not infer its
+    /// presence from this value.
     pub fn wal_path(&self) -> Option<PathBuf> {
-        self.wal.as_ref().map(|wal| wal.path().to_path_buf())
+        (self.wal_enabled || self.wal.is_some()).then(|| wal_sidecar_path(&self.path))
     }
 
     /// Apply record-tree mutations and publish them as one WAL transaction or write batch.
