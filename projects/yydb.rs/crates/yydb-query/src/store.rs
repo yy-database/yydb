@@ -2,8 +2,10 @@
 
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
-use serde_json::{Map, Value as JsonValue};
-use yydb_types::{Error, ObjectKind, ObjectRef, Result, Value, Vector, scalar};
+use yydb_types::{
+    Date, Decimal, Error, FileDescriptor, FileManifestRef, HashAlgo, ObjectKind, ObjectRef, Result, Time, Timestamp, Value,
+    Vector,
+};
 
 use super::ops::QueryRow;
 
@@ -183,12 +185,231 @@ pub fn upsert_row(records: &mut BTreeMap<String, Vec<u8>>, table: &str, pk: &str
     Ok(())
 }
 
+/// Version byte prefixed to every stored row record.
+///
+/// Row records are self-describing and versioned. A record whose first byte is
+/// not [`ROW_CODEC_VERSION`] was written by the retired JSON row codec, and
+/// decoding it fails closed with a migration hint instead of guessing a shape.
+pub const ROW_CODEC_VERSION: u8 = 1;
+
+const TAG_BOOL: u8 = 0x01;
+const TAG_I64: u8 = 0x02;
+const TAG_F64: u8 = 0x03;
+const TAG_TEXT: u8 = 0x04;
+const TAG_UUID: u8 = 0x05;
+const TAG_DATE: u8 = 0x06;
+const TAG_TIME: u8 = 0x07;
+const TAG_TIMESTAMP: u8 = 0x08;
+const TAG_DECIMAL: u8 = 0x09;
+const TAG_BYTES: u8 = 0x0A;
+const TAG_VECTOR: u8 = 0x0B;
+const TAG_OBJECT: u8 = 0x0C;
+const TAG_FILE: u8 = 0x0D;
+
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+/// Encode one row as the binary row record format.
+///
+/// Layout: `version u8`, `column count u16`, `null bitmap ceil(n/8)`, then one
+/// `name length u16 + UTF-8 name` per column in ascending name order, then one
+/// tagged value for every column the bitmap does not mark null. Integers keep
+/// their declared width, text and octets carry a length prefix, floats are raw
+/// IEEE-754 bits, and keys never repeat the enclosing table name.
 fn encode_row(row: &QueryRow) -> Result<Vec<u8>> {
-    let mut map = Map::new();
-    for (key, value) in row {
-        map.insert(key.clone(), encode_value(value)?);
+    let column_count = u16::try_from(row.len()).map_err(|_| Error::Unsupported("query row has more than 65535 columns"))?;
+    let mut out = Vec::with_capacity(4 + row.len() * 12);
+    out.push(ROW_CODEC_VERSION);
+    out.extend_from_slice(&column_count.to_le_bytes());
+    let bitmap_len = row.len().div_ceil(8);
+    let bitmap_start = out.len();
+    out.resize(bitmap_start + bitmap_len, 0);
+    for (index, (name, value)) in row.iter().enumerate() {
+        if matches!(value, Value::Null) {
+            out[bitmap_start + index / 8] |= 1 << (index % 8);
+        }
+        put_len(&mut out, name.len(), "column name")?;
+        out.extend_from_slice(name.as_bytes());
     }
-    serde_json::to_vec(&JsonValue::Object(map)).map_err(|_| Error::Corrupt("row json encode failed"))
+    for value in row.values() {
+        if matches!(value, Value::Null) {
+            continue;
+        }
+        encode_value(&mut out, value)?;
+    }
+    Ok(out)
+}
+
+fn put_len(out: &mut Vec<u8>, len: usize, _what: &str) -> Result<()> {
+    let len = u16::try_from(len).map_err(|_| Error::Unsupported("row record field exceeds 65535 bytes"))?;
+    out.extend_from_slice(&len.to_le_bytes());
+    Ok(())
+}
+
+fn encode_value(out: &mut Vec<u8>, value: &Value) -> Result<()> {
+    match value {
+        Value::Null => return Err(Error::Corrupt("null columns are carried by the row null bitmap")),
+        Value::Bool(flag) => {
+            out.push(TAG_BOOL);
+            out.push(u8::from(*flag));
+        }
+        Value::I64(integer) => {
+            out.push(TAG_I64);
+            out.extend_from_slice(&integer.to_le_bytes());
+        }
+        Value::F64(number) => {
+            if !number.is_finite() {
+                return Err(Error::Unsupported("query row encoding rejects non-finite REAL values"));
+            }
+            out.push(TAG_F64);
+            out.extend_from_slice(&number.to_le_bytes());
+        }
+        Value::Text(text) => {
+            out.push(TAG_TEXT);
+            put_len(out, text.len(), "text value")?;
+            out.extend_from_slice(text.as_bytes());
+        }
+        Value::Uuid(id) => {
+            out.push(TAG_UUID);
+            out.extend_from_slice(id.as_bytes());
+        }
+        Value::Date(date) => {
+            out.push(TAG_DATE);
+            out.extend_from_slice(&date.days().to_le_bytes());
+        }
+        Value::Time(time) => {
+            out.push(TAG_TIME);
+            out.extend_from_slice(&time.nanos().to_le_bytes());
+        }
+        Value::Timestamp(timestamp) => {
+            out.push(TAG_TIMESTAMP);
+            out.extend_from_slice(&timestamp.unix_micros().to_le_bytes());
+        }
+        Value::Decimal(decimal) => {
+            out.push(TAG_DECIMAL);
+            out.extend_from_slice(&decimal.unscaled().to_le_bytes());
+            out.push(decimal.precision());
+            out.push(decimal.scale());
+        }
+        Value::Bytes(octets) => {
+            out.push(TAG_BYTES);
+            put_len(out, octets.len(), "bytes value")?;
+            out.extend_from_slice(octets);
+        }
+        Value::Vector(vector) => {
+            out.push(TAG_VECTOR);
+            let dimension =
+                u16::try_from(vector.dim).map_err(|_| Error::Unsupported("inline row vector dimension exceeds 65535"))?;
+            let payload_len = u32::try_from(dimension as usize * 4)
+                .map_err(|_| Error::Unsupported("inline row vector payload exceeds 4 GiB"))?;
+            out.extend_from_slice(&dimension.to_le_bytes());
+            out.extend_from_slice(&payload_len.to_le_bytes());
+            for component in vector.data.iter() {
+                out.extend_from_slice(&component.to_le_bytes());
+            }
+        }
+        Value::Object(object) => {
+            out.push(TAG_OBJECT);
+            out.push(algo_tag(object.algo)?);
+            out.push(object_kind_tag(object.kind)?);
+            out.extend_from_slice(&object.hash);
+            out.extend_from_slice(&object.size.to_le_bytes());
+        }
+        Value::File(file) => {
+            out.push(TAG_FILE);
+            let digest =
+                parse_digest_hex(&file.digest).ok_or(Error::Corrupt("file descriptor digest is not 64 hexadecimal digits"))?;
+            out.extend_from_slice(&digest);
+            out.extend_from_slice(&file.octets.to_le_bytes());
+            let mut flags = 0_u8;
+            if file.name.is_some() {
+                flags |= 0b01;
+            }
+            if file.media_type.is_some() {
+                flags |= 0b10;
+            }
+            out.push(flags);
+            if let Some(name) = &file.name {
+                put_len(out, name.len(), "file name")?;
+                out.extend_from_slice(name.as_bytes());
+            }
+            if let Some(media_type) = &file.media_type {
+                put_len(out, media_type.len(), "file media type")?;
+                out.extend_from_slice(media_type.as_bytes());
+            }
+            out.extend_from_slice(&file.manifest.hash);
+            out.extend_from_slice(&file.manifest.size.to_le_bytes());
+        }
+        _ => {
+            return Err(Error::Unsupported(
+                "query row encoding supports null, bool, i64, real, text, uuid, bytes, vector, date, time, timestamp, \
+                 decimal, bytes object references, and file descriptors only",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn algo_tag(algo: HashAlgo) -> Result<u8> {
+    match algo {
+        HashAlgo::Blake3 => Ok(0),
+        _ => Err(Error::Unsupported("query row encoding supports the blake3 digest algorithm only")),
+    }
+}
+
+fn object_kind_tag(kind: ObjectKind) -> Result<u8> {
+    Ok(match kind {
+        ObjectKind::Blob => 0,
+        ObjectKind::VectorPayload => 1,
+        ObjectKind::FileManifest => 2,
+        ObjectKind::AnnSegment => 3,
+        _ => return Err(Error::Unsupported("query row encoding does not support this object kind")),
+    })
+}
+
+fn algo_from_tag(tag: u8) -> Result<HashAlgo> {
+    match tag {
+        0 => Ok(HashAlgo::Blake3),
+        _ => Err(Error::Corrupt("row record digest algorithm tag is unknown")),
+    }
+}
+
+fn object_kind_from_tag(tag: u8) -> Result<ObjectKind> {
+    match tag {
+        0 => Ok(ObjectKind::Blob),
+        1 => Ok(ObjectKind::VectorPayload),
+        2 => Ok(ObjectKind::FileManifest),
+        3 => Ok(ObjectKind::AnnSegment),
+        _ => Err(Error::Corrupt("row record object kind tag is unknown")),
+    }
+}
+
+fn digest_hex(digest: &[u8; 32]) -> String {
+    let mut out = String::with_capacity(64);
+    for byte in digest {
+        out.push(HEX_DIGITS[(byte >> 4) as usize] as char);
+        out.push(HEX_DIGITS[(byte & 0x0F) as usize] as char);
+    }
+    out
+}
+
+fn parse_digest_hex(text: &str) -> Option<[u8; 32]> {
+    if text.len() != 64 {
+        return None;
+    }
+    let mut digest = [0_u8; 32];
+    for (index, pair) in text.as_bytes().chunks(2).enumerate() {
+        digest[index] = (hex_digit(pair[0])? << 4) | hex_digit(pair[1])?;
+    }
+    Some(digest)
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// Load one row by primary key.
@@ -199,82 +420,210 @@ pub fn load_row(records: &BTreeMap<String, Vec<u8>>, table: &str, pk: &str) -> R
 }
 
 fn decode_row(bytes: &[u8]) -> Result<QueryRow> {
-    let json: JsonValue = serde_json::from_slice(bytes).map_err(|_| Error::Corrupt("row json decode failed"))?;
-    let object = json.as_object().ok_or(Error::Corrupt("row json must be an object"))?;
+    parse_row(bytes, &mut None, true)
+}
+
+/// One stored row record's out-of-line references.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct RowReferences {
+    /// Objects the row stores directly.
+    pub objects: Vec<ObjectRef>,
+    /// File descriptors the row stores.
+    pub files: Vec<FileDescriptor>,
+}
+
+/// Collect the out-of-line objects one stored row record points at.
+///
+/// The reference closure must see exactly what the row committed, so this reads
+/// the same record layout the reader uses and never resolves an object.
+pub fn row_references(bytes: &[u8]) -> Result<RowReferences> {
+    let mut references = Some(RowReferences::default());
+    parse_row(bytes, &mut references, false)?;
+    references.take().ok_or(Error::Corrupt("row record reference walk produced no result"))
+}
+
+fn parse_row(bytes: &[u8], references: &mut Option<RowReferences>, resolve: bool) -> Result<QueryRow> {
+    match bytes.first() {
+        Some(version) if *version == ROW_CODEC_VERSION => {}
+        Some(_) => {
+            return Err(Error::Unsupported(
+                "row record uses the retired JSON row encoding: rebuild the database from source data to use the \
+                 binary row format",
+            ));
+        }
+        None => return Err(Error::Corrupt("row record is empty")),
+    }
+    let mut cursor = RowCursor::new(bytes);
+    cursor.take(1)?;
+    let column_count = cursor.u16()? as usize;
+    let bitmap_len = column_count.div_ceil(8);
+    let bitmap = cursor.take(bitmap_len)?.to_vec();
+    let mut names = Vec::with_capacity(column_count);
+    for _ in 0..column_count {
+        names.push(cursor.text()?);
+    }
     let mut row = QueryRow::new();
-    for (key, value) in object {
-        row.insert(key.clone(), decode_value(value)?);
+    for (index, name) in names.into_iter().enumerate() {
+        if bitmap[index / 8] & (1 << (index % 8)) != 0 {
+            row.insert(name, Value::Null);
+            continue;
+        }
+        let value = decode_value(&mut cursor, references, resolve)?;
+        row.insert(name, value);
+    }
+    if cursor.remaining() != 0 {
+        return Err(Error::Corrupt("row record has trailing bytes"));
     }
     Ok(row)
 }
 
-fn encode_value(value: &Value) -> Result<JsonValue> {
-    Ok(match value {
-        Value::Null => JsonValue::Null,
-        Value::Bool(b) => JsonValue::Bool(*b),
-        Value::I64(i) => JsonValue::from(*i),
-        Value::F64(number) => {
-            if !number.is_finite() {
-                return Err(Error::Unsupported("query row encoding rejects non-finite REAL values"));
-            }
-            JsonValue::Number(
-                serde_json::Number::from_f64(*number)
-                    .ok_or(Error::Unsupported("query row encoding rejects non-finite REAL values"))?,
-            )
-        }
-        Value::Text(s) => JsonValue::String(s.clone()),
-        Value::Uuid(_)
-        | Value::Date(_)
-        | Value::Time(_)
-        | Value::Timestamp(_)
-        | Value::Decimal(_)
-        | Value::Bytes(_)
-        | Value::Vector(_)
-        | Value::Object(_)
-        | Value::File(_) => scalar::tagged_value_json(value)
-            .expect("uuid, temporal, decimal, binary, vector, object-reference, and file values always have a tagged form"),
-        _ => {
-            return Err(Error::Unsupported(
-                "query row encoding supports null, bool, i64, real, text, uuid, bytes, vector, date, time, timestamp, \
-                 decimal, bytes object references, and file descriptors only",
-            ));
-        }
-    })
+/// Bounds-checked forward reader over one row record.
+struct RowCursor<'a> {
+    bytes: &'a [u8],
+    position: usize,
 }
 
-fn decode_value(value: &JsonValue) -> Result<Value> {
-    Ok(match value {
-        JsonValue::Null => Value::Null,
-        JsonValue::Bool(b) => Value::Bool(*b),
-        JsonValue::Number(n) => {
-            if let Some(integer) = n.as_i64() {
-                Value::I64(integer)
-            }
-            else if n.is_f64() {
-                let real = n.as_f64().ok_or_else(|| Error::Corrupt("row json real is not a finite f64"))?;
-                if !real.is_finite() {
-                    return Err(Error::Corrupt("row json real is not finite"));
-                }
-                Value::F64(real)
-            }
-            else {
-                return Err(Error::Corrupt("row json integer is outside the signed 64-bit range"));
-            }
-        }
-        JsonValue::String(s) => Value::Text(s.clone()),
-        JsonValue::Object(_) => match scalar::tagged_value_from_json(value) {
-            Some(Ok(parsed)) => resolve_object_reference(parsed)?,
-            Some(Err(error)) => return Err(error.into()),
-            None => {
-                return Err(Error::Unsupported(
-                    "query row decoding supports tagged uuid, date, time, timestamp, decimal, bytes, vector, object \
-                     references, and file descriptors only",
-                ));
-            }
+impl<'a> RowCursor<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, position: 0 }
+    }
+
+    fn take(&mut self, len: usize) -> Result<&'a [u8]> {
+        let end = self
+            .position
+            .checked_add(len)
+            .filter(|end| *end <= self.bytes.len())
+            .ok_or(Error::Corrupt("row record is truncated"))?;
+        let slice = &self.bytes[self.position..end];
+        self.position = end;
+        Ok(slice)
+    }
+
+    fn u8(&mut self) -> Result<u8> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn u16(&mut self) -> Result<u16> {
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
+    }
+
+    fn u32(&mut self) -> Result<u32> {
+        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+    }
+
+    fn u64(&mut self) -> Result<u64> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+    }
+
+    fn i32(&mut self) -> Result<i32> {
+        Ok(i32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+    }
+
+    fn i64(&mut self) -> Result<i64> {
+        Ok(i64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+    }
+
+    fn i128(&mut self) -> Result<i128> {
+        Ok(i128::from_le_bytes(self.take(16)?.try_into().unwrap()))
+    }
+
+    fn digest(&mut self) -> Result<[u8; 32]> {
+        Ok(self.take(32)?.try_into().unwrap())
+    }
+
+    fn text(&mut self) -> Result<String> {
+        let len = self.u16()? as usize;
+        let bytes = self.take(len)?;
+        String::from_utf8(bytes.to_vec()).map_err(|_| Error::Corrupt("row record text is not UTF-8"))
+    }
+
+    fn remaining(&self) -> usize {
+        self.bytes.len() - self.position
+    }
+}
+
+fn decode_value(cursor: &mut RowCursor<'_>, references: &mut Option<RowReferences>, resolve: bool) -> Result<Value> {
+    Ok(match cursor.u8()? {
+        TAG_BOOL => match cursor.u8()? {
+            0 => Value::Bool(false),
+            1 => Value::Bool(true),
+            _ => return Err(Error::Corrupt("row record boolean is not 0 or 1")),
         },
-        JsonValue::Array(_) => {
-            return Err(Error::Unsupported("query row decoding does not support JSON arrays"));
+        TAG_I64 => Value::I64(cursor.i64()?),
+        TAG_F64 => {
+            let real = f64::from_le_bytes(cursor.take(8)?.try_into().unwrap());
+            if !real.is_finite() {
+                return Err(Error::Corrupt("row record real is not finite"));
+            }
+            Value::F64(real)
         }
+        TAG_TEXT => Value::Text(cursor.text()?),
+        TAG_UUID => Value::Uuid(uuid::Uuid::from_bytes(cursor.take(16)?.try_into().unwrap())),
+        TAG_DATE => Value::Date(Date::from_days(cursor.i32()?)?),
+        TAG_TIME => Value::Time(Time::from_nanos(cursor.i64()?)?),
+        TAG_TIMESTAMP => Value::Timestamp(Timestamp::from_unix_micros(cursor.i64()?)?),
+        TAG_DECIMAL => {
+            let unscaled = cursor.i128()?;
+            let precision = cursor.u8()?;
+            let scale = cursor.u8()?;
+            Value::Decimal(Decimal::new(unscaled, precision, scale)?)
+        }
+        TAG_BYTES => {
+            let len = cursor.u16()? as usize;
+            Value::Bytes(cursor.take(len)?.to_vec())
+        }
+        TAG_VECTOR => {
+            let dimension = cursor.u16()? as usize;
+            let payload_len = cursor.u32()? as usize;
+            if dimension.saturating_mul(4) != payload_len {
+                return Err(Error::Scalar {
+                    kind: "vector",
+                    message: "vector payload length disagrees with its declared dimension".into(),
+                });
+            }
+            let payload = cursor.take(payload_len)?;
+            let mut components = Vec::with_capacity(dimension);
+            for index in 0..dimension {
+                let offset = index * 4;
+                let component = f32::from_le_bytes(payload[offset..offset + 4].try_into().unwrap());
+                if !component.is_finite() {
+                    return Err(Error::Scalar { kind: "vector", message: format!("component {index} is not finite") });
+                }
+                components.push(component);
+            }
+            Value::Vector(
+                Vector::new(components).map_err(|error| Error::Scalar { kind: "vector", message: error.to_string() })?,
+            )
+        }
+        TAG_OBJECT => {
+            let algo = algo_from_tag(cursor.u8()?)?;
+            let kind = object_kind_from_tag(cursor.u8()?)?;
+            let hash = cursor.digest()?;
+            let size = cursor.u64()?;
+            let object = ObjectRef { algo, hash, size, kind };
+            if let Some(references) = references.as_mut() {
+                references.objects.push(object.clone());
+            }
+            if resolve { resolve_object_reference(Value::Object(object))? } else { Value::Object(object) }
+        }
+        TAG_FILE => {
+            let digest = digest_hex(&cursor.digest()?);
+            let octets = cursor.u64()?;
+            let flags = cursor.u8()?;
+            if flags & !0b11 != 0 {
+                return Err(Error::Corrupt("row record file flags are invalid"));
+            }
+            let name = if flags & 0b01 != 0 { Some(cursor.text()?) } else { None };
+            let media_type = if flags & 0b10 != 0 { Some(cursor.text()?) } else { None };
+            let hash = cursor.digest()?;
+            let size = cursor.u64()?;
+            let descriptor = FileDescriptor { digest, octets, name, media_type, manifest: FileManifestRef { hash, size } };
+            if let Some(references) = references.as_mut() {
+                references.files.push(descriptor.clone());
+            }
+            Value::File(descriptor)
+        }
+        _ => return Err(Error::Corrupt("row record value tag is unknown")),
     })
 }
 

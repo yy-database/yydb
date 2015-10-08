@@ -350,14 +350,12 @@ fn insert_embedding(conn: &yydb::Connection, id: i64, file: &FileDescriptor, emb
 }
 
 /// Hash of the `vector-payload` object the stored row references for `embedding`.
-fn stored_vector_object_hash(conn: &yydb::Connection, table: &str) -> String {
-    let rows = conn.scan_prefix(&format!("__yydb/v0/row/{table}/"), None, 64).unwrap();
-    assert_eq!(rows.len(), 1, "one stored row");
-    let json: serde_json::Value = serde_json::from_slice(&rows[0].1).unwrap();
-    let object = json.get("embedding").expect("embedding member");
-    assert_eq!(object["$yydb"], "object", "a 121-dim vector must leave the inline boundary: {json}");
-    assert_eq!(object["kind"], "vector-payload", "object kind must be vector-payload: {json}");
-    object["hash"].as_str().expect("object hash").to_owned()
+///
+/// Vector placement is content-addressed, so the object the row points at is the
+/// one CAS returns for the same components.
+fn vector_object_hash(conn: &yydb::Connection, embedding: &[f32]) -> String {
+    let vector = yydb::Vector::new(embedding.to_vec()).expect("vector");
+    conn.objects().put_vector(&vector).expect("vector payload object").hash_hex()
 }
 
 #[test]
@@ -369,7 +367,7 @@ fn restore_verifies_every_object_reference_not_only_file_digests() {
     let embedding: Vec<f32> = (0..121).map(|index| index as f32 * 0.5 + 0.25).collect();
     insert_embedding(&conn, 1, &file, Value::Vector(yydb::Vector::new(embedding.clone()).unwrap())).unwrap();
 
-    let vector_hash = stored_vector_object_hash(&conn, "Embedding");
+    let vector_hash = vector_object_hash(&conn, &embedding);
     assert!(conn.objects().path_for_hash(&vector_hash).exists(), "the vector object reference must be stored as a blob");
 
     let dest = crate::fixtures::yydb::temp_yydx("file-vector-restore-dest");

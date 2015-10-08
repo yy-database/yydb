@@ -2928,9 +2928,10 @@ fn uuid_column_projects_compares_and_sorts_as_a_uuid() {
     assert_eq!(matched.len(), 1);
     assert_eq!(matched[0].get("user_name"), Some(&Value::Text("ada".into())));
 
-    // Storage keeps the tagged scalar so a reload cannot degrade it into text.
-    let stored = records.values().filter_map(|bytes| std::str::from_utf8(bytes).ok()).collect::<Vec<_>>().join("\n");
-    assert!(stored.contains("\"$yydb\":\"uuid\""), "unexpected stored rows: {stored}");
+    // Storage keeps the typed UUID value instead of degrading it into text.
+    let needle: Vec<u8> = std::iter::once(0x05u8).chain(ada.as_bytes().iter().copied()).collect();
+    let stored: Vec<u8> = records.values().flat_map(|bytes| bytes.iter().copied()).collect();
+    assert!(stored.windows(needle.len()).any(|window| window == needle.as_slice()), "unexpected stored rows: {stored:?}");
 }
 
 #[test]
@@ -6204,9 +6205,11 @@ fn blob_column_round_trips_raw_bytes_verbatim() {
         execute_sql("SELECT payload FROM Asset WHERE asset_id = 1", &[], &contract, &[], &mut records).expect("read blob").rows;
     assert_eq!(rows[0].get("payload"), Some(&Value::Bytes(payload)));
 
-    // Storage keeps a tagged hex object rather than a lossy JSON string.
-    let stored = records.values().next().and_then(|bytes| std::str::from_utf8(bytes).ok()).expect("stored row is utf8 json");
-    assert!(stored.contains("\"$yydb\":\"bytes\""), "unexpected stored row: {stored}");
+    // Storage keeps the raw octets behind the binary `bytes` tag, so no text
+    // round trip can corrupt them.
+    let stored = records.values().next().expect("stored row");
+    let needle = [0x0A, 0x04, 0x00, 0x00, 0xFF, 0x10, 0x80];
+    assert!(stored.windows(needle.len()).any(|window| window == needle), "unexpected stored row: {stored:?}");
 }
 
 #[test]
@@ -6418,11 +6421,27 @@ fn typed_columns_project_exact_scalars() {
     );
     assert_eq!(rows[0].get("amount"), Some(&Value::Decimal(Decimal::parse("1.50", 12, 2).expect("decimal"))));
 
-    // Storage keeps tagged scalar objects, so a reload never degrades them into
-    // text or a number.
-    let stored = records.values().filter_map(|bytes| std::str::from_utf8(bytes).ok()).collect::<Vec<_>>().join("\n");
-    for tag in ["\"$yydb\":\"date\"", "\"$yydb\":\"time\"", "\"$yydb\":\"timestamp\"", "\"$yydb\":\"decimal\""] {
-        assert!(stored.contains(tag), "stored rows must keep `{tag}`: {stored}");
+    // Storage keeps the typed scalar values, so a reload never degrades them
+    // into text or a number.
+    let date = Date::parse_iso("2024-02-29").expect("date");
+    let time = Time::parse_iso("12:00:00").expect("time");
+    let timestamp = Timestamp::parse_iso("2024-02-29T12:00:00Z").expect("timestamp");
+    let decimal = Decimal::parse("1.50", 12, 2).expect("decimal");
+    let mut decimal_bytes = decimal.unscaled().to_le_bytes().to_vec();
+    decimal_bytes.push(decimal.precision());
+    decimal_bytes.push(decimal.scale());
+    let needles: [(u8, Vec<u8>); 4] = [
+        (0x06, date.days().to_le_bytes().to_vec()),
+        (0x07, time.nanos().to_le_bytes().to_vec()),
+        (0x08, timestamp.unix_micros().to_le_bytes().to_vec()),
+        (0x09, decimal_bytes),
+    ];
+    let scopes: Vec<&[u8]> = records.values().map(|bytes| bytes.as_slice()).collect();
+    for (tag, payload) in needles {
+        assert!(
+            scopes.iter().any(|row| row.windows(payload.len() + 1).any(|window| window[0] == tag && window[1..] == payload)),
+            "stored rows must keep the typed value for tag {tag:#04x}"
+        );
     }
 }
 

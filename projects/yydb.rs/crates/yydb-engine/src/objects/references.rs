@@ -1,7 +1,7 @@
 //! Metadata references to CAS objects stored in record values.
 //!
 //! A reference reaches the record map in two shapes: a raw `yydb:object:<hex>`
-//! value attached by [`crate::Batch`], and a tagged JSON value inside a table
+//! value attached by [`crate::Batch`], and a binary row record inside a table
 //! row. A row `file` value additionally pins the immutable manifest object and
 //! every chunk that manifest lists, so reclaiming only the descriptor would
 //! delete content the row can still read.
@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use serde_json::Value as JsonValue;
-use yydb_query::ROW_PREFIX;
+use yydb_query::{ROW_PREFIX, row_references};
 use yydb_types::{FileDescriptor, ObjectRef, Result, Value, scalar};
 
 use super::ObjectStore;
@@ -68,6 +68,16 @@ fn scan_references(
         if key.starts_with("__yydb/") && !key.starts_with(ROW_PREFIX) {
             continue;
         }
+        if key.starts_with(ROW_PREFIX) {
+            let references = row_references(value)?;
+            for object in references.objects {
+                hashes.insert(object.hash);
+            }
+            for descriptor in references.files {
+                pin_file_reference(&descriptor, objects, tolerant, &mut hashes)?;
+            }
+            continue;
+        }
         collect_json_references(value, objects, tolerant, &mut hashes)?;
     }
     Ok(hashes)
@@ -79,6 +89,26 @@ fn collect_json_references(bytes: &[u8], objects: &ObjectStore, tolerant: bool, 
         return Ok(());
     };
     collect_value_references(&json, objects, tolerant, hashes)
+}
+
+/// Pin a committed `file` descriptor's manifest object and every chunk it lists.
+fn pin_file_reference(
+    descriptor: &FileDescriptor,
+    objects: &ObjectStore,
+    tolerant: bool,
+    hashes: &mut HashSet<[u8; 32]>,
+) -> Result<()> {
+    hashes.insert(descriptor.manifest.hash);
+    match objects.load_file_manifest(descriptor) {
+        Ok(manifest) => {
+            for chunk in manifest.chunks {
+                hashes.insert(chunk.hash);
+            }
+            Ok(())
+        }
+        Err(error) if !tolerant => Err(error),
+        Err(_) => Ok(()),
+    }
 }
 
 fn collect_value_references(
@@ -95,16 +125,7 @@ fn collect_value_references(
                     return Ok(());
                 }
                 Some(Ok(Value::File(descriptor))) => {
-                    hashes.insert(descriptor.manifest.hash);
-                    match objects.load_file_manifest(&descriptor) {
-                        Ok(manifest) => {
-                            for chunk in manifest.chunks {
-                                hashes.insert(chunk.hash);
-                            }
-                        }
-                        Err(error) if !tolerant => return Err(error.into()),
-                        Err(_) => {}
-                    }
+                    pin_file_reference(&descriptor, objects, tolerant, hashes)?;
                     return Ok(());
                 }
                 Some(Err(error)) => return Err(error.into()),
@@ -138,6 +159,14 @@ pub(crate) fn file_descriptors(records: &BTreeMap<String, Vec<u8>>, namespace_pr
             continue;
         }
         if key.starts_with("__yydb/") && !key.starts_with(ROW_PREFIX) {
+            continue;
+        }
+        if key.starts_with(ROW_PREFIX) {
+            for descriptor in row_references(value)?.files {
+                if seen.insert(descriptor.manifest.hash) {
+                    descriptors.push(descriptor);
+                }
+            }
             continue;
         }
         let Ok(json) = serde_json::from_slice::<JsonValue>(value)

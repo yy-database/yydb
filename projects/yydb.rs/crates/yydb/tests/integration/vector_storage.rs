@@ -6,7 +6,7 @@
 //! switch between 120 and 121 dimensions and oversized-dimension schema
 //! refusal all live in `@yydb/yydb`'s `engine-depth` / vector tests and in
 //! `yydb.py`'s `test_yydb.py`. The tests below stay Rust-side because they
-//! assert storage internals no binding exposes: the raw row JSON layout,
+//! assert storage internals no binding exposes: the binary row record layout,
 //! corruption injected through the internal row key, the embedded CAS records
 //! a single-file `.yydb` uses for object-backed vectors, and the no-half-published
 //! state after a refused schema.
@@ -69,32 +69,48 @@ fn open_memory() -> Connection {
     conn
 }
 
-fn stored_row_json(conn: &Connection) -> Vec<String> {
-    stored_row_json_for_table(conn, "Doc")
-}
-
-fn stored_row_json_for_table(conn: &Connection, table: &str) -> Vec<String> {
+fn stored_row_bytes_for_table(conn: &Connection, table: &str) -> Vec<Vec<u8>> {
     conn.scan_prefix(&format!("__yydb/v0/row/{table}/"), None, 64)
         .expect("scan rows")
         .into_iter()
-        .map(|(_, bytes)| String::from_utf8(bytes).expect("row json is utf-8"))
+        .map(|(_, bytes)| bytes)
         .collect()
 }
 
+/// Build one binary `Doc` row whose vector payload disagrees with its dimension.
+///
+/// Row record layout: codec version `u8`, column count `u16`, null bitmap
+/// `ceil(n/8)`, one `length u16 + name` per column in ascending name order, then
+/// one tagged value per non-null column.
+fn corrupt_vector_row(dimension: u16, components: &[f32]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(1);
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.push(0);
+    out.extend_from_slice(&(9u16).to_le_bytes());
+    out.extend_from_slice(b"embedding");
+    out.extend_from_slice(&(2u16).to_le_bytes());
+    out.extend_from_slice(b"id");
+    out.push(0x0B);
+    out.extend_from_slice(&dimension.to_le_bytes());
+    out.extend_from_slice(&((components.len() * 4) as u32).to_le_bytes());
+    for component in components {
+        out.extend_from_slice(&component.to_le_bytes());
+    }
+    out.push(0x02);
+    out.extend_from_slice(&1i64.to_le_bytes());
+    out
+}
+
 #[test]
-fn vos_vector_row_uses_the_tagged_vector_form() {
+fn vos_vector_row_roundtrips_exact_component_bits() {
     let conn = open_memory();
     let embedding = [0.25, -2.5, 4.0];
     insert(&conn, 1, vector(&embedding)).expect("insert vector");
 
-    let rows = stored_row_json(&conn);
+    let rows = conn.query_vos("Doc.all().collect()").expect("read rows");
     assert_eq!(rows.len(), 1);
-    let row = &rows[0];
-    assert!(row.contains("\"$yydb\":\"vector\""), "row must carry the tagged vector form: {row}");
-    assert!(row.contains("\"dimension\":3"), "row must record the declared dimension: {row}");
-    let expected = Vector::new(embedding.to_vec()).expect("vector").to_le_bytes();
-    let hex: String = expected.iter().map(|byte| format!("{byte:02x}")).collect();
-    assert!(row.contains(&hex), "row must carry the exact component bits `{hex}`: {row}");
+    assert_eq!(rows[0].get("embedding"), Some(&vector(&embedding)), "the stored row must keep exact component bits");
 }
 
 #[test]
@@ -112,15 +128,13 @@ fn vos_vector_corrupt_row_encoding_is_refused_at_read() {
     // A row whose component payload is shorter than the declared dimension
     // cannot be decoded as an embedding, so the read fails instead of
     // substituting a shorter vector.
-    let truncated = br#"{"id":1,"embedding":{"$yydb":"vector","dimension":3,"components":"0000803f"}}"#;
-    conn.put(&key, truncated).expect("stage truncated row");
+    conn.put(&key, corrupt_vector_row(3, &[1.0])).expect("stage truncated row");
     let error = conn.query_vos("Doc.all().collect()").expect_err("truncated vector row must reject");
     assert!(matches!(error, Error::Scalar { kind: "vector", .. }), "unexpected error: {error}");
 
     // A payload that disagrees with its own dimension marker is refused the
     // same way, so a padded payload cannot pretend to be a wider embedding.
-    let padded = br#"{"id":1,"embedding":{"$yydb":"vector","dimension":4,"components":"0000803f0000803f"}}"#;
-    conn.put(&key, padded).expect("stage padded row");
+    conn.put(&key, corrupt_vector_row(4, &[1.0, 2.0])).expect("stage padded row");
     let error = conn.query_vos("Doc.all().collect()").expect_err("padded vector row must reject");
     assert!(matches!(error, Error::Scalar { kind: "vector", .. }), "unexpected error: {error}");
 }
@@ -134,9 +148,13 @@ fn vos_vector_single_file_yydb_embeds_large_vector() {
 
     let expected = large_vector(121);
     insert_large(&conn, 1, expected.clone()).expect("single-file .yydb must embed large vectors");
-    let rows = stored_row_json_for_table(&conn, "BigDoc");
+    let rows = stored_row_bytes_for_table(&conn, "BigDoc");
     assert_eq!(rows.len(), 1);
-    assert!(rows[0].contains("\"$yydb\":\"object\""), "large vector row must keep an object reference: {}", rows[0]);
+    assert!(
+        rows[0].len() < 256,
+        "large vector row must keep an object reference instead of the inline payload, got {} bytes",
+        rows[0].len()
+    );
 
     drop(conn);
     let reopened = Connection::open(&path).expect("reopen");

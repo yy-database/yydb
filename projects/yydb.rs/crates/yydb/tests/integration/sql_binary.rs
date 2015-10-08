@@ -309,18 +309,17 @@ fn cast_blob_to_text_rejects_instead_of_lossy_decoding() {
 }
 
 #[test]
-fn blob_rows_carry_no_text_copy_in_the_record_map() {
+fn blob_rows_carry_the_octets_without_a_text_copy() {
     let conn = open();
     let payload = vec![0x00, 0xff];
     insert(&conn, 1, Value::Bytes(payload.clone())).expect("insert");
 
-    // The stored row keeps a tagged `bytes` object with the lowercase hex of the
-    // original octets, which proves the write path never decoded them.
+    // The stored row keeps the raw octets behind the binary `bytes` tag, so the
+    // write path never decoded or re-encoded them as text.
     let records: BTreeMap<String, Vec<u8>> =
         conn.scan_prefix("__yydb/v0/row/Payload/", None, 16).expect("scan rows").into_iter().collect();
     assert_eq!(records.len(), 1, "one payload row must be stored");
     let raw = records.values().next().expect("payload row stored");
-    let raw = std::str::from_utf8(raw).expect("row json is utf-8");
-    assert!(raw.contains("\"$yydb\":\"bytes\""), "unexpected stored row: {raw}");
-    assert!(raw.contains("00ff"), "unexpected stored row: {raw}");
+    let needle = [0x0A, 0x02, 0x00, 0x00, 0xFF];
+    assert!(raw.windows(needle.len()).any(|window| window == needle), "stored row must carry the tagged octets, got {raw:?}");
 }
