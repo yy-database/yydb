@@ -6,7 +6,7 @@
 
 ```text
 manifest.toml              case 列表与期望 doctor 结果
-page0_empty_dual_slot.bin  空库 page 0（双 slot，generation=0）
+page0_empty_dual_slot.bin  空库 page 0（双 slot，generation=0，page format revision 1）
 wal_header.bin             仅 WAL 文件头
 wal_txn_commit_minimal.bin 单事务 PageImage + TxnCommit（合成）
 shm_empty.bin              空 SHM

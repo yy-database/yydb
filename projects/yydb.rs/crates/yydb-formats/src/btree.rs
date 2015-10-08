@@ -508,13 +508,14 @@ fn pack_leaf_cells(cells: Vec<LeafCell>) -> Result<Vec<Vec<LeafCell>>> {
     let mut current: Vec<LeafCell> = Vec::new();
     let mut usage = 4usize;
     for cell in cells {
-        let slot_len = 4 + LeafPage::cell_bytes_len(&cell);
-        if 4 + slot_len > PAGE_PAYLOAD_LEN {
+        if 4 + 4 + LeafPage::cell_bytes_len(None, &cell) > PAGE_PAYLOAD_LEN {
             return Err(Error::Unsupported("record is too large for one leaf page"));
         }
+        let mut slot_len = 4 + LeafPage::cell_bytes_len(current.last().map(|cell| &cell.key), &cell);
         if !current.is_empty() && usage + slot_len > PAGE_PAYLOAD_LEN {
             groups.push(std::mem::take(&mut current));
             usage = 4;
+            slot_len = 4 + LeafPage::cell_bytes_len(None, &cell);
         }
         usage += slot_len;
         current.push(cell);

@@ -11,8 +11,8 @@ use yydb_types::{Error, Result};
 use crate::{
     btree::RecordTree,
     header::{
-        DatabaseHeader, PAGE_SIZE, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B, encode_empty_page0, inactive_slot_offset, parse_page0,
-        seal_header_slot, slot_offset_for_kind,
+        DatabaseHeader, PAGE_SIZE, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B, encode_empty_page0, inactive_slot_offset,
+        parse_page0_checked, seal_header_slot, slot_offset_for_kind,
     },
     key::TreeKey,
     pager::{DecodedPage, PageStore},
@@ -48,7 +48,7 @@ impl MemoryPager {
             return Ok(header.clone());
         }
         let page0 = self.get_page(0)?.ok_or(Error::Corrupt("missing page0"))?;
-        let header = parse_page0(&page0)?;
+        let header = parse_page0_checked(&page0)?;
         *self.header_cache.borrow_mut() = Some(header.clone());
         Ok(header)
     }

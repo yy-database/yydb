@@ -61,7 +61,7 @@ fn yydb_formats_v0_restore_yydb_rejects_corrupt_data_page() {
 
     let conn = Connection::open_with_flags(&path, OpenFlags::wal()).expect("open");
     conn.ensure_schema("table Setting { @@id: uuid, key: utf8, value: utf8 }").expect("schema");
-    for index in 0..32 {
+    for index in 0..200 {
         conn.put(format!("key-{index}"), format!("value-{index}").as_bytes()).expect("put");
     }
     conn.backup_to(&backup).expect("backup");

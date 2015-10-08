@@ -32,8 +32,8 @@ pub use crc32c::crc32c;
 pub use doctor::diagnose_file;
 pub use file::{FilePager, PublishStats, main_bytes_from_memory_pager, memory_pager_from_main_bytes};
 pub use header::{
-    DatabaseHeader, DatabaseHeaderSlot, PAGE_MAGIC, PAGE_SIZE, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B, encode_empty_page0,
-    inactive_slot_offset, parse_page0, slot_offset_for_kind,
+    DatabaseHeader, DatabaseHeaderSlot, PAGE_FORMAT_VERSION, PAGE_MAGIC, PAGE_SIZE, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B,
+    encode_empty_page0, inactive_slot_offset, parse_page0, parse_page0_checked, slot_offset_for_kind,
 };
 pub use internal::{InternalEntry, InternalPage};
 pub use key::{KEY_KIND_USER, TREE_CATALOG, TREE_RECORD, TreeKey};

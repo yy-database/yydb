@@ -32,7 +32,7 @@ def build_header_slot(slot_kind: int, generation: int, checksum_override: int | 
     buf[22:38] = DB_ID
     buf[38] = 0x01
     buf[39] = 12
-    struct.pack_into("<I", buf, 40, 0)
+    struct.pack_into("<I", buf, 40, 1)
     struct.pack_into("<Q", buf, 72, 0)
     struct.pack_into("<Q", buf, 80, 0)
     if checksum_override is not None:

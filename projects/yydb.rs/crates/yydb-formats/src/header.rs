@@ -14,6 +14,12 @@ pub const SLOT_BYTES: usize = 2048;
 pub const SLOT_KIND_A: u8 = 0x41;
 /// Slot kind marker for header slot B.
 pub const SLOT_KIND_B: u8 = 0x42;
+/// On-disk page format revision this build reads and writes.
+///
+/// Revision `1` stores leaf cells with prefix-compressed keys and table rows as
+/// binary records. Revision `0` files are refused with a rebuild hint instead of
+/// being parsed through a compatibility path.
+pub const PAGE_FORMAT_VERSION: u32 = 1;
 
 /// Parsed database header slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,6 +121,20 @@ pub fn parse_page0(bytes: &[u8]) -> Result<DatabaseHeader> {
     }
 }
 
+/// Parse page 0 and refuse a page format revision this build does not read.
+///
+/// Files written by an older revision keep their bytes but are never decoded
+/// through a compatibility path: the caller is told to rebuild from source data.
+pub fn parse_page0_checked(bytes: &[u8]) -> Result<DatabaseHeader> {
+    let header = parse_page0(bytes)?;
+    if header.slot.format_version != PAGE_FORMAT_VERSION {
+        return Err(Error::Unsupported(
+            "the database file uses a retired page format: rebuild it from source data to use this build",
+        ));
+    }
+    Ok(header)
+}
+
 /// Byte offset of a header slot on page 0.
 pub fn slot_offset_for_kind(slot_kind: u8) -> usize {
     if slot_kind == SLOT_KIND_B { SLOT_BYTES } else { 0 }
@@ -158,7 +178,7 @@ pub fn encode_empty_page0(database_id: [u8; 16], storage_layout: u8) -> Vec<u8> 
         slot[22..38].copy_from_slice(&database_id);
         slot[38] = storage_layout;
         slot[39] = 12;
-        slot[40..44].copy_from_slice(&0u32.to_le_bytes());
+        slot[40..44].copy_from_slice(&PAGE_FORMAT_VERSION.to_le_bytes());
         let checksum = crc32c(&slot[..2044]);
         slot[2044..2048].copy_from_slice(&checksum.to_le_bytes());
     }

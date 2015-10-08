@@ -7,7 +7,7 @@ fn yydb_formats_v0_kv_leaf_split() {
     let id = [9, 9, 9, 9, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1];
     let mut pager = MemoryPager::new_empty(id, 0x01);
     let payload = vec![b'v'; 100];
-    for i in 0..35_u32 {
+    for i in 0..40_u32 {
         pager.put_kv(format!("k/{i:03}"), &payload).unwrap();
     }
     let root = pager.header().unwrap().slot.record_root;

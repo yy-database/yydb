@@ -4,9 +4,11 @@
 use std::path::PathBuf;
 
 use yydb_formats::{
-    BLOB_HEADER_BYTES, committed_tail_lsn, committed_transactions, crc32c, parse_blob_header, parse_page0, parse_shm,
-    parse_wal, parse_wal_recover, strip_trailing_txn_commit,
+    BLOB_HEADER_BYTES, PAGE_FORMAT_VERSION, SLOT_BYTES, committed_tail_lsn, committed_transactions, crc32c,
+    parse_blob_header, parse_page0, parse_page0_checked, parse_shm, parse_wal, parse_wal_recover,
+    strip_trailing_txn_commit,
 };
+use yydb_types::Error;
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/format-v0").join(name)
@@ -18,8 +20,22 @@ fn format_v0_page0_empty() {
     assert_eq!(bytes.len(), 4096);
     let header = parse_page0(&bytes).unwrap();
     assert_eq!(header.slot.generation, 1);
-    assert_eq!(header.slot.format_version, 0);
+    assert_eq!(header.slot.format_version, PAGE_FORMAT_VERSION);
     assert_eq!(header.slot.storage_layout, 0x01);
+}
+
+#[test]
+fn retired_page_format_is_refused() {
+    let mut bytes = std::fs::read(fixture("page0_empty_dual_slot.bin")).unwrap();
+    for offset in [0, SLOT_BYTES] {
+        bytes[offset + 40..offset + 44].copy_from_slice(&0_u32.to_le_bytes());
+        let checksum = crc32c(&bytes[offset..offset + 2044]);
+        bytes[offset + 2044..offset + 2048].copy_from_slice(&checksum.to_le_bytes());
+    }
+    let header = parse_page0(&bytes).unwrap();
+    assert_eq!(header.slot.format_version, 0);
+    let error = parse_page0_checked(&bytes).expect_err("a retired page format must be refused");
+    assert!(matches!(error, Error::Unsupported(_)), "unexpected error: {error}");
 }
 
 #[test]

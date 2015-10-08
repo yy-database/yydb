@@ -8,6 +8,10 @@ use crate::{
 };
 
 const DIRECTORY_BYTES: usize = 4;
+/// Cell header: shared key prefix length, key suffix length, value length.
+const CELL_HEADER_BYTES: usize = 5;
+/// Widest shared key prefix a cell header can express.
+const MAX_COMMON_PREFIX: usize = u8::MAX as usize;
 
 /// One key/value cell in a leaf page.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +60,7 @@ impl LeafPage {
             return Err(Error::Corrupt("leaf directory invalid"));
         }
         let mut cells = Vec::with_capacity(slot_count);
+        let mut key_bytes = Vec::with_capacity(64);
         for idx in 0..slot_count {
             let base = DIRECTORY_BYTES + idx * 4;
             let cell_offset = u16::from_le_bytes(payload[base..base + 2].try_into().unwrap()) as usize;
@@ -66,24 +71,26 @@ impl LeafPage {
                 return Err(Error::Corrupt("leaf cell out of bounds"));
             }
             let cell = &payload[start..end];
-            if cell.len() < 8 {
+            if cell.len() < CELL_HEADER_BYTES {
                 return Err(Error::Corrupt("leaf cell truncated"));
             }
-            let key_kind = cell[0];
-            let tree_id = cell[1];
-            if tree_id != header.tree_id {
-                return Err(Error::Corrupt("leaf cell tree id mismatch"));
-            }
-            let key_len = u16::from_le_bytes(cell[2..4].try_into().unwrap()) as usize;
-            let value_len = u32::from_le_bytes(cell[4..8].try_into().unwrap()) as usize;
-            let key_end = 8 + key_len;
+            let common = cell[0] as usize;
+            let suffix_len = u16::from_le_bytes(cell[1..3].try_into().unwrap()) as usize;
+            let value_len = u16::from_le_bytes(cell[3..5].try_into().unwrap()) as usize;
+            let key_start = CELL_HEADER_BYTES;
+            let key_end = key_start + suffix_len;
             let value_end = key_end + value_len;
             if value_end != cell.len() {
                 return Err(Error::Corrupt("leaf cell length mismatch"));
             }
-            let key = TreeKey::from_bytes(&cell[8..key_end]).ok_or(Error::Corrupt("leaf key invalid"))?;
-            if key.key_kind != key_kind {
-                return Err(Error::Corrupt("leaf key kind mismatch"));
+            if common > key_bytes.len() {
+                return Err(Error::Corrupt("leaf cell prefix exceeds the previous key"));
+            }
+            key_bytes.truncate(common);
+            key_bytes.extend_from_slice(&cell[key_start..key_end]);
+            let key = TreeKey::from_bytes(&key_bytes).ok_or(Error::Corrupt("leaf key invalid"))?;
+            if key.tree_id != header.tree_id {
+                return Err(Error::Corrupt("leaf cell tree id mismatch"));
             }
             cells.push(LeafCell { key, value: cell[key_end..value_end].to_vec() });
         }
@@ -106,10 +113,12 @@ impl LeafPage {
         let directory_bytes = DIRECTORY_BYTES + slot_count * 4;
         let mut cell_bytes: Vec<Vec<u8>> = Vec::with_capacity(slot_count);
         let mut total_cells = 0usize;
+        let mut previous: Option<&TreeKey> = None;
         for cell in &self.cells {
-            let encoded = encode_cell(&cell.key, &cell.value)?;
+            let encoded = encode_cell(previous, &cell.key, &cell.value)?;
             total_cells += encoded.len();
             cell_bytes.push(encoded);
+            previous = Some(&cell.key);
         }
         let free_start = directory_bytes + total_cells;
         if free_start > PAGE_PAYLOAD_LEN {
@@ -200,8 +209,12 @@ impl LeafPage {
     }
 
     /// On-disk cell length without building the encoded buffer.
-    pub fn cell_bytes_len(cell: &LeafCell) -> usize {
-        8 + 2 + cell.key.encoded.len() + cell.value.len()
+    ///
+    /// `previous` is the key stored before `cell` in the same page; the cell pays
+    /// only the suffix that differs from it.
+    pub fn cell_bytes_len(previous: Option<&TreeKey>, cell: &LeafCell) -> usize {
+        let common = previous.map(|previous| common_key_prefix(previous, &cell.key)).unwrap_or(0);
+        CELL_HEADER_BYTES + (2 + cell.key.encoded.len() - common) + cell.value.len()
     }
 
     /// Split into left (retained) and right leaf. Separator is the first key in `right`.
@@ -283,22 +296,48 @@ impl LeafPage {
 }
 
 /// Payload bytes used by `cells`, including their directory slots.
+///
+/// The first cell pays its full key; every later cell pays only the suffix that
+/// differs from the key before it, which is what [`encode_cell`] writes.
 fn payload_usage(cells: &[LeafCell]) -> Result<usize> {
     let mut total = DIRECTORY_BYTES + cells.len() * 4;
+    let mut previous: Option<&TreeKey> = None;
     for cell in cells {
-        total += encode_cell(&cell.key, &cell.value)?.len();
+        total += LeafPage::cell_bytes_len(previous, cell);
+        previous = Some(&cell.key);
     }
     Ok(total)
 }
 
-fn encode_cell(key: &TreeKey, value: &[u8]) -> Result<Vec<u8>> {
+/// Bytes `key` shares with the key stored before it in the same page.
+///
+/// Keys serialize as `tree_id`, `key_kind`, then the sortable payload, so the
+/// comparison never allocates.
+fn common_key_prefix(previous: &TreeKey, key: &TreeKey) -> usize {
+    if previous.tree_id != key.tree_id {
+        return 0;
+    }
+    if previous.key_kind != key.key_kind {
+        return 1;
+    }
+    let shared = previous.encoded.iter().zip(key.encoded.iter()).take_while(|(left, right)| left == right).count();
+    (2 + shared).min(MAX_COMMON_PREFIX)
+}
+
+fn encode_cell(previous: Option<&TreeKey>, key: &TreeKey, value: &[u8]) -> Result<Vec<u8>> {
     let key_bytes = key.to_bytes();
-    let mut cell = Vec::with_capacity(8 + key_bytes.len() + value.len());
-    cell.push(key.key_kind);
-    cell.push(key.tree_id);
-    cell.extend_from_slice(&(key_bytes.len() as u16).to_le_bytes());
-    cell.extend_from_slice(&(value.len() as u32).to_le_bytes());
-    cell.extend_from_slice(&key_bytes);
+    let common = previous.map(|previous| common_key_prefix(previous, key)).unwrap_or(0);
+    if common > key_bytes.len() {
+        return Err(Error::Corrupt("leaf cell prefix exceeds the key length"));
+    }
+    let suffix = &key_bytes[common..];
+    let suffix_len = u16::try_from(suffix.len()).map_err(|_| Error::Corrupt("leaf page full"))?;
+    let value_len = u16::try_from(value.len()).map_err(|_| Error::Corrupt("leaf page full"))?;
+    let mut cell = Vec::with_capacity(CELL_HEADER_BYTES + suffix.len() + value.len());
+    cell.push(common as u8);
+    cell.extend_from_slice(&suffix_len.to_le_bytes());
+    cell.extend_from_slice(&value_len.to_le_bytes());
+    cell.extend_from_slice(suffix);
     cell.extend_from_slice(value);
     Ok(cell)
 }

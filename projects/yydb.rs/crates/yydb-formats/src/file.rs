@@ -13,7 +13,7 @@ use crate::{
     blob_refs::BlobManifestDelta,
     btree::RecordTree,
     header::{
-        DatabaseHeader, PAGE_MAGIC, PAGE_SIZE, corrupt_header_slot_checksum, inactive_slot_offset, parse_page0,
+        DatabaseHeader, PAGE_MAGIC, PAGE_SIZE, corrupt_header_slot_checksum, inactive_slot_offset, parse_page0_checked,
         slot_offset_for_kind,
     },
     key::TreeKey,
@@ -514,7 +514,7 @@ fn load_main_bytes(bytes: &[u8]) -> Result<MemoryPager> {
     if bytes.get(0..5) != Some(PAGE_MAGIC.as_slice()) {
         return Err(Error::Unsupported("main file is not YDPG format v0"));
     }
-    parse_page0(&bytes[0..PAGE_SIZE])?;
+    parse_page0_checked(&bytes[0..PAGE_SIZE])?;
     let page_count = bytes.len() / PAGE_SIZE;
     let mut pager = MemoryPager::default();
     for page_id in 0..page_count as u32 {

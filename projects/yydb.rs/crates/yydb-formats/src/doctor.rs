@@ -8,7 +8,7 @@ use std::{
 use yydb_types::{DoctorIssue, DoctorSeverity, Error, Result};
 
 use crate::{
-    header::{PAGE_MAGIC, PAGE_SIZE, SLOT_BYTES, parse_page0},
+    header::{PAGE_FORMAT_VERSION, PAGE_MAGIC, PAGE_SIZE, SLOT_BYTES, parse_page0},
     internal::InternalPage,
     key::TreeKey,
     leaf::LeafPage,
@@ -49,6 +49,17 @@ fn probe_main_bytes(bytes: &[u8]) -> Vec<DoctorIssue> {
             return issues;
         }
     };
+    if header.slot.format_version != PAGE_FORMAT_VERSION {
+        issues.push(issue_error(
+            "yydb.doctor.retired_format",
+            format!(
+                "page format revision {} is not read by this build: rebuild the database from source data",
+                header.slot.format_version
+            ),
+            None,
+        ));
+        return issues;
+    }
     if !bytes.len().is_multiple_of(PAGE_SIZE) {
         issues.push(issue_error("yydb.doctor.corrupt_page", "main file length is not a multiple of the page size", None));
     }
