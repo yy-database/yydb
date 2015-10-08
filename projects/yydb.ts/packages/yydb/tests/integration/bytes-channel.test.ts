@@ -8,6 +8,8 @@ import test from "node:test";
 
 import { Database } from "@yydb/yydb";
 
+import { TAG_BYTES, TAG_OBJECT, decodeStoredRow, type StoredColumn } from "../support/row-bytes.ts";
+
 const BLOB_SCHEMA = `table Blob {
     @@blob_id: i64,
     label: utf8,
@@ -33,13 +35,13 @@ const INLINE_NAMES = new Set(["empty", "nul", "invalid-utf8", "all-byte-values",
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-async function storedRowJson(database: Database): Promise<Map<number, string>> {
+async function storedRows(database: Database): Promise<Map<number, Map<string, StoredColumn>>> {
     const rows = await database.scan({ prefix: "__yydb/v0/row/Blob/", limit: 1000 });
     return new Map(
         rows.map((row) => {
-            const text = Buffer.from(row.value).toString("utf8");
-            const parsed = JSON.parse(text) as { blob_id: number };
-            return [Number(parsed.blob_id), text];
+            const columns = decodeStoredRow(row.value);
+            const id = Number(columns.get("blob_id")?.bytes.readBigInt64LE(0) ?? -1);
+            return [id, columns] as const;
         }),
     );
 }
@@ -78,14 +80,21 @@ test("@yydb/yydb moves octets through a VOS bytes column verbatim", async () => 
         assert.notEqual(rows[0].body, null);
 
         // Placement is the storage host's decision: payloads inside the inline
-        // row budget stay tagged `bytes`, larger ones become object references.
-        const stored = await storedRowJson(database);
+        // row budget keep the octets in the row, larger ones become object
+        // references. The stored value tag is what records that choice.
+        const stored = await storedRows(database);
         assert.equal(stored.size, PAYLOADS.length);
         for (const [offset, payload] of PAYLOADS.entries()) {
-            const row = stored.get(offset + 1);
-            assert.ok(row, `${payload.name} must be stored`);
-            const expected = INLINE_NAMES.has(payload.name) ? '"$yydb":"bytes"' : '"$yydb":"object"';
-            assert.ok(row.includes(expected), `${payload.name} must be stored as ${expected}: ${row.slice(0, 120)}`);
+            const columns = stored.get(offset + 1);
+            assert.ok(columns, `${payload.name} must be stored`);
+            const body = columns.get("body");
+            assert.ok(body, `${payload.name} must keep a body column`);
+            if (INLINE_NAMES.has(payload.name)) {
+                assert.equal(body.tag, TAG_BYTES, `${payload.name} must stay inline as bytes`);
+                assert.equal(hexOf(body.bytes), hexOf(payload.octets), `${payload.name} inline octets must be verbatim`);
+            } else {
+                assert.equal(body.tag, TAG_OBJECT, `${payload.name} must be stored as an object reference`);
+            }
         }
 
         await database.close();

@@ -6,6 +6,8 @@ import test from "node:test";
 
 import { Database, YydbError, defineMicro, v } from "@yydb/yydb";
 
+import { TAG_OBJECT, TAG_VECTOR, decodeStoredRow } from "../support/row-bytes.ts";
+
 /**
  * Exact-type channels and the host micro path: the tagged wire forms for
  * `vector<N>` / `uuid` / `bytes` / `file`, their acceptance and rejection
@@ -158,11 +160,16 @@ test("embedding placement switches from inline to object between 120 and 121 dim
 
             const inline = await database.scan({ prefix: "__yydb/v0/row/V120/", limit: 10 });
             assert.ok(inline.length > 0);
-            assert.match(Buffer.from(inline[0].value).toString("utf8"), /"\$yydb":"vector"/);
+            const inlineColumn = decodeStoredRow(inline[0].value).get("e");
+            assert.ok(inlineColumn, "the inline row must carry the embedding column");
+            assert.equal(inlineColumn.tag, TAG_VECTOR);
+            assert.equal(inlineColumn.bytes.length, 6 + 120 * 4, "the vector payload must hold 120 f32 components");
 
             const object = await database.scan({ prefix: "__yydb/v0/row/V121/", limit: 10 });
             assert.ok(object.length > 0);
-            assert.match(Buffer.from(object[0].value).toString("utf8"), /"\$yydb":"object"/);
+            const objectColumn = decodeStoredRow(object[0].value).get("e");
+            assert.ok(objectColumn, "the oversized row must carry the embedding column");
+            assert.equal(objectColumn.tag, TAG_OBJECT);
         } finally {
             await database.close();
         }

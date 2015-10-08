@@ -6,6 +6,8 @@ import test from "node:test";
 
 import { Database, YydbError } from "@yydb/yydb";
 
+import { TAG_I64, decodeStoredRow } from "../support/row-bytes.ts";
+
 /**
  * Usage-side VOS program surface: writes through named parameters, the Phase-1
  * query pipeline (filters, ordering, windowing, projection) and the stable
@@ -82,9 +84,9 @@ test("named parameters cross the write boundary with their exact scalar shapes",
             a: false,
         });
 
-        // Integers beyond the host-exact width cross the row wire tagged as
-        // `{"$yydb":"i64","value":"..."}` and decode to `bigint`, so the full
-        // 64-bit value survives the JSON round trip without rounding.
+        // Integers beyond the host-exact width cross the row wire as the i64
+        // value tag and decode to `bigint`, so the full 64-bit value survives
+        // the round trip without rounding.
         const wideRows = await database.query<{ p_id: number; name: string; score: number | bigint }>(
             "P.all().collect()",
         );
@@ -101,9 +103,14 @@ test("named parameters cross the write boundary with their exact scalar shapes",
 
         // The stored row keeps the wide integer verbatim in the KV view.
         const stored = await database.scan({ prefix: "__yydb/v0/row/P/", limit: 100 });
-        const row4 = stored.find((row) => Buffer.from(row.value).toString("utf8").includes("汉字"));
-        assert.ok(row4, "the seeded row must be reachable through the KV view");
-        assert.match(Buffer.from(row4.value).toString("utf8"), /9007199254740993/);
+        const stored4 = stored
+            .map((row) => decodeStoredRow(row.value))
+            .find((columns) => columns.get("name")?.bytes.toString("utf8") === "汉字🎉");
+        assert.ok(stored4, "the seeded row must be reachable through the KV view");
+        const score = stored4.get("score");
+        assert.ok(score, "the stored row must carry the score column");
+        assert.equal(score.tag, TAG_I64);
+        assert.equal(score.bytes.readBigInt64LE(0), 9007199254740993n);
     });
 });
 
