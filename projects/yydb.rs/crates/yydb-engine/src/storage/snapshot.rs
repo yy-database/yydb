@@ -53,14 +53,14 @@ pub(crate) fn state_from_snapshot(snapshot: &Snapshot) -> Result<State> {
 /// A narrowed read fetches metadata once to derive its window and then fetches
 /// only that window. Re-decoding the schema, identity and contract from the
 /// second snapshot would repeat work the caller already paid for, so the
-/// window rows are inserted into the decoded metadata state instead.
-pub(crate) fn state_with_window(metadata: &State, snapshot: &Snapshot) -> Result<State> {
-    let mut state = metadata.clone();
-    for (key, value) in &snapshot.records {
+/// window rows are inserted into the decoded metadata state instead. Both
+/// inputs are consumed: a read owns them and needs neither afterwards.
+pub(crate) fn state_with_window(mut state: State, snapshot: Snapshot) -> Result<State> {
+    for (key, value) in snapshot.records {
         if key.starts_with(META_PREFIX) {
             continue;
         }
-        state.records.insert(key.clone(), value.clone());
+        state.records.insert(key, value);
     }
     Ok(state)
 }

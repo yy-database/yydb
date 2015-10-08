@@ -18,7 +18,7 @@ impl Connection {
         let metadata = self.read_state_metadata()?;
         let window =
             yydb_query::ReadWindow { start: lease::LEASE_PREFIX.to_owned(), end: Some(format!("{}0", lease::LEASE_PREFIX)) };
-        let mut leases = self.read_state_window_with_metadata(&window, &metadata)?;
+        let mut leases = self.read_state_window_with_metadata(&window, metadata)?;
         if !lease::reconcile_expired_leases(&mut leases.records)? {
             return Ok(());
         }
@@ -108,11 +108,7 @@ impl Connection {
     /// the embedded object prefix, because
     /// [`Self::read_state`] would otherwise hand the resolver an incomplete
     /// object catalog.
-    pub(crate) fn read_state_window_with_metadata(
-        &self,
-        window: &yydb_query::ReadWindow,
-        metadata: &State,
-    ) -> Result<State> {
+    pub(crate) fn read_state_window_with_metadata(&self, window: &yydb_query::ReadWindow, metadata: State) -> Result<State> {
         match self.backend.as_ref() {
             Backend::File { database, .. } => {
                 let mut windows = vec![RecordWindow { start: window.start.clone(), end: window.end.clone() }];
@@ -126,13 +122,13 @@ impl Connection {
                     let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     database.snapshot_windows(&windows)?
                 };
-                let mut state = snapshot::state_with_window(metadata, &snapshot)?;
+                let mut state = snapshot::state_with_window(metadata, snapshot)?;
                 if self.is_single_file_yydb() {
                     self.objects.take_embedded_records(&mut state.records)?;
                 }
                 Ok(state)
             }
-            Backend::Memory { .. } => Ok(metadata.clone()),
+            Backend::Memory { .. } => Ok(metadata),
         }
     }
 
@@ -145,7 +141,7 @@ impl Connection {
     /// object records are already durable.
     fn read_state_windows(&self, windows: &[yydb_query::ReadWindow]) -> Result<(State, snapshot::PriorRecords)> {
         let metadata = self.read_state_metadata()?;
-        self.read_state_windows_with_metadata(windows, &metadata)
+        self.read_state_windows_with_metadata(windows, metadata)
     }
 
     /// Read metadata plus exactly the rows inside `windows`, reusing
@@ -153,7 +149,7 @@ impl Connection {
     fn read_state_windows_with_metadata(
         &self,
         windows: &[yydb_query::ReadWindow],
-        metadata: &State,
+        metadata: State,
     ) -> Result<(State, snapshot::PriorRecords)> {
         match self.backend.as_ref() {
             Backend::File { database, .. } => {
@@ -171,7 +167,7 @@ impl Connection {
                     let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     database.snapshot_windows(&record_windows)?
                 };
-                let mut state = snapshot::state_with_window(metadata, &snapshot)?;
+                let mut state = snapshot::state_with_window(metadata, snapshot)?;
                 let prior = snapshot::prior_records(&state.records);
                 if self.is_single_file_yydb() {
                     self.objects.take_embedded_records(&mut state.records)?;
@@ -295,7 +291,7 @@ impl Connection {
         else {
             return self.mutate_active_state_unlocked(f);
         };
-        let (mut state, prior) = self.read_state_windows_with_metadata(&windows, &metadata)?;
+        let (mut state, prior) = self.read_state_windows_with_metadata(&windows, metadata)?;
         f(&mut state)?;
         self.write_state_delta(state, &prior)?;
         Ok(())

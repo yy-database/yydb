@@ -121,40 +121,40 @@ impl Connection {
         if self.has_open_transaction() {
             let state = self.active_state_unlocked()?;
             self.check_schema_drift(stmt, &state)?;
-            let contract = resolved_contract(&state)?;
-            return self.execute_with(stmt, values, &contract, &state.records);
+            return self.execute_with(stmt, values, resolved_contract(&state)?, &state.records);
         }
 
         // Phase one: metadata only. The decoded contract is what lets the
         // query layer prove which record-key window one statement can reach.
         let metadata = self.read_state_metadata()?;
         self.check_schema_drift(stmt, &metadata)?;
-        let contract = resolved_contract(&metadata)?;
-        let Some(window) = yydb_query::read_window(&stmt.ops, &contract, values)?
+        let Some(window) = yydb_query::read_window(&stmt.ops, resolved_contract(&metadata)?, values)?
         else {
             let state = self.read_state()?;
             self.check_schema_drift(stmt, &state)?;
-            let contract = resolved_contract(&state)?;
-            return self.execute_with(stmt, values, &contract, &state.records);
+            return self.execute_with(stmt, values, resolved_contract(&state)?, &state.records);
         };
 
         // Memory-backed connections already hold every row.
         if matches!(self.backend.as_ref(), Backend::Memory { .. }) {
-            return self.execute_with(stmt, values, &contract, &metadata.records);
+            return self.execute_with(stmt, values, resolved_contract(&metadata)?, &metadata.records);
         }
 
+        // The window was derived from this metadata, so its schema basis must
+        // still hold after the second read. Capture it before the metadata is
+        // consumed by the window merge.
+        let basis = schema_basis(&metadata);
         // Phase two: metadata plus the window, read as one pager transaction.
-        let state = self.read_state_window_with_metadata(&window, &metadata)?;
-        if schema_basis(&state) != schema_basis(&metadata) {
+        let state = self.read_state_window_with_metadata(&window, metadata)?;
+        if schema_basis(&state) != basis {
             // The durable schema moved between the two reads, so the window
             // was derived from a contract that no longer describes the data.
             // Fall back to a single full snapshot rather than trust it.
             let state = self.read_state()?;
             self.check_schema_drift(stmt, &state)?;
-            let contract = resolved_contract(&state)?;
-            return self.execute_with(stmt, values, &contract, &state.records);
+            return self.execute_with(stmt, values, resolved_contract(&state)?, &state.records);
         }
-        self.execute_with(stmt, values, &contract, &state.records)
+        self.execute_with(stmt, values, resolved_contract(&state)?, &state.records)
     }
 
     fn execute_with(
@@ -250,12 +250,14 @@ impl Connection {
                 let contract = resolved_contract(metadata)?;
                 let schema_document = metadata.schema.as_ref().map(|schema| schema.document.as_str());
                 self.with_write_hooks(|| {
-                    yydb_query::point_write_keys(source, &contract, &metadata.unique_constraints, schema_document, &[])
+                    yydb_query::point_write_keys(source, contract, &metadata.unique_constraints, schema_document, &[])
                 })
                 .map(|keys| keys.map(Self::key_windows))
             },
             |state| {
-                let contract = resolved_contract(state)?;
+                // The write executor mutates `state.records`, so it cannot hold a
+                // borrow of the contract inside the same state.
+                let contract = resolved_contract(state)?.clone();
                 let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
                 let records = &mut state.records;
                 let constraints = &state.unique_constraints;
@@ -284,7 +286,7 @@ impl Connection {
                 self.with_write_hooks(|| {
                     yydb_query::point_write_keys(
                         &plan.source,
-                        &contract,
+                        contract,
                         &metadata.unique_constraints,
                         schema_document,
                         &plan.values,
@@ -294,7 +296,9 @@ impl Connection {
             },
             |state| {
                 let plan = yydb_query::bind_vos_write(source, named)?;
-                let contract = resolved_contract(state)?;
+                // The write executor mutates `state.records`, so it cannot hold a
+                // borrow of the contract inside the same state.
+                let contract = resolved_contract(state)?.clone();
                 let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
                 let records = &mut state.records;
                 let constraints = &state.unique_constraints;
@@ -336,7 +340,9 @@ impl Connection {
             },
             |state| {
                 self.check_schema_drift(&stmt, state)?;
-                let contract = resolved_contract(state)?;
+                // The write executor mutates `state.records`, so it cannot hold a
+                // borrow of the contract inside the same state.
+                let contract = resolved_contract(state)?.clone();
                 let outcome = yydb_query::with_object_resolver(Some(self.object_resolver()), || {
                     yydb_query::with_bytes_placement(Some(self.bytes_policy()), || {
                         yydb_query::with_vector_placement(Some(self.vector_policy()), || {
@@ -358,10 +364,10 @@ impl Connection {
     }
 }
 
-fn resolved_contract(state: &super::State) -> Result<vos::ResolvedContract> {
+fn resolved_contract(state: &super::State) -> Result<&vos::ResolvedContract> {
     state
         .resolved_contract
-        .clone()
+        .as_ref()
         .ok_or_else(|| Error::Schema { message: "query requires ensure_schema before execution".into() })
 }
 

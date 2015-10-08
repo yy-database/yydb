@@ -155,7 +155,17 @@ fn table_prefix(table: &str) -> String {
 
 /// Load all rows for `table` from the record map.
 pub fn load_table(records: &BTreeMap<String, Vec<u8>>, table: &str) -> Result<Vec<QueryRow>> {
-    Ok(load_table_entries(records, table)?.into_iter().map(|(_, row)| row).collect())
+    // A read never needs the record-map key, so it decodes straight out of the
+    // prefix range instead of cloning one record name per row.
+    let prefix = table_prefix(table);
+    let mut rows = Vec::new();
+    for (key, bytes) in records.range(prefix.clone()..) {
+        if !key.starts_with(&prefix) {
+            break;
+        }
+        rows.push(decode_row(bytes)?);
+    }
+    Ok(rows)
 }
 
 /// Load all rows for `table` together with their record-map keys.
@@ -457,7 +467,9 @@ fn parse_row(bytes: &[u8], references: &mut Option<RowReferences>, resolve: bool
     cursor.take(1)?;
     let column_count = cursor.u16()? as usize;
     let bitmap_len = column_count.div_ceil(8);
-    let bitmap = cursor.take(bitmap_len)?.to_vec();
+    // The bitmap stays a slice of the record; copying it would add one heap
+    // allocation per decoded row for no benefit.
+    let bitmap = cursor.take(bitmap_len)?;
     let mut names = Vec::with_capacity(column_count);
     for _ in 0..column_count {
         names.push(cursor.text()?);

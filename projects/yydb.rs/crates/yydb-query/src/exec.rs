@@ -239,10 +239,15 @@ fn execute_ops_in(
                 // projected, so it is resolved once for the whole pipeline. A
                 // correlated one stays in place and is evaluated per row.
                 let fields = resolve_projection_subqueries(fields, contract, records, bound_values)?;
-                rows = rows
-                    .into_iter()
-                    .map(|row| project_row_in(&fields, &row, table, contract, records, bound_values, outer))
-                    .collect::<Result<Vec<_>>>()?;
+                // `SELECT a, b` over rows that already carry exactly those
+                // columns produces the input rows unchanged. Rebuilding the
+                // map would copy every value for no observable difference.
+                if !projection_is_identity(&fields, &rows) {
+                    rows = rows
+                        .into_iter()
+                        .map(|row| project_row_in(&fields, &row, table, contract, records, bound_values, outer))
+                        .collect::<Result<Vec<_>>>()?;
+                }
             }
             QueryOp::Sort { keys } => {
                 // Precompute a per-row sort-key value vector so the comparator can
@@ -259,36 +264,54 @@ fn execute_ops_in(
                         None => Ok(None),
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let row_exprs: Vec<Option<&Expr>> = folded_keys.iter().map(|expr| expr.as_ref()).collect();
                 let asc: Vec<bool> = keys.iter().map(|k| k.ascending).collect();
                 let fields: Vec<&str> = keys.iter().map(|k| k.field.as_str()).collect();
-                let mut indexed: Vec<(Vec<Value>, BTreeMap<String, Value>)> = rows
-                    .into_iter()
-                    .map(|row| {
-                        let mut vals = Vec::with_capacity(keys.len());
-                        for (idx, expr_opt) in row_exprs.iter().enumerate() {
-                            let v = match expr_opt {
-                                Some(expr) => eval_expr(expr, &row, table, contract, records, bound_values, outer)?,
-                                None => row.get(fields[idx]).cloned().unwrap_or(Value::Null),
-                            };
-                            vals.push(v);
+                let plain_keys = folded_keys.iter().all(Option::is_none);
+                if plain_keys && rows.len() <= INLINE_SORT_ROWS {
+                    // Sorting a short row set reads the key columns straight off
+                    // each row. Precomputing a value vector would allocate once
+                    // per row to save lookups that a small set never amortizes.
+                    rows.sort_by(|left, right| {
+                        for idx in 0..keys.len() {
+                            let ord = compare_sort_field(left.get(fields[idx]), right.get(fields[idx]));
+                            let ord = if asc[idx] { ord } else { ord.reverse() };
+                            if ord != std::cmp::Ordering::Equal {
+                                return ord;
+                            }
                         }
-                        Ok((vals, row))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                indexed.sort_by(|a, b| {
-                    let (lv, _) = &a;
-                    let (rv, _) = &b;
-                    for idx in 0..keys.len() {
-                        let ord = compare_values(&lv[idx], &rv[idx]);
-                        let ord = if asc[idx] { ord } else { ord.reverse() };
-                        if ord != std::cmp::Ordering::Equal {
-                            return ord;
+                        std::cmp::Ordering::Equal
+                    });
+                }
+                else {
+                    let row_exprs: Vec<Option<&Expr>> = folded_keys.iter().map(|expr| expr.as_ref()).collect();
+                    let mut indexed: Vec<(Vec<Value>, BTreeMap<String, Value>)> = rows
+                        .into_iter()
+                        .map(|row| {
+                            let mut vals = Vec::with_capacity(keys.len());
+                            for (idx, expr_opt) in row_exprs.iter().enumerate() {
+                                let v = match expr_opt {
+                                    Some(expr) => eval_expr(expr, &row, table, contract, records, bound_values, outer)?,
+                                    None => row.get(fields[idx]).cloned().unwrap_or(Value::Null),
+                                };
+                                vals.push(v);
+                            }
+                            Ok((vals, row))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    indexed.sort_by(|a, b| {
+                        let (lv, _) = &a;
+                        let (rv, _) = &b;
+                        for idx in 0..keys.len() {
+                            let ord = compare_values(&lv[idx], &rv[idx]);
+                            let ord = if asc[idx] { ord } else { ord.reverse() };
+                            if ord != std::cmp::Ordering::Equal {
+                                return ord;
+                            }
                         }
-                    }
-                    std::cmp::Ordering::Equal
-                });
-                rows = indexed.into_iter().map(|(_, row)| row).collect();
+                        std::cmp::Ordering::Equal
+                    });
+                    rows = indexed.into_iter().map(|(_, row)| row).collect();
+                }
             }
             QueryOp::Skip { count } => {
                 if let Some(count) = resolve_count_expr(count, contract, records, bound_values)? {
@@ -308,6 +331,35 @@ fn execute_ops_in(
 
 fn query_runtime_error(message: impl Into<String>) -> Error {
     Error::Schema { message: message.into() }
+}
+
+/// Row count up to which a plain-column sort compares rows in place.
+///
+/// Below this size a record lookup per comparison is cheaper than allocating a
+/// sort-key vector per row. Larger sets keep the precomputed-key path, where
+/// the comparator stays O(1) per key.
+const INLINE_SORT_ROWS: usize = 4096;
+
+fn compare_sort_field(left: Option<&Value>, right: Option<&Value>) -> std::cmp::Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => compare_values(left, right),
+        (None, Some(right)) => compare_values(&Value::Null, right),
+        (Some(left), None) => compare_values(left, &Value::Null),
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+}
+
+/// Whether `fields` projects exactly the columns `rows` already carry.
+fn projection_is_identity(fields: &[ProjectField], rows: &[QueryRow]) -> bool {
+    let Some(first) = rows.first()
+    else {
+        return true;
+    };
+    fields.len() == first.len()
+        && fields.iter().all(|field| match &field.expr {
+            ProjectExpr::Scalar { path } => path.len() == 1 && path[0] == field.name && first.contains_key(path[0].as_str()),
+            _ => false,
+        })
 }
 
 /// Resolve a CountExpr (Skip/Take count) to an optional row count.
