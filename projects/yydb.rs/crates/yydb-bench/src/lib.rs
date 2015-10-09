@@ -423,7 +423,7 @@ fn run_sqlite(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
         let index = (op * 7919) % cfg.rows.max(1);
         let mut statement =
             reopened.prepare("SELECT payload FROM Bench WHERE id = ?1").map_err(|e| format!("sqlite reopen prepare: {e}"))?;
-        let count = count_rows(&mut statement, rusqlite::params![key_at(index)], "sqlite reopen point get")?;
+        let (count, _bytes) = read_payload_rows(&mut statement, rusqlite::params![key_at(index)], "sqlite reopen point get")?;
         if count != 1 {
             return Err(format!("sqlite reopen point get returned {count} rows"));
         }
@@ -459,7 +459,7 @@ fn sqlite_point_pass(conn: &rusqlite::Connection, cfg: &BenchConfig, context: &s
     let started = Instant::now();
     for op in 0..cfg.point_ops {
         let index = (op * 7919) % cfg.rows.max(1);
-        let count = count_rows(&mut statement, rusqlite::params![key_at(index)], context)?;
+        let (count, _bytes) = read_payload_rows(&mut statement, rusqlite::params![key_at(index)], context)?;
         if count != 1 {
             return Err(format!("{context} returned {count} rows for `{}`", key_at(index)));
         }
@@ -467,14 +467,44 @@ fn sqlite_point_pass(conn: &rusqlite::Connection, cfg: &BenchConfig, context: &s
     Ok(started.elapsed().as_nanos() / cfg.point_ops.max(1) as u128)
 }
 
-/// Counts result rows, surfacing row-level errors instead of swallowing them.
-fn count_rows(statement: &mut rusqlite::Statement<'_>, params: impl rusqlite::Params, context: &str) -> Result<usize, String> {
+/// Reads a `payload`-only result set into owned values.
+///
+/// The yydb side materialises every selected column, so the SQLite side reads
+/// the value as well instead of advancing the cursor without touching it.
+/// Returns `(rows, payload bytes)` so the caller can keep the result alive.
+fn read_payload_rows(
+    statement: &mut rusqlite::Statement<'_>,
+    params: impl rusqlite::Params,
+    context: &str,
+) -> Result<(usize, usize), String> {
     let mut rows = statement.query(params).map_err(|e| format!("{context}: {e}"))?;
     let mut count = 0usize;
-    while let Some(_row) = rows.next().map_err(|e| format!("{context}: {e}"))? {
+    let mut bytes = 0usize;
+    while let Some(row) = rows.next().map_err(|e| format!("{context}: {e}"))? {
+        let payload: Vec<u8> = row.get(0).map_err(|e| format!("{context}: {e}"))?;
+        bytes += payload.len();
         count += 1;
     }
-    Ok(count)
+    Ok((count, bytes))
+}
+
+/// Reads a `(id, payload)` result set into owned values, matching the yydb
+/// materialisation of the same projection.
+fn read_keyed_rows(
+    statement: &mut rusqlite::Statement<'_>,
+    params: impl rusqlite::Params,
+    context: &str,
+) -> Result<(usize, usize), String> {
+    let mut rows = statement.query(params).map_err(|e| format!("{context}: {e}"))?;
+    let mut count = 0usize;
+    let mut bytes = 0usize;
+    while let Some(row) = rows.next().map_err(|e| format!("{context}: {e}"))? {
+        let id: String = row.get(0).map_err(|e| format!("{context}: {e}"))?;
+        let payload: Vec<u8> = row.get(1).map_err(|e| format!("{context}: {e}"))?;
+        bytes += id.len() + payload.len();
+        count += 1;
+    }
+    Ok((count, bytes))
 }
 
 fn sqlite_range_pass(conn: &rusqlite::Connection, cfg: &BenchConfig) -> Result<u128, String> {
@@ -486,7 +516,11 @@ fn sqlite_range_pass(conn: &rusqlite::Connection, cfg: &BenchConfig) -> Result<u
     for scan in 0..cfg.range_scans {
         let start_index = (scan * 104_729) % cfg.rows.max(1);
         let end_index = (start_index + cfg.range_len).min(cfg.rows);
-        let count = count_rows(&mut statement, rusqlite::params![key_at(start_index), key_at(end_index)], "sqlite range scan")?;
+        let (count, _bytes) = read_keyed_rows(
+            &mut statement,
+            rusqlite::params![key_at(start_index), key_at(end_index)],
+            "sqlite range scan",
+        )?;
         if count != end_index - start_index {
             return Err(format!("sqlite range scan returned {count} rows, expected {}", end_index - start_index));
         }
