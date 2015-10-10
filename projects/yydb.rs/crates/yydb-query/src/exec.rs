@@ -412,9 +412,25 @@ fn resolve_standalone_expr(
     }
 }
 
+/// Borrows a single-element column path from the row under test.
+///
+/// Returns `None` for multi-element paths and missing columns, so callers fall
+/// back to [`read_path`] without changing semantics.
+fn read_path_ref<'a>(path: &[String], row: &'a QueryRow) -> Option<&'a Value> {
+    if path.len() == 1 { row.get(&path[0]) } else { None }
+}
+
+/// Borrows a bound value that is either a literal or an in-range slot.
+fn resolve_bound_ref<'a>(bv: &'a BoundValue, bound_values: &'a [Value]) -> Option<&'a Value> {
+    match bv {
+        BoundValue::Literal(value) => Some(value),
+        BoundValue::Slot { index, .. } => bound_values.get(*index as usize),
+    }
+}
+
 /// Resolve a BoundValue either to the baked-in literal or to the bound
-/// parameter at `index`. Returns an error for Slot references that exceed
-/// the caller-supplied slice (bind-time contract violation).
+/// parameter at `index`. Returns an error for Slot references that exceed the
+/// caller-supplied slice (bind-time contract violation).
 fn resolve_bound_value(bv: &BoundValue, bound_values: &[Value]) -> Result<Value> {
     match bv {
         BoundValue::Literal(v) => Ok(v.clone()),
@@ -672,6 +688,13 @@ fn eval_pred_in(
         // A bare boolean value is unknown when the field is `NULL`, so
         // `NOT column` cannot turn a missing value into a passing row.
         Pred::FieldBool { path, value } => {
+            if let (Some(left), Some(right)) = (read_path_ref(path, row), resolve_bound_ref(value, bound_values)) {
+                return Ok(match (left, right) {
+                    (Value::Bool(a), Value::Bool(b)) => Some(*a == *b),
+                    (Value::Null, _) => None,
+                    _ => Some(false),
+                });
+            }
             let left = read_path(path, row, table, contract, records, outer);
             let right = match resolve_bound_value(value, bound_values) {
                 Ok(v) => v,
@@ -687,6 +710,11 @@ fn eval_pred_in(
         // `FieldCmp` keeps two-valued semantics for VOS ordinary equality and
         // the decided `IS [NOT] TRUE/FALSE` tests.
         Pred::FieldCmp { path, op, value } => {
+            // Single-element paths and resolvable bindings compare by borrow so
+            // a scanned row pays no clone per predicate test.
+            if let (Some(left), Some(right)) = (read_path_ref(path, row), resolve_bound_ref(value, bound_values)) {
+                return Ok(cmp_values(left, *op, right));
+            }
             let left = read_path(path, row, table, contract, records, outer);
             let right = match resolve_bound_value(value, bound_values) {
                 Ok(v) => v,
