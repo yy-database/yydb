@@ -1,9 +1,10 @@
 //! `YDPG` file-backed pager with optional `YYWL` v0 sidecar.
 
 use std::{
-    fs::OpenOptions,
-    io::{Seek, SeekFrom, Write},
+    fs::{File, OpenOptions},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    sync::Arc,
     time::Instant,
 };
 
@@ -17,7 +18,7 @@ use crate::{
         slot_offset_for_kind,
     },
     key::TreeKey,
-    memory::MemoryPager,
+    memory::{MainFileSource, MemoryPager},
     pager::PageStore,
     shm::{shm_sidecar_path, sync_shm_from_commit, sync_shm_from_wal},
     wal::{committed_tail_lsn, committed_transactions},
@@ -76,7 +77,7 @@ impl FilePager {
             std::fs::create_dir_all(parent)?;
         }
         let existed = path.exists();
-        let inner = if existed { load_main_file(&path)? } else { MemoryPager::new_empty(fresh_database_id(), 0x01) };
+        let inner = if existed { open_main_file(&path)? } else { MemoryPager::new_empty(fresh_database_id(), 0x01) };
         let mut file_pager = Self {
             path: path.clone(),
             inner,
@@ -339,7 +340,10 @@ impl FilePager {
         let wal = read_wal_file(&wal_path)?;
         let checkpoint_lsn = self.inner.header()?.slot.checkpoint_lsn;
         let frames_after_checkpoint = wal.frames.iter().filter(|frame| frame.frame_lsn > checkpoint_lsn).count();
-        let mut pages = self.inner.pages_snapshot();
+        // Replay only the pages named by committed frames above the checkpoint.
+        // Pages that never changed since the checkpoint stay in the main file
+        // and are read on demand by `MainFileSource`.
+        let mut pages = std::collections::BTreeMap::new();
         replay_wal_pages_after(&wal, checkpoint_lsn, &mut pages)?;
         for (page_id, image) in pages {
             self.inner.put_page(page_id, image)?;
@@ -373,7 +377,7 @@ impl FilePager {
 
     fn persist_data_pages(&self) -> Result<()> {
         let pages: Vec<(u32, Vec<u8>)> =
-            self.inner.pages_snapshot().into_iter().filter(|(page_id, _)| *page_id != 0).collect();
+            self.inner.pages_snapshot()?.into_iter().filter(|(page_id, _)| *page_id != 0).collect();
         if pages.is_empty() {
             return Ok(());
         }
@@ -488,7 +492,7 @@ pub fn memory_pager_from_main_bytes(bytes: &[u8]) -> Result<MemoryPager> {
 
 /// Serialize a `MemoryPager` into a contiguous `YDPG` main-file byte image.
 pub fn main_bytes_from_memory_pager(pager: &MemoryPager) -> Result<Vec<u8>> {
-    let snapshot = pager.pages_snapshot();
+    let snapshot = pager.pages_snapshot()?;
     if snapshot.is_empty() {
         return Err(Error::Corrupt("memory pager has no pages"));
     }
@@ -503,8 +507,30 @@ pub fn main_bytes_from_memory_pager(pager: &MemoryPager) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-fn load_main_file(path: &Path) -> Result<MemoryPager> {
-    load_main_bytes(&std::fs::read(path)?)
+/// Open a `YDPG` main file and keep its remaining pages readable on demand.
+///
+/// Only page 0 is read up front, so a reopen does not copy every page into the
+/// resident map. Reads pull the page they touch through [`MainFileSource`].
+fn open_main_file(path: &Path) -> Result<MemoryPager> {
+    let file = File::open(path)?;
+    let len = file.metadata()?.len();
+    if len < PAGE_SIZE as u64 {
+        return Err(Error::Corrupt("main file too short"));
+    }
+    if len % PAGE_SIZE as u64 != 0 {
+        return Err(Error::Corrupt("main file length is not page aligned"));
+    }
+    let page_count = (len / PAGE_SIZE as u64) as u32;
+    let mut page0 = vec![0_u8; PAGE_SIZE];
+    (&file).read_exact(&mut page0)?;
+    if page0.get(0..5) != Some(PAGE_MAGIC.as_slice()) {
+        return Err(Error::Unsupported("main file is not YDPG format v0"));
+    }
+    parse_page0_checked(&page0)?;
+    let mut pager = MemoryPager::default();
+    pager.put_page(0, page0)?;
+    pager.attach_source(Arc::new(MainFileSource::new(file, page_count)));
+    Ok(pager)
 }
 
 fn load_main_bytes(bytes: &[u8]) -> Result<MemoryPager> {

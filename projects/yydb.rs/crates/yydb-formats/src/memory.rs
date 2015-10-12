@@ -3,7 +3,9 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap},
-    sync::Arc,
+    fs::File,
+    io::{Read, Seek, SeekFrom},
+    sync::{Arc, Mutex},
 };
 
 use yydb_types::{Error, Result};
@@ -18,10 +20,52 @@ use crate::{
     pager::{DecodedPage, PageStore},
 };
 
+/// Lazy reader for a `YDPG` main file.
+///
+/// Opening a database attaches this source instead of copying every page image
+/// into the resident map. A page read on demand stays resident for later
+/// lookups, so a reopen pays for the pages the workload actually visits.
+#[derive(Debug)]
+pub struct MainFileSource {
+    page_count: u32,
+    /// Shared seek handle so a read does not reopen the file per page.
+    file: Mutex<File>,
+}
+
+impl MainFileSource {
+    /// Bind a source to an already opened main file and its page bound.
+    pub fn new(file: File, page_count: u32) -> Self {
+        Self { page_count, file: Mutex::new(file) }
+    }
+
+    /// Number of pages the main file holds.
+    pub fn page_count(&self) -> u32 {
+        self.page_count
+    }
+
+    fn read_page(&self, page_id: u32) -> Result<Option<Vec<u8>>> {
+        if page_id >= self.page_count {
+            return Ok(None);
+        }
+        let mut file = self.file.lock().map_err(|_| Error::Corrupt("main file handle poisoned"))?;
+        file.seek(SeekFrom::Start(u64::from(page_id) * PAGE_SIZE as u64))?;
+        let mut image = vec![0_u8; PAGE_SIZE];
+        file.read_exact(&mut image)?;
+        Ok(Some(image))
+    }
+}
+
+/// Bound on lazily read page images kept in memory (4 KiB each).
+const LAZY_PAGE_CACHE: usize = 1024;
+
 /// Process-local page store used by tests and the memory storage profile.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryPager {
     pages: BTreeMap<u32, Vec<u8>>,
+    /// Main file that backs pages which are not resident yet.
+    source: Option<Arc<MainFileSource>>,
+    /// Bounded read cache for pages pulled from the main file.
+    lazy_pages: RefCell<HashMap<u32, Vec<u8>>>,
     /// Pages written since the last [`Self::clear_dirty`]. A publish transaction
     /// brackets its mutation with `clear_dirty` / `take_dirty_pages` so the
     /// changed-page set comes from the writes themselves instead of a full
@@ -53,9 +97,33 @@ impl MemoryPager {
         Ok(header)
     }
 
-    /// Read a page by id.
+    /// Back pages that are not resident with a lazily read main file.
+    pub fn attach_source(&mut self, source: Arc<MainFileSource>) {
+        self.source = Some(source);
+    }
+
+    /// Read a page by id, pulling it from the main file when it is not resident.
+    ///
+    /// Pages read from the main file land in a bounded cache so a scan or a
+    /// burst of point gets does not re-read the same image from disk.
     pub fn get_page(&self, page_id: u32) -> Result<Option<Vec<u8>>> {
-        Ok(self.pages.get(&page_id).cloned())
+        if let Some(image) = self.pages.get(&page_id) {
+            return Ok(Some(image.clone()));
+        }
+        if let Some(image) = self.lazy_pages.borrow().get(&page_id) {
+            return Ok(Some(image.clone()));
+        }
+        let Some(source) = &self.source else {
+            return Ok(None);
+        };
+        let Some(image) = source.read_page(page_id)? else {
+            return Ok(None);
+        };
+        let mut cache = self.lazy_pages.borrow_mut();
+        if cache.len() < LAZY_PAGE_CACHE {
+            cache.insert(page_id, image.clone());
+        }
+        Ok(Some(image))
     }
 
     /// Write or replace a full page image.
@@ -65,6 +133,7 @@ impl MemoryPager {
         }
         self.pages.insert(page_id, image);
         self.dirty.insert(page_id);
+        self.lazy_pages.borrow_mut().remove(&page_id);
         self.decoded.borrow_mut().remove(&page_id);
         if page_id == 0 {
             *self.header_cache.borrow_mut() = None;
@@ -102,20 +171,35 @@ impl MemoryPager {
         dirty.into_iter().filter_map(|page_id| self.pages.get(&page_id).map(|image| (page_id, image.clone()))).collect()
     }
 
-    /// Page count including page 0.
+    /// Page bound including page 0, covering both resident and main-file pages.
     pub fn page_count(&self) -> usize {
-        self.pages.len()
+        let resident = self.pages.keys().next_back().map(|id| *id as usize + 1).unwrap_or(0);
+        resident.max(self.source.as_ref().map(|source| source.page_count as usize).unwrap_or(0))
     }
 
     /// Allocate the next unused page id above the current max.
     pub fn alloc_page_id(&mut self) -> Result<u32> {
-        let max_id = self.pages.keys().max().copied().unwrap_or(0);
-        Ok(max_id + 1)
+        let max_resident = self.pages.keys().next_back().copied().unwrap_or(0);
+        let max_source = self.source.as_ref().map(|source| source.page_count.saturating_sub(1)).unwrap_or(0);
+        Ok(max_resident.max(max_source) + 1)
     }
 
-    /// Snapshot of all resident pages.
-    pub fn pages_snapshot(&self) -> BTreeMap<u32, Vec<u8>> {
-        self.pages.clone()
+    /// Snapshot of every page, materialising lazily read main-file pages.
+    pub fn pages_snapshot(&self) -> Result<BTreeMap<u32, Vec<u8>>> {
+        let mut pages = self.pages.clone();
+        for (page_id, image) in self.lazy_pages.borrow().iter() {
+            pages.entry(*page_id).or_insert_with(|| image.clone());
+        }
+        if let Some(source) = &self.source {
+            for page_id in 0..source.page_count {
+                if !pages.contains_key(&page_id) {
+                    if let Some(image) = source.read_page(page_id)? {
+                        pages.insert(page_id, image);
+                    }
+                }
+            }
+        }
+        Ok(pages)
     }
 
     /// Bump `generation` and `checkpoint_lsn` by writing the inactive header slot only.
