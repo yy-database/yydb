@@ -61,7 +61,9 @@ pub struct EngineReport {
     pub point_get_warm_ns_per_op: u128,
     /// Range scan, averaged per returned row.
     pub range_scan_ns_per_row: u128,
-    /// Close, reopen, then 100 point gets (includes the open).
+    /// Open a populated database file, including any recovery work.
+    pub reopen_open_ns: u128,
+    /// 100 point gets on the reopened handle, excluding the open.
     pub reopen_point_get_ns: u128,
     /// Open and close a database file that holds no schema and no rows.
     pub empty_reopen_ns: u128,
@@ -243,6 +245,8 @@ fn run_yydb(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
     drop(conn);
     let started = Instant::now();
     let reopened = yydb::Connection::open_with_flags(&path, yydb::OpenFlags::wal()).map_err(|e| format!("yydb reopen: {e}"))?;
+    let reopen_open_ns = started.elapsed().as_nanos();
+    let get_started = Instant::now();
     for op in 0..100usize {
         let index = (op * 7919) % cfg.rows.max(1);
         let rows = reopened
@@ -252,7 +256,7 @@ fn run_yydb(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
             return Err(format!("yydb reopen point get returned {} rows", rows.len()));
         }
     }
-    let reopen_point_get_ns = started.elapsed().as_nanos();
+    let reopen_point_get_ns = get_started.elapsed().as_nanos();
     reopened.close();
 
     let publish = PublishReport {
@@ -297,6 +301,7 @@ fn run_yydb(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
         point_get_ns_per_op,
         point_get_warm_ns_per_op,
         range_scan_ns_per_row,
+        reopen_open_ns,
         reopen_point_get_ns,
         empty_reopen_ns,
         publish: Some(publish),
@@ -419,6 +424,8 @@ fn run_sqlite(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
     drop(conn);
     let started = Instant::now();
     let reopened = rusqlite::Connection::open(&path).map_err(|e| format!("sqlite reopen: {e}"))?;
+    let reopen_open_ns = started.elapsed().as_nanos();
+    let get_started = Instant::now();
     for op in 0..100usize {
         let index = (op * 7919) % cfg.rows.max(1);
         let mut statement =
@@ -428,7 +435,7 @@ fn run_sqlite(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
             return Err(format!("sqlite reopen point get returned {count} rows"));
         }
     }
-    let reopen_point_get_ns = started.elapsed().as_nanos();
+    let reopen_point_get_ns = get_started.elapsed().as_nanos();
     drop(reopened);
 
     Ok(EngineReport {
@@ -438,6 +445,7 @@ fn run_sqlite(dir: &Path, cfg: &BenchConfig) -> Result<EngineReport, String> {
         point_get_ns_per_op,
         point_get_warm_ns_per_op,
         range_scan_ns_per_row,
+        reopen_open_ns,
         reopen_point_get_ns,
         empty_reopen_ns,
         publish: None,

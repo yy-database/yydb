@@ -68,6 +68,7 @@ fn print_report(baseline: &Baseline) {
     row("point get cold (ns/op)", baseline.yydb.point_get_ns_per_op, baseline.sqlite.point_get_ns_per_op);
     row("point get warm (ns/op)", baseline.yydb.point_get_warm_ns_per_op, baseline.sqlite.point_get_warm_ns_per_op);
     row("range scan (ns/row)", baseline.yydb.range_scan_ns_per_row, baseline.sqlite.range_scan_ns_per_row);
+    row("reopen open (ns)", baseline.yydb.reopen_open_ns, baseline.sqlite.reopen_open_ns);
     row("reopen+100 gets (ns)", baseline.yydb.reopen_point_get_ns, baseline.sqlite.reopen_point_get_ns);
     row("empty reopen (ns)", baseline.yydb.empty_reopen_ns, baseline.sqlite.empty_reopen_ns);
     if let Some(publish) = &baseline.yydb.publish {
