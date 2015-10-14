@@ -124,6 +124,14 @@ export type WasmSession = {
     queryPreparedJson(json: string): string;
     /** Release a prepared statement's plan. Returns true if present. */
     closeStatement(statementId: string): boolean;
+    /** Roll back the current transaction. Returns JSON `{ ok, error? }`. */
+    rollback(): string;
+    /** Create a named savepoint inside the open transaction. Returns JSON `{ ok, error? }`. */
+    savepoint(name: string): string;
+    /** Roll back to a savepoint. Returns JSON `{ ok, error? }`. */
+    rollbackTo(name: string): string;
+    /** Release a savepoint. Returns JSON `{ ok, error? }`. */
+    release(name: string): string;
     close(): void;
     readonly path?: string;
 };
@@ -132,8 +140,12 @@ const glueApi = glue as {
     yydbVersion?: () => string;
     checkSchema?: (source: string) => CheckSchemaResult;
     introspectSchema?: (source: string) => string;
-    MemorySession?: new () => WasmSession;
-    PersistentSession?: new (path: string) => WasmSession;
+    MemorySession?: (new () => WasmSession) & {
+        restoreFromSnapshot?: (bytes: Uint8Array) => WasmSession;
+    };
+    PersistentSession?: (new (path: string) => WasmSession) & {
+        restoreBackup?: (path: string, bytes: Uint8Array) => WasmSession;
+    };
 };
 
 let ready = false;
@@ -209,6 +221,38 @@ export function createMemorySession(): WasmSession {
         throw new Error('@yydb/yydb-unknown-wasm32: MemorySession export missing, rebuild wasm artifacts');
     }
     return new glueApi.MemorySession();
+}
+
+/**
+ * Open an in-memory session from a main-file snapshot.
+ *
+ * The snapshot is verified inside the WASM core (page CRC32C plus a doctor
+ * pass) before the session takes ownership of it, so a damaged backup throws
+ * instead of producing a half-readable database.
+ */
+export function restoreMemorySession(bytes: Uint8Array): WasmSession {
+    assertReady();
+    const restore = glueApi.MemorySession?.restoreFromSnapshot;
+    if (!restore) {
+        throw new Error('@yydb/yydb-unknown-wasm32: MemorySession.restoreFromSnapshot missing, rebuild wasm artifacts');
+    }
+    return restore(bytes);
+}
+
+/**
+ * Replace the OPFS database at `path` with a verified snapshot and open it.
+ *
+ * The snapshot is validated before it is published, so a damaged backup never
+ * overwrites a live database. The snapshot layout must match `path` (`.yydb`
+ * main file into a `.yydb` path, `.yydx` into a `.yydx` path).
+ */
+export function restorePersistentSession(path: string, bytes: Uint8Array): WasmSession {
+    assertReady();
+    const restore = glueApi.PersistentSession?.restoreBackup;
+    if (!restore) {
+        throw new Error('@yydb/yydb-unknown-wasm32: PersistentSession.restoreBackup missing, rebuild wasm artifacts');
+    }
+    return restore(path, bytes);
 }
 
 /** Open a stateful OPFS-backed session at `path`. */

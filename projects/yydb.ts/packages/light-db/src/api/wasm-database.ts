@@ -21,6 +21,8 @@ import {
     initWasm,
     openPersistentSession,
     createMemorySession,
+    restoreMemorySession,
+    restorePersistentSession,
     yydbVersion,
     type WasmSession,
 } from '@yydb/yydb-unknown-wasm32';
@@ -188,6 +190,36 @@ export class Database implements LightDatabase {
         return new Database(name, session);
     }
 
+    /**
+     * Open a database from a verified main-file snapshot.
+     *
+     * The snapshot is validated in the WASM core before it is used. Pass
+     * `{ memory: true }` for a transient session, otherwise the snapshot
+     * replaces the OPFS database at `name`. The snapshot layout must match the
+     * name: a `.yydb` main file into a `.yydb` path, a `.yydx` main file into a
+     * `.yydx` path.
+     *
+     * @param name Database name (OPFS path when persistent).
+     * @param backup Main-file snapshot bytes from a backup or export step.
+     * @param options Open options — pass `{ memory: true }` for a transient session.
+     */
+    public static async restore(name: string, backup: Uint8Array, options: OpenOptions = {}): Promise<Database> {
+        if (!name || name.length === 0) {
+            throw new Error('database name must not be empty');
+        }
+        if (backup.length === 0) {
+            throw new Error('backup snapshot must not be empty');
+        }
+
+        await initWasm();
+
+        const session: WasmSession = options.memory
+            ? restoreMemorySession(backup)
+            : restorePersistentSession(name, backup);
+
+        return new Database(name, session);
+    }
+
     /** Parse a WASM envelope, converting `{ ok: false, error }` to a thrown error. */
     private parseResult<T>(raw: string): T {
         const parsed = JSON.parse(raw) as WasmResult;
@@ -303,6 +335,21 @@ export class Database implements LightDatabase {
     /** Roll back the current transaction. */
     public async rollback(): Promise<void> {
         this.parseResult(this.session.rollback());
+    }
+
+    /** Create a named savepoint inside the open transaction. */
+    public async savepoint(name: string): Promise<void> {
+        this.parseResult(this.session.savepoint(name));
+    }
+
+    /** Roll back to a savepoint, discarding writes made after it. */
+    public async rollbackTo(name: string): Promise<void> {
+        this.parseResult(this.session.rollbackTo(name));
+    }
+
+    /** Release a savepoint so it can no longer be rolled back to. */
+    public async release(name: string): Promise<void> {
+        this.parseResult(this.session.release(name));
     }
 
     /**

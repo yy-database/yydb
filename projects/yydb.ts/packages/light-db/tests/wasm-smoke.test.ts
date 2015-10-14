@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, beforeAll, afterAll, it, expect } from 'vitest';
-import { initWasm, createMemorySession, type WasmSession } from '@yydb/yydb-unknown-wasm32';
+import { initWasm, createMemorySession, restoreMemorySession, type WasmSession } from '@yydb/yydb-unknown-wasm32';
 
 let wasmReady = false;
 let sess: WasmSession;
@@ -112,5 +112,53 @@ describe('prepareJson + queryPreparedJson', () => {
         );
         expect(retry.ok).toBe(false);
         expect(String(retry.error)).toMatch(/not found/i);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// savepoints — nested rollback inside one transaction
+// ---------------------------------------------------------------------------
+
+describe('savepoints', () => {
+    it('rolls back to a savepoint and keeps earlier writes', () => {
+        const session = createMemorySession();
+        const encoder = new TextEncoder();
+        try {
+            expect(JSON.parse(session.begin())).toMatchObject({ ok: true });
+            expect(JSON.parse(session.put('kept', encoder.encode('one')))).toMatchObject({ ok: true });
+            expect(JSON.parse(session.savepoint('outer'))).toMatchObject({ ok: true });
+            expect(JSON.parse(session.put('dropped', encoder.encode('two')))).toMatchObject({ ok: true });
+            expect(JSON.parse(session.rollbackTo('outer'))).toMatchObject({ ok: true });
+
+            const dropped = JSON.parse(session.get('dropped')) as Record<string, unknown>;
+            expect(dropped.ok).toBe(true);
+            expect(dropped.value).toBeNull();
+
+            expect(JSON.parse(session.savepoint('probe'))).toMatchObject({ ok: true });
+            expect(JSON.parse(session.release('probe'))).toMatchObject({ ok: true });
+            expect(JSON.parse(session.commit())).toMatchObject({ ok: true });
+
+            const kept = JSON.parse(session.get('kept')) as Record<string, unknown>;
+            expect(kept.ok).toBe(true);
+            expect(Array.from(kept.value as number[])).toEqual([111, 110, 101]);
+        } finally {
+            session.close();
+        }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// restore — snapshot verification gate
+// ---------------------------------------------------------------------------
+
+describe('restore', () => {
+    it('refuses a payload that is not a main-file snapshot', () => {
+        let message = '';
+        try {
+            restoreMemorySession(new Uint8Array([1, 2, 3]));
+        } catch (error) {
+            message = String(error);
+        }
+        expect(message).not.toBe('');
     });
 });

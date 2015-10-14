@@ -14,6 +14,30 @@ fn memory_session_kv_roundtrip() {
     assert_eq!(parsed.get("value"), Some(&json!([100, 97, 114, 107])));
 }
 
+#[test]
+fn memory_session_savepoints_roll_back_and_release() {
+    let session = MemorySession::new().expect("memory");
+    assert_ok_true(&session.begin());
+    assert_ok_true(&session.put("kept", b"one"));
+    assert_ok_true(&session.savepoint("outer"));
+    assert_ok_true(&session.put("discarded", b"two"));
+    assert_ok_true(&session.rollback_to("outer"));
+    assert_eq!(parse_json(&session.get("discarded")).get("value"), Some(&JsonValue::Null));
+    assert_ok_true(&session.savepoint("probe"));
+    assert_ok_true(&session.release("probe"));
+    assert_ok_true(&session.commit());
+    assert_eq!(parse_json(&session.get("kept")).get("value"), Some(&json!([111, 110, 101])));
+}
+
+#[test]
+fn memory_session_restores_a_verified_snapshot() {
+    let source = yydb::Connection::open_in_memory().expect("source");
+    source.put("alpha", b"one").expect("put");
+    let bytes = source.main_snapshot().expect("snapshot");
+    let restored = MemorySession::restore_from_snapshot(&bytes).expect("restore");
+    assert_eq!(parse_json(&restored.get("alpha")).get("value"), Some(&json!([111, 110, 101])));
+}
+
 const SCALAR_SCHEMA: &str = r#"
 table Event {
     @@event_id: i64,

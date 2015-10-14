@@ -291,6 +291,15 @@ fn persist_persistent_connection(conn: &Connection, volume: &OpfsPersistentVolum
     Ok(())
 }
 
+/// Check a main-file snapshot the way a restore entry must: load it into a
+/// throwaway handle so page CRC32C checks run, then require a clean doctor
+/// report before the snapshot is allowed to reach durable storage.
+fn validate_snapshot(bytes: &[u8]) -> yydb::Result<()> {
+    let probe = Connection::open_in_memory()?;
+    probe.load_main_snapshot(bytes)?;
+    probe.doctor().map(|_| ())
+}
+
 fn run_ensure_schema_persistent(conn: &Connection, volume: &OpfsPersistentVolume, closed: bool, document: &str) -> String {
     if closed {
         return unit_result_json(Err(closed_session_error()));
@@ -327,6 +336,19 @@ impl MemorySession {
         Connection::open_in_memory()
             .map(|conn| Self { conn, closed: false, stmts: HashMap::new() })
             .map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// Open a session from a main-file snapshot, verifying every page first.
+    ///
+    /// This is the browser restore entry: the snapshot is loaded into a
+    /// throwaway handle so page CRC32C checks run, `doctor` must report no
+    /// errors, and only then does the session take ownership of the pages.
+    #[wasm_bindgen(js_name = restoreFromSnapshot)]
+    pub fn restore_from_snapshot(bytes: &[u8]) -> std::result::Result<MemorySession, JsValue> {
+        validate_snapshot(bytes).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        let conn = Connection::open_in_memory().map_err(|err| JsValue::from_str(&err.to_string()))?;
+        conn.load_main_snapshot(bytes).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        Ok(Self { conn, closed: false, stmts: HashMap::new() })
     }
 
     /// Persist the database-truth VOS schema document.
@@ -456,6 +478,33 @@ impl MemorySession {
             return unit_result_json(Err(closed_session_error()));
         }
         unit_result_json(self.conn.rollback())
+    }
+
+    /// Create a named savepoint inside the open transaction.
+    #[wasm_bindgen(js_name = savepoint)]
+    pub fn savepoint(&self, name: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.savepoint(name))
+    }
+
+    /// Roll back to a savepoint, discarding writes made after it.
+    #[wasm_bindgen(js_name = rollbackTo)]
+    pub fn rollback_to(&self, name: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.rollback_to_savepoint(name))
+    }
+
+    /// Release a savepoint so it can no longer be rolled back to.
+    #[wasm_bindgen(js_name = release)]
+    pub fn release(&self, name: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        unit_result_json(self.conn.release_savepoint(name))
     }
 
     /// Fold the WAL into the main file (memory sessions are a no-op after flush).
@@ -708,6 +757,23 @@ impl PersistentSession {
         self.path.clone()
     }
 
+    /// Replace `path` with a verified main-file snapshot and open a session.
+    ///
+    /// The snapshot is validated (page CRC32C plus a doctor pass) before it is
+    /// published, so a damaged backup can never overwrite a live database.
+    /// The caller must match the layout: a `.yydb` snapshot restores into a
+    /// `.yydb` path, a `.yydx` main file into a `.yydx` path.
+    #[wasm_bindgen(js_name = restoreBackup)]
+    pub fn restore_backup(path: &str, bytes: &[u8]) -> std::result::Result<PersistentSession, JsValue> {
+        validate_snapshot(bytes).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        let caps =
+            if path.ends_with(".yydx") { OpfsCapabilities::full_yydx_profile() } else { OpfsCapabilities::full_yydb_profile() };
+        let volume = open_persistent(path, &caps).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        volume.publish_main(bytes).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        let conn = open_persistent_connection(&volume).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        Ok(Self { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
+    }
+
     /// Persist the database-truth VOS schema document.
     #[wasm_bindgen(js_name = ensureSchema)]
     pub fn ensure_schema(&self, document: &str) -> String {
@@ -869,6 +935,51 @@ impl PersistentSession {
         }
         match self.volume.as_ref() {
             Some(volume) => match self.conn.rollback() {
+                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Create a named savepoint inside the open transaction, then persist.
+    #[wasm_bindgen(js_name = savepoint)]
+    pub fn savepoint(&self, name: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.volume.as_ref() {
+            Some(volume) => match self.conn.savepoint(name) {
+                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Roll back to a savepoint, then persist the rolled-back snapshot.
+    #[wasm_bindgen(js_name = rollbackTo)]
+    pub fn rollback_to(&self, name: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.volume.as_ref() {
+            Some(volume) => match self.conn.rollback_to_savepoint(name) {
+                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
+    }
+
+    /// Release a savepoint, then persist.
+    #[wasm_bindgen(js_name = release)]
+    pub fn release(&self, name: &str) -> String {
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.volume.as_ref() {
+            Some(volume) => match self.conn.release_savepoint(name) {
                 Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
                 Err(error) => unit_result_json(Err(error)),
             },

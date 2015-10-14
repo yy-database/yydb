@@ -262,6 +262,15 @@ export interface LightDatabase {
     /** Roll back the current transaction. */
     rollback(): Promise<void>;
 
+    /** Create a named savepoint inside the open transaction. */
+    savepoint(name: string): Promise<void>;
+
+    /** Roll back to a savepoint, discarding writes made after it. */
+    rollbackTo(name: string): Promise<void>;
+
+    /** Release a savepoint so it can no longer be rolled back to. */
+    release(name: string): Promise<void>;
+
     /** Execute a VOS read pipeline. */
     query<T = Record<string, unknown>>(source: string): Promise<T[]>;
 
