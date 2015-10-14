@@ -4,7 +4,7 @@
 
 #![deny(missing_docs)]
 
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 use pyo3::{
     IntoPyObjectExt,
@@ -327,6 +327,280 @@ fn read_file(py: Python<'_>, db_path: String, descriptor: &Bound<'_, PyDict>) ->
     Ok(PyBytes::new(py, &octets).into())
 }
 
+/// One open embedded handle that keeps transaction state across calls.
+///
+/// The stateless module functions in this extension open a fresh connection per
+/// call, so they cannot span a transaction. Use this class when several writes,
+/// a savepoint or a rollback must share one open handle.
+#[pyclass(name = "Connection")]
+pub struct PyConnection {
+    conn: Arc<yydb::Connection>,
+}
+
+impl PyConnection {
+    fn from_conn(conn: yydb::Connection) -> Self {
+        Self { conn: Arc::new(conn) }
+    }
+
+    fn restore_handle(backup: &str) -> PyResult<Self> {
+        let conn = if backup.ends_with(".yydx") {
+            yydb::Connection::restore_yydx(backup)
+        }
+        else {
+            yydb::Connection::restore_yydb(backup)
+        };
+        Ok(Self::from_conn(conn.map_err(map_err)?))
+    }
+
+    fn compact_report(&self) -> PyResult<String> {
+        let report = self.conn.compact_yydx().map_err(map_err)?;
+        serde_json::to_string(&report).map_err(|error| PyRuntimeError::new_err(error.to_string()))
+    }
+}
+
+#[pymethods]
+impl PyConnection {
+    /// Open `path`, optionally with the `YYWL` journal enabled.
+    #[new]
+    #[pyo3(signature = (path, wal = true))]
+    fn new(path: &str, wal: bool) -> PyResult<Self> {
+        let flags = if wal { yydb::OpenFlags::wal() } else { yydb::OpenFlags::new() };
+        Ok(Self::from_conn(yydb::Connection::open_with_flags(path, flags).map_err(map_err)?))
+    }
+
+    /// Open `path` with the default (delete) journal.
+    #[staticmethod]
+    fn open(path: &str) -> PyResult<Self> {
+        Ok(Self::from_conn(yydb::Connection::open(path).map_err(map_err)?))
+    }
+
+    /// Open a `.yydx` database with the sibling object tree.
+    #[staticmethod]
+    fn open_yydx(path: &str) -> PyResult<Self> {
+        Ok(Self::from_conn(yydb::Connection::open_yydx(path).map_err(map_err)?))
+    }
+
+    /// Open an in-memory database.
+    #[staticmethod]
+    fn open_in_memory() -> PyResult<Self> {
+        Ok(Self::from_conn(yydb::Connection::open_in_memory().map_err(map_err)?))
+    }
+
+    /// Open a verified backup copy: `.yydb` checks page integrity, `.yydx`
+    /// checks the object tree closure and file digests.
+    #[staticmethod]
+    fn restore(backup: &str) -> PyResult<Self> {
+        Self::restore_handle(backup)
+    }
+
+    /// Close the handle. Repeated calls are no-ops.
+    fn close(&self) {
+        self.conn.close();
+    }
+
+    /// Whether this handle has been closed.
+    fn is_closed(&self) -> bool {
+        self.conn.is_closed()
+    }
+
+    /// Main database path, or `None` for an in-memory handle.
+    fn path(&self) -> Option<String> {
+        self.conn.path().map(|path| path.display().to_string())
+    }
+
+    /// Reserved `-wal` companion path.
+    ///
+    /// The path is derived from the main file and is **not** guaranteed to exist:
+    /// the sidecar appears only when WAL mode is enabled and a commit appended
+    /// frames. Do not use this to test for durability state, use
+    /// `journal_mode()` or `wal_frame_count()` instead.
+    fn wal_path(&self) -> Option<String> {
+        self.conn.wal_path().map(|path| path.display().to_string())
+    }
+
+    /// Reserved `-shm` companion path, subject to the same existence caveat as
+    /// `wal_path()`.
+    fn shm_path(&self) -> Option<String> {
+        self.conn.shm_path().map(|path| path.display().to_string())
+    }
+
+    /// Active journal mode (`delete` or `wal`).
+    fn journal_mode(&self) -> String {
+        self.conn.journal_mode().as_str().to_owned()
+    }
+
+    /// Append frames present in the WAL sidecar.
+    fn wal_frame_count(&self) -> PyResult<u32> {
+        self.conn.wal_frame_count().map_err(map_err)
+    }
+
+    /// Fold the WAL into the main file.
+    fn checkpoint(&self) -> PyResult<()> {
+        self.conn.checkpoint().map_err(map_err)
+    }
+
+    /// Published schema revision, or `None` before the first schema.
+    fn schema_version(&self) -> PyResult<Option<u32>> {
+        self.conn.schema_version().map_err(map_err)
+    }
+
+    /// Number of committed records.
+    fn record_count(&self) -> PyResult<usize> {
+        self.conn.record_count().map_err(map_err)
+    }
+
+    /// Read one record, or `None` when the key is absent.
+    fn get(&self, py: Python<'_>, key: &str) -> PyResult<Option<Py<PyBytes>>> {
+        Ok(self.conn.get(key).map_err(map_err)?.map(|octets| PyBytes::new(py, &octets).into()))
+    }
+
+    /// Write one record.
+    fn put(&self, key: &str, value: &[u8]) -> PyResult<()> {
+        self.conn.put(key, value).map_err(map_err)
+    }
+
+    /// Delete one record. Absent keys succeed silently.
+    fn delete(&self, key: &str) -> PyResult<()> {
+        self.conn.write_batch(&[(key.to_owned(), None)]).map_err(map_err)
+    }
+
+    /// Scan keys in lexical order with `prefix` (`""` scans every key).
+    ///
+    /// `after` is an exclusive continuation cursor, pass `None` for the first
+    /// page. Returns `(key, value)` pairs in scan order.
+    #[pyo3(signature = (prefix, after = None, limit = 1000))]
+    fn scan(&self, py: Python<'_>, prefix: &str, after: Option<&str>, limit: usize) -> PyResult<Vec<(String, Py<PyBytes>)>> {
+        let rows = self.conn.scan_prefix(prefix, after, limit).map_err(map_err)?;
+        Ok(rows.into_iter().map(|(key, value)| (key, PyBytes::new(py, &value).into())).collect())
+    }
+
+    /// Atomically write or delete many records in one commit.
+    ///
+    /// Each entry is `(key, value)` where `value=None` deletes the key.
+    fn write_batch(&self, changes: Vec<(String, Option<Vec<u8>>)>) -> PyResult<()> {
+        self.conn.write_batch(&changes).map_err(map_err)
+    }
+
+    /// Begin an explicit transaction, balanced by `commit()` or `rollback()`.
+    fn begin(&self) -> PyResult<()> {
+        self.conn.begin().map_err(map_err)
+    }
+
+    /// Commit the open transaction.
+    fn commit(&self) -> PyResult<()> {
+        self.conn.commit().map_err(map_err)
+    }
+
+    /// Roll the open transaction back.
+    fn rollback(&self) -> PyResult<()> {
+        self.conn.rollback().map_err(map_err)
+    }
+
+    /// Create a named savepoint inside the open transaction.
+    fn savepoint(&self, name: &str) -> PyResult<()> {
+        self.conn.savepoint(name).map_err(map_err)
+    }
+
+    /// Roll back to a savepoint, discarding writes made after it.
+    fn rollback_to(&self, name: &str) -> PyResult<()> {
+        self.conn.rollback_to_savepoint(name).map_err(map_err)
+    }
+
+    /// Release a savepoint so it can no longer be rolled back to.
+    fn release(&self, name: &str) -> PyResult<()> {
+        self.conn.release_savepoint(name).map_err(map_err)
+    }
+
+    /// Run read-only consistency probes and return the report as JSON.
+    ///
+    /// The report only *finds* damage. This method does not repair a corrupt
+    /// page, a torn WAL frame or a missing object: recovery is open-time
+    /// truncation of an uncommitted WAL tail, and a data page that fails CRC32C
+    /// stays failed. Restore from a verified backup instead.
+    fn doctor(&self) -> PyResult<String> {
+        let report = self.conn.doctor().map_err(map_err)?;
+        serde_json::to_string(&report).map_err(|error| PyRuntimeError::new_err(error.to_string()))
+    }
+
+    /// Checkpoint, then copy a self-contained main file to `dest`.
+    fn backup(&self, dest: &str) -> PyResult<()> {
+        self.conn.backup_to(dest).map_err(map_err)
+    }
+
+    /// Fold the WAL and reclaim safe orphan objects (`.yydx` layouts only).
+    ///
+    /// Returns the compact report as JSON. A single-file `.yydb` handle returns
+    /// an error because it has no object tree to compact.
+    fn compact(&self) -> PyResult<String> {
+        self.compact_report()
+    }
+}
+
+fn open_default(path: &str) -> PyResult<PyConnection> {
+    PyConnection::open(path)
+}
+
+/// Write one record through a stateless handle.
+#[pyfunction]
+fn kv_put(db_path: String, key: String, value: &[u8]) -> PyResult<()> {
+    open_default(&db_path)?.put(&key, value)
+}
+
+/// Read one record, or `None` when the key is absent.
+#[pyfunction]
+fn kv_get(py: Python<'_>, db_path: String, key: String) -> PyResult<Option<Py<PyBytes>>> {
+    open_default(&db_path)?.get(py, &key)
+}
+
+/// Delete one record. Absent keys succeed silently.
+#[pyfunction]
+fn kv_delete(db_path: String, key: String) -> PyResult<()> {
+    open_default(&db_path)?.delete(&key)
+}
+
+/// Scan keys in lexical order with `prefix`, returning `(key, value)` pairs.
+#[pyfunction]
+#[pyo3(signature = (db_path, prefix, after = None, limit = 1000))]
+fn kv_scan(
+    py: Python<'_>,
+    db_path: String,
+    prefix: String,
+    after: Option<String>,
+    limit: usize,
+) -> PyResult<Vec<(String, Py<PyBytes>)>> {
+    open_default(&db_path)?.scan(py, &prefix, after.as_deref(), limit)
+}
+
+/// Atomically write or delete many records in one commit.
+#[pyfunction]
+fn kv_write_batch(db_path: String, changes: Vec<(String, Option<Vec<u8>>)>) -> PyResult<()> {
+    open_default(&db_path)?.write_batch(changes)
+}
+
+/// Read-only consistency report as JSON. Does not repair damaged pages.
+#[pyfunction]
+fn doctor_text(db_path: String) -> PyResult<String> {
+    open_default(&db_path)?.doctor()
+}
+
+/// Checkpoint, then copy a self-contained main file to `dest`.
+#[pyfunction]
+fn backup_db(db_path: String, dest: String) -> PyResult<()> {
+    open_default(&db_path)?.backup(&dest)
+}
+
+/// Fold the WAL and reclaim safe orphan objects (`.yydx` layouts only).
+#[pyfunction]
+fn compact_db(db_path: String) -> PyResult<String> {
+    open_default(&db_path)?.compact()
+}
+
+/// Open a verified backup copy (`.yydb` pages or `.yydx` object closure).
+#[pyfunction]
+fn restore(backup: String) -> PyResult<PyConnection> {
+    PyConnection::restore_handle(&backup)
+}
+
 fn summarize_document(document: &str) -> String {
     let trimmed = document.trim();
     if trimmed.is_empty() {
@@ -354,5 +628,15 @@ fn yydb_pyo3(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(put_file, m)?)?;
     m.add_function(wrap_pyfunction!(read_file_window, m)?)?;
     m.add_function(wrap_pyfunction!(read_file, m)?)?;
+    m.add_class::<PyConnection>()?;
+    m.add_function(wrap_pyfunction!(kv_put, m)?)?;
+    m.add_function(wrap_pyfunction!(kv_get, m)?)?;
+    m.add_function(wrap_pyfunction!(kv_delete, m)?)?;
+    m.add_function(wrap_pyfunction!(kv_scan, m)?)?;
+    m.add_function(wrap_pyfunction!(kv_write_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(doctor_text, m)?)?;
+    m.add_function(wrap_pyfunction!(backup_db, m)?)?;
+    m.add_function(wrap_pyfunction!(compact_db, m)?)?;
+    m.add_function(wrap_pyfunction!(restore, m)?)?;
     Ok(())
 }

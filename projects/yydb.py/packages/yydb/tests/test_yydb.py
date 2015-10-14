@@ -6,6 +6,7 @@ the pure import surface still runs everywhere.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import tempfile
@@ -21,7 +22,7 @@ except ImportError:  # running the suite from a source checkout
     sys.path.insert(0, str(PACKAGE_ROOT / "src"))
     import yydb
 
-from yydb import Database, YydbError
+from yydb import Connection, Database, YydbError, restore
 from yydb.errors import DATABASE_CLOSED, INVALID_ARGUMENT, NATIVE_ERROR
 
 SCHEMA = "table Project { @@id: uuid, title: utf8 }"
@@ -457,6 +458,126 @@ class NativeTest(unittest.TestCase):
                 self.assertEqual(len(rows), 1, "refused pipelines must not mutate rows")
             finally:
                 database.close()
+
+    def test_raw_records_crud_scan_and_batch(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-kv-") as directory:
+            path = Path(directory) / "kv.yydb"
+            database = Database.open(path)
+            try:
+                database.put("user:1", b"one")
+                database.put("user:2", b"two")
+                database.put("other:1", b"\x00\xff")
+                self.assertEqual(database.get("user:1"), b"one")
+                self.assertEqual(database.get("user:2"), b"two")
+                self.assertIsNone(database.get("missing"))
+
+                first_page = database.scan("user:", limit=1)
+                self.assertEqual(first_page, [("user:1", b"one")])
+                second_page = database.scan("user:", after="user:1", limit=10)
+                self.assertEqual(second_page, [("user:2", b"two")])
+
+                database.write_batch([("user:3", b"three"), ("user:2", None)])
+                self.assertEqual(database.get("user:3"), b"three")
+                self.assertIsNone(database.get("user:2"))
+
+                database.delete("user:1")
+                self.assertIsNone(database.get("user:1"))
+            finally:
+                database.close()
+
+    def test_connection_savepoints_roll_back_without_touching_earlier_writes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-sp-") as directory:
+            path = Path(directory) / "session.yydb"
+            connection = Connection.open(path)
+            try:
+                self.assertEqual(connection.journal_mode(), "wal")
+                self.assertIsInstance(connection.wal_path(), str)
+                connection.put("a", b"kept")
+                connection.begin()
+                connection.put("b", b"transient")
+                connection.savepoint("outer")
+                connection.put("c", b"discarded")
+                connection.savepoint("inner")
+                connection.put("d", b"also-discarded")
+                connection.rollback_to("outer")
+                self.assertIsNone(connection.get("c"))
+                self.assertIsNone(connection.get("d"))
+                self.assertEqual(connection.get("b"), b"transient")
+                connection.savepoint("probe")
+                connection.release("probe")
+                connection.commit()
+                self.assertEqual(connection.get("a"), b"kept")
+                self.assertEqual(connection.get("b"), b"transient")
+            finally:
+                connection.close()
+
+            reopened = Database.open(path)
+            try:
+                self.assertEqual(reopened.get("a"), b"kept")
+                self.assertEqual(reopened.get("b"), b"transient")
+                self.assertIsNone(reopened.get("c"))
+            finally:
+                reopened.close()
+
+    def test_rollback_discards_the_open_transaction(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-rb-") as directory:
+            path = Path(directory) / "rollback.yydb"
+            connection = Connection.open(path)
+            try:
+                connection.begin()
+                connection.put("gone", b"value")
+                connection.rollback()
+                self.assertIsNone(connection.get("gone"))
+                self.assertEqual(connection.record_count(), 0)
+            finally:
+                connection.close()
+
+    def test_backup_restore_and_doctor(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-backup-") as directory:
+            path = Path(directory) / "source.yydb"
+            backup_path = Path(directory) / "copy.yydb"
+            database = Database.open(path)
+            try:
+                database.put("one", b"1")
+                database.put("two", b"2")
+                database.backup(backup_path)
+                report = json.loads(database.doctor())
+                self.assertEqual(
+                    [issue for issue in report["issues"] if issue["severity"] == "error"],
+                    [],
+                    f"doctor must report no errors on a healthy file: {report}",
+                )
+                self.assertEqual(report["orphan_object_count"], 0)
+            finally:
+                database.close()
+
+            restored = restore(backup_path)
+            try:
+                self.assertEqual(restored.get("one"), b"1")
+                self.assertEqual(restored.get("two"), b"2")
+                self.assertEqual(restored.record_count(), 2)
+            finally:
+                restored.close()
+
+    def test_compact_is_refused_for_single_file_layouts(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-compact-") as directory:
+            path = Path(directory) / "plain.yydb"
+            database = Database.open(path)
+            try:
+                database.put("one", b"1")
+                with self.assertRaises(YydbError) as raised:
+                    database.compact()
+                self.assertEqual(raised.exception.code, NATIVE_ERROR)
+            finally:
+                database.close()
+
+    def test_closed_connection_refuses_record_operations(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-closed-") as directory:
+            connection = Connection.open(Path(directory) / "closed.yydb")
+            connection.close()
+            with self.assertRaises(YydbError) as raised:
+                connection.get("anything")
+            self.assertEqual(raised.exception.code, DATABASE_CLOSED)
 
 
 if __name__ == "__main__":

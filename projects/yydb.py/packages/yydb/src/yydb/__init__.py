@@ -1,9 +1,14 @@
 """Python bindings for the YYDB VOS database.
 
 The public surface stays thin on purpose: version lookup, an embedded
-database handle with one VOS read pipeline and one parameterized VOS write,
-and VOS schema file reads. SQL execution is not exposed here, the YYDB
-engine owns the VOS authoring surface.
+database handle with VOS read/write pipelines, raw record operations and a
+session handle for explicit transactions and savepoints. SQL execution is not
+exposed here, the YYDB engine owns the VOS authoring surface.
+
+Two handles exist for two lifetimes. :class:`Database` opens and drops a native
+connection per call, so it cannot span a transaction. :class:`Connection`
+keeps one native handle open, which is what `begin`, `savepoint`, `rollback_to`
+and `release` require.
 """
 
 from __future__ import annotations
@@ -20,11 +25,13 @@ from .errors import (
 )
 
 __all__ = [
+    "Connection",
     "Database",
     "YydbError",
     "is_native_available",
     "native_unavailable_reason",
     "read_schema_file",
+    "restore",
     "version",
 ]
 
@@ -88,6 +95,19 @@ def read_schema_file(schema_path: str | os.PathLike[str]) -> str:
     resolved = _resolve_path(schema_path, "schema_path")
     native = _require_native()
     return _call("read_schema_file", native.read_schema_file, resolved)
+
+
+def restore(backup_path: str | os.PathLike[str]) -> "Connection":
+    """Open a verified backup copy and return a session handle.
+
+    ``.yydb`` backups get every page CRC32C check, ``.yydx`` backups get the
+    object-tree closure and file digest check. Restoring opens the copy in
+    place, it does not overwrite a live database: copy the result to the
+    destination yourself, then open that path.
+    """
+    resolved = _resolve_path(backup_path, "backup_path")
+    native = _require_native()
+    return Connection(_call("restore", native.restore, resolved))
 
 
 class Database:
@@ -228,6 +248,89 @@ class Database:
         native = _require_native()
         return _call("read_file_window", native.read_file_window, self._path, descriptor, offset, length)
 
+    def put(self, key: str, value: bytes) -> None:
+        """Write one record on the raw record tree."""
+        self._ensure_open()
+        if not isinstance(key, str) or not key:
+            raise YydbError(INVALID_ARGUMENT, "key must be a non-empty str")
+        if not isinstance(value, (bytes, bytearray, memoryview)):
+            raise YydbError(INVALID_ARGUMENT, "value must be bytes-like")
+        native = _require_native()
+        _call("put", native.kv_put, self._path, key, bytes(value))
+
+    def get(self, key: str) -> bytes | None:
+        """Read one record, or ``None`` when the key is absent."""
+        self._ensure_open()
+        if not isinstance(key, str) or not key:
+            raise YydbError(INVALID_ARGUMENT, "key must be a non-empty str")
+        native = _require_native()
+        return _call("get", native.kv_get, self._path, key)
+
+    def delete(self, key: str) -> None:
+        """Delete one record. Absent keys succeed silently."""
+        self._ensure_open()
+        if not isinstance(key, str) or not key:
+            raise YydbError(INVALID_ARGUMENT, "key must be a non-empty str")
+        native = _require_native()
+        _call("delete", native.kv_delete, self._path, key)
+
+    def scan(
+        self,
+        prefix: str = "",
+        after: str | None = None,
+        limit: int = 1000,
+    ) -> list[tuple[str, bytes]]:
+        """Scan records in lexical key order.
+
+        ``after`` is an exclusive continuation cursor: pass the last key of the
+        previous page to continue. An empty ``prefix`` scans every key.
+        """
+        self._ensure_open()
+        if not isinstance(prefix, str):
+            raise YydbError(INVALID_ARGUMENT, "prefix must be a str")
+        if after is not None and not isinstance(after, str):
+            raise YydbError(INVALID_ARGUMENT, "after must be a str or None")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise YydbError(INVALID_ARGUMENT, "limit must be a positive int")
+        native = _require_native()
+        return _call("scan", native.kv_scan, self._path, prefix, after, limit)
+
+    def write_batch(self, changes: list[tuple[str, bytes | None]]) -> None:
+        """Write or delete many records in one commit.
+
+        Each entry is ``(key, value)``, and ``value=None`` deletes the key.
+        """
+        self._ensure_open()
+        native = _require_native()
+        _call("write_batch", native.kv_write_batch, self._path, _changes(changes))
+
+    def doctor(self) -> str:
+        """Run read-only consistency probes and return the report as JSON.
+
+        This reports damage, it never repairs it. A data page that fails CRC32C
+        stays failed, use :meth:`backup` artifacts and ``restore()`` instead.
+        """
+        self._ensure_open()
+        native = _require_native()
+        return _call("doctor", native.doctor_text, self._path)
+
+    def backup(self, dest: str | os.PathLike[str]) -> None:
+        """Checkpoint, then copy a self-contained main file to ``dest``."""
+        self._ensure_open()
+        resolved = _resolve_path(dest, "dest")
+        native = _require_native()
+        _call("backup", native.backup_db, self._path, resolved)
+
+    def compact(self) -> str:
+        """Fold the WAL and reclaim safe orphan objects, returning JSON.
+
+        Applies to ``.yydx`` layouts. A single-file ``.yydb`` handle raises a
+        native error because it has no object tree to compact.
+        """
+        self._ensure_open()
+        native = _require_native()
+        return _call("compact", native.compact_db, self._path)
+
     def info(self) -> str:
         """Return multi-line database diagnostics."""
         self._ensure_open()
@@ -244,3 +347,180 @@ class Database:
 
     def __repr__(self) -> str:
         return f"Database(path={self._path!r}, closed={self._closed})"
+
+
+def _changes(changes: list[tuple[str, bytes | None]]) -> list[tuple[str, bytes | None]]:
+    if not isinstance(changes, list) or not changes:
+        raise YydbError(INVALID_ARGUMENT, "changes must be a non-empty list")
+    prepared: list[tuple[str, bytes | None]] = []
+    for change in changes:
+        if not isinstance(change, tuple) or len(change) != 2:
+            raise YydbError(INVALID_ARGUMENT, "each change must be a (key, value) tuple")
+        key, value = change
+        if not isinstance(key, str) or not key:
+            raise YydbError(INVALID_ARGUMENT, "change keys must be non-empty str")
+        if value is None:
+            prepared.append((key, None))
+            continue
+        if not isinstance(value, (bytes, bytearray, memoryview)):
+            raise YydbError(INVALID_ARGUMENT, "change values must be bytes-like or None")
+        prepared.append((key, bytes(value)))
+    return prepared
+
+
+class Connection:
+    """One native handle that stays open across calls.
+
+    The stateless :class:`Database` handle serves single-call operations. A
+    transaction, a savepoint or a rollback spans several calls and therefore
+    needs this handle. Instances are not thread-safe, matching the underlying
+    writer handle.
+
+    ``wal_path()`` and ``shm_path()`` return *reserved* companion paths, not
+    evidence of existing files: the sidecar appears only in WAL mode after a
+    commit appended frames. Use :meth:`journal_mode` and
+    :meth:`wal_frame_count` for durability state instead of testing paths.
+    """
+
+    def __init__(self, handle: Any) -> None:
+        self._handle = handle
+        self._closed = False
+
+    @classmethod
+    def open(cls, path: str | os.PathLike[str], *, wal: bool = True) -> "Connection":
+        """Open ``path``; ``wal=False`` selects the delete journal."""
+        resolved = _resolve_path(path, "path")
+        native = _require_native()
+        return cls(_call("open", native.Connection, resolved, wal))
+
+    @classmethod
+    def open_yydx(cls, path: str | os.PathLike[str]) -> "Connection":
+        """Open a ``.yydx`` database with its sibling object tree."""
+        resolved = _resolve_path(path, "path")
+        native = _require_native()
+        return cls(_call("open_yydx", native.Connection.open_yydx, resolved))
+
+    @classmethod
+    def open_in_memory(cls) -> "Connection":
+        """Open an in-memory database."""
+        native = _require_native()
+        return cls(_call("open_in_memory", native.Connection.open_in_memory))
+
+    def close(self) -> None:
+        """Close the handle and release its writer lock. Repeated calls are no-ops."""
+        if not self._closed:
+            self._handle.close()
+            # Dropping the native object releases the writer lock, `close()` alone
+            # only marks the handle closed inside the engine.
+            self._handle = None
+            self._closed = True
+
+    def is_closed(self) -> bool:
+        """Whether this handle has been closed."""
+        return self._closed or self._handle.is_closed()
+
+    def path(self) -> str | None:
+        """Main database path, or ``None`` for an in-memory handle."""
+        return self._native_call("path", "path")
+
+    def wal_path(self) -> str | None:
+        """Reserved ``-wal`` path; the sidecar is not guaranteed to exist."""
+        return self._native_call("wal_path", "wal_path")
+
+    def shm_path(self) -> str | None:
+        """Reserved ``-shm`` path; the sidecar is not guaranteed to exist."""
+        return self._native_call("shm_path", "shm_path")
+
+    def journal_mode(self) -> str:
+        """Active journal mode, ``delete`` or ``wal``."""
+        return self._native_call("journal_mode", "journal_mode")
+
+    def wal_frame_count(self) -> int:
+        """Frames currently present in the WAL sidecar."""
+        return self._native_call("wal_frame_count", "wal_frame_count")
+
+    def checkpoint(self) -> None:
+        """Fold the WAL into the main file."""
+        self._native_call("checkpoint", "checkpoint")
+
+    def schema_version(self) -> int | None:
+        """Published schema revision, ``None`` before the first schema."""
+        return self._native_call("schema_version", "schema_version")
+
+    def record_count(self) -> int:
+        """Number of committed records."""
+        return self._native_call("record_count", "record_count")
+
+    def get(self, key: str) -> bytes | None:
+        """Read one record, or ``None`` when the key is absent."""
+        return self._native_call("get", "get", key)
+
+    def put(self, key: str, value: bytes) -> None:
+        """Write one record."""
+        if not isinstance(value, (bytes, bytearray, memoryview)):
+            raise YydbError(INVALID_ARGUMENT, "value must be bytes-like")
+        self._native_call("put", "put", key, bytes(value))
+
+    def delete(self, key: str) -> None:
+        """Delete one record. Absent keys succeed silently."""
+        self._native_call("delete", "delete", key)
+
+    def scan(
+        self,
+        prefix: str = "",
+        after: str | None = None,
+        limit: int = 1000,
+    ) -> list[tuple[str, bytes]]:
+        """Scan records in lexical key order, ``after`` is exclusive."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise YydbError(INVALID_ARGUMENT, "limit must be a positive int")
+        return self._native_call("scan", "scan", prefix, after, limit)
+
+    def write_batch(self, changes: list[tuple[str, bytes | None]]) -> None:
+        """Write or delete many records in one commit."""
+        self._native_call("write_batch", "write_batch", _changes(changes))
+
+    def begin(self) -> None:
+        """Begin an explicit transaction."""
+        self._native_call("begin", "begin")
+
+    def commit(self) -> None:
+        """Commit the open transaction."""
+        self._native_call("commit", "commit")
+
+    def rollback(self) -> None:
+        """Roll the open transaction back."""
+        self._native_call("rollback", "rollback")
+
+    def savepoint(self, name: str) -> None:
+        """Create a named savepoint inside the open transaction."""
+        self._native_call("savepoint", "savepoint", name)
+
+    def rollback_to(self, name: str) -> None:
+        """Roll back to a savepoint, discarding writes made after it."""
+        self._native_call("rollback_to", "rollback_to", name)
+
+    def release(self, name: str) -> None:
+        """Release a savepoint so it can no longer be rolled back to."""
+        self._native_call("release", "release", name)
+
+    def doctor(self) -> str:
+        """Read-only consistency report as JSON. Does not repair damage."""
+        return self._native_call("doctor", "doctor")
+
+    def backup(self, dest: str | os.PathLike[str]) -> None:
+        """Checkpoint, then copy a self-contained main file to ``dest``."""
+        resolved = _resolve_path(dest, "dest")
+        self._native_call("backup", "backup", resolved)
+
+    def compact(self) -> str:
+        """Fold the WAL and reclaim safe orphan objects (``.yydx`` only)."""
+        return self._native_call("compact", "compact")
+
+    def _native_call(self, operation: str, name: str, *args: Any) -> Any:
+        if self.is_closed():
+            raise YydbError(DATABASE_CLOSED, "connection is closed")
+        return _call(operation, getattr(self._handle, name), *args)
+
+    def __repr__(self) -> str:
+        return f"Connection(path={self.path()!r}, closed={self.is_closed()})"
