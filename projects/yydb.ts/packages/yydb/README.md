@@ -17,7 +17,7 @@ For a wire client only (renderer or an app that already runs `yydb serve`), use
 | Import | Runtime | Role |
 |--------|---------|------|
 | `@yydb/yydb` | Node | `Database.open`, micro helpers, VOS re-exports |
-| `@yydb/yydb/cli` | Node | CLI (`version`, `init`, `info`, `verify`, `serve`) |
+| `@yydb/yydb/cli` | Node | CLI (`version`, `init`, `info`, `verify`, `restore`, `import`, `export`, `serve`) |
 
 Node.js 18+.
 
@@ -88,6 +88,25 @@ Missing, extra, or mistyped parameters raise `YydbError` with code `yydb.query.b
 The native binding exposes additive operations (`schemaVersion`, `schemaDocument`, `recordCount`, `journalMode`,
 `checkpoint`, `walFrameCount`, `get`, `put`); the CLI composes commands from them.
 
+### Restore
+
+`Database.restore(backupPath)` opens a backup copy after verification: `.yydb` page CRCs are checked, `.yydx` object
+closure is checked. A failed check refuses to open instead of returning a damaged handle. `yydb restore <backup>
+--target <path>` verifies first and then copies the file to the target.
+
+## Limits
+
+- `walPath()` reports the sidecar path and may return `null`. It does not guarantee the file exists: the WAL may not
+  be created yet, may already be folded, or may be unused. Do not treat its presence as a commit signal — use
+  `journalMode()` / `walFrameCount()`, or `checkpoint()` first.
+- `doctor()` is read-only. It never repairs a damaged page, rewrites the WAL or reclaims orphans. Damaged pages must be
+  restored from a verified backup or the file rebuilt. Orphan reclamation is `compact()` on `.yydx` only.
+- `yydb import` and `yydb export` are explicit ETL, not a SQLite compatibility layer. The declared subset is exactly
+  `records(key TEXT PRIMARY KEY, value BLOB NOT NULL)`. Import refuses other column shapes, non-`TEXT` keys, non-`BLOB`
+  values and keys in the reserved `__yydb/` namespace. Export skips reserved keys.
+- The full code catalog is the guide page `guide/10-errors.md`. Engine codes are minted only by the Rust
+  `yydb-types` crate; the TypeScript host adds `yydb.client.*` and `yydb.statement.closed`.
+
 ## Related packages
 
 | Need | Package |
@@ -101,6 +120,6 @@ The native binding exposes additive operations (`schemaVersion`, `schemaDocument
 Electron: main process can use `@yydb/yydb`; renderer code can use `@yydb/yydb-client` against the main-process
 endpoint.
 
-The managed engine listens on `127.0.0.1` with no authentication �?keep the endpoint private.
+The managed engine listens on `127.0.0.1` with no authentication ā€?keep the endpoint private.
 
-[YYDB overview](https://github.com/yy-database/yydb) · [User guides](https://github.com/yy-database/yydb/tree/dev/projects/yydb.ts/homepage/documentation/zh-hans)
+[YYDB overview](https://github.com/yy-database/yydb) Ā· [User guides](https://github.com/yy-database/yydb/tree/dev/projects/yydb.ts/homepage/documentation/zh-hans)
