@@ -129,7 +129,11 @@ export interface NativeClient {
 export interface YydbNative {
     version(): string;
     serve(dbPath: string, bind: string, insecureBind?: boolean): void;
-    Database: { open(dbPath: string): NativeDatabase };
+    Database: {
+        open(dbPath: string): NativeDatabase;
+        /** Open a verified backup copy (`.yydb` page CRCs or `.yydx` object closure). */
+        restore(backupPath: string): NativeDatabase;
+    };
     Client: { connect(endpoint: string): NativeClient };
 }
 

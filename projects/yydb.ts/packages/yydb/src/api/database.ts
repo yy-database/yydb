@@ -480,6 +480,23 @@ export class Database {
         return new Database(resolved, db);
     }
 
+    /**
+     * Open a verified backup copy.
+     *
+     * `.yydb` backups get every page CRC32C check, `.yydx` backups get the
+     * object-tree closure and file digest check. The backup is opened in place:
+     * this factory never overwrites a live database. Copy the backup to its
+     * destination first, then open that path.
+     */
+    static async restore(backupPath: string): Promise<Database> {
+        const resolved = path.resolve(backupPath);
+        if (!fs.existsSync(resolved)) {
+            throw new Error(`backup not found: ${resolved}`);
+        }
+        const db = loadNative().Database.restore(resolved);
+        return new Database(resolved, db);
+    }
+
     /** Engine version string (same as `yydb --version`). */
     serverVersion(): string {
         return loadNative().version();

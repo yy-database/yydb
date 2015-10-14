@@ -207,6 +207,25 @@ impl Database {
         Ok(Self { connection: Mutex::new(Some(Arc::new(connection))), host_adapter })
     }
 
+    /// Open a verified backup copy: `.yydb` checks every page, `.yydx` checks
+    /// the object tree closure and file digests.
+    ///
+    /// The backup opens in place, this factory does not overwrite a live
+    /// database. Copy the backup to its destination, then open that path.
+    #[napi(factory)]
+    pub fn restore(backup: String) -> Result<Self> {
+        let connection = if backup.ends_with(".yydx") {
+            yydb::Connection::restore_yydx(&backup).map_err(reason)?
+        }
+        else {
+            yydb::Connection::restore_yydb(&backup).map_err(reason)?
+        };
+        let host_adapter = Arc::new(NapiHostAdapter::new());
+        let adapter: Arc<dyn yydb::HostRuntimeAdapter> = host_adapter.clone();
+        connection.set_host_adapter(adapter);
+        Ok(Self { connection: Mutex::new(Some(Arc::new(connection))), host_adapter })
+    }
+
     /// Release the file handle and its writer lock.
     ///
     /// Returns `true` when this call released the handle. Later calls on the
