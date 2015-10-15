@@ -56,3 +56,8 @@ projects/yydb.ts/packages/light-db/temp/
 
 # Nifty change-logs draft index (local only — regenerate with `nifty change-logs --version X.Y.Z --write`)
 changelog/releases/*.reference.md
+
+# Local bench artifacts
+.bench-*/
+.bench-*.json
+*.pdb
