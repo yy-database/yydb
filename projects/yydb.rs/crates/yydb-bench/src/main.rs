@@ -6,12 +6,13 @@
 
 use std::{io::Write, path::PathBuf};
 
-use yydb_bench::{Baseline, BenchConfig, run};
+use yydb_bench::{Baseline, BenchConfig, run, profile};
 
 fn main() {
     let mut config = BenchConfig::default();
     let mut dir = std::env::temp_dir().join("yydb-bench");
     let mut baseline_out: Option<PathBuf> = None;
+    let mut profile_only = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
@@ -32,8 +33,18 @@ fn main() {
             "--baseline-out" => {
                 baseline_out = Some(PathBuf::from(args.next().unwrap_or_else(|| panic!("--baseline-out expects a path"))))
             }
+            "--profile" => profile_only = true,
             other => panic!("unknown argument `{other}`"),
         }
+    }
+
+    if profile_only {
+        let report = profile(&dir, &config).unwrap_or_else(|error| {
+            eprintln!("profile failed: {error}");
+            std::process::exit(1);
+        });
+        print_profile(&report);
+        return;
     }
 
     let baseline = run(&dir, &config).unwrap_or_else(|error| {
@@ -129,4 +140,76 @@ fn print_report(baseline: &Baseline) {
 fn row(label: &str, yydb: u128, sqlite: u128) {
     let ratio = yydb as f64 / sqlite.max(1) as f64;
     println!("{label:<24} {yydb:>14} {sqlite:>14} {ratio:>9.2}x");
+}
+
+fn print_profile(report: &yydb_bench::ProfileReport) {
+    println!(
+        "yydb profile · rows={} · range-len={} · calls={}",
+        report.rows, report.range_len, report.calls
+    );
+    println!(
+        "{:<20} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>6}",
+        "shape (µs/call)", "total", "bind", "metadata", "drift", "plan", "window", "exec", "rows"
+    );
+    stage("empty window", &report.empty_window);
+    stage("one row", &report.one_row);
+    stage("range window", &report.range_window);
+    stage("window no sort", &report.window_no_sort);
+    stage("point get", &report.point_get);
+    println!(
+        "per-row: window {:>7.1} ns · exec {:>7.1} ns",
+        per_row(report.range_window.window_read_ns, report.one_row.window_read_ns, report.range_window.rows),
+        per_row(report.range_window.exec_ns, report.one_row.exec_ns, report.range_window.rows),
+    );
+    println!(
+        "{:<20} {:>10} {:>10} {:>10} {:>10} {:>10}",
+        "exec split (µs/call)", "exec", "scan", "filter", "project", "sort"
+    );
+    exec_split("range window", &report.range_window);
+    exec_split("one row", &report.one_row);
+    exec_split("point get", &report.point_get);
+    println!(
+        "prepare_sql {:>8} ns/call · unprepared point {:>8} ns/call",
+        report.prepare_ns, report.unprepared_point_ns
+    );
+    println!(
+        "insert in txn {:>8} ns/row · insert prepare {:>8} ns · commit {:>8} ns",
+        report.insert_row_ns, report.insert_prepare_ns, report.commit_per_batch_ns
+    );
+    println!("Raw numbers only: timers are taken on the profiling path alone.");
+}
+
+fn per_row(range_ns: u128, baseline_ns: u128, rows: usize) -> f64 {
+    let extra_rows = rows.saturating_sub(1);
+    if extra_rows == 0 {
+        return 0.0;
+    }
+    range_ns.saturating_sub(baseline_ns) as f64 / extra_rows as f64
+}
+
+fn exec_split(label: &str, report: &yydb_bench::StageReport) {
+    println!(
+        "{:<20} {:>10.2} {:>10.2} {:>10.2} {:>10.2} {:>10.2}",
+        label,
+        report.exec_ns as f64 / 1000.0,
+        report.scan_ns as f64 / 1000.0,
+        report.filter_ns as f64 / 1000.0,
+        report.project_ns as f64 / 1000.0,
+        report.sort_ns as f64 / 1000.0,
+    );
+}
+
+fn stage(label: &str, report: &yydb_bench::StageReport) {
+    println!(
+        "{:<20} {:>10.2} {:>10.2} {:>10.2} {:>10.2} {:>10.2} {:>10.2} {:>10.2} {:>6}",
+        label,
+        report.total_ns as f64 / 1000.0,
+        report.bind_ns as f64 / 1000.0,
+        report.metadata_ns as f64 / 1000.0,
+        report.drift_ns as f64 / 1000.0,
+        report.plan_ns as f64 / 1000.0,
+        report.window_read_ns as f64 / 1000.0,
+        report.exec_ns as f64 / 1000.0,
+        report.rows
+    );
 }

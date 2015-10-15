@@ -3,7 +3,11 @@
 //! Two frontends reach the same executor: VOS (`prepare_vos`, `query_vos`,
 //! `execute_vos_write`) and SQL (`prepare_sql`, `query_sql`, `execute_sql_write`).
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::Arc,
+    time::Instant,
+};
 
 use crate::{
     Error, Result,
@@ -113,22 +117,65 @@ impl Connection {
         self.run_prepared_read(stmt, &values)
     }
 
+    /// Same execution as [`Self::query_prepared_ordered`], with per-stage
+    /// timings written into `profile`.
+    ///
+    /// Diagnostics only: the engine itself never reads these numbers. Timers
+    /// are taken only on this path, so ordinary reads pay nothing for it.
+    pub fn query_prepared_ordered_profiled(
+        &self,
+        stmt: &PreparedStatement,
+        values: &[Value],
+        profile: &mut ReadProfile,
+    ) -> Result<Vec<QueryRow>> {
+        let started = Instant::now();
+        let values = yydb_query::bind_ordered(stmt, values)?;
+        profile.bind_ns += started.elapsed().as_nanos();
+        self.run_prepared_read_profiled(stmt, &values, Some(profile))
+    }
+
     fn run_prepared_read(&self, stmt: &PreparedStatement, values: &[Value]) -> Result<Vec<QueryRow>> {
+        self.run_prepared_read_profiled(stmt, values, None)
+    }
+
+    fn run_prepared_read_profiled(
+        &self,
+        stmt: &PreparedStatement,
+        values: &[Value],
+        mut profile: Option<&mut ReadProfile>,
+    ) -> Result<Vec<QueryRow>> {
         self.guard_session_alive()?;
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         // A transaction already owns one full snapshot, so narrowing here
         // would read less than the snapshot the caller expects.
         if self.has_open_transaction() {
             let state = self.active_state_unlocked()?;
+            let started = Instant::now();
             self.check_schema_drift(stmt, &state)?;
-            return self.execute_with(stmt, values, resolved_contract(&state)?, &state.records);
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.drift_ns += started.elapsed().as_nanos();
+            }
+            return self.execute_with_profiled(stmt, values, resolved_contract(&state)?, &state.records, profile);
         }
 
         // Phase one: metadata only. The decoded contract is what lets the
         // query layer prove which record-key window one statement can reach.
+        let started = Instant::now();
         let metadata = self.read_state_metadata()?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.metadata_ns += started.elapsed().as_nanos();
+        }
+        let started = Instant::now();
         self.check_schema_drift(stmt, &metadata)?;
-        let Some(window) = yydb_query::read_window(&stmt.ops, resolved_contract(&metadata)?, values)?
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.drift_ns += started.elapsed().as_nanos();
+        }
+        let started = Instant::now();
+        let window = yydb_query::read_window(&stmt.ops, resolved_contract(&metadata)?, values)?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.plan_ns += started.elapsed().as_nanos();
+        }
+        let Some(window) = window
         else {
             let state = self.read_state()?;
             self.check_schema_drift(stmt, &state)?;
@@ -137,7 +184,7 @@ impl Connection {
 
         // Memory-backed connections already hold every row.
         if matches!(self.backend.as_ref(), Backend::Memory { .. }) {
-            return self.execute_with(stmt, values, resolved_contract(&metadata)?, &metadata.records);
+            return self.execute_with_profiled(stmt, values, resolved_contract(&metadata)?, &metadata.records, profile);
         }
 
         // The window was derived from this metadata, so its schema basis must
@@ -145,7 +192,11 @@ impl Connection {
         // consumed by the window merge.
         let basis = schema_basis(&metadata);
         // Phase two: metadata plus the window, read as one pager transaction.
+        let started = Instant::now();
         let state = self.read_state_window_with_metadata(&window, metadata)?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.window_read_ns += started.elapsed().as_nanos();
+        }
         if schema_basis(&state) != basis {
             // The durable schema moved between the two reads, so the window
             // was derived from a contract that no longer describes the data.
@@ -154,7 +205,7 @@ impl Connection {
             self.check_schema_drift(stmt, &state)?;
             return self.execute_with(stmt, values, resolved_contract(&state)?, &state.records);
         }
-        self.execute_with(stmt, values, resolved_contract(&state)?, &state.records)
+        self.execute_with_profiled(stmt, values, resolved_contract(&state)?, &state.records, profile)
     }
 
     fn execute_with(
@@ -167,6 +218,32 @@ impl Connection {
         yydb_query::with_object_resolver(Some(self.object_resolver()), || {
             yydb_query::execute_prepared(stmt, values, Some(contract), records)
         })
+    }
+
+    fn execute_with_profiled(
+        &self,
+        stmt: &PreparedStatement,
+        values: &[Value],
+        contract: &vos::ResolvedContract,
+        records: &BTreeMap<String, Vec<u8>>,
+        profile: Option<&mut ReadProfile>,
+    ) -> Result<Vec<QueryRow>> {
+        let Some(profile) = profile
+        else {
+            return self.execute_with(stmt, values, contract, records);
+        };
+        let started = Instant::now();
+        let (rows, exec) = yydb_query::with_object_resolver(Some(self.object_resolver()), || {
+            yydb_query::execute_prepared_profiled(stmt, values, Some(contract), records)
+        })?;
+        profile.exec_ns += started.elapsed().as_nanos();
+        profile.scanned_rows += rows.len();
+        profile.scan_ns += exec.scan_ns;
+        profile.filter_ns += exec.filter_ns;
+        profile.project_ns += exec.project_ns;
+        profile.sort_ns += exec.sort_ns;
+        profile.exec_other_ns += exec.other_ns;
+        Ok(rows)
     }
 
     fn check_schema_drift(&self, stmt: &PreparedStatement, state: &super::State) -> Result<()> {
@@ -361,6 +438,46 @@ impl Connection {
             },
         )?;
         Ok(affected)
+    }
+}
+
+/// Per-stage timings of one prepared read.
+///
+/// Filled only by [`Connection::query_prepared_ordered_profiled`]; ordinary
+/// reads never take timers. Values accumulate across calls, so a caller that
+/// runs the same statement many times can divide by the call count.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ReadProfile {
+    /// Parameter binding and slot validation.
+    pub bind_ns: u128,
+    /// Reading reserved metadata and decoding the stored schema and contract.
+    pub metadata_ns: u128,
+    /// Schema drift check, including the schema document fingerprint.
+    pub drift_ns: u128,
+    /// Window planning: which record keys one statement can reach.
+    pub plan_ns: u128,
+    /// Pager read of the planned window plus its row decode into the record map.
+    pub window_read_ns: u128,
+    /// Whole-row plan execution: table decode, filters, projection, sorting.
+    pub exec_ns: u128,
+    /// Table scan inside [`Self::exec_ns`]: record-map walk and row decode.
+    pub scan_ns: u128,
+    /// Row filtering inside [`Self::exec_ns`].
+    pub filter_ns: u128,
+    /// Projection rebuild inside [`Self::exec_ns`].
+    pub project_ns: u128,
+    /// Ordering inside [`Self::exec_ns`].
+    pub sort_ns: u128,
+    /// Joins, set operations, aggregates and windows inside [`Self::exec_ns`].
+    pub exec_other_ns: u128,
+    /// Rows the executor emitted, summed across calls.
+    pub scanned_rows: usize,
+}
+
+impl ReadProfile {
+    /// Sum of every recorded stage.
+    pub fn total_ns(&self) -> u128 {
+        self.bind_ns + self.metadata_ns + self.drift_ns + self.plan_ns + self.window_read_ns + self.exec_ns
     }
 }
 

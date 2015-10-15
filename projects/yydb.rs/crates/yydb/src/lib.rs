@@ -75,7 +75,7 @@ pub mod catalog {
 
 /// Durable connection handle and statement surface.
 pub mod connection {
-    pub use yydb_engine::connection::Connection;
+    pub use yydb_engine::connection::{Connection, ReadProfile};
 }
 
 /// Private SQL bridge — not part of the `@yydb/yydb` public author surface.

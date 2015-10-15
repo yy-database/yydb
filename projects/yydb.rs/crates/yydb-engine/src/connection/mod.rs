@@ -31,6 +31,8 @@ mod state;
 mod transaction;
 mod udf;
 
+pub use query::ReadProfile;
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct State {
     pub(crate) schema: Option<SchemaVersion>,

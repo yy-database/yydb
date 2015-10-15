@@ -343,6 +343,18 @@ pub fn execute_prepared(
     exec::execute_ops(&stmt.ops, contract, records, values)
 }
 
+/// Execute a prepared-and-bound statement, also reporting per-operator timings.
+///
+/// Diagnostics only: the engine never reads the profile.
+pub fn execute_prepared_profiled(
+    stmt: &PreparedStatement,
+    values: &[Value],
+    contract: Option<&vos::types::ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+) -> Result<(Vec<QueryRow>, exec::ExecProfile)> {
+    exec::execute_ops_profiled(&stmt.ops, contract, records, values)
+}
+
 /// Execute a prepared-and-bound write statement against stored rows.
 ///
 /// Returns [`Error::Unsupported`] for read statements so callers cannot

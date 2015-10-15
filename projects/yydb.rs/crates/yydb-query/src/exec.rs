@@ -3,6 +3,7 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap},
+    time::Instant,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -26,7 +27,36 @@ use super::{
 // `NOW`, `CURRENT_TIMESTAMP`, `CURRENT_DATE`, and `CURRENT_TIME` freeze to this
 // instant so repeated calls within the same query yield the same value.
 thread_local! {
-    static QUERY_START_CLOCK: RefCell<Option<Timestamp>> = RefCell::new(None);
+    static QUERY_START_CLOCK: RefCell<Option<Timestamp>> = const { RefCell::new(None) };
+    /// Operator timings of the pipeline currently running, installed only by
+    /// [`execute_ops_profiled`]. Ordinary pipelines leave it `None` and take no
+    /// timers.
+    static EXEC_PROFILE: RefCell<Option<ExecProfile>> = const { RefCell::new(None) };
+}
+
+/// Where one read pipeline spends its time, accumulated across operators.
+///
+/// Filled only by [`execute_ops_profiled`]; the engine never reads these
+/// numbers.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ExecProfile {
+    /// Table scan: record-map range walk plus row-record decode into [`QueryRow`].
+    pub scan_ns: u128,
+    /// Row filtering, including predicate evaluation per row.
+    pub filter_ns: u128,
+    /// Projection rebuild when the output columns differ from the scanned ones.
+    pub project_ns: u128,
+    /// Ordering, including the sort-key comparisons.
+    pub sort_ns: u128,
+    /// Joins, set operations, aggregates, windows, qualification, skip and take.
+    pub other_ns: u128,
+}
+
+impl ExecProfile {
+    /// Sum of every recorded operator.
+    pub fn total_ns(&self) -> u128 {
+        self.scan_ns + self.filter_ns + self.project_ns + self.sort_ns + self.other_ns
+    }
 }
 
 /// Wall-clock microseconds since UNIX epoch.
@@ -115,6 +145,41 @@ pub fn execute_ops(
     execute_ops_in(ops, contract, records, bound_values, None)
 }
 
+/// Same execution as [`execute_ops`], also reporting per-operator timings.
+///
+/// Diagnostics only: the pipeline itself never reads the profile, and a
+/// non-profiled execution takes no timers.
+pub fn execute_ops_profiled(
+    ops: &[QueryOp],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<(Vec<QueryRow>, ExecProfile)> {
+    EXEC_PROFILE.with(|slot| *slot.borrow_mut() = Some(ExecProfile::default()));
+    let rows = execute_ops_in(ops, contract, records, bound_values, None);
+    let profile = EXEC_PROFILE.with(|slot| slot.borrow_mut().take()).unwrap_or_default();
+    rows.map(|rows| (rows, profile))
+}
+
+/// Operator bucket one elapsed time belongs in.
+fn profile_slot(op: &QueryOp) -> fn(&mut ExecProfile) -> &mut u128 {
+    match op {
+        QueryOp::Scan { .. } => |profile: &mut ExecProfile| &mut profile.scan_ns,
+        QueryOp::Filter { .. } => |profile: &mut ExecProfile| &mut profile.filter_ns,
+        QueryOp::Project { .. } => |profile: &mut ExecProfile| &mut profile.project_ns,
+        QueryOp::Sort { .. } => |profile: &mut ExecProfile| &mut profile.sort_ns,
+        _ => |profile: &mut ExecProfile| &mut profile.other_ns,
+    }
+}
+
+fn note_profile(op: &QueryOp, elapsed: u128) {
+    EXEC_PROFILE.with(|slot| {
+        if let Some(profile) = slot.borrow_mut().as_mut() {
+            *profile_slot(op)(profile) += elapsed;
+        }
+    });
+}
+
 /// Execute a pipeline on behalf of `outer`, the row of the statement that
 /// encloses it.
 ///
@@ -148,7 +213,11 @@ fn execute_ops_in(
 
     let mut rows: Vec<QueryRow> = Vec::new();
     let mut current_table: Option<String> = None;
+    // Checked once per pipeline: an ordinary execution then pays nothing per
+    // operator beyond a predictable branch.
+    let profiling = EXEC_PROFILE.with(|slot| slot.borrow().is_some());
     for op in ops {
+        let started = profiling.then(Instant::now);
         match op {
             QueryOp::Scan { table } => {
                 let storage_table = match contract {
@@ -324,6 +393,9 @@ fn execute_ops_in(
                 }
             }
             QueryOp::Collect => {}
+        }
+        if let Some(started) = started {
+            note_profile(op, started.elapsed().as_nanos());
         }
     }
     Ok(rows)

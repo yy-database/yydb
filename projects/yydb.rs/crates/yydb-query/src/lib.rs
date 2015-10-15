@@ -34,6 +34,7 @@ use vos::types::ResolvedContract;
 use yydb_types::{TableUniqueConstraint, Value};
 
 pub use catalog::{resolved_contract_from_document, validate_contract_types};
+pub use exec::{ExecProfile, execute_ops_profiled};
 pub use ops::{
     AggregateField, BoundValue, CmpOp, ConflictAction, ConflictClause, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp,
     QueryRow, ReturningProjection, SessionOp, SetOpKind, SlotTy, SortKey, WindowField, WindowFrame, WindowFrameBound,
@@ -44,7 +45,7 @@ pub use params::{
     execute_prepared, execute_write_prepared, fingerprint, prepare,
 };
 #[doc(hidden)]
-pub use params::{Dialect, prepare_sql};
+pub use params::{Dialect, execute_prepared_profiled, prepare_sql};
 pub use result::{ColumnMeta, EncodedResult, ResultCell, ResultFormat, encode_result};
 #[doc(hidden)]
 pub use sql::SqlPlan;

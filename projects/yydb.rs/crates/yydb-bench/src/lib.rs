@@ -536,3 +536,270 @@ fn sqlite_range_pass(conn: &rusqlite::Connection, cfg: &BenchConfig) -> Result<u
     }
     Ok(started.elapsed().as_nanos() / scanned.max(1) as u128)
 }
+
+/// Stage timings of one read shape, averaged over its calls.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct StageReport {
+    /// Parameter binding and validation.
+    pub bind_ns: u128,
+    /// Reserved metadata read plus schema and contract decode.
+    pub metadata_ns: u128,
+    /// Schema drift check, including the schema document fingerprint.
+    pub drift_ns: u128,
+    /// Record-key window planning.
+    pub plan_ns: u128,
+    /// Pager window read and its record decode.
+    pub window_read_ns: u128,
+    /// Plan execution: table decode, filters, projection, ordering.
+    pub exec_ns: u128,
+    /// Table scan inside `exec_ns`: record-map walk and row decode.
+    pub scan_ns: u128,
+    /// Row filtering inside `exec_ns`.
+    pub filter_ns: u128,
+    /// Projection rebuild inside `exec_ns`.
+    pub project_ns: u128,
+    /// Ordering inside `exec_ns`.
+    pub sort_ns: u128,
+    /// Other operators inside `exec_ns`.
+    pub exec_other_ns: u128,
+    /// Sum of the stages above.
+    pub total_ns: u128,
+    /// Rows emitted per call.
+    pub rows: usize,
+}
+
+impl StageReport {
+    fn averaged(profile: yydb::connection::ReadProfile, calls: usize) -> Self {
+        let calls = calls.max(1);
+        let divisor = calls as u128;
+        Self {
+            bind_ns: profile.bind_ns / divisor,
+            metadata_ns: profile.metadata_ns / divisor,
+            drift_ns: profile.drift_ns / divisor,
+            plan_ns: profile.plan_ns / divisor,
+            window_read_ns: profile.window_read_ns / divisor,
+            exec_ns: profile.exec_ns / divisor,
+            scan_ns: profile.scan_ns / divisor,
+            filter_ns: profile.filter_ns / divisor,
+            project_ns: profile.project_ns / divisor,
+            sort_ns: profile.sort_ns / divisor,
+            exec_other_ns: profile.exec_other_ns / divisor,
+            total_ns: profile.total_ns() / divisor,
+            rows: profile.scanned_rows / calls,
+        }
+    }
+}
+
+/// Fixed-cost decomposition of the YYDB read and write paths on the bench dataset.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileReport {
+    /// Dataset rows loaded before measuring.
+    pub rows: usize,
+    /// Rows per measured range window.
+    pub range_len: usize,
+    /// Calls behind each read shape.
+    pub calls: usize,
+    /// Range statement with an empty window: pure fixed cost.
+    pub empty_window: StageReport,
+    /// Same statement returning exactly one row.
+    pub one_row: StageReport,
+    /// Same statement returning `range_len` rows.
+    pub range_window: StageReport,
+    /// Same window without `ORDER BY`, to separate sort cost.
+    pub window_no_sort: StageReport,
+    /// Point statement returning one row.
+    pub point_get: StageReport,
+    /// One `prepare_sql` call, including its metadata basis read.
+    pub prepare_ns: u128,
+    /// One unprepared point read (`query_sql_with_params`).
+    pub unprepared_point_ns: u128,
+    /// One insert inside an open transaction, including its own preparation.
+    pub insert_row_ns: u128,
+    /// One insert statement preparation alone.
+    pub insert_prepare_ns: u128,
+    /// One batch commit of `batch_size` rows.
+    pub commit_per_batch_ns: u128,
+}
+
+const RANGE_SQL: &str = "SELECT id, payload FROM Bench WHERE id >= ?1 AND id < ?2 ORDER BY id";
+const UNSORTED_RANGE_SQL: &str = "SELECT id, payload FROM Bench WHERE id >= ?1 AND id < ?2";
+const POINT_SQL: &str = "SELECT payload FROM Bench WHERE id = ?1";
+const INSERT_SQL: &str = "INSERT INTO Bench (id, payload) VALUES (?1, ?2)";
+
+/// Calls run before a shape is timed, so the first sample never absorbs cold
+/// page reads or a freshly built binary.
+const WARMUP_CALLS: usize = 20;
+
+/// Runs one read shape in its own loop: `WARMUP_CALLS` untimed calls followed
+/// by `calls` measured ones.
+///
+/// Shapes are timed separately because each walks a different record window,
+/// so sharing a loop let the previous shape flush the pager cache and made
+/// ordering an unnamed variable in the numbers.
+fn measure_shape<F>(calls: usize, mut run: F) -> Result<yydb::connection::ReadProfile, String>
+where
+    F: FnMut(usize, &mut yydb::connection::ReadProfile) -> Result<(), String>,
+{
+    let mut warm = yydb::connection::ReadProfile::default();
+    for scan in 0..WARMUP_CALLS.min(calls.max(1)) {
+        run(scan, &mut warm)?;
+    }
+    let mut profile = yydb::connection::ReadProfile::default();
+    for scan in 0..calls {
+        run(scan, &mut profile)?;
+    }
+    Ok(profile)
+}
+
+/// Record keys of one measured range.
+fn range_bounds(cfg: &BenchConfig, scan: usize) -> (usize, usize) {
+    let start = (scan * 104_729) % cfg.rows.max(1);
+    let end = (start + cfg.range_len).min(cfg.rows);
+    (start, end)
+}
+
+/// Loads the bench dataset and reports where one read or write call spends its time.
+pub fn profile(dir: &Path, cfg: &BenchConfig) -> Result<ProfileReport, String> {
+    std::fs::create_dir_all(dir).map_err(|error| format!("cannot create profile dir: {error}"))?;
+    let path = dir.join("profile.yydb");
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(dir.join(format!("profile.yydb{suffix}")));
+    }
+    let conn = yydb::Connection::open_with_flags(&path, yydb::OpenFlags::wal()).map_err(|e| format!("profile open: {e}"))?;
+    conn.ensure_schema("table Bench { @@id: utf8, payload: bytes }").map_err(|e| format!("profile schema: {e}"))?;
+    let load_started = Instant::now();
+    for chunk_start in (0..cfg.rows).step_by(cfg.batch_size.max(1)) {
+        conn.begin().map_err(|e| format!("profile begin: {e}"))?;
+        for index in chunk_start..(chunk_start + cfg.batch_size.max(1)).min(cfg.rows) {
+            yydb_insert(&conn, index, cfg)?;
+        }
+        conn.commit().map_err(|e| format!("profile commit: {e}"))?;
+    }
+    let _load_ns = load_started.elapsed().as_nanos();
+    verify_yydb_count(&conn, cfg.rows, "profile post-load count")?;
+
+    let calls = cfg.range_scans.max(1);
+    let range_statement = conn.prepare_sql(RANGE_SQL).map_err(|e| format!("profile range prepare: {e}"))?;
+    let unsorted_statement =
+        conn.prepare_sql(UNSORTED_RANGE_SQL).map_err(|e| format!("profile unsorted prepare: {e}"))?;
+
+    let empty = measure_shape(calls, |scan, profile| {
+        let start_index = range_bounds(cfg, scan).0;
+        let from = Value::Text(key_at(start_index));
+        let to = Value::Text(key_at(start_index));
+        let rows = conn
+            .query_prepared_ordered_profiled(&range_statement, &[from, to], profile)
+            .map_err(|e| format!("profile empty window: {e}"))?;
+        if !rows.is_empty() {
+            return Err(format!("profile empty window returned {} rows", rows.len()));
+        }
+        Ok(())
+    })?;
+
+    let single = measure_shape(calls, |scan, profile| {
+        let start_index = range_bounds(cfg, scan).0;
+        let from = Value::Text(key_at(start_index));
+        let to = Value::Text(key_at((start_index + 1).min(cfg.rows)));
+        let rows = conn
+            .query_prepared_ordered_profiled(&range_statement, &[from, to], profile)
+            .map_err(|e| format!("profile single row: {e}"))?;
+        if rows.len() != 1 {
+            return Err(format!("profile single row returned {} rows", rows.len()));
+        }
+        Ok(())
+    })?;
+
+    let window = measure_shape(calls, |scan, profile| {
+        let (start_index, end_index) = range_bounds(cfg, scan);
+        let from = Value::Text(key_at(start_index));
+        let to = Value::Text(key_at(end_index));
+        let rows = conn
+            .query_prepared_ordered_profiled(&range_statement, &[from, to], profile)
+            .map_err(|e| format!("profile range window: {e}"))?;
+        if rows.len() != end_index - start_index {
+            return Err(format!("profile range window returned {} rows", rows.len()));
+        }
+        Ok(())
+    })?;
+
+    let unsorted = measure_shape(calls, |scan, profile| {
+        let (start_index, end_index) = range_bounds(cfg, scan);
+        let from = Value::Text(key_at(start_index));
+        let to = Value::Text(key_at(end_index));
+        let rows = conn
+            .query_prepared_ordered_profiled(&unsorted_statement, &[from, to], profile)
+            .map_err(|e| format!("profile unsorted window: {e}"))?;
+        if rows.len() != end_index - start_index {
+            return Err(format!("profile unsorted window returned {} rows", rows.len()));
+        }
+        Ok(())
+    })?;
+
+    let point_statement = conn.prepare_sql(POINT_SQL).map_err(|e| format!("profile point prepare: {e}"))?;
+    let point_calls = cfg.point_ops.max(1);
+    let point = measure_shape(point_calls, |op, profile| {
+        let index = (op * 7919) % cfg.rows.max(1);
+        let rows = conn
+            .query_prepared_ordered_profiled(&point_statement, &[Value::Text(key_at(index))], profile)
+            .map_err(|e| format!("profile point get: {e}"))?;
+        if rows.len() != 1 {
+            return Err(format!("profile point get returned {} rows", rows.len()));
+        }
+        Ok(())
+    })?;
+
+    let prepare_calls = 100usize;
+    let started = Instant::now();
+    for _ in 0..prepare_calls {
+        conn.prepare_sql(RANGE_SQL).map_err(|e| format!("profile prepare: {e}"))?;
+    }
+    let prepare_ns = started.elapsed().as_nanos() / prepare_calls as u128;
+
+    let started = Instant::now();
+    for op in 0..prepare_calls {
+        let index = (op * 7919) % cfg.rows.max(1);
+        let rows = conn
+            .query_sql_with_params(POINT_SQL, &[Value::Text(key_at(index))])
+            .map_err(|e| format!("profile unprepared point: {e}"))?;
+        if rows.len() != 1 {
+            return Err(format!("profile unprepared point returned {} rows", rows.len()));
+        }
+    }
+    let unprepared_point_ns = started.elapsed().as_nanos() / prepare_calls as u128;
+
+    let insert_calls = 200usize;
+    let insert_start = cfg.rows + cfg.single_inserts;
+    let started = Instant::now();
+    for _ in 0..insert_calls {
+        conn.prepare_sql(INSERT_SQL).map_err(|e| format!("profile insert prepare: {e}"))?;
+    }
+    let insert_prepare_ns = started.elapsed().as_nanos() / insert_calls as u128;
+
+    conn.begin().map_err(|e| format!("profile insert begin: {e}"))?;
+    let started = Instant::now();
+    for index in insert_start..insert_start + insert_calls {
+        yydb_insert(&conn, index, cfg)?;
+    }
+    let insert_row_ns = started.elapsed().as_nanos() / insert_calls as u128;
+    let commit_started = Instant::now();
+    conn.commit().map_err(|e| format!("profile insert commit: {e}"))?;
+    let commit_per_batch_ns = commit_started.elapsed().as_nanos();
+
+    conn.close();
+
+    Ok(ProfileReport {
+        rows: cfg.rows,
+        range_len: cfg.range_len,
+        calls,
+        empty_window: StageReport::averaged(empty, calls),
+        one_row: StageReport::averaged(single, calls),
+        range_window: StageReport::averaged(window, calls),
+        window_no_sort: StageReport::averaged(unsorted, calls),
+        point_get: StageReport::averaged(point, point_calls),
+        prepare_ns,
+        unprepared_point_ns,
+        insert_row_ns,
+        insert_prepare_ns,
+        commit_per_batch_ns,
+    })
+}
