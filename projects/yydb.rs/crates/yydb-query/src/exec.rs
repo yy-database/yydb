@@ -1,6 +1,7 @@
 //! Execute Phase 1 query ops against stored table rows.
 
 use std::{
+    borrow::Cow,
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap},
     time::Instant,
@@ -500,6 +501,26 @@ fn resolve_bound_ref<'a>(bv: &'a BoundValue, bound_values: &'a [Value]) -> Optio
     }
 }
 
+/// Reads a column path, borrowing the row value whenever a bare lookup can
+/// answer it.
+///
+/// Filters test every scanned row, so cloning the operand for each comparison
+/// allocates a value per row. Only a path that needs outer-row handling, a
+/// dotted key or contract resolution falls back to [`read_path`].
+fn read_path_cow<'a>(
+    path: &[String],
+    row: &'a QueryRow,
+    table: &str,
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    outer: Option<&OuterRow<'_>>,
+) -> Cow<'a, Value> {
+    match read_path_ref(path, row) {
+        Some(value) => Cow::Borrowed(value),
+        None => Cow::Owned(read_path(path, row, table, contract, records, outer)),
+    }
+}
+
 /// Resolve a BoundValue either to the baked-in literal or to the bound
 /// parameter at `index`. Returns an error for Slot references that exceed the
 /// caller-supplied slice (bind-time contract violation).
@@ -826,9 +847,9 @@ fn eval_pred_in(
         }
         // A join condition is a SQL comparison: either side `NULL` is unknown.
         Pred::FieldCmpField { left_path, op, right_path } => {
-            let left = read_path(left_path, row, table, contract, records, outer);
-            let right = read_path(right_path, row, table, contract, records, outer);
-            if matches!(left, Value::Null) || matches!(right, Value::Null) {
+            let left = read_path_cow(left_path, row, table, contract, records, outer);
+            let right = read_path_cow(right_path, row, table, contract, records, outer);
+            if matches!(left.as_ref(), Value::Null) || matches!(right.as_ref(), Value::Null) {
                 return Ok(None);
             }
             cmp_values(&left, *op, &right)
@@ -849,14 +870,33 @@ fn eval_pred_in(
         // A scalar subquery is resolved before any row is tested. A NULL on
         // either side makes the comparison unknown.
         Pred::FieldCmpScalar { path, op, value } => {
-            let left = read_path(path, row, table, contract, records, outer);
-            if matches!(left, Value::Null) || matches!(value, Value::Null) {
+            let left = read_path_cow(path, row, table, contract, records, outer);
+            if matches!(left.as_ref(), Value::Null) || matches!(value, Value::Null) {
                 return Ok(None);
             }
             cmp_values(&left, *op, value)
         }
         // Per-row expression comparison with SQL three-valued NULL semantics.
         Pred::ExprCmp { expr, op, value } => {
+            // A bare column compared with a bound constant is the shape every
+            // SQL range filter lowers to, so both operands are borrowed in
+            // place instead of cloned once per tested row.
+            if let (Expr::Column { path }, Some(right)) = (expr.as_ref(), resolve_bound_ref(value, bound_values)) {
+                let left = match read_path_ref(path, row) {
+                    Some(left) => left,
+                    None => {
+                        let owned = read_path(path, row, table, contract, records, outer);
+                        if matches!(owned, Value::Null) || matches!(right, Value::Null) {
+                            return Ok(None);
+                        }
+                        return Ok(cmp_values(&owned, *op, right));
+                    }
+                };
+                if matches!(left, Value::Null) || matches!(right, Value::Null) {
+                    return Ok(None);
+                }
+                return Ok(cmp_values(left, *op, right));
+            }
             let left = match eval_expr(expr, row, table, contract, records, bound_values, outer) {
                 Ok(v) => v,
                 Err(_) => return Ok(None),
