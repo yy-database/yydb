@@ -2,17 +2,18 @@
 //!
 //! `yydb-bench [--rows N] [--point-ops N] [--range-scans N] [--range-len N]
 //! [--batch-size N] [--single-inserts N] [--value-bytes N] [--dir PATH]
-//! [--baseline-out PATH]`
+//! [--baseline-out PATH] [--profile | --measure] [--rounds N]`
 
 use std::{io::Write, path::PathBuf};
 
-use yydb_bench::{Baseline, BenchConfig, run, profile};
+use yydb_bench::{Baseline, BenchConfig, MeasureReport, run, profile, measure};
 
 fn main() {
     let mut config = BenchConfig::default();
     let mut dir = std::env::temp_dir().join("yydb-bench");
     let mut baseline_out: Option<PathBuf> = None;
     let mut profile_only = false;
+    let mut measure_only = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
@@ -34,8 +35,19 @@ fn main() {
                 baseline_out = Some(PathBuf::from(args.next().unwrap_or_else(|| panic!("--baseline-out expects a path"))))
             }
             "--profile" => profile_only = true,
+            "--measure" => measure_only = true,
+            "--rounds" => config.measure_rounds = value(),
             other => panic!("unknown argument `{other}`"),
         }
+    }
+
+    if measure_only {
+        let report = measure(&dir, &config).unwrap_or_else(|error| {
+            eprintln!("measure failed: {error}");
+            std::process::exit(1);
+        });
+        print_measure(&report);
+        return;
     }
 
     if profile_only {
@@ -58,6 +70,59 @@ fn main() {
         file.write_all(json.as_bytes()).expect("write baseline");
         println!("baseline written to {}", path.display());
     }
+}
+
+fn print_measure(report: &MeasureReport) {
+    let config = &report.config;
+    println!(
+        "yydb-bench measure · os={} · rows={} · range={}x{} · point-ops={} · rounds={} (+{} discarded)",
+        report.os,
+        config.rows,
+        config.range_scans,
+        config.range_len,
+        config.point_ops,
+        report.rounds.len(),
+        report.discarded_rounds
+    );
+    println!(
+        "{:<6} {:<6} {:<14} {:>14} {:>14} {:>8} {:>14} {:>14}",
+        "round", "cache", "order", "yydb range", "sqlite range", "ratio", "yydb point", "sqlite point"
+    );
+    for round in &report.rounds {
+        println!(
+            "{:<6} {:<6} {:<14} {:>14} {:>14} {:>7.2}x {:>14} {:>14}",
+            round.round,
+            round.cache,
+            round.order,
+            round.yydb_range_ns_per_row,
+            round.sqlite_range_ns_per_row,
+            round.yydb_range_ns_per_row as f64 / round.sqlite_range_ns_per_row.max(1) as f64,
+            round.yydb_point_ns_per_op,
+            round.sqlite_point_ns_per_op
+        );
+    }
+    println!();
+    spread("range ns/row", &report.yydb_range, &report.sqlite_range);
+    spread("point ns/op", &report.yydb_point, &report.sqlite_point);
+    let ratio = &report.ratio_x1000;
+    println!(
+        "ratio yydb/sqlite: median {:.2}x · p90 {:.2}x · max {:.2}x (n={})",
+        ratio.median as f64 / 1000.0,
+        ratio.p90 as f64 / 1000.0,
+        ratio.max as f64 / 1000.0,
+        ratio.samples
+    );
+}
+
+fn spread(label: &str, yydb: &yydb_bench::Series, sqlite: &yydb_bench::Series) {
+    println!(
+        "{:<16} yydb median {:>10} (min {:>10}, p90 {:>10}, max {:>10})",
+        label, yydb.median, yydb.min, yydb.p90, yydb.max
+    );
+    println!(
+        "{:<16} sqlite median {:>8} (min {:>10}, p90 {:>10}, max {:>10})",
+        "", sqlite.median, sqlite.min, sqlite.p90, sqlite.max
+    );
 }
 
 fn print_report(baseline: &Baseline) {

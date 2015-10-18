@@ -30,6 +30,8 @@ pub struct BenchConfig {
     pub single_inserts: usize,
     /// Payload size in bytes.
     pub value_bytes: usize,
+    /// Recorded rounds in the alternating same-process measurement.
+    pub measure_rounds: usize,
 }
 
 impl Default for BenchConfig {
@@ -42,6 +44,7 @@ impl Default for BenchConfig {
             batch_size: 1_000,
             single_inserts: 200,
             value_bytes: 64,
+            measure_rounds: 7,
         }
     }
 }
@@ -801,5 +804,250 @@ pub fn profile(dir: &Path, cfg: &BenchConfig) -> Result<ProfileReport, String> {
         insert_row_ns,
         insert_prepare_ns,
         commit_per_batch_ns,
+    })
+}
+
+/// Rounds thrown away before the sample starts.
+///
+/// The first round pays for the harness itself: the binary is still being
+/// paged in and both fixtures are read for the first time in this process.
+/// Discarding exactly one round is a fixed rule, not a choice made after
+/// looking at the numbers.
+const DISCARDED_ROUNDS: usize = 1;
+
+/// One round of both engines, measured back to back in the same process.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct MeasureRound {
+    /// Zero-based index of the recorded round.
+    pub round: usize,
+    /// `cold` (fresh handles opened at round start) or `warm` (handles carried
+    /// over from the previous round).
+    pub cache: &'static str,
+    /// Which engine ran first, so drift in machine state stays visible.
+    pub order: &'static str,
+    /// YYDB key-range scan, nanoseconds per returned row.
+    pub yydb_range_ns_per_row: u128,
+    /// SQLite key-range scan, nanoseconds per returned row.
+    pub sqlite_range_ns_per_row: u128,
+    /// YYDB point get, nanoseconds per operation.
+    pub yydb_point_ns_per_op: u128,
+    /// SQLite point get, nanoseconds per operation.
+    pub sqlite_point_ns_per_op: u128,
+}
+
+/// Spread of one sample.
+///
+/// `median` is the lower median and `p90` uses the nearest-rank method, so a
+/// seven-round run reports its largest value as the 90th percentile.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct Series {
+    /// Number of samples the spread was computed from.
+    pub samples: usize,
+    /// Smallest value.
+    pub min: u128,
+    /// Lower median.
+    pub median: u128,
+    /// 90th percentile by nearest rank.
+    pub p90: u128,
+    /// Largest value.
+    pub max: u128,
+}
+
+impl Series {
+    /// Summarises `values`, which may be empty.
+    fn of(values: &[u128]) -> Self {
+        if values.is_empty() {
+            return Self::default();
+        }
+        let mut sorted = values.to_vec();
+        sorted.sort_unstable();
+        let last = sorted.len() - 1;
+        let p90_index = ((sorted.len() as f64 * 0.9).ceil() as usize).saturating_sub(1).min(last);
+        Self {
+            samples: sorted.len(),
+            min: sorted[0],
+            median: sorted[last / 2],
+            p90: sorted[p90_index],
+            max: sorted[last],
+        }
+    }
+}
+
+/// Alternating same-process measurement of both engines.
+///
+/// SQLite's own per-row cost moves by more than a factor of two between
+/// windows on this machine, so a ratio taken from two separate runs is not a
+/// comparable number. This report keeps every round, alternates the engine
+/// order, and toggles the engine page-cache state so absolute nanoseconds are
+/// the primary evidence and the ratio is only a reference.
+#[derive(Debug, Clone, Serialize)]
+pub struct MeasureReport {
+    /// Workload scale used for both engines.
+    pub config: BenchConfig,
+    /// Operating system the run happened on.
+    pub os: &'static str,
+    /// Rounds discarded before the sample started.
+    pub discarded_rounds: usize,
+    /// Every recorded round in order.
+    pub rounds: Vec<MeasureRound>,
+    /// YYDB key-range scan spread, nanoseconds per returned row.
+    pub yydb_range: Series,
+    /// SQLite key-range scan spread, nanoseconds per returned row.
+    pub sqlite_range: Series,
+    /// YYDB point get spread, nanoseconds per operation.
+    pub yydb_point: Series,
+    /// SQLite point get spread, nanoseconds per operation.
+    pub sqlite_point: Series,
+    /// `yydb / sqlite` per round in thousandths.
+    pub ratio_x1000: Series,
+}
+
+fn companion_path(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut text = path.as_os_str().to_owned();
+    text.push(suffix);
+    std::path::PathBuf::from(text)
+}
+
+fn build_yydb_dataset(path: &Path, cfg: &BenchConfig) -> Result<(), String> {
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(companion_path(path, suffix));
+    }
+    let conn = yydb::Connection::open_with_flags(path, yydb::OpenFlags::wal()).map_err(|e| format!("measure yydb open: {e}"))?;
+    conn.ensure_schema("table Bench { @@id: utf8, payload: bytes }").map_err(|e| format!("measure yydb schema: {e}"))?;
+    for chunk_start in (0..cfg.rows).step_by(cfg.batch_size.max(1)) {
+        conn.begin().map_err(|e| format!("measure yydb begin: {e}"))?;
+        for index in chunk_start..(chunk_start + cfg.batch_size.max(1)).min(cfg.rows) {
+            yydb_insert(&conn, index, cfg)?;
+        }
+        conn.commit().map_err(|e| format!("measure yydb commit: {e}"))?;
+    }
+    verify_yydb_count(&conn, cfg.rows, "measure yydb fixture")?;
+    conn.close();
+    drop(conn);
+    Ok(())
+}
+
+fn build_sqlite_dataset(path: &Path, cfg: &BenchConfig) -> Result<(), String> {
+    let _ = std::fs::remove_file(path);
+    let conn = rusqlite::Connection::open(path).map_err(|e| format!("measure sqlite open: {e}"))?;
+    conn.execute_batch("PRAGMA journal_mode = WAL; CREATE TABLE Bench (id TEXT PRIMARY KEY, payload BLOB NOT NULL)")
+        .map_err(|e| format!("measure sqlite schema: {e}"))?;
+    for chunk_start in (0..cfg.rows).step_by(cfg.batch_size.max(1)) {
+        conn.execute_batch("BEGIN").map_err(|e| format!("measure sqlite begin: {e}"))?;
+        for index in chunk_start..(chunk_start + cfg.batch_size.max(1)).min(cfg.rows) {
+            sqlite_insert(&conn, index, cfg)?;
+        }
+        conn.execute_batch("COMMIT").map_err(|e| format!("measure sqlite commit: {e}"))?;
+    }
+    let count: usize = conn
+        .query_row("SELECT COUNT(*) FROM Bench", [], |row| row.get::<_, usize>(0))
+        .map_err(|e| format!("measure sqlite count: {e}"))?;
+    if count != cfg.rows {
+        return Err(format!("measure sqlite fixture holds {count} rows, expected {}", cfg.rows));
+    }
+    drop(conn);
+    Ok(())
+}
+
+fn open_yydb(path: &Path) -> Result<yydb::Connection, String> {
+    yydb::Connection::open_with_flags(path, yydb::OpenFlags::wal()).map_err(|e| format!("measure yydb open: {e}"))
+}
+
+fn open_sqlite(path: &Path) -> Result<rusqlite::Connection, String> {
+    rusqlite::Connection::open(path).map_err(|e| format!("measure sqlite open: {e}"))
+}
+
+/// Runs `cfg.measure_rounds` recorded rounds of both engines alternately.
+///
+/// Both fixtures are built once, then every round measures the identical
+/// key-range scan and point-get workload. Even rounds open fresh handles so
+/// the engine page cache starts empty. Odd rounds reuse the handles so the
+/// cache holds the previous round's pages. Alternating the engine order keeps
+/// a warming machine from always penalising the same engine.
+pub fn measure(dir: &Path, cfg: &BenchConfig) -> Result<MeasureReport, String> {
+    std::fs::create_dir_all(dir).map_err(|error| format!("cannot create measure dir: {error}"))?;
+    let yydb_path = dir.join("measure.yydb");
+    let sqlite_path = dir.join("measure.sqlite");
+    build_yydb_dataset(&yydb_path, cfg)?;
+    build_sqlite_dataset(&sqlite_path, cfg)?;
+
+    let mut yydb_conn: Option<yydb::Connection> = Some(open_yydb(&yydb_path)?);
+    let mut sqlite_conn: Option<rusqlite::Connection> = Some(open_sqlite(&sqlite_path)?);
+
+    let mut rounds = Vec::new();
+    let mut yydb_range = Vec::new();
+    let mut sqlite_range = Vec::new();
+    let mut yydb_point = Vec::new();
+    let mut sqlite_point = Vec::new();
+    let mut ratio = Vec::new();
+
+    for sample in 0..(cfg.measure_rounds + DISCARDED_ROUNDS) {
+        let cache = if sample % 2 == 0 { "cold" } else { "warm" };
+        if cache == "cold" {
+            // Close and drop before opening: two handles on one file would hold
+            // two writer locks against each other.
+            if let Some(conn) = yydb_conn.take() {
+                conn.close();
+            }
+            drop(sqlite_conn.take());
+            yydb_conn = Some(open_yydb(&yydb_path)?);
+            sqlite_conn = Some(open_sqlite(&sqlite_path)?);
+        }
+        let yydb_handle = yydb_conn.as_ref().ok_or_else(|| "measure yydb handle missing".to_string())?;
+        let sqlite_handle = sqlite_conn.as_ref().ok_or_else(|| "measure sqlite handle missing".to_string())?;
+        // Order is driven by a separate bit from the cache state: tying both to
+        // one parity would make every cold round run YYDB first and hand it a
+        // systematically colder machine than SQLite.
+        let yydb_first = (sample / 2) % 2 == 0;
+        let order = if yydb_first { "yydb-first" } else { "sqlite-first" };
+        let measured = if yydb_first {
+            let yydb_range = yydb_range_pass(yydb_handle, cfg)?;
+            let yydb_point = yydb_point_pass(yydb_handle, cfg, "measure yydb point")?;
+            let sqlite_range = sqlite_range_pass(sqlite_handle, cfg)?;
+            let sqlite_point = sqlite_point_pass(sqlite_handle, cfg, "measure sqlite point")?;
+            (yydb_range, yydb_point, sqlite_range, sqlite_point)
+        }
+        else {
+            let sqlite_range = sqlite_range_pass(sqlite_handle, cfg)?;
+            let sqlite_point = sqlite_point_pass(sqlite_handle, cfg, "measure sqlite point")?;
+            let yydb_range = yydb_range_pass(yydb_handle, cfg)?;
+            let yydb_point = yydb_point_pass(yydb_handle, cfg, "measure yydb point")?;
+            (yydb_range, yydb_point, sqlite_range, sqlite_point)
+        };
+        if sample < DISCARDED_ROUNDS {
+            continue;
+        }
+        let (yydb_range_ns, yydb_point_ns, sqlite_range_ns, sqlite_point_ns) = measured;
+        rounds.push(MeasureRound {
+            round: sample - DISCARDED_ROUNDS,
+            cache,
+            order,
+            yydb_range_ns_per_row: yydb_range_ns,
+            sqlite_range_ns_per_row: sqlite_range_ns,
+            yydb_point_ns_per_op: yydb_point_ns,
+            sqlite_point_ns_per_op: sqlite_point_ns,
+        });
+        yydb_range.push(yydb_range_ns);
+        sqlite_range.push(sqlite_range_ns);
+        yydb_point.push(yydb_point_ns);
+        sqlite_point.push(sqlite_point_ns);
+        ratio.push(yydb_range_ns.saturating_mul(1000) / sqlite_range_ns.max(1));
+    }
+
+    if let Some(conn) = yydb_conn.take() {
+        conn.close();
+    }
+    drop(sqlite_conn.take());
+
+    Ok(MeasureReport {
+        config: *cfg,
+        os: std::env::consts::OS,
+        discarded_rounds: DISCARDED_ROUNDS,
+        rounds,
+        yydb_range: Series::of(&yydb_range),
+        sqlite_range: Series::of(&sqlite_range),
+        yydb_point: Series::of(&yydb_point),
+        sqlite_point: Series::of(&sqlite_point),
+        ratio_x1000: Series::of(&ratio),
     })
 }
