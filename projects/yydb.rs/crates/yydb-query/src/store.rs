@@ -463,33 +463,44 @@ fn parse_row(bytes: &[u8], references: &mut Option<RowReferences>, resolve: bool
         }
         None => return Err(Error::Corrupt("row record is empty")),
     }
-    let mut cursor = RowCursor::new(bytes);
-    cursor.take(1)?;
-    let column_count = cursor.u16()? as usize;
+    let mut header = RowCursor::new(bytes);
+    header.take(1)?;
+    let column_count = header.u16()? as usize;
     let bitmap_len = column_count.div_ceil(8);
     // The bitmap stays a slice of the record; copying it would add one heap
     // allocation per decoded row for no benefit.
-    let bitmap = cursor.take(bitmap_len)?;
-    let mut names = Vec::with_capacity(column_count);
+    let bitmap = header.take(bitmap_len)?;
+    // Walk the name table once to find where the values start instead of
+    // collecting the names into a `Vec`: the names are only needed one at a
+    // time, and each decoded name is moved straight into the row as its key.
+    let names_start = header;
+    let mut walk = names_start;
     for _ in 0..column_count {
-        names.push(cursor.text()?);
+        walk.skip_text()?;
     }
+    let mut names = names_start;
+    let mut values = walk;
     let mut row = QueryRow::new();
-    for (index, name) in names.into_iter().enumerate() {
+    for index in 0..column_count {
+        let name = names.text()?;
         if bitmap[index / 8] & (1 << (index % 8)) != 0 {
             row.insert(name, Value::Null);
             continue;
         }
-        let value = decode_value(&mut cursor, references, resolve)?;
+        let value = decode_value(&mut values, references, resolve)?;
         row.insert(name, value);
     }
-    if cursor.remaining() != 0 {
+    if values.remaining() != 0 {
         return Err(Error::Corrupt("row record has trailing bytes"));
     }
     Ok(row)
 }
 
 /// Bounds-checked forward reader over one row record.
+///
+/// `Copy` lets one recorded row be walked twice from two saved positions: one
+/// cursor reads the name table, the other reads the values that follow it.
+#[derive(Clone, Copy)]
 struct RowCursor<'a> {
     bytes: &'a [u8],
     position: usize,
@@ -547,6 +558,13 @@ impl<'a> RowCursor<'a> {
         let len = self.u16()? as usize;
         let bytes = self.take(len)?;
         String::from_utf8(bytes.to_vec()).map_err(|_| Error::Corrupt("row record text is not UTF-8"))
+    }
+
+    /// Advance past one length-prefixed UTF-8 string without materializing it.
+    fn skip_text(&mut self) -> Result<()> {
+        let len = self.u16()? as usize;
+        self.take(len)?;
+        Ok(())
     }
 
     fn remaining(&self) -> usize {
