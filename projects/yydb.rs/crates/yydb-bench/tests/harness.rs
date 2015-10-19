@@ -18,6 +18,7 @@ fn small_config() -> BenchConfig {
         batch_size: 50,
         single_inserts: 20,
         value_bytes: 32,
+        measure_rounds: 7,
     }
 }
 
