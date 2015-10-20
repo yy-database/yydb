@@ -21,7 +21,8 @@ use super::{
         ProjectField, QueryOp, QueryRow, ScalarFunction, SetOpKind, TextOp, WindowField, WindowFrame, WindowFrameBound,
         WindowFrameUnit, WindowFunction,
     },
-    resolve, store,
+    resolve,
+    store::{ReadRows, RowSource},
 };
 
 // Query-start clock instant, set for the duration of one `execute_ops_in` call.
@@ -143,7 +144,22 @@ pub fn execute_ops(
     records: &BTreeMap<String, Vec<u8>>,
     bound_values: &[Value],
 ) -> Result<Vec<QueryRow>> {
-    execute_ops_in(ops, contract, records, bound_values, None)
+    execute_ops_in(ops, contract, &ReadRows::owned(records), bound_values, None)
+}
+
+/// Execute a pre-lowered op list against a borrowed storage window.
+///
+/// `records` still supplies the metadata rows the engine owns; every table scan
+/// decodes rows from `source` instead of from that map. The caller must keep
+/// `source` alive for the whole call, which is what a narrowed read guarantees.
+pub fn execute_ops_borrowed(
+    ops: &[QueryOp],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    source: &dyn RowSource,
+    bound_values: &[Value],
+) -> Result<Vec<QueryRow>> {
+    execute_ops_in(ops, contract, &ReadRows::borrowed(records, source), bound_values, None)
 }
 
 /// Same execution as [`execute_ops`], also reporting per-operator timings.
@@ -154,6 +170,26 @@ pub fn execute_ops_profiled(
     ops: &[QueryOp],
     contract: Option<&ResolvedContract>,
     records: &BTreeMap<String, Vec<u8>>,
+    bound_values: &[Value],
+) -> Result<(Vec<QueryRow>, ExecProfile)> {
+    execute_ops_in_profiled(ops, contract, &ReadRows::owned(records), bound_values)
+}
+
+/// Same as [`execute_ops_profiled`], reading table rows from a borrowed window.
+pub fn execute_ops_borrowed_profiled(
+    ops: &[QueryOp],
+    contract: Option<&ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    source: &dyn RowSource,
+    bound_values: &[Value],
+) -> Result<(Vec<QueryRow>, ExecProfile)> {
+    execute_ops_in_profiled(ops, contract, &ReadRows::borrowed(records, source), bound_values)
+}
+
+fn execute_ops_in_profiled(
+    ops: &[QueryOp],
+    contract: Option<&ResolvedContract>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
 ) -> Result<(Vec<QueryRow>, ExecProfile)> {
     EXEC_PROFILE.with(|slot| *slot.borrow_mut() = Some(ExecProfile::default()));
@@ -190,7 +226,7 @@ fn note_profile(op: &QueryOp, elapsed: u128) {
 fn execute_ops_in(
     ops: &[QueryOp],
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
@@ -226,7 +262,7 @@ fn execute_ops_in(
                     None => table.clone(),
                 };
                 current_table = Some(table.clone());
-                rows = store::load_table(records, &storage_table)?;
+                rows = records.load_table(&storage_table)?;
             }
             QueryOp::Qualify { prefix } => {
                 rows = rows
@@ -271,7 +307,7 @@ fn execute_ops_in(
                     Some(contract) => table_row_key_name(contract, right)?,
                     None => right.clone(),
                 };
-                let right_rows = store::load_table(records, &storage_right)?;
+                let right_rows = records.load_table(&storage_right)?;
                 let prefix = right_alias.clone().unwrap_or_else(|| right.clone());
                 rows = execute_join(*kind, &rows, &right_rows, &prefix, on, contract, records, bound_values, outer)?;
             }
@@ -279,7 +315,7 @@ fn execute_ops_in(
                 if current_table.is_none() {
                     return Err(Error::Schema { message: "join without a preceding table scan".into() });
                 }
-                let right_rows = execute_ops(right, contract, records, bound_values)?;
+                let right_rows = execute_ops_in(right, contract, records, bound_values, None)?;
                 rows = execute_join(*kind, &rows, &right_rows, right_alias, on, contract, records, bound_values, outer)?;
             }
             QueryOp::SetOperation { kind, left, right, columns, right_columns } => {
@@ -443,7 +479,7 @@ fn projection_is_identity(fields: &[ProjectField], rows: &[QueryRow]) -> bool {
 fn resolve_count_expr(
     count: &CountExpr,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
 ) -> Result<Option<usize>> {
     let value = match count {
@@ -469,7 +505,7 @@ fn resolve_count_expr(
 fn resolve_standalone_expr(
     expr: &Expr,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
 ) -> Result<Value> {
     match expr {
@@ -512,7 +548,7 @@ fn read_path_cow<'a>(
     row: &'a QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     outer: Option<&OuterRow<'_>>,
 ) -> Cow<'a, Value> {
     match read_path_ref(path, row) {
@@ -539,7 +575,7 @@ pub fn project_row(
     row: &QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
 ) -> Result<QueryRow> {
     project_row_in(fields, row, table, contract, records, bound_values, None)
@@ -550,7 +586,7 @@ fn project_row_in(
     row: &QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<QueryRow> {
@@ -605,7 +641,7 @@ fn project_row_in(
 pub(crate) fn resolve_subquery_predicates(
     predicate: &Pred,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
 ) -> Result<Pred> {
     resolve_subquery_predicates_in(predicate, contract, records, bound_values, None)
@@ -619,7 +655,7 @@ pub(crate) fn resolve_subquery_predicates(
 fn resolve_subquery_predicates_in(
     predicate: &Pred,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Pred> {
@@ -701,7 +737,7 @@ fn eval_pred_for_row(
     row: &QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<bool> {
@@ -722,13 +758,13 @@ fn eval_pred_for_row(
 fn execute_subquery(
     ops: &[QueryOp],
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     correlated: bool,
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
     if !correlated {
-        return execute_ops(ops, contract, records, bound_values);
+        return execute_ops_in(ops, contract, records, bound_values, None);
     }
     let Some(outer) = outer
     else {
@@ -751,7 +787,7 @@ pub(crate) fn eval_pred(
     row: &QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
 ) -> Result<bool> {
     Ok(eval_pred_in(pred, row, table, contract, records, bound_values, None)? == Some(true))
@@ -771,7 +807,7 @@ fn eval_pred_in(
     row: &QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Option<bool>> {
@@ -1020,7 +1056,7 @@ fn truth_or(left: Option<bool>, right: Option<bool>) -> Option<bool> {
 fn scalar_subquery_value(
     ops: &[QueryOp],
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     correlated: bool,
     outer: Option<&OuterRow<'_>>,
@@ -1077,7 +1113,7 @@ fn read_path(
     row: &QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     outer: Option<&OuterRow<'_>>,
 ) -> Value {
     // A path lowering marked as an outer reference is read from the row of the
@@ -1236,7 +1272,7 @@ pub(crate) fn eval_expr(
     row: &QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
@@ -1278,7 +1314,7 @@ pub(crate) fn eval_expr(
 fn resolve_projection_subqueries(
     fields: &[ProjectField],
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
 ) -> Result<Vec<ProjectField>> {
     fields
@@ -1301,7 +1337,7 @@ fn resolve_projection_subqueries(
 fn resolve_scalar_subqueries(
     expr: &Expr,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
 ) -> Result<Expr> {
     let resolve = |inner: &Expr| resolve_scalar_subqueries(inner, contract, records, bound_values);
@@ -1350,7 +1386,7 @@ fn eval_case(
     row: &QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
@@ -1537,7 +1573,7 @@ fn eval_function(
     row: &QueryRow,
     table: &str,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
@@ -1835,7 +1871,7 @@ fn execute_join(
     prefix: &str,
     on: &Pred,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
@@ -1857,7 +1893,7 @@ fn execute_inner_join(
     prefix: &str,
     on: &Pred,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
@@ -1885,7 +1921,7 @@ fn execute_left_join(
     prefix: &str,
     on: &Pred,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
@@ -1931,7 +1967,7 @@ fn execute_right_join(
     prefix: &str,
     on: &Pred,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
@@ -1980,7 +2016,7 @@ fn execute_full_join(
     prefix: &str,
     on: &Pred,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
@@ -2080,7 +2116,7 @@ fn execute_set_operation(
     columns: Option<&[String]>,
     right_columns: Option<&[String]>,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
@@ -2218,7 +2254,7 @@ fn execute_aggregate(
     group_keys: &[ProjectField],
     aggregates: &[AggregateField],
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
@@ -2278,7 +2314,7 @@ fn eval_aggregate(
     agg: &AggregateField,
     group_rows: &[QueryRow],
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<(String, Value)> {
@@ -2410,7 +2446,7 @@ fn extreme_value(
     rows: &[QueryRow],
     want_max: bool,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
@@ -2450,7 +2486,7 @@ fn eval_project_expr(
     expr: &ProjectExpr,
     row: &QueryRow,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
@@ -2473,7 +2509,7 @@ fn execute_window(
     rows: &[QueryRow],
     fields: &[WindowField],
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<QueryRow>> {
@@ -2503,7 +2539,7 @@ fn partition_rows(
     rows: &[QueryRow],
     field: &WindowField,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<Vec<usize>>> {
@@ -2528,7 +2564,7 @@ fn eval_window_partition(
     partition: &[usize],
     field: &WindowField,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<Value>> {
@@ -2621,7 +2657,7 @@ fn eval_window_order_keys(
     row: &QueryRow,
     field: &WindowField,
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Vec<Value>> {
@@ -2833,7 +2869,7 @@ fn eval_window_aggregate(
     field: &WindowField,
     frame_rows: &[QueryRow],
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {
@@ -2873,7 +2909,7 @@ fn window_extreme(
     expr: ProjectExpr,
     frame_rows: &[QueryRow],
     contract: Option<&ResolvedContract>,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
     bound_values: &[Value],
     outer: Option<&OuterRow<'_>>,
 ) -> Result<Value> {

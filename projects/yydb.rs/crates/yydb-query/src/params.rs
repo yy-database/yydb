@@ -355,6 +355,28 @@ pub fn execute_prepared_profiled(
     exec::execute_ops_profiled(&stmt.ops, contract, records, values)
 }
 
+/// Execute a prepared read against a borrowed storage window.
+///
+/// Metadata rows stay in `records`; table scans decode rows from `source`, which
+/// the caller must keep alive for the duration of the call. Every row leaves the
+/// pipeline owned, so no borrow crosses this boundary.
+#[doc(hidden)]
+pub fn execute_prepared_borrowed(
+    stmt: &PreparedStatement,
+    values: &[Value],
+    contract: Option<&vos::types::ResolvedContract>,
+    records: &BTreeMap<String, Vec<u8>>,
+    source: &dyn super::store::RowSource,
+    profiled: bool,
+) -> Result<(Vec<QueryRow>, exec::ExecProfile)> {
+    if profiled {
+        exec::execute_ops_borrowed_profiled(&stmt.ops, contract, records, source, values)
+    }
+    else {
+        exec::execute_ops_borrowed(&stmt.ops, contract, records, source, values).map(|rows| (rows, exec::ExecProfile::default()))
+    }
+}
+
 /// Execute a prepared-and-bound write statement against stored rows.
 ///
 /// Returns [`Error::Unsupported`] for read statements so callers cannot

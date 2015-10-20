@@ -1,7 +1,5 @@
 //! Resolve dotted field paths against stored rows and the resolved VOS contract.
 
-use std::collections::BTreeMap;
-
 use vos::types::ResolvedContract;
 
 use yydb_types::{Error, Result, Value};
@@ -9,7 +7,7 @@ use yydb_types::{Error, Result, Value};
 use super::{
     catalog::{field_on_table, reference_target_storage_name, table_type_by_name},
     ops::QueryRow,
-    store,
+    store::ReadRows,
 };
 
 fn resolve_error(message: impl Into<String>) -> Error {
@@ -35,7 +33,7 @@ pub fn resolve_field_path(
     row: &QueryRow,
     table: &str,
     contract: &ResolvedContract,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
 ) -> Result<Value> {
     if path.is_empty() {
         return Ok(Value::Null);
@@ -58,7 +56,7 @@ pub fn resolve_field_path(
         let field = field_on_table(entry, segment)?;
         let target_table = reference_target_storage_name(contract, &field.canonical_type)?;
         let pk = value_to_pk(&value)?;
-        owned = Some(store::load_row(records, &target_table, &pk)?);
+        owned = Some(records.load_row(&target_table, &pk)?);
         current = owned.as_ref().expect("loaded referenced row");
         current_table = target_table;
     }
@@ -72,7 +70,7 @@ pub fn resolve_row_at_path(
     row: &QueryRow,
     table: &str,
     contract: &ResolvedContract,
-    records: &BTreeMap<String, Vec<u8>>,
+    records: &ReadRows<'_>,
 ) -> Result<(QueryRow, String)> {
     if path.is_empty() {
         return Ok((row.clone(), table.to_string()));
@@ -88,7 +86,7 @@ pub fn resolve_row_at_path(
         let field = field_on_table(entry, segment)?;
         let target_table = reference_target_storage_name(contract, &field.canonical_type)?;
         let pk = value_to_pk(&value)?;
-        owned = Some(store::load_row(records, &target_table, &pk)?);
+        owned = Some(records.load_row(&target_table, &pk)?);
         current = owned.as_ref().expect("loaded referenced row");
         current_table = target_table;
     }

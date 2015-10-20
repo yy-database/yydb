@@ -154,6 +154,55 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
         Ok(out)
     }
 
+    /// Collect the decoded leaf pages that can hold keys inside `[start, end)`.
+    ///
+    /// Unlike [`Self::scan_range`] this copies no cell: a caller that only needs
+    /// to borrow the stored row bytes pays one pointer per leaf instead of one
+    /// `Vec` per row. The pages come from the pager's decoded-page cache, so the
+    /// borrow stays valid while the returned handles are alive.
+    pub fn collect_leaf_pages(
+        &mut self,
+        start: &TreeKey,
+        end: Option<&TreeKey>,
+        out: &mut Vec<Arc<DecodedPage>>,
+    ) -> Result<()> {
+        let root = self.pager.header()?.slot.record_root;
+        if root == 0 {
+            return Ok(());
+        }
+        self.collect_pages_range(root, start, end, out)
+    }
+
+    fn collect_pages_range(
+        &mut self,
+        page_id: u32,
+        start: &TreeKey,
+        end: Option<&TreeKey>,
+        out: &mut Vec<Arc<DecodedPage>>,
+    ) -> Result<()> {
+        let page = self.load_decoded(page_id)?.ok_or(Error::Corrupt("missing tree page"))?;
+        match page.as_ref() {
+            DecodedPage::Leaf(_) => {
+                out.push(page);
+                Ok(())
+            }
+            DecodedPage::Internal(node) => {
+                for idx in 0..node.entries.len() {
+                    let lower = &node.entries[idx].separator;
+                    if node.entries.get(idx + 1).is_some_and(|next| next.separator <= *start) {
+                        continue;
+                    }
+                    if end.is_some_and(|end| *lower >= *end) {
+                        break;
+                    }
+                    self.collect_pages_range(node.child_page_id(idx), start, end, out)?;
+                }
+                Ok(())
+            }
+            _ => Err(Error::Corrupt("unexpected page type")),
+        }
+    }
+
     /// Delete a key when present.
     pub fn delete(&mut self, key: &TreeKey) -> Result<bool> {
         let root = self.pager.header()?.slot.record_root;

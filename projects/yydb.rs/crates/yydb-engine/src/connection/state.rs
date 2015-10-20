@@ -132,6 +132,54 @@ impl Connection {
         }
     }
 
+    /// Read metadata plus a borrowed view of the rows inside `window`.
+    ///
+    /// Same window contract as [`Self::read_state_window_with_metadata`]: the
+    /// window is a superset of every row the statement can read, and execution
+    /// still filters inside it. The difference is that table rows stay in the
+    /// decoded page images instead of being copied into a record map, so a
+    /// window read pays one page handle per leaf instead of one map entry per
+    /// row. Single-file `.yydb` images still pull the embedded object prefix into
+    /// `state.records`, because the resolver and publication consume an owned
+    /// object catalog.
+    ///
+    /// Returns no window for a memory-backed connection: that backend already
+    /// keeps every row in `state.records`, so it needs no borrowed view.
+    pub(crate) fn read_state_window_rows(
+        &self,
+        window: &yydb_query::ReadWindow,
+        metadata: State,
+    ) -> Result<(State, Option<yydb_storage::RowWindow>)> {
+        match self.backend.as_ref() {
+            Backend::File { database, .. } => {
+                let mut windows = vec![RecordWindow { start: window.start.clone(), end: window.end.clone() }];
+                if self.is_single_file_yydb() {
+                    windows.push(RecordWindow {
+                        start: EMBEDDED_OBJECT_PREFIX.to_owned(),
+                        end: Some(format!("{EMBEDDED_OBJECT_PREFIX}g")),
+                    });
+                }
+                let (snapshot, rows) = {
+                    let mut database = database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    database.snapshot_windows_with_rows(&windows)?
+                };
+                let mut state = snapshot::state_with_window(metadata, snapshot)?;
+                if self.is_single_file_yydb() {
+                    for row in rows.iter() {
+                        let row = row?;
+                        if row.key.starts_with(EMBEDDED_OBJECT_PREFIX) {
+                            state.records.insert(row.key.to_owned(), row.bytes.to_vec());
+                        }
+                    }
+                    self.objects.take_embedded_records(&mut state.records)?;
+                }
+                Ok((state, Some(rows)))
+            }
+            // Memory-backed connections already hold every row in `metadata`.
+            Backend::Memory { .. } => Ok((metadata, None)),
+        }
+    }
+
     /// Read reserved metadata plus exactly the rows inside `windows`, together
     /// with what the image held for them before the statement ran.
     ///
@@ -378,6 +426,27 @@ impl Connection {
             }
         }
         Ok(sequence)
+    }
+}
+
+/// Borrowed table rows handed to a narrowed read.
+///
+/// A window read keeps row bytes in the decoded leaf pages, so the query layer
+/// receives references that live exactly as long as the window does. Every row
+/// is decoded into an owned `QueryRow` inside the operator, so no borrow crosses
+/// this boundary.
+pub(crate) struct WindowRows<'a>(pub(crate) &'a yydb_storage::RowWindow);
+
+impl yydb_query::RowSource for WindowRows<'_> {
+    fn rows_with_prefix<'a>(&'a self, prefix: &str) -> Box<dyn Iterator<Item = Result<yydb_query::BorrowedRow<'a>>> + 'a> {
+        let prefix = prefix.to_owned();
+        Box::new(self.0.iter().filter_map(move |row| match row {
+            Ok(row) if row.key.starts_with(&prefix) => {
+                Some(Ok(yydb_query::BorrowedRow { key: row.key, bytes: row.bytes }))
+            }
+            Ok(_) => None,
+            Err(error) => Some(Err(error)),
+        }))
     }
 }
 

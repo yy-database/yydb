@@ -15,7 +15,10 @@ use yydb_types::{Error, Result};
 use crate::{
     journal::{JournalMode, wal_path},
     lock::WriterLock,
-    snapshot::{RecordDelta, RecordWindow, Snapshot, read_snapshot, read_snapshot_windows, write_delta, write_snapshot},
+    snapshot::{
+        RecordDelta, RecordWindow, RowWindow, Snapshot, read_snapshot, read_snapshot_windows,
+        read_snapshot_windows_with_rows, write_delta, write_snapshot,
+    },
 };
 
 /// An open, exclusively locked file-backed database image.
@@ -95,6 +98,17 @@ impl Database {
     /// can read, so the record tree never walks the rest of the database.
     pub fn snapshot_windows(&mut self, windows: &[RecordWindow]) -> Result<Snapshot> {
         read_snapshot_windows(&mut self.pager, windows)
+    }
+
+    /// Load metadata plus a borrowed row view of the records inside `windows`.
+    ///
+    /// This is the read-only counterpart of [`Database::snapshot_windows`]:
+    /// metadata is still decoded into owned rows, but the record rows stay in the
+    /// decoded page images the windows reach. The returned [`RowWindow`] owns
+    /// those page handles, so the borrow lasts exactly as long as the caller
+    /// keeps it alive.
+    pub fn snapshot_windows_with_rows(&mut self, windows: &[RecordWindow]) -> Result<(Snapshot, RowWindow)> {
+        read_snapshot_windows_with_rows(&mut self.pager, windows)
     }
 
     /// Cumulative publication counters for this database handle.

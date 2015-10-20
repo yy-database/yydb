@@ -164,6 +164,22 @@ impl FilePager {
         RecordTree::open(&mut self.inner).scan_range(&TreeKey::user_record(start), end.as_ref())
     }
 
+    /// Collect the decoded leaf pages holding user keys in `[start, end)`.
+    ///
+    /// The returned handles keep the pager's decoded pages alive without copying
+    /// a cell, so a read-only caller can decode rows straight out of the page
+    /// images it is handed.
+    pub fn leaf_pages_range(
+        &mut self,
+        start: impl AsRef<[u8]>,
+        end: Option<&[u8]>,
+    ) -> Result<Vec<Arc<crate::pager::DecodedPage>>> {
+        let end = end.map(TreeKey::user_record);
+        let mut pages = Vec::new();
+        RecordTree::open(&mut self.inner).collect_leaf_pages(&TreeKey::user_record(start), end.as_ref(), &mut pages)?;
+        Ok(pages)
+    }
+
     /// User KV delete.
     pub fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
         self.inner.clear_dirty();

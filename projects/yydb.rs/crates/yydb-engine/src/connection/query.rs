@@ -192,8 +192,10 @@ impl Connection {
         // consumed by the window merge.
         let basis = schema_basis(&metadata);
         // Phase two: metadata plus the window, read as one pager transaction.
+        // Table rows stay in the decoded page images; only metadata and, for
+        // single-file images, the embedded object catalog are owned.
         let started = Instant::now();
-        let state = self.read_state_window_with_metadata(&window, metadata)?;
+        let (state, rows) = self.read_state_window_rows(&window, metadata)?;
         if let Some(profile) = profile.as_deref_mut() {
             profile.window_read_ns += started.elapsed().as_nanos();
         }
@@ -205,7 +207,7 @@ impl Connection {
             self.check_schema_drift(stmt, &state)?;
             return self.execute_with(stmt, values, resolved_contract(&state)?, &state.records);
         }
-        self.execute_with_profiled(stmt, values, resolved_contract(&state)?, &state.records, profile)
+        self.execute_with_rows(stmt, values, resolved_contract(&state)?, &state.records, rows.as_ref(), profile)
     }
 
     fn execute_with(
@@ -236,14 +238,59 @@ impl Connection {
         let (rows, exec) = yydb_query::with_object_resolver(Some(self.object_resolver()), || {
             yydb_query::execute_prepared_profiled(stmt, values, Some(contract), records)
         })?;
+        self.add_exec_profile(profile, started, &exec, rows.len());
+        Ok(rows)
+    }
+
+    /// Execute a narrowed read whose table rows are borrowed from a window.
+    ///
+    /// `records` still carries the metadata rows the engine owns; table scans
+    /// decode rows from `rows` and hand back owned `QueryRow`s, so no borrow
+    /// leaves this call.
+    fn execute_with_rows(
+        &self,
+        stmt: &PreparedStatement,
+        values: &[Value],
+        contract: &vos::ResolvedContract,
+        records: &BTreeMap<String, Vec<u8>>,
+        rows: Option<&yydb_storage::RowWindow>,
+        profile: Option<&mut ReadProfile>,
+    ) -> Result<Vec<QueryRow>> {
+        let Some(rows) = rows
+        else {
+            // Memory-backed reads already own every row, so they run unwindowed.
+            return self.execute_with_profiled(stmt, values, contract, records, profile);
+        };
+        let source = super::state::WindowRows(rows);
+        let Some(profile) = profile
+        else {
+            let (out, _) = yydb_query::with_object_resolver(Some(self.object_resolver()), || {
+                yydb_query::execute_prepared_borrowed(stmt, values, Some(contract), records, &source, false)
+            })?;
+            return Ok(out);
+        };
+        let started = Instant::now();
+        let (out, exec) = yydb_query::with_object_resolver(Some(self.object_resolver()), || {
+            yydb_query::execute_prepared_borrowed(stmt, values, Some(contract), records, &source, true)
+        })?;
+        self.add_exec_profile(profile, started, &exec, out.len());
+        Ok(out)
+    }
+
+    fn add_exec_profile(
+        &self,
+        profile: &mut ReadProfile,
+        started: Instant,
+        exec: &yydb_query::ExecProfile,
+        row_count: usize,
+    ) {
         profile.exec_ns += started.elapsed().as_nanos();
-        profile.scanned_rows += rows.len();
+        profile.scanned_rows += row_count;
         profile.scan_ns += exec.scan_ns;
         profile.filter_ns += exec.filter_ns;
         profile.project_ns += exec.project_ns;
         profile.sort_ns += exec.sort_ns;
         profile.exec_other_ns += exec.other_ns;
-        Ok(rows)
     }
 
     fn check_schema_drift(&self, stmt: &PreparedStatement, state: &super::State) -> Result<()> {

@@ -15,7 +15,7 @@ use super::{
         BoundValue, ConflictAction, ConflictClause, Expr, Pred, ProjectExpr, ProjectField, QueryOp, QueryRow,
         ReturningProjection, WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
-    store,
+    store::{self, ReadRows},
 };
 
 fn write_error(message: impl Into<String>) -> Error {
@@ -382,7 +382,7 @@ fn project_returned(
     bound_values: &[Value],
 ) -> Result<QueryRow> {
     match fields {
-        Some(fields) => exec::project_row(fields, row, table, Some(contract), records, bound_values),
+        Some(fields) => exec::project_row(fields, row, table, Some(contract), &ReadRows::owned(records), bound_values),
         None => Ok(row.clone()),
     }
 }
@@ -469,8 +469,8 @@ fn conflict_update_row(
     bound_values: &[Value],
 ) -> Result<Option<QueryRow>> {
     if let Some(predicate) = predicate {
-        let predicate = exec::resolve_subquery_predicates(predicate, None, records, bound_values)?;
-        if !exec::eval_pred(&predicate, matched, table, None, records, bound_values)? {
+        let predicate = exec::resolve_subquery_predicates(predicate, None, &ReadRows::owned(records), bound_values)?;
+        if !exec::eval_pred(&predicate, matched, table, None, &ReadRows::owned(records), bound_values)? {
             return Ok(None);
         }
     }
@@ -585,7 +585,7 @@ fn update_rows(
     let (entry, storage) = resolve_table(contract, table)?;
     let pk_field = catalog::primary_field_name(entry)?.to_string();
     let predicate =
-        predicate.map(|predicate| exec::resolve_subquery_predicates(predicate, None, records, bound_values)).transpose()?;
+        predicate.map(|predicate| exec::resolve_subquery_predicates(predicate, None, &ReadRows::owned(records), bound_values)).transpose()?;
     let predicate = predicate.as_ref();
 
     let mut replacements: Vec<(String, QueryRow)> = Vec::new();
@@ -593,7 +593,7 @@ fn update_rows(
         let entries = store::load_table_entries(records, &storage)?;
         for (key, mut row) in entries {
             if let Some(predicate) = predicate {
-                if !exec::eval_pred(predicate, &row, table, None, records, bound_values)? {
+                if !exec::eval_pred(predicate, &row, table, None, &ReadRows::owned(records), bound_values)? {
                     continue;
                 }
             }
@@ -630,14 +630,14 @@ fn delete_rows(
 ) -> Result<usize> {
     let (_, storage) = resolve_table(contract, table)?;
     let predicate =
-        predicate.map(|predicate| exec::resolve_subquery_predicates(predicate, None, records, bound_values)).transpose()?;
+        predicate.map(|predicate| exec::resolve_subquery_predicates(predicate, None, &ReadRows::owned(records), bound_values)).transpose()?;
     let predicate = predicate.as_ref();
     let mut doomed: Vec<String> = Vec::new();
     {
         let entries = store::load_table_entries(records, &storage)?;
         for (key, row) in entries {
             if let Some(predicate) = predicate {
-                if !exec::eval_pred(predicate, &row, table, None, records, bound_values)? {
+                if !exec::eval_pred(predicate, &row, table, None, &ReadRows::owned(records), bound_values)? {
                     continue;
                 }
             }

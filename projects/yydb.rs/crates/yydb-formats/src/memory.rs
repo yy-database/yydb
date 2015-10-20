@@ -264,6 +264,22 @@ impl MemoryPager {
         let end = end.map(TreeKey::user_record);
         RecordTree::open(self).scan_range(&TreeKey::user_record(start), end.as_ref())
     }
+
+    /// Collect the decoded leaf pages holding user keys in `[start, end)`.
+    ///
+    /// Returns reference-counted handles to the pages already decoded for this
+    /// pager, so a read-only caller decodes rows out of those images instead of
+    /// copying every stored cell into a fresh map.
+    pub fn leaf_pages_range(
+        &mut self,
+        start: impl AsRef<[u8]>,
+        end: Option<&[u8]>,
+    ) -> Result<Vec<Arc<DecodedPage>>> {
+        let end = end.map(TreeKey::user_record);
+        let mut pages = Vec::new();
+        RecordTree::open(self).collect_leaf_pages(&TreeKey::user_record(start), end.as_ref(), &mut pages)?;
+        Ok(pages)
+    }
 }
 
 impl PageStore for MemoryPager {

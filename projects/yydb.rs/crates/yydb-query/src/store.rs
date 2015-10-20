@@ -144,6 +144,100 @@ pub(crate) fn place_vector(vector: Vector) -> Result<Value> {
     })
 }
 
+/// One record-map row borrowed from a storage window.
+///
+/// The borrow is bounded by the [`RowSource`] that handed it out: a pipeline
+/// decodes it into an owned [`QueryRow`] and never keeps the reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BorrowedRow<'a> {
+    /// Logical record name.
+    pub key: &'a str,
+    /// Stored row bytes, borrowed from the page image that holds them.
+    pub bytes: &'a [u8],
+}
+
+/// Storage view that hands out borrowed rows for one record-key prefix.
+///
+/// A narrowed read keeps row bytes in the storage window instead of copying
+/// them into a record map. The engine owns that window and passes it here for
+/// the duration of one statement execution; every row is decoded into an owned
+/// [`QueryRow`] before it leaves the operator.
+pub trait RowSource {
+    /// Rows whose record name starts with `prefix`, in ascending key order.
+    ///
+    /// The iterator borrows `self`, so the source must outlive it. It owns its
+    /// copy of `prefix`, so the caller may pass a temporary string.
+    fn rows_with_prefix<'a>(&'a self, prefix: &str) -> Box<dyn Iterator<Item = Result<BorrowedRow<'a>>> + 'a>;
+
+    /// Exact row lookup by full record key.
+    ///
+    /// Defaults to the first row of [`Self::rows_with_prefix`]: a source yields
+    /// ascending keys, so a longer key sharing the requested prefix means the
+    /// exact row is absent.
+    fn row_at<'a>(&'a self, key: &str) -> Option<Result<BorrowedRow<'a>>> {
+        let first = self.rows_with_prefix(key).next()?;
+        match first {
+            Ok(row) if row.key == key => Some(Ok(row)),
+            Ok(_) => None,
+            Err(error) => Some(Err(error)),
+        }
+    }
+}
+
+/// Record rows one read pipeline can scan.
+///
+/// A full read owns every row in the map. A narrowed read owns only metadata
+/// rows and borrows the statement's window from [`RowSource`].
+pub(crate) struct ReadRows<'a> {
+    records: &'a BTreeMap<String, Vec<u8>>,
+    source: Option<&'a dyn RowSource>,
+}
+
+impl<'a> ReadRows<'a> {
+    /// Rows come from the owned record map only.
+    pub(crate) fn owned(records: &'a BTreeMap<String, Vec<u8>>) -> Self {
+        Self { records, source: None }
+    }
+
+    /// Rows come from `source`; `records` still answers metadata lookups.
+    pub(crate) fn borrowed(records: &'a BTreeMap<String, Vec<u8>>, source: &'a dyn RowSource) -> Self {
+        Self { records, source: Some(source) }
+    }
+
+    /// Decode every row of `table`, whichever side holds the bytes.
+    pub(crate) fn load_table(&self, table: &str) -> Result<Vec<QueryRow>> {
+        match self.source {
+            Some(source) => load_table_borrowed(source, table),
+            None => load_table(self.records, table),
+        }
+    }
+
+    /// Decode one row addressed by table and primary key.
+    pub(crate) fn load_row(&self, table: &str, pk: &str) -> Result<QueryRow> {
+        let key = row_key(table, pk);
+        match self.source {
+            Some(source) => match source.row_at(&key) {
+                Some(record) => decode_row(record?.bytes),
+                None => Err(missing_row(table, pk)),
+            },
+            None => load_row(self.records, table, pk),
+        }
+    }
+}
+
+fn missing_row(table: &str, pk: &str) -> Error {
+    Error::Schema { message: format!("missing row `{table}` pk `{pk}`") }
+}
+
+fn load_table_borrowed(source: &dyn RowSource, table: &str) -> Result<Vec<QueryRow>> {
+    let prefix = table_prefix(table);
+    let mut rows = Vec::new();
+    for record in source.rows_with_prefix(&prefix) {
+        rows.push(decode_row(record?.bytes)?);
+    }
+    Ok(rows)
+}
+
 /// Build the storage key for one table row.
 pub fn row_key(table: &str, pk: &str) -> String {
     format!("{ROW_PREFIX}{table}/{pk}")
@@ -425,7 +519,7 @@ fn hex_digit(byte: u8) -> Option<u8> {
 /// Load one row by primary key.
 pub fn load_row(records: &BTreeMap<String, Vec<u8>>, table: &str, pk: &str) -> Result<QueryRow> {
     let key = row_key(table, pk);
-    let bytes = records.get(&key).ok_or_else(|| Error::Schema { message: format!("missing row `{table}` pk `{pk}`") })?;
+    let bytes = records.get(&key).ok_or_else(|| missing_row(table, pk))?;
     decode_row(bytes)
 }
 
