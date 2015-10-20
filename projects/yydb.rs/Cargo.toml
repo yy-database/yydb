@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "ffis/*"]
+members = [
+    "yydb-napi",
+    "yydb-pyo3",
+    "yydb-wasm",
+]
+default-members = ["yydb-napi"]
 
 [workspace.package]
 version = "0.0.18"
@@ -10,42 +15,13 @@ license = "MPL-2.0"
 repository = "https://github.com/yy-database/yydb"
 
 [workspace.dependencies]
-vos = { git = "https://github.com/voml/vos-language.git", rev = "387d9fc3c9a556ddb8a433c627a866a2918d0186" }
-# SQL frontend parser (Oak). The SQL AST feeds `yydb-query`'s lowering pass.
-oak-sql = { git = "https://github.com/yggdrasil-language/oaks.git", rev = "f05abe2c9e99365553871ba152e45f82d72c12d7", package = "oak-sql" }
-# Engine (bottom â†’ mid; depend on yydb facade in apps)
-yydb-types = { version = "0.0.18", path = "crates/yydb-types" }
-yydb-formats = { version = "0.0.18", path = "crates/yydb-formats" }
-yydb-execution = { version = "0.0.18", path = "crates/yydb-execution" }
-yydb-udf = { version = "0.0.18", path = "crates/yydb-udf" }
-yydb-query = { version = "0.0.18", path = "crates/yydb-query" }
-yydb-storage = { version = "0.0.18", path = "crates/yydb-storage" }
-yydb-engine = { version = "0.0.18", path = "crates/yydb-engine" }
-yydb-protocol = { version = "0.0.18", path = "crates/yydb-protocol" }
-# Facade
-yydb = { version = "0.0.18", path = "crates/yydb" }
-# Transport (aggregated by the facade; never depend back on `yydb`)
-yydb-client = { path = "crates/yydb-client" }
-yydb-server = { path = "crates/yydb-server" }
-# Measurement harness (SQLite-referenced; never a product dependency)
-yydb-bench = { version = "0.0.18", path = "crates/yydb-bench" }
-# SQLite split: format primitives, storage runtime, and product facade
-sqlite-formats = { version = "0.1.0", path = "crates/sqlite-formats" }
-sqlite-storage = { version = "0.1.0", path = "crates/sqlite-storage" }
-sqlite = { version = "0.1.0", path = "crates/sqlite" }
-# Language bindings (thin; every Rust capability comes from `yydb`)
-yydb-napi = { path = "ffis/yydb-napi" }
-yydb-pyo3 = { path = "ffis/yydb-pyo3" }
-# Third party
+# Sole database.rs dependency ¡ª the `yydb` facade. Pin full 40-char rev.
+# Local absolute path overrides belong in `.cargo/config.toml` (facade only).
+yydb = { git = "https://github.com/oovm/database.rs.git", rev = "224941598608759e33dc38bf61b4682d921f9b29" }
+
 blake3 = "1"
-rusqlite = { version = "0.33", features = ["bundled"] }
-sha1 = "0.11.0"
-sha2 = "0.10"
-base64 = "0.23.1"
-uuid = { version = "1", features = ["serde", "v4"] }
-serde = "1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Storage_FileSystem", "Win32_System_IO"] }
 napi = { version = "3.14.2", default-features = false, features = ["napi4", "napi6"] }
 napi-derive = "3.6.12"
 napi-build = "2.6"

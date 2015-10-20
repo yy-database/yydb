@@ -19,6 +19,7 @@ Thumbs.db
 projects/yydb.rs/target/
 projects/yydb.rs/.cargo/config.toml
 projects/yydb.rs/Cargo.lock
+.cargo/config.toml
 target/
 
 # Node

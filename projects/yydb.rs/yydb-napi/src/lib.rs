@@ -1,4 +1,4 @@
-//! Thin Node-API binding — atomic database operations over the [`yydb`] facade.
+﻿//! Thin Node-API binding — atomic database operations over the [`yydb`] facade.
 //!
 //! The binding exposes one handle per open file plus single-purpose methods.
 //! User-facing commands (`init`, `info`, `serve`) are composed in TypeScript so
@@ -23,8 +23,6 @@ use std::{
 
 use napi::bindgen_prelude::{Buffer, Env, FunctionRef, Result};
 use napi_derive::napi;
-
-mod sqlite;
 
 fn reason(error: yydb::Error) -> napi::Error {
     let json = serde_json::to_string(&error.to_json()).unwrap_or_else(|_| error.to_string());
@@ -989,3 +987,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+

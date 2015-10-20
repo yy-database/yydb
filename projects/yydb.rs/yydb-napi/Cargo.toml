@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "yydb-napi"
 version.workspace = true
 edition.workspace = true
@@ -19,7 +19,6 @@ napi-derive = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 yydb = { workspace = true }
-sqlite = { workspace = true }
 
 [build-dependencies]
 napi-build = { workspace = true }

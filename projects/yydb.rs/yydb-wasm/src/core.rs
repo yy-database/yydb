@@ -273,7 +273,7 @@ pub(crate) fn compare_exchange_json(result: Result<bool>) -> String {
     }
 }
 
-fn rows_json(rows: Vec<yydb_query::QueryRow>) -> Result<Vec<JsonValue>> {
+fn rows_json(rows: Vec<yydb::query::QueryRow>) -> Result<Vec<JsonValue>> {
     rows.into_iter()
         .map(|row| {
             let mut map = serde_json::Map::new();
@@ -285,7 +285,7 @@ fn rows_json(rows: Vec<yydb_query::QueryRow>) -> Result<Vec<JsonValue>> {
         .collect()
 }
 
-pub(crate) fn query_rows_json(result: Result<Vec<yydb_query::QueryRow>>) -> String {
+pub(crate) fn query_rows_json(result: Result<Vec<yydb::query::QueryRow>>) -> String {
     let rows = result.and_then(rows_json);
     match rows {
         Ok(rows) => json!({

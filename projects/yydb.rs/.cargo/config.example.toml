@@ -1,5 +1,6 @@
-# Copy to `config.toml` (git ignored) and replace `<your-path>` with your local absolute path.
+﻿# Copy to `config.toml` (git ignored) and replace `<your-path>` with your local absolute path.
 # CI uses pinned git `rev` from `Cargo.toml` only.
+# Patch the facade only — internal crates follow the database.rs workspace graph.
 
-[patch."https://github.com/voml/vos-language.git"]
-vos = { path = "<your-path>/vos-language/projects/crates/vos" }
+[patch."https://github.com/oovm/database.rs.git"]
+yydb = { path = "<your-path>/database.rs/projects/facades/yydb" }

@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use js_sys::Function;
 use wasm_bindgen::prelude::*;
 use yydb::{Connection, Error, protocol as wire};
-use yydb_query::PreparedStatement;
+use yydb::query::PreparedStatement;
 
 use crate::{
     core::{
@@ -604,7 +604,7 @@ impl MemorySession {
         }
         match self.conn.prepare_vos(source) {
             Ok(stmt) => {
-                if stmt.query_kind != yydb_query::QueryKind::Read {
+                if stmt.query_kind != yydb::query::QueryKind::Read {
                     let error = Error::Schema { message: "Phase 1 only executes pipelines ending in `.collect()`".into() };
                     return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string();
                 }
@@ -1101,7 +1101,7 @@ impl PersistentSession {
         }
         match self.conn.prepare_vos(source) {
             Ok(stmt) => {
-                if stmt.query_kind != yydb_query::QueryKind::Read {
+                if stmt.query_kind != yydb::query::QueryKind::Read {
                     let error = Error::Schema { message: "Phase 1 only executes pipelines ending in `.collect()`".into() };
                     return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string();
                 }
