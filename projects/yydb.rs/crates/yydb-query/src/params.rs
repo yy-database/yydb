@@ -295,12 +295,21 @@ pub struct BoundWrite {
 ///
 /// Write programs lower through `dml` rather than the operator pipeline, so they
 /// need the rewritten source text: the executor resolves each slot identifier
-/// against `values` while initializing a field. Refuses a program that is not a
-/// write so a read pipeline never enters the DML executor.
-pub fn bind_vos_write(source: &str, named: &BTreeMap<String, Value>) -> Result<BoundWrite> {
+/// against `values` while initializing a field.
+///
+/// Schema macros are only writes once expanded, and the expansion needs the
+/// installed schema document, so the write check runs on the expanded program.
+/// A macro that cannot be expanded (missing document, unknown name, arguments)
+/// returns its own error instead of passing as an accepted write.
+pub fn bind_vos_write(
+    source: &str,
+    named: &BTreeMap<String, Value>,
+    schema_document: Option<&str>,
+) -> Result<BoundWrite> {
     let (parameters, rewritten) = scan_and_rewrite(source, Dialect::Vos)?;
     let program = vos::parse_program(&rewritten).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
-    if !super::dml::has_write_call(&program) {
+    let expanded = super::dml::expand_program(&program, schema_document)?;
+    if !super::dml::has_write_call(&expanded) {
         return Err(Error::Unsupported("VOS parameter binding for writes requires an insert, update, or delete program"));
     }
     let values = bind_values(&parameters, named)?;

@@ -404,9 +404,9 @@ impl Connection {
         let _guard = self.operation_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         self.mutate_narrowed_write_unlocked(
             |metadata| {
-                let plan = yydb_query::bind_vos_write(source, named)?;
                 let contract = resolved_contract(metadata)?;
                 let schema_document = metadata.schema.as_ref().map(|schema| schema.document.as_str());
+                let plan = yydb_query::bind_vos_write(source, named, schema_document)?;
                 self.with_write_hooks(|| {
                     yydb_query::point_write_keys(
                         &plan.source,
@@ -419,11 +419,11 @@ impl Connection {
                 .map(|keys| keys.map(Self::key_windows))
             },
             |state| {
-                let plan = yydb_query::bind_vos_write(source, named)?;
                 // The write executor mutates `state.records`, so it cannot hold a
                 // borrow of the contract inside the same state.
                 let contract = resolved_contract(state)?.clone();
                 let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
+                let plan = yydb_query::bind_vos_write(source, named, schema_document)?;
                 let records = &mut state.records;
                 let constraints = &state.unique_constraints;
                 let values = &plan.values;

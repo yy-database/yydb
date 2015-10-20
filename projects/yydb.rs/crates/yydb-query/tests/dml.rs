@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use yydb_query::{ReadWindow, execute_write, point_write_keys, prepare_sql, resolved_contract_from_document, write_windows};
+use yydb_query::{
+    ReadWindow, bind_vos_write, execute_write, execute_write_with_params, point_write_keys, prepare_sql,
+    resolved_contract_from_document, write_windows,
+};
 use yydb_types::{TableUniqueConstraint, UniqueConstraint, Value};
 
 const BLOG_SCHEMA: &str = r#"
@@ -51,6 +54,22 @@ macro seed_blog() -> unit {
         user_name: "linus",
         active: true,
     }.insert()
+}
+"#;
+
+const KEYED_WITH_MACRO: &str = r#"
+table Doc {
+    @@doc_id: i64,
+    title: utf8,
+}
+
+macro seed_docs() -> unit {
+    Doc::insert({ doc_id: 1, title: "one" })
+    Doc::insert({ doc_id: 2, title: "two" })
+}
+
+macro patch_doc() -> unit {
+    Doc::update({ doc_id: 1, title: "one patched" })
 }
 "#;
 
@@ -133,6 +152,75 @@ fn a_macro_that_expands_to_keyed_writes_stays_narrowable() {
         .expect("plan")
         .expect("a macro of keyed inserts must be narrowable");
     assert_eq!(keys.len(), 2, "both expanded statements must name one key each, got {keys:?}");
+}
+
+fn stored_title(contract: &vos::ResolvedContract, records: &BTreeMap<String, Vec<u8>>, id: i64) -> String {
+    let rows = yydb_query::execute("Doc.all().collect()", Some(contract), records).expect("read back");
+    let row = rows.iter().find(|row| row.get("doc_id") == Some(&Value::I64(id))).expect("row exists");
+    match row.get("title") {
+        Some(Value::Text(title)) => title.clone(),
+        other => panic!("unexpected title {other:?}"),
+    }
+}
+
+#[test]
+fn a_macro_program_binds_parameters_and_stores_inserted_rows() {
+    let contract = resolved_contract_from_document(KEYED_WITH_MACRO).expect("contract");
+    let source = "seed_docs()\nDoc::insert({ doc_id: $doc_id, title: $title })";
+    let named = BTreeMap::from([("doc_id".to_string(), Value::I64(3)), ("title".to_string(), Value::Text("three".into()))]);
+    let plan = bind_vos_write(source, &named, Some(KEYED_WITH_MACRO))
+        .expect("a macro that expands to inserts must bind like a write program");
+    assert_eq!(plan.values, vec![Value::I64(3), Value::Text("three".into())]);
+
+    let mut records = BTreeMap::new();
+    execute_write_with_params(&plan.source, &contract, &[], Some(KEYED_WITH_MACRO), &mut records, &plan.values)
+        .expect("execute");
+    assert_eq!(records.len(), 3, "two macro rows and one parameter row must land");
+    assert_eq!(stored_title(&contract, &records, 3), "three");
+}
+
+#[test]
+fn a_macro_program_binds_parameters_and_patches_an_updated_row() {
+    let contract = resolved_contract_from_document(KEYED_WITH_MACRO).expect("contract");
+    let source = "patch_doc()\nDoc::update({ doc_id: 1, title: $title })";
+    let named = BTreeMap::from([("title".to_string(), Value::Text("patched twice".into()))]);
+    let plan = bind_vos_write(source, &named, Some(KEYED_WITH_MACRO))
+        .expect("a macro that expands to an update must bind like a write program");
+
+    let mut records = BTreeMap::new();
+    execute_write("seed_docs()", &contract, Some(KEYED_WITH_MACRO), &mut records).expect("seed");
+    execute_write_with_params(&plan.source, &contract, &[], Some(KEYED_WITH_MACRO), &mut records, &plan.values)
+        .expect("execute");
+    assert_eq!(stored_title(&contract, &records, 1), "patched twice", "the parameter patch must win over the macro patch");
+}
+
+fn bind_error(source: &str, named: &BTreeMap<String, Value>, document: Option<&str>) -> yydb_types::Error {
+    bind_vos_write(source, named, document).err().expect("write binding must fail")
+}
+
+#[test]
+fn a_macro_without_a_schema_document_still_fails() {
+    let err = bind_error("seed_docs()", &BTreeMap::new(), None);
+    assert_eq!(err.code(), "yydb.schema.invalid", "an unexpandable macro must stay fail-closed");
+}
+
+#[test]
+fn an_unknown_macro_still_fails() {
+    let err = bind_error("missing_macro()", &BTreeMap::new(), Some(KEYED_WITH_MACRO));
+    assert_eq!(err.code(), "yydb.schema.invalid", "an unknown macro must not pass as a write");
+}
+
+#[test]
+fn a_macro_call_with_a_parameter_argument_still_fails() {
+    let named = BTreeMap::from([("title".to_string(), Value::Text("ignored".into()))]);
+    let err = bind_error("seed_docs($title)", &named, Some(KEYED_WITH_MACRO));
+    assert_eq!(err.code(), "yydb.unsupported", "a macro call with arguments must not be accepted");
+}
+
+#[test]
+fn a_read_pipeline_is_still_refused_by_write_binding() {
+    let err = bind_error("Doc.all().collect()", &BTreeMap::new(), Some(KEYED_WITH_MACRO));
+    assert_eq!(err.code(), "yydb.unsupported", "a read pipeline must never enter the write executor");
 }
 
 /// Plan the record windows of one prepared SQL write statement.

@@ -5,6 +5,8 @@
 //! that a failed patch leaves the stored row byte-identical, that a keyed
 //! delete is idempotent, and that both survive rollback and reopen.
 
+use std::collections::BTreeMap;
+
 use yydb::{Error, Value, query::QueryRow};
 
 use crate::fixtures::yydb::{cleanup, open_temp_db, reopen};
@@ -14,6 +16,22 @@ table Doc {
     @@doc_id: i64,
     @slug: utf8,
     title: utf8,
+}
+"#;
+
+const MACRO_SCHEMA: &str = r#"
+table Doc {
+    @@doc_id: i64,
+    title: utf8,
+}
+
+macro seed_docs() -> unit {
+    Doc::insert({ doc_id: 1, title: "one" })
+    Doc::insert({ doc_id: 2, title: "two" })
+}
+
+macro patch_doc() -> unit {
+    Doc::update({ doc_id: 2, title: "macro patched" })
 }
 "#;
 
@@ -167,5 +185,56 @@ fn collection_update_stays_unsupported() {
         .expect_err("Phase 1 has no predicate evaluator for collection writes");
     assert!(matches!(error, Error::Unsupported(_)), "unexpected error: {error}");
     assert!(error.to_string().contains("table type"), "unexpected error: {error}");
+    cleanup(&path);
+}
+
+#[test]
+fn a_macro_write_program_binds_parameters_and_stores_rows() {
+    let (conn, path) = open_temp_db("vos-macro-insert");
+    conn.ensure_schema(MACRO_SCHEMA).unwrap();
+    let named = BTreeMap::from([("doc_id".to_string(), Value::I64(3)), ("title".to_string(), Value::Text("three".into()))]);
+    conn.execute_vos_write_with_params("seed_docs()\nDoc::insert({ doc_id: $doc_id, title: $title })", &named)
+        .expect("a macro program that expands to writes must bind its parameters");
+
+    let rows = conn.query_vos("Doc.all().collect()").unwrap();
+    assert_eq!(rows.len(), 3, "both macro rows and the parameter row must land");
+    assert_eq!(id_of(&rows[2]), 3);
+    assert_eq!(text(&rows[2], "title"), "three");
+
+    conn.close();
+    drop(conn);
+    let reopened = reopen(&path);
+    assert_eq!(reopened.query_vos("Doc.all().collect()").unwrap().len(), 3, "the macro rows must be durable");
+    reopened.close();
+    cleanup(&path);
+}
+
+#[test]
+fn a_macro_update_program_binds_parameters_and_patches_a_row() {
+    let (conn, path) = open_temp_db("vos-macro-update");
+    conn.ensure_schema(MACRO_SCHEMA).unwrap();
+    conn.execute_vos_write("seed_docs()").unwrap();
+    let named = BTreeMap::from([("title".to_string(), Value::Text("parameter patched".into()))]);
+    conn.execute_vos_write_with_params("patch_doc()\nDoc::update({ doc_id: 1, title: $title })", &named)
+        .expect("a macro program that expands to an update must bind its parameters");
+
+    let rows = conn.query_vos("Doc.all().collect()").unwrap();
+    assert_eq!(text(&rows[0], "title"), "parameter patched", "the parameter patch must land");
+    assert_eq!(text(&rows[1], "title"), "macro patched", "the macro patch must land too");
+    cleanup(&path);
+}
+
+#[test]
+fn an_unexpandable_macro_write_still_fails() {
+    let (conn, path) = open_temp_db("vos-macro-missing");
+    conn.ensure_schema(MACRO_SCHEMA).unwrap();
+    let error =
+        conn.execute_vos_write_with_params("missing_macro()", &BTreeMap::new()).expect_err("an unknown macro must fail");
+    assert_eq!(error.code(), "yydb.schema.invalid", "unexpected error: {error}");
+
+    let named = BTreeMap::from([("title".to_string(), Value::Text("ignored".into()))]);
+    let error =
+        conn.execute_vos_write_with_params("seed_docs($title)", &named).expect_err("a macro call with arguments must fail");
+    assert_eq!(error.code(), "yydb.unsupported", "unexpected error: {error}");
     cleanup(&path);
 }

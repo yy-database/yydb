@@ -163,7 +163,12 @@ fn execute_program_with_constraints(
     Ok(())
 }
 
-fn expand_program(program: &VosProgram, schema_document: Option<&str>) -> Result<VosProgram> {
+/// Replace every schema-macro call with the body the schema document declares.
+///
+/// Write binding runs this before it decides whether a program is a write: a
+/// macro call is not a `.insert(…)` until it has been expanded, and an
+/// unexpandable macro must stay an error rather than become an accepted write.
+pub(crate) fn expand_program(program: &VosProgram, schema_document: Option<&str>) -> Result<VosProgram> {
     let mut statements = Vec::new();
     for stmt in &program.statements {
         match stmt {
