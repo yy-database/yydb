@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { SqliteSnapshot } from "../src/node.ts";
+import { SqliteSnapshot, SqliteWriter } from "../src/node.ts";
 import { referencePython } from "./reference.ts";
 
 const python = referencePython();
@@ -19,9 +19,9 @@ test("snapshot constructor rejects invalid inputs before loading an addon", () =
 });
 
 test("native snapshot copies bytes and exposes bounded schema scans", () => {
-    const bytes = readFileSync(
-        new URL("../../../../yydb.rs/crates/sqlite-formats/src/assets/blank.sqlite", import.meta.url),
-    );
+    // The blank asset used to live in the removed in-tree Rust core. Build it with
+    // the writer so the suite never depends on an untracked file.
+    const bytes = SqliteWriter.create(4096).pages();
     const snapshot = new SqliteSnapshot(bytes);
     bytes.fill(0);
     assert.deepEqual(snapshot.schema(), []);

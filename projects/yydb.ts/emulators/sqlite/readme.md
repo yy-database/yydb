@@ -21,6 +21,10 @@ Not supported:
 
 Values are on-disk storage classes, not SQL-projected results. `NULL` and the empty string stay distinct, an `INTEGER PRIMARY KEY` alias column is returned as `NULL` rather than substituted with the rowid, and REAL affinity is not applied, so an integral REAL input can decode as an integer. Use the schema `sql` source to map aliases and declared types.
 
+## Testing
+
+Run `pnpm build:napi` at the workspace root before the suite. Tests load the native addon from `projects/yydb.ts/platforms/<platform>/lib/` build output, never a checked-in binary, and build their own blank database image instead of reading an untracked asset.
+
 ## Exports
 
 | Subpath | Use |
@@ -41,8 +45,8 @@ const tables = snapshot.schema().filter((o) => o.kind === "table");
 const rows = snapshot.table("samples", { maxRows: 100 });
 ```
 
-Each row is `{ rowid: bigint, payload: Buffer }` �?storage bytes, not SQL-projected values. Schema `sql` fields are opaque CREATE text. The default snapshot size cap is 256 MiB; each scan accepts `maxPages`, `maxRows`, `maxPayloadBytes`, and `maxTotalPayloadBytes`.
+Each row is `{ rowid: bigint, payload: Buffer }` ā€?storage bytes, not SQL-projected values. Schema `sql` fields are opaque CREATE text. The default snapshot size cap is 256ā€ÆMiB; each scan accepts `maxPages`, `maxRows`, `maxPayloadBytes`, and `maxTotalPayloadBytes`.
 
 ## Related packages
 
-- [`@yydb/yydb`](https://github.com/yy-database/yydb/tree/dev/projects/yydb.ts/packages/yydb) �?hosts the native `SqliteSnapshot` binding through its platform addon
+- [`@yydb/yydb`](https://github.com/yy-database/yydb/tree/dev/projects/yydb.ts/packages/yydb) ā€?hosts the native `SqliteSnapshot` binding through its platform addon
