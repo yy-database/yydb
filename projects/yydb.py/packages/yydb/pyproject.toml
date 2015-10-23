@@ -19,7 +19,7 @@ classifiers = [
 ]
 
 [tool.maturin]
-manifest-path = "../../../yydb.rs/ffis/yydb-pyo3/Cargo.toml"
+manifest-path = "../../../yydb.rs/yydb-pyo3/Cargo.toml"
 module-name = "yydb_pyo3"
 python-source = "src"
 python-packages = ["yydb"]

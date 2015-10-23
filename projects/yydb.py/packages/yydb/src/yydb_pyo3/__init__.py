@@ -10,6 +10,8 @@ from __future__ import annotations
 try:
     from .yydb_pyo3 import (
         Connection,
+        SqliteDatabase,
+        SqliteWriter,
         backup_db,
         compact_db,
         doctor_text,
@@ -36,6 +38,8 @@ except ImportError as error:  # running from a source checkout without a wheel
 
 __all__ = [
     "Connection",
+    "SqliteDatabase",
+    "SqliteWriter",
     "backup_db",
     "compact_db",
     "doctor_text",
