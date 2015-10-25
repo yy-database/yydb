@@ -22,12 +22,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from yydb import Connection  # noqa: E402
 
-ROWS = 20_000
-KEYS_PER_TXN = 1_000
-POINT_OPS = 10_000
-RANGE_SCANS = 200
-RANGE_LEN = 100
-PAGE_SIZE = 4_096
+ROWS = int(os.environ.get("BENCH_ROWS", "20000"))
+KEYS_PER_TXN = int(os.environ.get("BENCH_TXN", "1000"))
+POINT_OPS = int(os.environ.get("BENCH_POINT", "10000"))
+RANGE_SCANS = int(os.environ.get("BENCH_RANGE", "200"))
+RANGE_LEN = int(os.environ.get("BENCH_RANGE_LEN", "100"))
+PAGE_SIZE = int(os.environ.get("BENCH_PAGE", "4096"))
 PAYLOAD = b"x" * 64
 
 
@@ -201,15 +201,15 @@ def main() -> int:
         off_ms = oracle_load(off_path, "off")
         full_ms = oracle_load(full_path, "full")
         rows: list[tuple[str, float, float, str]] = [
-            ("our batch load 20k keys (64B value, 1k/txn)", load_ms, load_ms, "ms"),
+            (f"our batch load {ROWS} keys (64B value, {KEYS_PER_TXN}/txn)", load_ms, load_ms, "ms"),
             (
-                "python sqlite3 batch load 20k keys (4k page, 1k/txn, synchronous=off)",
+                f"python sqlite3 batch load {ROWS} keys (4k page, {KEYS_PER_TXN}/txn, synchronous=off)",
                 off_ms,
                 off_ms,
                 "ms",
             ),
             (
-                "python sqlite3 batch load 20k keys (4k page, 1k/txn, synchronous=full)",
+                f"python sqlite3 batch load {ROWS} keys (4k page, {KEYS_PER_TXN}/txn, synchronous=full)",
                 full_ms,
                 full_ms,
                 "ms",
@@ -229,10 +229,10 @@ def main() -> int:
         )
 
         point_ours = our_point(our_path)
-        rows.append(("our point get 10k", median(point_ours), p95(point_ours), "us"))
+        rows.append((f"our point get {POINT_OPS}", median(point_ours), p95(point_ours), "us"))
         point_oracle = oracle_point(off_path)
         rows.append(
-            ("python sqlite3 point lookup 10k (where k = ?)", median(point_oracle), p95(point_oracle), "us")
+            (f"python sqlite3 point lookup {POINT_OPS} (where k = ?)", median(point_oracle), p95(point_oracle), "us")
         )
 
         scan_ours = our_scan(our_path)
