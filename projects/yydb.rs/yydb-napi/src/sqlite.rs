@@ -8,9 +8,9 @@
 
 use napi::bindgen_prelude::{BigInt, Buffer};
 use napi_derive::napi;
-use sqlite::{
-    RecordLimits, RecordValue, SchemaObjectKind, TableLimits, TextEncoding, blank_database, decode_library_version,
-    decode_record, read_existing, read_named_table, read_schema, validate_database,
+use database::formats::sqlite::{RecordLimits, RecordValue, blank_database, decode_library_version, validate_database};
+use database::storage::sqlite::{
+    SchemaObjectKind, TableLimits, TextEncoding, decode_record, read_existing, read_named_table, read_schema,
 };
 
 /// Optional resource bounds for each schema or table scan.
@@ -165,7 +165,7 @@ fn resolve_encoding_name(bytes: &[u8]) -> napi::Result<&'static str> {
     })
 }
 
-fn build_decoded_rows(bytes: &[u8], rows: Vec<sqlite::TableRow>, limits: TableLimits) -> napi::Result<Vec<SqliteDecodedRow>> {
+fn build_decoded_rows(bytes: &[u8], rows: Vec<database::storage::sqlite::TableRow>, limits: TableLimits) -> napi::Result<Vec<SqliteDecodedRow>> {
     let encoding = detect_encoding(bytes)?;
     let record_limits = RecordLimits { max_columns: 1024, max_payload_bytes: limits.max_payload_bytes.max(1_048_576) };
     rows.into_iter()
@@ -370,22 +370,22 @@ struct WriterColumnJson {
     unique: Option<bool>,
 }
 
-fn json_to_write_value(json: &serde_json::Value) -> napi::Result<sqlite::WriteValue> {
+fn json_to_write_value(json: &serde_json::Value) -> napi::Result<database::storage::sqlite::WriteValue> {
     Ok(match json {
-        serde_json::Value::Null => sqlite::WriteValue::Null,
-        serde_json::Value::Bool(flag) => sqlite::WriteValue::Integer(i64::from(*flag)),
+        serde_json::Value::Null => database::storage::sqlite::WriteValue::Null,
+        serde_json::Value::Bool(flag) => database::storage::sqlite::WriteValue::Integer(i64::from(*flag)),
         serde_json::Value::Number(number) => {
             if let Some(integer) = number.as_i64() {
-                sqlite::WriteValue::Integer(integer)
+                database::storage::sqlite::WriteValue::Integer(integer)
             }
             else if let Some(real) = number.as_f64() {
-                sqlite::WriteValue::Real(real)
+                database::storage::sqlite::WriteValue::Real(real)
             }
             else {
                 return Err(napi::Error::from_reason("sqlite write value number out of range"));
             }
         }
-        serde_json::Value::String(text) => sqlite::WriteValue::Text(text.clone()),
+        serde_json::Value::String(text) => database::storage::sqlite::WriteValue::Text(text.clone()),
         serde_json::Value::Object(object) => {
             if let Some(hex) = object.get("$blob").and_then(serde_json::Value::as_str) {
                 if hex.len() % 2 != 0 {
@@ -397,13 +397,13 @@ fn json_to_write_value(json: &serde_json::Value) -> napi::Result<sqlite::WriteVa
                         .map_err(|_| napi::Error::from_reason("sqlite blob hex is not valid"))?;
                     bytes.push(byte);
                 }
-                sqlite::WriteValue::Blob(bytes)
+                database::storage::sqlite::WriteValue::Blob(bytes)
             }
             else if let Some(integer) = object.get("$i64").and_then(serde_json::Value::as_str) {
                 let value = integer
                     .parse::<i64>()
                     .map_err(|_| napi::Error::from_reason("sqlite $i64 value must be a decimal string"))?;
-                sqlite::WriteValue::Integer(value)
+                database::storage::sqlite::WriteValue::Integer(value)
             }
             else {
                 return Err(napi::Error::from_reason("sqlite write value object must carry `$blob` or `$i64`"));
@@ -417,7 +417,7 @@ fn json_to_write_value(json: &serde_json::Value) -> napi::Result<sqlite::WriteVa
 /// open directly. The writer keeps the image in memory until [`save`](SqliteWriter::save).
 #[napi]
 pub struct SqliteWriter {
-    writer: sqlite::SqliteWriter,
+    writer: database::storage::sqlite::SqliteWriter,
 }
 
 #[napi]
@@ -426,14 +426,14 @@ impl SqliteWriter {
     #[napi(factory)]
     pub fn create(page_size: Option<u32>) -> napi::Result<Self> {
         let page_size = page_size.unwrap_or(4096) as usize;
-        let writer = sqlite::SqliteWriter::create(page_size).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let writer = database::storage::sqlite::SqliteWriter::create(page_size).map_err(|e| napi::Error::from_reason(e.to_string()))?;
         Ok(Self { writer })
     }
 
     /// Loads an existing SQLite main file for further mutation.
     #[napi(factory)]
     pub fn open(path: String) -> napi::Result<Self> {
-        let writer = sqlite::SqliteWriter::open(&path).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let writer = database::storage::sqlite::SqliteWriter::open(&path).map_err(|e| napi::Error::from_reason(e.to_string()))?;
         Ok(Self { writer })
     }
 
@@ -445,7 +445,7 @@ impl SqliteWriter {
             .map_err(|e| napi::Error::from_reason(format!("sqlite columns JSON invalid: {e}")))?;
         let mut specs = Vec::with_capacity(columns.len());
         for column in columns {
-            specs.push(sqlite::ColumnSpec {
+            specs.push(database::storage::sqlite::ColumnSpec {
                 name: column.name,
                 declared_type: column.declared_type.unwrap_or_else(|| "BLOB".to_string()),
                 not_null: column.not_null.unwrap_or(false),
@@ -455,6 +455,7 @@ impl SqliteWriter {
                 },
                 primary_key: column.primary_key.unwrap_or(false),
                 unique: column.unique.unwrap_or(false),
+                autoincrement: false,
             });
         }
         self.writer.create_table(&name, &specs).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -502,11 +503,11 @@ impl SqliteWriter {
         for value in values {
             let object = value.as_object().ok_or_else(|| napi::Error::from_reason("sqlite update slot must be an object"))?;
             if object.get("keep").and_then(serde_json::Value::as_bool).unwrap_or(false) {
-                slots.push(sqlite::UpdateValue::Keep);
+                slots.push(database::storage::sqlite::UpdateValue::Keep);
                 continue;
             }
             match object.get("set") {
-                Some(inner) => slots.push(sqlite::UpdateValue::Set(json_to_write_value(inner)?)),
+                Some(inner) => slots.push(database::storage::sqlite::UpdateValue::Set(json_to_write_value(inner)?)),
                 None => return Err(napi::Error::from_reason("sqlite update slot needs `keep` or `set`")),
             }
         }

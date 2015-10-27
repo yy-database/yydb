@@ -1,7 +1,7 @@
 //! Host-testable WASM shared surface (no wasm-bindgen).
 
 use serde_json::{Value as JsonValue, json};
-use yydb::{
+use database::execution::engine::{
     Connection, Error, Result, SchemaVersion, Value,
     catalog::{self, ExecutionTypeKind},
     execution::Type,
@@ -29,7 +29,7 @@ pub struct SchemaCheck {
     pub error: Option<String>,
 }
 
-/// Crate version (matches `yydb::version()` / workspace semver).
+/// Crate version (matches `database::execution::engine::version()` / workspace semver).
 pub fn yydb_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
@@ -201,7 +201,7 @@ fn execution_type_json(ty: Type) -> JsonValue {
 }
 
 fn scalar_value_json(value: &Value) -> Result<JsonValue> {
-    if let Some(tagged) = yydb::types::scalar::tagged_value_json(value) {
+    if let Some(tagged) = database::types::scalar::tagged_value_json(value) {
         return Ok(tagged);
     }
     match value {
@@ -209,7 +209,7 @@ fn scalar_value_json(value: &Value) -> Result<JsonValue> {
         Value::Bool(value) => Ok(json!(value)),
         Value::I64(value) => Ok(json!(value)),
         Value::Text(value) => Ok(json!(value)),
-        _ => Err(yydb::Error::Unsupported("scalar call value type is outside the supported scalar subset")),
+        _ => Err(database::types::Error::Unsupported("scalar call value type is outside the supported scalar subset")),
     }
 }
 
@@ -273,7 +273,7 @@ pub(crate) fn compare_exchange_json(result: Result<bool>) -> String {
     }
 }
 
-fn rows_json(rows: Vec<yydb::query::QueryRow>) -> Result<Vec<JsonValue>> {
+fn rows_json(rows: Vec<database::query::local::QueryRow>) -> Result<Vec<JsonValue>> {
     rows.into_iter()
         .map(|row| {
             let mut map = serde_json::Map::new();
@@ -285,7 +285,7 @@ fn rows_json(rows: Vec<yydb::query::QueryRow>) -> Result<Vec<JsonValue>> {
         .collect()
 }
 
-pub(crate) fn query_rows_json(result: Result<Vec<yydb::query::QueryRow>>) -> String {
+pub(crate) fn query_rows_json(result: Result<Vec<database::query::local::QueryRow>>) -> String {
     let rows = result.and_then(rows_json);
     match rows {
         Ok(rows) => json!({

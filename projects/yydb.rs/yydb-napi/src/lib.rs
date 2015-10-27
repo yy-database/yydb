@@ -1,12 +1,12 @@
-﻿//! Thin Node-API binding — atomic database operations over the [`yydb`] facade.
+﻿//! Thin Node-API binding — atomic database operations over the [`database`] facade.
 //!
 //! The binding exposes one handle per open file plus single-purpose methods.
 //! User-facing commands (`init`, `info`, `serve`) are composed in TypeScript so
 //! this crate never grows CLI aggregate helpers.
 //!
-//! Every `yydb::Error` surface carries the full diagnostic contract: the JS
+//! Every `database::types::Error` surface carries the full diagnostic contract: the JS
 //! `Error.message` is a compact JSON object produced by
-//! [`yydb::Error::to_json`]. Hosts that need only the human-readable text must
+//! [`database::types::Error::to_json`]. Hosts that need only the human-readable text must
 //! parse the JSON and pick the `"message"` key; branching logic should prefer
 //! the `"code"` key.
 
@@ -26,7 +26,7 @@ use napi_derive::napi;
 
 mod sqlite;
 
-fn reason(error: yydb::Error) -> napi::Error {
+fn reason(error: database::types::Error) -> napi::Error {
     let json = serde_json::to_string(&error.to_json()).unwrap_or_else(|_| error.to_string());
     napi::Error::from_reason(json)
 }
@@ -37,11 +37,11 @@ thread_local! {
     /// Statement registry — one entry per `Database.prepare()` call in this
     /// thread. Keyed by `statement_id` (FNV-1a fingerprint prefix); holding
     /// the full `PreparedStatement` with lowered op tree for execution.
-    static STMT_REG: std::cell::RefCell<BTreeMap<String, yydb::query::PreparedStatement>> =
+    static STMT_REG: std::cell::RefCell<BTreeMap<String, database::query::local::PreparedStatement>> =
         const { std::cell::RefCell::new(BTreeMap::new()) };
 }
 
-fn register_stmt(stmt: yydb::query::PreparedStatement) -> String {
+fn register_stmt(stmt: database::query::local::PreparedStatement) -> String {
     let id = stmt.statement_id.clone();
     STMT_REG.with(|r| {
         r.borrow_mut().insert(id.clone(), stmt);
@@ -49,13 +49,13 @@ fn register_stmt(stmt: yydb::query::PreparedStatement) -> String {
     id
 }
 
-fn take_stmt(id: &str) -> Option<yydb::query::PreparedStatement> {
+fn take_stmt(id: &str) -> Option<database::query::local::PreparedStatement> {
     STMT_REG.with(|r| r.borrow_mut().remove(id))
 }
 
 fn with_stmt<F, R>(id: &str, f: F) -> Result<R>
 where
-    F: FnOnce(&yydb::query::PreparedStatement) -> Result<R>,
+    F: FnOnce(&database::query::local::PreparedStatement) -> Result<R>,
 {
     STMT_REG.with(|r| {
         let borrow = r.borrow();
@@ -66,7 +66,7 @@ where
     })
 }
 
-fn parse_params_json(json: &str) -> Result<BTreeMap<String, yydb::Value>> {
+fn parse_params_json(json: &str) -> Result<BTreeMap<String, database::types::Value>> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|e| napi::Error::from_reason(format!("invalid parameters JSON: {e}")))?;
     let obj =
@@ -82,7 +82,7 @@ fn parse_params_json(json: &str) -> Result<BTreeMap<String, yydb::Value>> {
 /// Embedded `yydb` engine version string.
 #[napi]
 pub fn version() -> String {
-    yydb::version().to_string()
+    database::execution::engine::version().to_string()
 }
 
 /// Run the YY wire serve loop on `bind` for the database at `db_path`.
@@ -91,13 +91,13 @@ pub fn version() -> String {
 /// the `yydb serve` CLI should invoke it.
 #[napi]
 pub fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> Result<()> {
-    yydb::server::run_serve(std::path::Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
+    database::server::yy::run_serve(std::path::Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
         .map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
 // ─── Host runtime adapter ─────────────────────────────────────────────────
 
-/// Node-side [`yydb::HostRuntimeAdapter`] that calls back into the JS invoker
+/// Node-side [`database::udf::HostRuntimeAdapter`] that calls back into the JS invoker
 /// installed through [`Database::install_host_invoker`].
 ///
 /// The engine only invokes a host micro synchronously from inside a `#[napi]`
@@ -117,21 +117,21 @@ impl NapiHostAdapter {
     }
 }
 
-impl yydb::HostRuntimeAdapter for NapiHostAdapter {
-    fn invoke_scalar(&self, handle: &yydb::HostFunctionHandle, args: &[yydb::UdfValue]) -> yydb::UdfResult<yydb::UdfValue> {
+impl database::udf::HostRuntimeAdapter for NapiHostAdapter {
+    fn invoke_scalar(&self, handle: &database::udf::HostFunctionHandle, args: &[database::udf::UdfValue]) -> database::udf::Result<database::udf::UdfValue> {
         let invoker = self
             .invokers
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(&handle.host_id)
             .cloned()
-            .ok_or(yydb::UdfError::HostDisconnected)?;
+            .ok_or(database::udf::UdfError::HostDisconnected)?;
         let env_raw = self.env.load(Ordering::Acquire);
         if env_raw.is_null() {
-            return Err(yydb::UdfError::HostDisconnected);
+            return Err(database::udf::UdfError::HostDisconnected);
         }
         let env = Env::from_raw(env_raw as napi::sys::napi_env);
-        let function = invoker.borrow_back(&env).map_err(|_| yydb::UdfError::HostDisconnected)?;
+        let function = invoker.borrow_back(&env).map_err(|_| database::udf::UdfError::HostDisconnected)?;
         let payload = serde_json::json!({
             "hostId": handle.host_id,
             "handleVersion": handle.version,
@@ -139,40 +139,40 @@ impl yydb::HostRuntimeAdapter for NapiHostAdapter {
             "args": args.iter().map(udf_value_to_json).collect::<Vec<_>>(),
         });
         let payload_json = serde_json::to_string(&payload)
-            .map_err(|error| yydb::UdfError::ExecutionFailed { message: format!("encode host invoke payload: {error}") })?;
+            .map_err(|error| database::udf::UdfError::ExecutionFailed { message: format!("encode host invoke payload: {error}") })?;
         let result_json =
-            function.call(payload_json).map_err(|error| yydb::UdfError::ExecutionFailed { message: error.to_string() })?;
-        let result: serde_json::Value = serde_json::from_str(&result_json).map_err(|_| yydb::UdfError::InvalidReturnValue)?;
+            function.call(payload_json).map_err(|error| database::udf::UdfError::ExecutionFailed { message: error.to_string() })?;
+        let result: serde_json::Value = serde_json::from_str(&result_json).map_err(|_| database::udf::UdfError::InvalidReturnValue)?;
         json_to_udf_value(result)
     }
 
     fn invoke_batch(
         &self,
-        _handle: &yydb::HostFunctionHandle,
-        _batches: &[Vec<yydb::UdfValue>],
-    ) -> yydb::UdfResult<Vec<yydb::UdfValue>> {
+        _handle: &database::udf::HostFunctionHandle,
+        _batches: &[Vec<database::udf::UdfValue>],
+    ) -> database::udf::Result<Vec<database::udf::UdfValue>> {
         // Phase-1 host micros are scalar-only; the engine scalar path routes
         // exclusively through [`Self::invoke_scalar`].
-        Err(yydb::UdfError::UnsupportedType)
+        Err(database::udf::UdfError::UnsupportedType)
     }
 }
 
-fn udf_value_to_json(value: &yydb::UdfValue) -> serde_json::Value {
+fn udf_value_to_json(value: &database::udf::UdfValue) -> serde_json::Value {
     match value {
-        yydb::UdfValue::Null => serde_json::Value::Null,
-        yydb::UdfValue::Bool(b) => serde_json::Value::Bool(*b),
-        yydb::UdfValue::I64(i) => serde_json::Value::Number((*i).into()),
-        yydb::UdfValue::Text(s) => serde_json::Value::String(s.clone()),
+        database::udf::UdfValue::Null => serde_json::Value::Null,
+        database::udf::UdfValue::Bool(b) => serde_json::Value::Bool(*b),
+        database::udf::UdfValue::I64(i) => serde_json::Value::Number((*i).into()),
+        database::udf::UdfValue::Text(s) => serde_json::Value::String(s.clone()),
     }
 }
 
-fn json_to_udf_value(value: serde_json::Value) -> yydb::UdfResult<yydb::UdfValue> {
+fn json_to_udf_value(value: serde_json::Value) -> database::udf::Result<database::udf::UdfValue> {
     match value {
-        serde_json::Value::Null => Ok(yydb::UdfValue::Null),
-        serde_json::Value::Bool(b) => Ok(yydb::UdfValue::Bool(b)),
-        serde_json::Value::Number(n) => n.as_i64().map(yydb::UdfValue::I64).ok_or(yydb::UdfError::InvalidReturnValue),
-        serde_json::Value::String(s) => Ok(yydb::UdfValue::Text(s)),
-        _ => Err(yydb::UdfError::InvalidReturnValue),
+        serde_json::Value::Null => Ok(database::udf::UdfValue::Null),
+        serde_json::Value::Bool(b) => Ok(database::udf::UdfValue::Bool(b)),
+        serde_json::Value::Number(n) => n.as_i64().map(database::udf::UdfValue::I64).ok_or(database::udf::UdfError::InvalidReturnValue),
+        serde_json::Value::String(s) => Ok(database::udf::UdfValue::Text(s)),
+        _ => Err(database::udf::UdfError::InvalidReturnValue),
     }
 }
 
@@ -181,12 +181,12 @@ fn json_to_udf_value(value: serde_json::Value) -> yydb::UdfResult<yydb::UdfValue
 pub struct Database {
     /// The connection is released on [`Database::close`] so the host can drop
     /// the file and writer lock without waiting for garbage collection.
-    connection: Mutex<Option<Arc<yydb::Connection>>>,
+    connection: Mutex<Option<Arc<database::execution::engine::Connection>>>,
     host_adapter: Arc<NapiHostAdapter>,
 }
 
 impl Database {
-    fn handle(&self) -> Result<Arc<yydb::Connection>> {
+    fn handle(&self) -> Result<Arc<database::execution::engine::Connection>> {
         self.connection
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -200,9 +200,9 @@ impl Database {
     /// Open (create when missing) the database at `db_path`.
     #[napi(factory)]
     pub fn open(db_path: String) -> Result<Self> {
-        let connection = yydb::Connection::open(&db_path).map_err(reason)?;
+        let connection = database::execution::engine::Connection::open(&db_path).map_err(reason)?;
         let host_adapter = Arc::new(NapiHostAdapter::new());
-        let adapter: Arc<dyn yydb::HostRuntimeAdapter> = host_adapter.clone();
+        let adapter: Arc<dyn database::udf::HostRuntimeAdapter> = host_adapter.clone();
         connection.set_host_adapter(adapter);
         Ok(Self { connection: Mutex::new(Some(Arc::new(connection))), host_adapter })
     }
@@ -215,13 +215,13 @@ impl Database {
     #[napi(factory)]
     pub fn restore(backup: String) -> Result<Self> {
         let connection = if backup.ends_with(".yydx") {
-            yydb::Connection::restore_yydx(&backup).map_err(reason)?
+            database::execution::engine::Connection::restore_yydx(&backup).map_err(reason)?
         }
         else {
-            yydb::Connection::restore_yydb(&backup).map_err(reason)?
+            database::execution::engine::Connection::restore_yydb(&backup).map_err(reason)?
         };
         let host_adapter = Arc::new(NapiHostAdapter::new());
-        let adapter: Arc<dyn yydb::HostRuntimeAdapter> = host_adapter.clone();
+        let adapter: Arc<dyn database::udf::HostRuntimeAdapter> = host_adapter.clone();
         connection.set_host_adapter(adapter);
         Ok(Self { connection: Mutex::new(Some(Arc::new(connection))), host_adapter })
     }
@@ -291,7 +291,7 @@ impl Database {
     /// Switch the journal mode.
     #[napi]
     pub fn set_journal_mode(&self, mode: String) -> Result<()> {
-        let mode = yydb::JournalMode::parse(&mode).map_err(reason)?;
+        let mode = database::execution::engine::JournalMode::parse(&mode).map_err(reason)?;
         self.handle()?.set_journal_mode(mode).map_err(reason)
     }
 
@@ -464,8 +464,8 @@ impl Database {
     #[napi]
     pub fn prepare(&self, source: String) -> Result<Statement> {
         let stmt = self.handle()?.prepare_vos(&source).map_err(reason)?;
-        if stmt.query_kind != yydb::query::QueryKind::Read {
-            return Err(reason(yydb::Error::Schema {
+        if stmt.query_kind != database::query::local::QueryKind::Read {
+            return Err(reason(database::types::Error::Schema {
                 message: "Phase 1 only executes pipelines ending in `.collect()`".into(),
             }));
         }
@@ -507,7 +507,7 @@ impl Database {
     /// with `type`/`fromField`/`toField` update a specific field.
     #[napi]
     pub fn migrate_schema(&self, document: String, renames_json: Option<String>) -> Result<()> {
-        let mut renames = yydb::catalog::RenameMap::default();
+        let mut renames = database::execution::engine::catalog::RenameMap::default();
         if let Some(json) = renames_json {
             let arr: Vec<serde_json::Value> =
                 serde_json::from_str(&json).map_err(|e| napi::Error::from_reason(format!("invalid renames JSON: {e}")))?;
@@ -524,7 +524,7 @@ impl Database {
                     obj.get("toField").and_then(|v| v.as_str()),
                 ) {
                     renames.fields.insert(
-                        yydb::catalog::FieldPath { type_name: type_name.to_owned(), field_name: from_field.to_owned() },
+                        database::execution::engine::catalog::FieldPath { type_name: type_name.to_owned(), field_name: from_field.to_owned() },
                         to_field.to_owned(),
                     );
                 }
@@ -590,7 +590,7 @@ impl Database {
         let returns_type = parse_udf_type(&returns)?;
         let fp_bytes: [u8; 32] =
             fingerprint.as_ref().try_into().map_err(|_| napi::Error::from_reason("fingerprint must be exactly 32 bytes"))?;
-        let definition = yydb::HostMicroDefinition::from_scalar(
+        let definition = database::udf::HostMicroDefinition::from_scalar(
             &name,
             version,
             arg_types,
@@ -627,7 +627,7 @@ impl Database {
             usize::try_from(chunk_size).map_err(|_| napi::Error::from_reason("chunk_size exceeds platform pointer width"))?;
         let descriptor =
             self.handle()?.put_file(Cursor::new(payload.as_ref()), chunk_size, name, media_type).map_err(reason)?;
-        let json = yydb::types::scalar::tagged_value_json(&yydb::Value::File(descriptor))
+        let json = database::types::scalar::tagged_value_json(&database::types::Value::File(descriptor))
             .expect("`Value::File` always has a tagged form");
         serde_json::to_string(&json).map_err(|e| napi::Error::from_reason(format!("encode file descriptor: {e}")))
     }
@@ -642,7 +642,7 @@ impl Database {
         let descriptor = parse_file_descriptor(&descriptor_json)?;
         let offset = u64::try_from(offset).map_err(|_| napi::Error::from_reason("offset must be non-negative"))?;
         let length = u64::try_from(length).map_err(|_| napi::Error::from_reason("length must be non-negative"))?;
-        let window = yydb::vos::types::FileReadWindow::new(offset, length);
+        let window = vos::types::FileReadWindow::new(offset, length);
         let octets = self.handle()?.read_file_window(&descriptor, window).map_err(reason)?;
         Ok(Buffer::from(octets))
     }
@@ -663,7 +663,7 @@ impl Database {
     pub fn call_scalar(&self, name: String, version: u32, args_json: String) -> Result<String> {
         let args: Vec<serde_json::Value> =
             serde_json::from_str(&args_json).map_err(|e| napi::Error::from_reason(format!("invalid args JSON: {e}")))?;
-        let values: Vec<yydb::Value> = args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
+        let values: Vec<database::types::Value> = args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
         let result = self.handle()?.call_scalar_version(&name, version, &values).map_err(reason)?;
         serde_json::to_string(&value_to_json(result)).map_err(|e| napi::Error::from_reason(format!("encode result: {e}")))
     }
@@ -691,7 +691,7 @@ impl Database {
 /// each; this crate never merges them into a single facade.
 #[napi]
 pub struct Client {
-    client: yydb::client::Client,
+    client: database::client::yy::Client,
     closed: bool,
 }
 
@@ -703,7 +703,7 @@ impl Client {
     /// wire Hello handshake before returning.
     #[napi(factory)]
     pub fn connect(endpoint: String) -> Result<Self> {
-        Ok(Self { client: yydb::client::Client::connect(endpoint).map_err(reason)?, closed: false })
+        Ok(Self { client: database::client::yy::Client::connect(endpoint).map_err(reason)?, closed: false })
     }
 
     /// Configured endpoint string (`host:port`).
@@ -782,7 +782,7 @@ impl Client {
         let returns_type = parse_udf_type(&returns)?;
         let fp_bytes: [u8; 32] =
             fingerprint.as_ref().try_into().map_err(|_| napi::Error::from_reason("fingerprint must be exactly 32 bytes"))?;
-        let definition = yydb::HostMicroDefinition::from_scalar(
+        let definition = database::udf::HostMicroDefinition::from_scalar(
             &name,
             version,
             arg_types,
@@ -807,7 +807,7 @@ impl Client {
         }
         let args: Vec<serde_json::Value> =
             serde_json::from_str(&args_json).map_err(|e| napi::Error::from_reason(format!("invalid args JSON: {e}")))?;
-        let values: Vec<yydb::Value> = args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
+        let values: Vec<database::types::Value> = args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
         let result = self.client.call_scalar_version(&name, version, &values).map_err(reason)?;
         serde_json::to_string(&value_to_json(result)).map_err(|e| napi::Error::from_reason(format!("encode result: {e}")))
     }
@@ -871,65 +871,65 @@ impl Statement {
     }
 }
 
-fn parse_udf_type(tag: &str) -> Result<yydb::UdfType> {
+fn parse_udf_type(tag: &str) -> Result<database::udf::UdfType> {
     match tag {
-        "null" => Ok(yydb::UdfType::Null),
-        "bool" => Ok(yydb::UdfType::Bool),
-        "i64" => Ok(yydb::UdfType::I64),
-        "text" | "utf8" => Ok(yydb::UdfType::Text),
-        "any" => Ok(yydb::UdfType::Any),
+        "null" => Ok(database::udf::UdfType::Null),
+        "bool" => Ok(database::udf::UdfType::Bool),
+        "i64" => Ok(database::udf::UdfType::I64),
+        "text" | "utf8" => Ok(database::udf::UdfType::Text),
+        "any" => Ok(database::udf::UdfType::Any),
         other => Err(napi::Error::from_reason(format!("unsupported UDF type: {other}"))),
     }
 }
 
-fn json_to_value(json: serde_json::Value) -> Result<yydb::Value> {
-    if let Some(value) = yydb::types::scalar::tagged_value_from_json(&json) {
+fn json_to_value(json: serde_json::Value) -> Result<database::types::Value> {
+    if let Some(value) = database::types::scalar::tagged_value_from_json(&json) {
         return value.map_err(|error| napi::Error::from_reason(error.to_string()));
     }
     match json {
-        serde_json::Value::Null => Ok(yydb::Value::Null),
-        serde_json::Value::Bool(b) => Ok(yydb::Value::Bool(b)),
+        serde_json::Value::Null => Ok(database::types::Value::Null),
+        serde_json::Value::Bool(b) => Ok(database::types::Value::Bool(b)),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                Ok(yydb::Value::I64(i))
+                Ok(database::types::Value::I64(i))
             }
             else if let Some(f) = n.as_f64() {
-                Ok(yydb::Value::F64(f))
+                Ok(database::types::Value::F64(f))
             }
             else {
                 Err(napi::Error::from_reason("number out of range for i64/f64"))
             }
         }
-        serde_json::Value::String(s) => Ok(yydb::Value::Text(s)),
+        serde_json::Value::String(s) => Ok(database::types::Value::Text(s)),
         other => Err(napi::Error::from_reason(format!("unsupported scalar value: {other:?}"))),
     }
 }
 
-fn value_to_json(value: yydb::Value) -> serde_json::Value {
-    if let Some(tagged) = yydb::types::scalar::tagged_value_json(&value) {
+fn value_to_json(value: database::types::Value) -> serde_json::Value {
+    if let Some(tagged) = database::types::scalar::tagged_value_json(&value) {
         return tagged;
     }
     match value {
-        yydb::Value::Null => serde_json::Value::Null,
-        yydb::Value::Bool(b) => serde_json::Value::Bool(b),
-        yydb::Value::I64(i) => serde_json::Value::Number(i.into()),
-        yydb::Value::U64(u) => serde_json::Value::Number(u.into()),
-        yydb::Value::F64(f) => {
+        database::types::Value::Null => serde_json::Value::Null,
+        database::types::Value::Bool(b) => serde_json::Value::Bool(b),
+        database::types::Value::I64(i) => serde_json::Value::Number(i.into()),
+        database::types::Value::U64(u) => serde_json::Value::Number(u.into()),
+        database::types::Value::F64(f) => {
             serde_json::Number::from_f64(f).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null)
         }
-        yydb::Value::Text(s) => serde_json::Value::String(s),
+        database::types::Value::Text(s) => serde_json::Value::String(s),
         other => serde_json::Value::String(format!("{other:?}")),
     }
 }
 
-fn parse_file_descriptor(json: &str) -> Result<yydb::FileDescriptor> {
+fn parse_file_descriptor(json: &str) -> Result<database::types::FileDescriptor> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|e| napi::Error::from_reason(format!("invalid file descriptor JSON: {e}")))?;
-    let decoded = yydb::types::scalar::tagged_value_from_json(&value)
+    let decoded = database::types::scalar::tagged_value_from_json(&value)
         .ok_or_else(|| napi::Error::from_reason("not a tagged value JSON"))?
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     match decoded {
-        yydb::Value::File(descriptor) => Ok(descriptor),
+        database::types::Value::File(descriptor) => Ok(descriptor),
         other => Err(napi::Error::from_reason(format!("expected `$yydb:file`, got `{}`", other.kind()))),
     }
 }
@@ -938,21 +938,21 @@ fn parse_file_descriptor(json: &str) -> Result<yydb::FileDescriptor> {
 mod tests {
     use super::*;
 
-    fn sample_descriptor() -> yydb::FileDescriptor {
-        yydb::FileDescriptor {
+    fn sample_descriptor() -> database::types::FileDescriptor {
+        database::types::FileDescriptor {
             digest: "0f".repeat(32),
             octets: 17,
             name: Some("report.txt".into()),
             media_type: None,
-            manifest: yydb::FileManifestRef { hash: [0x22; 32], size: 40 },
+            manifest: database::types::FileManifestRef { hash: [0x22; 32], size: 40 },
         }
     }
 
     #[test]
     fn file_descriptor_tagged_json_roundtrip() {
         let descriptor = sample_descriptor();
-        let value = yydb::Value::File(descriptor.clone());
-        let json = yydb::types::scalar::tagged_value_json(&value).expect("has tagged form");
+        let value = database::types::Value::File(descriptor.clone());
+        let json = database::types::scalar::tagged_value_json(&value).expect("has tagged form");
         let json_str = serde_json::to_string(&json).unwrap();
 
         let parsed = parse_file_descriptor(&json_str).expect("descriptor must parse");

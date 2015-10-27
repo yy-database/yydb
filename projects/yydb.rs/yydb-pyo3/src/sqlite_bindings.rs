@@ -8,9 +8,10 @@ use pyo3::{
     prelude::*,
     types::{PyBytes, PyDict, PyList},
 };
-use sqlite::{
-    ColumnSpec, RecordLimits, RecordValue, SchemaObjectKind, TableLimits, TextEncoding, UpdateValue, WriteValue, decode_library_version,
-    decode_record, read_named_index, read_named_table, read_named_without_rowid, read_schema, validate_database,
+use database::formats::sqlite::{RecordLimits, RecordValue, decode_library_version, validate_database};
+use database::storage::sqlite::{
+    ColumnSpec, SchemaObjectKind, TableLimits, TextEncoding, UpdateValue, WriteValue, decode_record, read_named_index,
+    read_named_table, read_named_without_rowid, read_schema,
 };
 
 fn sqlite_error(error: impl ToString) -> PyErr {
@@ -192,6 +193,7 @@ fn columns_from_json(columns_json: &str) -> PyResult<Vec<ColumnSpec>> {
             },
             primary_key: column.get("primaryKey").and_then(serde_json::Value::as_bool).unwrap_or(false),
             unique: column.get("unique").and_then(serde_json::Value::as_bool).unwrap_or(false),
+            autoincrement: false,
         });
     }
     Ok(specs)
@@ -200,7 +202,7 @@ fn columns_from_json(columns_json: &str) -> PyResult<Vec<ColumnSpec>> {
 /// Writes SQLite format-3 database images that upstream engines open directly.
 #[pyclass(module = "yydb_pyo3")]
 pub struct SqliteWriter {
-    writer: sqlite::SqliteWriter,
+    writer: database::storage::sqlite::SqliteWriter,
 }
 
 #[pymethods]
@@ -209,14 +211,14 @@ impl SqliteWriter {
     #[staticmethod]
     #[pyo3(signature = (page_size=None))]
     fn create(page_size: Option<usize>) -> PyResult<Self> {
-        let writer = sqlite::SqliteWriter::create(page_size.unwrap_or(4096)).map_err(sqlite_error)?;
+        let writer = database::storage::sqlite::SqliteWriter::create(page_size.unwrap_or(4096)).map_err(sqlite_error)?;
         Ok(Self { writer })
     }
 
     /// Loads an existing SQLite main file for further mutation.
     #[staticmethod]
     fn open(path: &str) -> PyResult<Self> {
-        let writer = sqlite::SqliteWriter::open(path).map_err(sqlite_error)?;
+        let writer = database::storage::sqlite::SqliteWriter::open(path).map_err(sqlite_error)?;
         Ok(Self { writer })
     }
 
@@ -330,14 +332,14 @@ impl SqliteDatabase {
     /// Opens a blank in-memory SQLite format-3 snapshot.
     #[staticmethod]
     fn open_in_memory() -> PyResult<Self> {
-        let database = sqlite::SqliteDatabase::open_in_memory().map_err(sqlite_error)?;
+        let database = database::storage::sqlite::SqliteDatabase::open_in_memory().map_err(sqlite_error)?;
         Ok(Self { bytes: database.pages().to_vec(), path: None })
     }
 
     /// Opens or creates a file-backed database, replaying `-wal` or a hot `-journal`.
     #[staticmethod]
     fn open(path: &str) -> PyResult<Self> {
-        let database = sqlite::SqliteDatabase::open(path).map_err(sqlite_error)?;
+        let database = database::storage::sqlite::SqliteDatabase::open(path).map_err(sqlite_error)?;
         Ok(Self { bytes: database.pages().to_vec(), path: Some(path.to_owned()) })
     }
 

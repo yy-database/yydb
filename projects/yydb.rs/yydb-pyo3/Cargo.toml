@@ -16,5 +16,13 @@ name = "yydb_pyo3"
 [dependencies]
 pyo3 = { workspace = true }
 serde_json = { workspace = true }
-yydb = { workspace = true }
-sqlite = { workspace = true }
+database = { workspace = true, features = [
+    "types",
+    "query",
+    "execution",
+    "udf",
+    "formats",
+    "storage",
+    "server",
+] }
+vos = { workspace = true }

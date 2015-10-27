@@ -1,6 +1,6 @@
 // fixture: yydb.opfs.capability_missing
 
-use yydb::Error;
+use database::types::Error;
 use yydb_wasm::{OpfsCapabilities, open_persistent};
 
 #[test]

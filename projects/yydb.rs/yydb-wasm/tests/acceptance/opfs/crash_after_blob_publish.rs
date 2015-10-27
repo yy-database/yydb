@@ -1,6 +1,6 @@
 // fixture: yydb.opfs.crash_after_blob_publish
 
-use yydb::Error;
+use database::types::Error;
 use yydb_wasm::OpfsBlobPublication;
 
 #[test]

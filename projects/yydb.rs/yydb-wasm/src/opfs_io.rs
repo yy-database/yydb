@@ -8,7 +8,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use yydb::{Error, Result};
+use database::types::{Error, Result};
 
 fn logical_store() -> &'static Mutex<HashMap<String, Vec<u8>>> {
     static STORE: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();

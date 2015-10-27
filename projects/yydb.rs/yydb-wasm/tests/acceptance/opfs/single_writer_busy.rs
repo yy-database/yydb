@@ -1,6 +1,6 @@
 // fixture: yydb.opfs.single_writer_busy
 
-use yydb::Error;
+use database::types::Error;
 use yydb_wasm::{OpfsCapabilities, claim_opfs_writer};
 
 #[test]

@@ -8,7 +8,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use yydb::{DoctorIssue, DoctorReport, DoctorSeverity, Error, Result};
+use database::types::{DoctorIssue, DoctorReport, DoctorSeverity, Error, Result};
 
 fn writer_locks() -> &'static Mutex<HashSet<String>> {
     static LOCKS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();

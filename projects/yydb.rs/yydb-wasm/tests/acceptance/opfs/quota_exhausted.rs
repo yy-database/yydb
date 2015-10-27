@@ -1,6 +1,6 @@
 // fixture: yydb.opfs.quota_exhausted
 
-use yydb::Error;
+use database::types::Error;
 use yydb_wasm::{OpfsCapabilities, OpfsCommittedVolume, claim_opfs_writer};
 
 #[test]

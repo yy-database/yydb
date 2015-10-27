@@ -1,6 +1,6 @@
 // fixture: yydb.opfs.doctor_missing_blob
 
-use yydb::DoctorSeverity;
+use database::types::DoctorSeverity;
 use yydb_wasm::{OpfsBlobPublication, opfs_commit_and_sync, opfs_doctor, opfs_evict_blob};
 
 #[test]

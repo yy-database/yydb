@@ -4,10 +4,7 @@ use std::sync::Arc;
 
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::JsValue;
-use yydb::{
-    HostFunctionHandle, HostRuntimeAdapter,
-    types::udf::{Result as UdfResult, UdfError, UdfValue},
-};
+use database::udf::{HostFunctionHandle, HostRuntimeAdapter, Result as UdfResult, UdfError, UdfValue};
 
 /// Invokes session-local host micros through a JS callback.
 pub struct JsHostAdapter {
@@ -21,7 +18,7 @@ impl JsHostAdapter {
     }
 
     /// Installs the adapter on an open connection.
-    pub fn install(conn: &yydb::Connection, invoker: Function) {
+    pub fn install(conn: &database::execution::engine::Connection, invoker: Function) {
         install_js_host_adapter(conn, invoker);
     }
 }
@@ -55,7 +52,7 @@ impl HostRuntimeAdapter for JsHostAdapter {
 }
 
 /// Installs the JS host adapter on an open connection.
-pub fn install_js_host_adapter(conn: &yydb::Connection, invoker: Function) {
+pub fn install_js_host_adapter(conn: &database::execution::engine::Connection, invoker: Function) {
     conn.set_host_adapter(Arc::new(JsHostAdapter::new(invoker)));
 }
 

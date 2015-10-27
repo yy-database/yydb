@@ -31,7 +31,7 @@ fn memory_session_savepoints_roll_back_and_release() {
 
 #[test]
 fn memory_session_restores_a_verified_snapshot() {
-    let source = yydb::Connection::open_in_memory().expect("source");
+    let source = database::execution::engine::Connection::open_in_memory().expect("source");
     source.put("alpha", b"one").expect("put");
     let bytes = source.main_snapshot().expect("snapshot");
     let restored = MemorySession::restore_from_snapshot(&bytes).expect("restore");

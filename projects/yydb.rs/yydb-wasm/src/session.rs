@@ -4,8 +4,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use js_sys::Function;
 use wasm_bindgen::prelude::*;
-use yydb::{Connection, Error, protocol as wire};
-use yydb::query::PreparedStatement;
+use database::execution::engine::Connection;
+use database::protocol::yy as wire;
+use database::query::local::PreparedStatement;
 
 use crate::{
     core::{
@@ -21,7 +22,7 @@ fn closed_session_error() -> Error {
 }
 
 /// Parse a write-batch JSON body: `[{ "key": "...", "value": bytes | null }, ...]`.
-fn parse_write_batch(body: &[u8]) -> yydb::Result<Vec<(String, Option<Vec<u8>>)>> {
+fn parse_write_batch(body: &[u8]) -> database::types::Result<Vec<(String, Option<Vec<u8>>)>> {
     let array: serde_json::Value = serde_json::from_slice(body)
         .map_err(|_| Error::Protocol { message: "writeBatch body must be a JSON array".to_string() })?;
     let arr =
@@ -55,17 +56,17 @@ fn parse_write_batch(body: &[u8]) -> yydb::Result<Vec<(String, Option<Vec<u8>>)>
 
 /// Parse a rename-map JSON body (same shape as the N-API layer accepts).
 /// Returns `Ok` with an empty RenameMap when `json` is `None`, empty, or `"null"`.
-fn parse_rename_map(json: Option<&str>) -> yydb::Result<yydb::catalog::RenameMap> {
+fn parse_rename_map(json: Option<&str>) -> database::types::Result<database::execution::engine::catalog::RenameMap> {
     let Some(json) = json
     else {
-        return Ok(yydb::catalog::RenameMap::default());
+        return Ok(database::execution::engine::catalog::RenameMap::default());
     };
     if json.is_empty() || json == "null" {
-        return Ok(yydb::catalog::RenameMap::default());
+        return Ok(database::execution::engine::catalog::RenameMap::default());
     }
     let arr: Vec<serde_json::Value> = serde_json::from_str(json)
         .map_err(|_| Error::Protocol { message: "migrateSchema renames must be a JSON array".to_string() })?;
-    let mut renames = yydb::catalog::RenameMap::default();
+    let mut renames = database::execution::engine::catalog::RenameMap::default();
     for entry in arr {
         let obj = entry
             .as_object()
@@ -81,7 +82,7 @@ fn parse_rename_map(json: Option<&str>) -> yydb::Result<yydb::catalog::RenameMap
             obj.get("toField").and_then(|v| v.as_str()),
         ) {
             renames.fields.insert(
-                yydb::catalog::FieldPath { type_name: type_name.to_owned(), field_name: from_field.to_owned() },
+                database::execution::engine::catalog::FieldPath { type_name: type_name.to_owned(), field_name: from_field.to_owned() },
                 to_field.to_owned(),
             );
         }
@@ -103,7 +104,7 @@ fn run_ensure_schema(conn: &Connection, closed: bool, document: &str) -> String 
 
 /// Parse a JSON MicroRegister request:
 /// `{ name, version, argTypes: ["i64"|"bool"|"text"|"null"], returnType, hostId, functionId, handleVersion, fingerprint: [32 u8s] }`.
-fn parse_micro_register_json(json: &str) -> yydb::Result<yydb::types::udf::HostMicroDefinition> {
+fn parse_micro_register_json(json: &str) -> database::types::Result<database::udf::HostMicroDefinition> {
     let obj: serde_json::Value = serde_json::from_str(json)
         .map_err(|_| Error::Protocol { message: "registerMicroJson must be a JSON object".to_string() })?;
     let name = obj
@@ -120,7 +121,7 @@ fn parse_micro_register_json(json: &str) -> yydb::Result<yydb::types::udf::HostM
         .get("argTypes")
         .and_then(|v| v.as_array())
         .ok_or_else(|| Error::Protocol { message: "registerMicroJson missing array `argTypes`".to_string() })?;
-    let arg_types: Vec<yydb::types::udf::UdfType> = arg_types_arr
+    let arg_types: Vec<database::udf::UdfType> = arg_types_arr
         .iter()
         .map(|v| {
             let s = v
@@ -165,7 +166,7 @@ fn parse_micro_register_json(json: &str) -> yydb::Result<yydb::types::udf::HostM
             .ok_or_else(|| Error::Protocol { message: "registerMicroJson `fingerprint` values must be u8".to_string() })?;
         fingerprint[i] = byte;
     }
-    yydb::types::udf::HostMicroDefinition::from_scalar(
+    database::udf::HostMicroDefinition::from_scalar(
         &name,
         version,
         arg_types,
@@ -180,7 +181,7 @@ fn parse_micro_register_json(json: &str) -> yydb::Result<yydb::types::udf::HostM
 
 /// Parse a JSON ScalarCall request:
 /// `{ name, version, args: [42, "text", true, null] }`.
-fn parse_scalar_call_json(json: &str) -> yydb::Result<(String, u32, Vec<yydb::types::Value>)> {
+fn parse_scalar_call_json(json: &str) -> database::types::Result<(String, u32, Vec<database::types::Value>)> {
     let obj: serde_json::Value = serde_json::from_str(json)
         .map_err(|_| Error::Protocol { message: "callScalarJson must be a JSON object".to_string() })?;
     let name = obj
@@ -205,34 +206,34 @@ fn parse_scalar_call_json(json: &str) -> yydb::Result<(String, u32, Vec<yydb::ty
 }
 
 /// Map a JSON scalar to the YY runtime `Value` subset (used by callScalar args).
-fn json_value_to_runtime(v: &serde_json::Value) -> yydb::Result<yydb::types::Value> {
+fn json_value_to_runtime(v: &serde_json::Value) -> database::types::Result<database::types::Value> {
     match v {
-        serde_json::Value::Null => Ok(yydb::types::Value::Null),
-        serde_json::Value::Bool(b) => Ok(yydb::types::Value::Bool(*b)),
+        serde_json::Value::Null => Ok(database::types::Value::Null),
+        serde_json::Value::Bool(b) => Ok(database::types::Value::Bool(*b)),
         serde_json::Value::Number(n) => {
             // Prefer i64 when it fits exactly; fall back to Float for fractional.
             if let Some(i) = n.as_i64() {
-                Ok(yydb::types::Value::I64(i))
+                Ok(database::types::Value::I64(i))
             }
             else if let Some(f) = n.as_f64() {
-                Ok(yydb::types::Value::F64(f))
+                Ok(database::types::Value::F64(f))
             }
             else {
                 Err(Error::Protocol { message: "callScalarJson number out of range".to_string() })
             }
         }
-        serde_json::Value::String(s) => Ok(yydb::types::Value::Text(s.clone())),
+        serde_json::Value::String(s) => Ok(database::types::Value::Text(s.clone())),
         _ => Err(Error::Protocol { message: "callScalarJson args must be scalar values".to_string() }),
     }
 }
 
 /// Map a wire `UdfType` tag string back to the enum variant.
-fn parse_udf_type_tag(s: &str) -> yydb::Result<yydb::types::udf::UdfType> {
+fn parse_udf_type_tag(s: &str) -> database::types::Result<database::udf::UdfType> {
     match s {
-        "i64" => Ok(yydb::types::udf::UdfType::I64),
-        "bool" => Ok(yydb::types::udf::UdfType::Bool),
-        "text" => Ok(yydb::types::udf::UdfType::Text),
-        "null" => Ok(yydb::types::udf::UdfType::Null),
+        "i64" => Ok(database::udf::UdfType::I64),
+        "bool" => Ok(database::udf::UdfType::Bool),
+        "text" => Ok(database::udf::UdfType::Text),
+        "null" => Ok(database::udf::UdfType::Null),
         _ => Err(Error::Protocol { message: format!("unknown UDF type tag: {s}") }),
     }
 }
@@ -277,7 +278,7 @@ fn run_call_scalar_json(conn: &Connection, closed: bool, json: &str) -> String {
     }
 }
 
-fn open_persistent_connection(volume: &OpfsPersistentVolume) -> yydb::Result<Connection> {
+fn open_persistent_connection(volume: &OpfsPersistentVolume) -> database::types::Result<Connection> {
     let conn = Connection::open_in_memory()?;
     if let Some(bytes) = volume.read_main()? {
         conn.load_main_snapshot(&bytes)?;
@@ -285,7 +286,7 @@ fn open_persistent_connection(volume: &OpfsPersistentVolume) -> yydb::Result<Con
     Ok(conn)
 }
 
-fn persist_persistent_connection(conn: &Connection, volume: &OpfsPersistentVolume) -> yydb::Result<()> {
+fn persist_persistent_connection(conn: &Connection, volume: &OpfsPersistentVolume) -> database::types::Result<()> {
     let bytes = conn.main_snapshot()?;
     volume.publish_main(&bytes)?;
     Ok(())
@@ -294,7 +295,7 @@ fn persist_persistent_connection(conn: &Connection, volume: &OpfsPersistentVolum
 /// Check a main-file snapshot the way a restore entry must: load it into a
 /// throwaway handle so page CRC32C checks run, then require a clean doctor
 /// report before the snapshot is allowed to reach durable storage.
-fn validate_snapshot(bytes: &[u8]) -> yydb::Result<()> {
+fn validate_snapshot(bytes: &[u8]) -> database::types::Result<()> {
     let probe = Connection::open_in_memory()?;
     probe.load_main_snapshot(bytes)?;
     probe.doctor().map(|_| ())
@@ -604,7 +605,7 @@ impl MemorySession {
         }
         match self.conn.prepare_vos(source) {
             Ok(stmt) => {
-                if stmt.query_kind != yydb::query::QueryKind::Read {
+                if stmt.query_kind != database::query::local::QueryKind::Read {
                     let error = Error::Schema { message: "Phase 1 only executes pipelines ending in `.collect()`".into() };
                     return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string();
                 }
@@ -651,7 +652,7 @@ impl MemorySession {
                 return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string();
             }
         };
-        let named: BTreeMap<String, yydb::types::Value> = match obj.get("params") {
+        let named: BTreeMap<String, database::types::Value> = match obj.get("params") {
             None | Some(serde_json::Value::Null) => BTreeMap::new(),
             Some(val) => {
                 let obj = match val.as_object() {
@@ -707,8 +708,8 @@ impl MemorySession {
 }
 
 /// Serialize a VOS runtime Value to JSON.
-fn value_to_json(v: yydb::types::Value) -> serde_json::Value {
-    use yydb::types::Value;
+fn value_to_json(v: database::types::Value) -> serde_json::Value {
+    use database::types::Value;
     match v {
         Value::Null => serde_json::Value::Null,
         Value::Bool(b) => serde_json::Value::Bool(b),
@@ -725,7 +726,7 @@ fn value_to_json(v: yydb::types::Value) -> serde_json::Value {
 }
 
 /// Open a persistent OPFS-backed session with the supplied capability profile.
-pub fn open_persistent_session(path: &str, caps: &OpfsCapabilities) -> yydb::Result<PersistentSession> {
+pub fn open_persistent_session(path: &str, caps: &OpfsCapabilities) -> database::types::Result<PersistentSession> {
     let volume = open_persistent(path, caps)?;
     let conn = open_persistent_connection(&volume)?;
     Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
@@ -1101,7 +1102,7 @@ impl PersistentSession {
         }
         match self.conn.prepare_vos(source) {
             Ok(stmt) => {
-                if stmt.query_kind != yydb::query::QueryKind::Read {
+                if stmt.query_kind != database::query::local::QueryKind::Read {
                     let error = Error::Schema { message: "Phase 1 only executes pipelines ending in `.collect()`".into() };
                     return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string();
                 }
@@ -1144,7 +1145,7 @@ impl PersistentSession {
                 return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string();
             }
         };
-        let named: BTreeMap<String, yydb::types::Value> = match obj.get("params") {
+        let named: BTreeMap<String, database::types::Value> = match obj.get("params") {
             None | Some(serde_json::Value::Null) => BTreeMap::new(),
             Some(val) => {
                 let obj = match val.as_object() {
@@ -1211,7 +1212,7 @@ impl PersistentSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use yydb::types::Value;
+    use database::types::Value;
 
     fn ok_register_json() -> String {
         let fingerprint = [0u8; 32];
@@ -1243,8 +1244,8 @@ mod tests {
         let definition = parse_micro_register_json(&ok_register_json()).expect("valid register json");
         assert_eq!(definition.identity.name(), "double");
         assert_eq!(definition.identity.version, 1);
-        assert_eq!(definition.signature.args, vec![yydb::types::udf::UdfType::I64]);
-        assert_eq!(definition.signature.returns, yydb::types::udf::UdfType::I64);
+        assert_eq!(definition.signature.args, vec![database::udf::UdfType::I64]);
+        assert_eq!(definition.signature.returns, database::udf::UdfType::I64);
         assert_eq!(definition.handle.host_id, 7);
         assert_eq!(definition.handle.function_id, "1");
         assert_eq!(definition.handle.version, 1);
