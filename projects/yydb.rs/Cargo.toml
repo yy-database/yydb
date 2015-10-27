@@ -17,8 +17,8 @@ repository = "https://github.com/yy-database/yydb"
 [workspace.dependencies]
 # Sole database.rs dependency  on  the `yydb` facade. Pin full 40-char rev.
 # Local absolute path overrides belong in `.cargo/config.toml` (facade only).
-yydb = { git = "https://github.com/oovm/database.rs.git", rev = "e800af84746bad3cd9c11a57bc5b59946b0420be" }
-sqlite = { git = "https://github.com/oovm/database.rs.git", rev = "e800af84746bad3cd9c11a57bc5b59946b0420be" }
+yydb = { git = "https://github.com/oovm/database.rs.git", rev = "5cae6652413f98bb32371178ac7dc8ece1c95587" }
+sqlite = { git = "https://github.com/oovm/database.rs.git", rev = "5cae6652413f98bb32371178ac7dc8ece1c95587" }
 
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
