@@ -18,7 +18,7 @@ repository = "https://github.com/yy-database/yydb"
 # `database` is the single stable public facade of database.rs. Pin full 40-char rev.
 # Local absolute path overrides belong in `.cargo/config.toml` (facade only).
 # VOS types are used directly by the native bindings, at the rev database.rs pins.
-database = { git = "https://github.com/oovm/database.rs.git", rev = "904bee590dfc0282d4d2ad5ee31773e7f25e658b", default-features = false }
+database = { git = "https://github.com/oovm/database.rs.git", rev = "bbf58deb3a87553d0bd71f43fd2706133806e55b", default-features = false }
 vos = { git = "https://github.com/voml/vos-language.git", rev = "387d9fc3c9a556ddb8a433c627a866a2918d0186" }
 
 blake3 = "1"

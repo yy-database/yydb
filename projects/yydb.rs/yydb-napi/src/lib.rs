@@ -91,7 +91,7 @@ pub fn version() -> String {
 /// the `yydb serve` CLI should invoke it.
 #[napi]
 pub fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> Result<()> {
-    database::server::yy::run_serve(std::path::Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
+    database::server::yydb::run_serve(std::path::Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
         .map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 

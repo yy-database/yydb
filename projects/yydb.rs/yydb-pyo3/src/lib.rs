@@ -150,7 +150,7 @@ fn version() -> String {
 #[pyfunction]
 #[pyo3(signature = (db_path, bind, insecure_bind=None))]
 fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> PyResult<()> {
-    database::server::yy::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false)).map_err(map_err)?;
+    database::server::yydb::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false)).map_err(map_err)?;
     Ok(())
 }
 
