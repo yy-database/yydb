@@ -440,7 +440,9 @@ impl Database {
     /// `params_json` is `{ "paramName": <value>, ... }` or `null` when the
     /// program takes no parameters. Values may use the tagged scalar form
     /// (`{"$yydb":"bytes","hex":...}` and the other exact scalars) so octets and
-    /// exact calendar values cross the host boundary unmodified.
+    /// exact calendar values cross the host boundary unmodified. The
+    /// `"$database"` spelling is accepted as well, with `$database` taking
+    /// precedence when both keys are present.
     #[napi]
     pub fn execute_vos_write(&self, source: String, params_json: Option<String>) -> Result<()> {
         let named = match params_json {
@@ -611,8 +613,8 @@ impl Database {
     /// records in its main image. Embedding large payloads inflates the single
     /// file and slows down snapshots and backups, so a `.yydx` layout is
     /// recommended for object-heavy workloads.
-    /// Returns the descriptor as a tagged JSON object with the shape
-    /// `{"$yydb":"file",…}` that can be round-tripped through VOS write
+    /// Returns the descriptor as a tagged JSON object with the host-contract
+    /// shape `{"$yydb":"file",…}` that can be round-tripped through VOS write
     /// parameters or `read_file_window`.
     #[napi]
     pub fn put_file(
@@ -629,13 +631,15 @@ impl Database {
             self.handle()?.put_file(Cursor::new(payload.as_ref()), chunk_size, name, media_type).map_err(reason)?;
         let json = database::types::scalar::tagged_value_json(&database::types::Value::File(descriptor))
             .expect("`Value::File` always has a tagged form");
+        let json = retag_database_to_host(json);
         serde_json::to_string(&json).map_err(|e| napi::Error::from_reason(format!("encode file descriptor: {e}")))
     }
 
     /// Read one VOS window of a committed `file` value.
     ///
     /// `descriptor_json` must be a tagged JSON `{"$yydb":"file",…}` produced by
-    /// [`Self::put_file`] or queried from a VOS `file` column.
+    /// [`Self::put_file`] or queried from a VOS `file` column. The legacy
+    /// `"$database"` spelling is accepted too.
     /// Every touched chunk is verified against the manifest.
     #[napi]
     pub fn read_file_window(&self, descriptor_json: String, offset: i64, length: i64) -> Result<Buffer> {
@@ -882,7 +886,41 @@ fn parse_udf_type(tag: &str) -> Result<database::udf::UdfType> {
     }
 }
 
+/// Tagged JSON key exposed to the JS host contract.
+const HOST_TAGGED_JSON_KEY: &str = "$yydb";
+
+/// Rewrites a host tagged object to the canonical `database` key.
+///
+/// `database::types::scalar::tagged_value_from_json` reads only
+/// `TAGGED_JSON_KEY`; the `$yydb` spelling stays accepted as a compatibility
+/// input, while `$database` wins when both keys are present.
+fn retag_host_to_database(json: serde_json::Value) -> serde_json::Value {
+    match json {
+        serde_json::Value::Object(mut map) => {
+            if !map.contains_key(database::types::scalar::TAGGED_JSON_KEY) {
+                if let Some(tag) = map.remove(HOST_TAGGED_JSON_KEY) {
+                    map.insert(database::types::scalar::TAGGED_JSON_KEY.to_owned(), tag);
+                }
+            }
+            serde_json::Value::Object(map)
+        }
+        other => other,
+    }
+}
+
+/// Rewrites the canonical tagged key to the `$yydb` spelling the JS host
+/// contract requires. Only the key name changes; the value structure is kept.
+fn retag_database_to_host(mut json: serde_json::Value) -> serde_json::Value {
+    if let serde_json::Value::Object(map) = &mut json {
+        if let Some(tag) = map.remove(database::types::scalar::TAGGED_JSON_KEY) {
+            map.insert(HOST_TAGGED_JSON_KEY.to_owned(), tag);
+        }
+    }
+    json
+}
+
 fn json_to_value(json: serde_json::Value) -> Result<database::types::Value> {
+    let json = retag_host_to_database(json);
     if let Some(value) = database::types::scalar::tagged_value_from_json(&json) {
         return value.map_err(|error| napi::Error::from_reason(error.to_string()));
     }
@@ -907,7 +945,7 @@ fn json_to_value(json: serde_json::Value) -> Result<database::types::Value> {
 
 fn value_to_json(value: database::types::Value) -> serde_json::Value {
     if let Some(tagged) = database::types::scalar::tagged_value_json(&value) {
-        return tagged;
+        return retag_database_to_host(tagged);
     }
     match value {
         database::types::Value::Null => serde_json::Value::Null,
@@ -925,12 +963,13 @@ fn value_to_json(value: database::types::Value) -> serde_json::Value {
 fn parse_file_descriptor(json: &str) -> Result<database::types::FileDescriptor> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|e| napi::Error::from_reason(format!("invalid file descriptor JSON: {e}")))?;
+    let value = retag_host_to_database(value);
     let decoded = database::types::scalar::tagged_value_from_json(&value)
         .ok_or_else(|| napi::Error::from_reason("not a tagged value JSON"))?
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     match decoded {
         database::types::Value::File(descriptor) => Ok(descriptor),
-        other => Err(napi::Error::from_reason(format!("expected `$yydb:file`, got `{}`", other.kind()))),
+        other => Err(napi::Error::from_reason(format!("expected a `file` tagged value, got `{}`", other.kind()))),
     }
 }
 

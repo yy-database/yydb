@@ -20,13 +20,52 @@ fn map_err(error: impl ToString) -> PyErr {
     PyRuntimeError::new_err(error.to_string())
 }
 
+/// Tagged JSON key exposed to the Python host contract.
+const HOST_TAGGED_JSON_KEY: &str = "$yydb";
+
+/// Rewrites a host tagged object to the canonical `database` key.
+///
+/// `database::types::scalar::tagged_value_from_json` reads only
+/// `TAGGED_JSON_KEY`; the `$yydb` spelling stays accepted as a compatibility
+/// input, while `$database` wins when both keys are present.
+fn retag_host_to_database(json: serde_json::Value) -> serde_json::Value {
+    match json {
+        serde_json::Value::Object(mut map) => {
+            if !map.contains_key(database::types::scalar::TAGGED_JSON_KEY) {
+                if let Some(tag) = map.remove(HOST_TAGGED_JSON_KEY) {
+                    map.insert(database::types::scalar::TAGGED_JSON_KEY.to_owned(), tag);
+                }
+            }
+            serde_json::Value::Object(map)
+        }
+        other => other,
+    }
+}
+
+/// Rewrites the canonical tagged key to the `$yydb` spelling the Python host
+/// contract requires. Only the key name changes; the value structure is kept.
+fn retag_database_to_host(mut json: serde_json::Value) -> serde_json::Value {
+    if let serde_json::Value::Object(map) = &mut json {
+        if let Some(tag) = map.remove(database::types::scalar::TAGGED_JSON_KEY) {
+            map.insert(HOST_TAGGED_JSON_KEY.to_owned(), tag);
+        }
+    }
+    json
+}
+
+/// Whether `dict` carries either tagged spelling.
+fn carries_tagged_value(dict: &Bound<'_, PyDict>) -> PyResult<bool> {
+    Ok(dict.contains(database::types::scalar::TAGGED_JSON_KEY)? || dict.contains(HOST_TAGGED_JSON_KEY)?)
+}
+
 /// Host value accepted by [`execute_vos_write_with_params`].
 ///
 /// `bytes` stays `bytes` in both directions: it is never decoded as text and
 /// never re-encoded, so a payload that no text spelling can carry survives the
-/// host boundary unchanged. A tagged dict carrying `"$yydb": "file"` is
-/// decoded into a [`database::types::Value::File`] descriptor so VOS `file` columns can
-/// be round-tripped through the Python host.
+/// host boundary unchanged. A tagged dict carrying `"$yydb"` (or the canonical
+/// `"$database"`) is decoded into the matching scalar, including
+/// [`database::types::Value::File`] descriptors so VOS `file` columns can be
+/// round-tripped through the Python host.
 fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_none() {
         return Ok(Value::Null);
@@ -38,8 +77,8 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
         return Ok(Value::Bool(value.extract::<bool>()?));
     }
     if let Ok(dict) = value.cast::<PyDict>() {
-        if dict.contains("$yydb")? {
-            let json = dict_to_json(dict)?;
+        if carries_tagged_value(dict)? {
+            let json = retag_host_to_database(dict_to_json(dict)?);
             if let Some(result) = database::types::scalar::tagged_value_from_json(&json) {
                 return result.map_err(|error| PyRuntimeError::new_err(error.to_string()));
             }
@@ -100,7 +139,7 @@ fn value_to_py(py: Python<'_>, value: Value) -> PyResult<Py<PyAny>> {
             // vector, wide integers, file descriptors) cross as tagged dicts
             // exactly like the TypeScript host.
             match database::types::scalar::tagged_value_json(&other) {
-                Some(json) => json_to_py(py, &json),
+                Some(json) => json_to_py(py, &retag_database_to_host(json)),
                 None => Err(PyTypeError::new_err(format!("unsupported result value `{}`", other.kind()))),
             }
         }
@@ -222,8 +261,9 @@ fn query_vos(py: Python<'_>, db_path: String, source: String) -> PyResult<Vec<Py
 /// Execute one VOS write statement with named parameters.
 ///
 /// `bytes` parameters stay `bytes`: they are handed to the engine as octets and
-/// never pass through a text spelling. A dict with `"$yydb": "file"` is
-/// accepted as a `Value::File` descriptor for VOS `file` columns.
+/// never pass through a text spelling. A dict tagged with `"$yydb"` or the
+/// canonical `"$database"` is accepted as its matching scalar, including
+/// `Value::File` descriptors for VOS `file` columns.
 #[pyfunction]
 fn execute_vos_write(db_path: String, source: String, params: &Bound<'_, PyDict>) -> PyResult<()> {
     let conn = database::execution::engine::Connection::open(&db_path).map_err(map_err)?;
@@ -261,13 +301,13 @@ fn execute_vos_transaction(db_path: String, statements: Vec<(String, Bound<'_, P
 }
 
 fn decode_descriptor_dict(dict: &Bound<'_, PyDict>) -> PyResult<database::types::FileDescriptor> {
-    let json = dict_to_json(dict)?;
+    let json = retag_host_to_database(dict_to_json(dict)?);
     let decoded = database::types::scalar::tagged_value_from_json(&json)
-        .ok_or_else(|| PyRuntimeError::new_err("dict does not carry a `$yydb` tagged value"))?
+        .ok_or_else(|| PyRuntimeError::new_err("dict does not carry a tagged scalar value"))?
         .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
     match decoded {
         Value::File(descriptor) => Ok(descriptor),
-        other => Err(PyRuntimeError::new_err(format!("expected `$yydb:file`, got `{}`", other.kind()))),
+        other => Err(PyRuntimeError::new_err(format!("expected a `file` tagged value, got `{}`", other.kind()))),
     }
 }
 
@@ -295,13 +335,14 @@ fn put_file(
     let descriptor = conn.put_file(std::io::Cursor::new(payload), chunk_size, name, media_type).map_err(map_err)?;
     let json =
         database::types::scalar::tagged_value_json(&Value::File(descriptor)).expect("`Value::File` always has a tagged form");
-    json_to_py(py, &json)
+    json_to_py(py, &retag_database_to_host(json))
 }
 
 /// Read one VOS window of a committed `file` value.
 ///
 /// `descriptor` is a tagged `{"$yydb":"file",…}` dict — the shape produced by
-/// [`put_file`] or queried from a VOS `file` column.
+/// [`put_file`] or queried from a VOS `file` column. The canonical
+/// `"$database"` spelling is accepted as well.
 #[pyfunction]
 #[pyo3(signature = (db_path, descriptor, offset, length))]
 fn read_file_window(
