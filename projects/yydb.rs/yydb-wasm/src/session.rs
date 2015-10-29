@@ -2,11 +2,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use database::{execution::engine::Connection, protocol::yy as wire, query::local::PreparedStatement, types::Error};
 use js_sys::Function;
 use wasm_bindgen::prelude::*;
-use database::execution::engine::Connection;
-use database::protocol::yy as wire;
-use database::query::local::PreparedStatement;
 
 use crate::{
     core::{
@@ -82,7 +80,10 @@ fn parse_rename_map(json: Option<&str>) -> database::types::Result<database::exe
             obj.get("toField").and_then(|v| v.as_str()),
         ) {
             renames.fields.insert(
-                database::execution::engine::catalog::FieldPath { type_name: type_name.to_owned(), field_name: from_field.to_owned() },
+                database::execution::engine::catalog::FieldPath {
+                    type_name: type_name.to_owned(),
+                    field_name: from_field.to_owned(),
+                },
                 to_field.to_owned(),
             );
         }
