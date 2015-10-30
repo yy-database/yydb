@@ -1,11 +1,44 @@
 //! Host-testable WASM shared surface (no wasm-bindgen).
 
-use serde_json::{Value as JsonValue, json};
 use database::execution::engine::{
     Connection, Error, Result, SchemaVersion, Value,
     catalog::{self, ExecutionTypeKind},
     execution::Type,
 };
+use serde_json::{Value as JsonValue, json};
+
+/// Tagged JSON key exposed to the browser host contract.
+const HOST_TAGGED_JSON_KEY: &str = "$yydb";
+
+/// Upstream diagnostic namespace produced by `database::types::Error::code`.
+const UPSTREAM_CODE_PREFIX: &str = "database.";
+
+/// Host-facing diagnostic namespace for the same errors.
+const HOST_CODE_PREFIX: &str = "yydb.";
+
+/// Rewrites the canonical tagged key to the `$yydb` spelling the browser host
+/// contract requires. Only the key name changes.
+fn retag_database_to_host(json: JsonValue) -> JsonValue {
+    match json {
+        JsonValue::Object(mut map) => {
+            if let Some(tag) = map.remove(database::types::scalar::TAGGED_JSON_KEY) {
+                map.insert(HOST_TAGGED_JSON_KEY.to_owned(), tag);
+            }
+            JsonValue::Object(map)
+        }
+        other => other,
+    }
+}
+
+/// Rewrites the upstream code namespace to the host contract spelling.
+fn retag_error_code(mut json: JsonValue) -> JsonValue {
+    if let Some(JsonValue::String(code)) = json.get_mut("code") {
+        if let Some(tail) = code.strip_prefix(UPSTREAM_CODE_PREFIX) {
+            *code = format!("{HOST_CODE_PREFIX}{tail}");
+        }
+    }
+    json
+}
 
 /// Build the full diagnostic contract JSON object for any error branch.
 ///
@@ -13,7 +46,7 @@ use database::execution::engine::{
 /// outcomes, so browser hosts receive `{ code, operation, retryable, message,
 /// params? }` instead of a flattened display string.
 fn err_diag(err: &Error) -> JsonValue {
-    err.to_json()
+    retag_error_code(err.to_json())
 }
 
 /// Outcome of validating a VOS schema document.
@@ -202,7 +235,7 @@ fn execution_type_json(ty: Type) -> JsonValue {
 
 fn scalar_value_json(value: &Value) -> Result<JsonValue> {
     if let Some(tagged) = database::types::scalar::tagged_value_json(value) {
-        return Ok(tagged);
+        return Ok(retag_database_to_host(tagged));
     }
     match value {
         Value::Null => Ok(JsonValue::Null),

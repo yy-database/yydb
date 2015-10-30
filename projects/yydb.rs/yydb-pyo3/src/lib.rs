@@ -8,16 +8,27 @@ use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 mod sqlite_bindings;
 
+use database::types::Value;
 use pyo3::{
     IntoPyObjectExt,
     exceptions::{PyRuntimeError, PyTypeError},
     prelude::*,
     types::{PyBool, PyBytes, PyDict, PyString},
 };
-use database::types::Value;
+
+/// Upstream diagnostic namespace produced by `database::types::Error::code`.
+const UPSTREAM_CODE_PREFIX: &str = "database.";
+
+/// Host-facing diagnostic namespace for the same errors.
+const HOST_CODE_PREFIX: &str = "yydb.";
+
+/// Rewrites the upstream code namespace to the host contract spelling.
+fn host_error_message(message: &str) -> String {
+    message.replace(UPSTREAM_CODE_PREFIX, HOST_CODE_PREFIX)
+}
 
 fn map_err(error: impl ToString) -> PyErr {
-    PyRuntimeError::new_err(error.to_string())
+    PyRuntimeError::new_err(host_error_message(&error.to_string()))
 }
 
 /// Tagged JSON key exposed to the Python host contract.
@@ -224,7 +235,8 @@ fn info_text(db_path: String) -> PyResult<String> {
     lines.push(format!("records={}", conn.record_count().map_err(map_err)?));
     lines.push(format!("journal_mode={}", conn.journal_mode().as_str()));
     if let (Some(wal), Some(shm)) = (conn.wal_path(), conn.shm_path()) {
-        let (wal_on, shm_on, frames) = database::execution::engine::journal::sidecar_status(conn.path().expect("file-backed")).map_err(map_err)?;
+        let (wal_on, shm_on, frames) =
+            database::execution::engine::journal::sidecar_status(conn.path().expect("file-backed")).map_err(map_err)?;
         lines.push(format!("wal={} exists={wal_on}", wal.display()));
         lines.push(format!("shm={} exists={shm_on}", shm.display()));
         lines.push(format!("wal_frames={frames}"));
@@ -407,7 +419,8 @@ impl PyConnection {
     #[new]
     #[pyo3(signature = (path, wal = true))]
     fn new(path: &str, wal: bool) -> PyResult<Self> {
-        let flags = if wal { database::execution::engine::OpenFlags::wal() } else { database::execution::engine::OpenFlags::new() };
+        let flags =
+            if wal { database::execution::engine::OpenFlags::wal() } else { database::execution::engine::OpenFlags::new() };
         Ok(Self::from_conn(database::execution::engine::Connection::open_with_flags(path, flags).map_err(map_err)?))
     }
 

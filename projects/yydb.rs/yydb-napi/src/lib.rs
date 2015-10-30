@@ -1,4 +1,4 @@
-﻿//! Thin Node-API binding — atomic database operations over the [`database`] facade.
+//! Thin Node-API binding — atomic database operations over the [`database`] facade.
 //!
 //! The binding exposes one handle per open file plus single-purpose methods.
 //! User-facing commands (`init`, `info`, `serve`) are composed in TypeScript so
@@ -26,8 +26,24 @@ use napi_derive::napi;
 
 mod sqlite;
 
+/// Upstream diagnostic namespace produced by `database::types::Error::code`.
+const UPSTREAM_CODE_PREFIX: &str = "database.";
+
+/// Host-facing diagnostic namespace for the same errors.
+const HOST_CODE_PREFIX: &str = "yydb.";
+
+/// Rewrites the upstream code namespace to the host contract spelling.
+fn retag_error_code(mut json: serde_json::Value) -> serde_json::Value {
+    if let Some(serde_json::Value::String(code)) = json.get_mut("code") {
+        if let Some(tail) = code.strip_prefix(UPSTREAM_CODE_PREFIX) {
+            *code = format!("{HOST_CODE_PREFIX}{tail}");
+        }
+    }
+    json
+}
+
 fn reason(error: database::types::Error) -> napi::Error {
-    let json = serde_json::to_string(&error.to_json()).unwrap_or_else(|_| error.to_string());
+    let json = serde_json::to_string(&retag_error_code(error.to_json())).unwrap_or_else(|_| error.to_string());
     napi::Error::from_reason(json)
 }
 
@@ -118,7 +134,11 @@ impl NapiHostAdapter {
 }
 
 impl database::udf::HostRuntimeAdapter for NapiHostAdapter {
-    fn invoke_scalar(&self, handle: &database::udf::HostFunctionHandle, args: &[database::udf::UdfValue]) -> database::udf::Result<database::udf::UdfValue> {
+    fn invoke_scalar(
+        &self,
+        handle: &database::udf::HostFunctionHandle,
+        args: &[database::udf::UdfValue],
+    ) -> database::udf::Result<database::udf::UdfValue> {
         let invoker = self
             .invokers
             .lock()
@@ -138,11 +158,14 @@ impl database::udf::HostRuntimeAdapter for NapiHostAdapter {
             "functionId": handle.function_id,
             "args": args.iter().map(udf_value_to_json).collect::<Vec<_>>(),
         });
-        let payload_json = serde_json::to_string(&payload)
-            .map_err(|error| database::udf::UdfError::ExecutionFailed { message: format!("encode host invoke payload: {error}") })?;
-        let result_json =
-            function.call(payload_json).map_err(|error| database::udf::UdfError::ExecutionFailed { message: error.to_string() })?;
-        let result: serde_json::Value = serde_json::from_str(&result_json).map_err(|_| database::udf::UdfError::InvalidReturnValue)?;
+        let payload_json = serde_json::to_string(&payload).map_err(|error| database::udf::UdfError::ExecutionFailed {
+            message: format!("encode host invoke payload: {error}"),
+        })?;
+        let result_json = function
+            .call(payload_json)
+            .map_err(|error| database::udf::UdfError::ExecutionFailed { message: error.to_string() })?;
+        let result: serde_json::Value =
+            serde_json::from_str(&result_json).map_err(|_| database::udf::UdfError::InvalidReturnValue)?;
         json_to_udf_value(result)
     }
 
@@ -170,7 +193,9 @@ fn json_to_udf_value(value: serde_json::Value) -> database::udf::Result<database
     match value {
         serde_json::Value::Null => Ok(database::udf::UdfValue::Null),
         serde_json::Value::Bool(b) => Ok(database::udf::UdfValue::Bool(b)),
-        serde_json::Value::Number(n) => n.as_i64().map(database::udf::UdfValue::I64).ok_or(database::udf::UdfError::InvalidReturnValue),
+        serde_json::Value::Number(n) => {
+            n.as_i64().map(database::udf::UdfValue::I64).ok_or(database::udf::UdfError::InvalidReturnValue)
+        }
         serde_json::Value::String(s) => Ok(database::udf::UdfValue::Text(s)),
         _ => Err(database::udf::UdfError::InvalidReturnValue),
     }
@@ -526,7 +551,10 @@ impl Database {
                     obj.get("toField").and_then(|v| v.as_str()),
                 ) {
                     renames.fields.insert(
-                        database::execution::engine::catalog::FieldPath { type_name: type_name.to_owned(), field_name: from_field.to_owned() },
+                        database::execution::engine::catalog::FieldPath {
+                            type_name: type_name.to_owned(),
+                            field_name: from_field.to_owned(),
+                        },
                         to_field.to_owned(),
                     );
                 }
@@ -667,7 +695,8 @@ impl Database {
     pub fn call_scalar(&self, name: String, version: u32, args_json: String) -> Result<String> {
         let args: Vec<serde_json::Value> =
             serde_json::from_str(&args_json).map_err(|e| napi::Error::from_reason(format!("invalid args JSON: {e}")))?;
-        let values: Vec<database::types::Value> = args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
+        let values: Vec<database::types::Value> =
+            args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
         let result = self.handle()?.call_scalar_version(&name, version, &values).map_err(reason)?;
         serde_json::to_string(&value_to_json(result)).map_err(|e| napi::Error::from_reason(format!("encode result: {e}")))
     }
@@ -811,7 +840,8 @@ impl Client {
         }
         let args: Vec<serde_json::Value> =
             serde_json::from_str(&args_json).map_err(|e| napi::Error::from_reason(format!("invalid args JSON: {e}")))?;
-        let values: Vec<database::types::Value> = args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
+        let values: Vec<database::types::Value> =
+            args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
         let result = self.client.call_scalar_version(&name, version, &values).map_err(reason)?;
         serde_json::to_string(&value_to_json(result)).map_err(|e| napi::Error::from_reason(format!("encode result: {e}")))
     }
@@ -1028,4 +1058,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-
