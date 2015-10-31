@@ -14,6 +14,7 @@ Thumbs.db
 *.log
 *.txt
 !projects/yydb.rs/crates/**/tests/fixtures/**/*.txt
+!projects/yydb.py/packages/yydb/tests/fixtures/**/*.txt
 
 # Rust (`projects/yydb.rs/` workspace only)
 projects/yydb.rs/target/
