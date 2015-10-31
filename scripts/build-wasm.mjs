@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process';
+import { existsSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,3 +14,11 @@ execSync(`wasm-pack build "${crateDir}" --target web --out-dir "${outDir}" --rel
     stdio: 'inherit',
     shell: true,
 });
+
+// wasm-pack writes `lib/.gitignore` containing `*`, which would keep the
+// generated glue and wasm asset out of the packed tarball. The file is local
+// build state only, so drop it after the artifacts land.
+const libIgnore = join(outDir, '.gitignore');
+if (existsSync(libIgnore)) {
+    unlinkSync(libIgnore);
+}

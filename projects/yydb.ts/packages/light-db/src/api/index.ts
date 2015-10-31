@@ -5,7 +5,7 @@
  * `@yydb/yydb-unknown-wasm32` 的 Rust 语义核心）。
  */
 
-export { Database, Statement, TransactionHandle, openLightDatabase } from './wasm-database';
+export { Database, Statement, TransactionHandle, openLightDatabase } from './wasm-database.js';
 
 export type {
     BatchChange,
@@ -32,4 +32,4 @@ export type {
     TimeScalar,
     TimestampScalar,
     UniqueConstraintDescriptor,
-} from './types';
+} from './types.js';

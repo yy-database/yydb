@@ -5,11 +5,11 @@
         "moduleResolution": "bundler",
         "types": ["node"],
         "strict": true,
-        "noEmit": true,
+        "outDir": "dist",
+        "rootDir": "src",
         "skipLibCheck": true,
         "declaration": true,
-        "isolatedModules": true,
-        "allowImportingTsExtensions": true
+        "isolatedModules": true
     },
     "include": ["src/**/*.ts"]
 }

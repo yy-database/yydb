@@ -9,14 +9,13 @@
     },
     "exports": {
         ".": {
-            "default": "./src/index.ts",
-            "import": "./src/index.ts",
-            "types": "./src/index.ts"
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
         },
         "./wasm": "./lib/yydb_wasm_bg.wasm"
     },
     "files": [
-        "src",
+        "dist",
         "lib",
         "README.md"
     ],
@@ -31,7 +30,10 @@
         "type": "git",
         "url": "git+https://github.com/yy-database/yydb.git"
     },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
     "scripts": {
+        "build": "tsc -p tsconfig.json",
         "test": "pnpm run typecheck",
         "typecheck": "tsc --noEmit -p tsconfig.json"
     },

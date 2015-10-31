@@ -17,11 +17,11 @@
  */
 
 // 错误模型
-export { LightDbError, LightDbErrorCodes } from './errors';
-export type { LightDbErrorOptions } from './errors';
+export { LightDbError, LightDbErrorCodes } from './errors/index.js';
+export type { LightDbErrorOptions } from './errors/index.js';
 
 // 唯一作者面 —— WASM-backed Database + 稳定类型合同
-export { Database, TransactionHandle, openLightDatabase } from './api';
+export { Database, TransactionHandle, openLightDatabase } from './api/index.js';
 export type {
     BatchChange,
     DateScalar,
@@ -42,4 +42,4 @@ export type {
     TimeScalar,
     TimestampScalar,
     UniqueConstraintDescriptor,
-} from './api';
+} from './api/index.js';
