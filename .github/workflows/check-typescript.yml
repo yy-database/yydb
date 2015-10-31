@@ -29,6 +29,7 @@ jobs:
       - name: Build native addon
         run: pnpm run build:napi
       - run: pnpm run build:wasm
+      - run: pnpm --filter @yydb/yydb-unknown-wasm32 build
       - run: pnpm --filter @yydb/yydb-client build
       - run: pnpm --filter @yydb/yydb build
       - run: pnpm --filter @yydb/yydb-client test
@@ -40,3 +41,9 @@ jobs:
       - run: pnpm --filter @yydb/light-db test:browser
       - run: pnpm --filter @yydb/yydb-webui check
       - run: pnpm --filter @yydb/yydb-homepage build
+      - name: Packed install state for @yydb/yydb
+        run: node scripts/check-install-state.mjs --only=@yydb/yydb
+      - name: Packed install state for @yydb/yydb-client
+        run: node scripts/check-install-state.mjs --only=@yydb/yydb-client
+      - name: Packed install state for @yydb/light-db
+        run: node scripts/check-install-state.mjs --only=@yydb/light-db
