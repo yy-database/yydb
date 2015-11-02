@@ -6,12 +6,14 @@
 //! It reuses the `sqlite` product facade, so there is a single reader and writer
 //! implementation across the Rust, Node and Python hosts.
 
+use database::{
+    formats::sqlite::{RecordLimits, RecordValue, blank_database, decode_library_version, validate_database},
+    storage::sqlite::{
+        SchemaObjectKind, TableLimits, TextEncoding, decode_record, read_existing, read_named_table, read_schema,
+    },
+};
 use napi::bindgen_prelude::{BigInt, Buffer};
 use napi_derive::napi;
-use database::formats::sqlite::{RecordLimits, RecordValue, blank_database, decode_library_version, validate_database};
-use database::storage::sqlite::{
-    SchemaObjectKind, TableLimits, TextEncoding, decode_record, read_existing, read_named_table, read_schema,
-};
 
 /// Optional resource bounds for each schema or table scan.
 #[napi(object)]
@@ -165,7 +167,11 @@ fn resolve_encoding_name(bytes: &[u8]) -> napi::Result<&'static str> {
     })
 }
 
-fn build_decoded_rows(bytes: &[u8], rows: Vec<database::storage::sqlite::TableRow>, limits: TableLimits) -> napi::Result<Vec<SqliteDecodedRow>> {
+fn build_decoded_rows(
+    bytes: &[u8],
+    rows: Vec<database::storage::sqlite::TableRow>,
+    limits: TableLimits,
+) -> napi::Result<Vec<SqliteDecodedRow>> {
     let encoding = detect_encoding(bytes)?;
     let record_limits = RecordLimits { max_columns: 1024, max_payload_bytes: limits.max_payload_bytes.max(1_048_576) };
     rows.into_iter()
@@ -426,14 +432,16 @@ impl SqliteWriter {
     #[napi(factory)]
     pub fn create(page_size: Option<u32>) -> napi::Result<Self> {
         let page_size = page_size.unwrap_or(4096) as usize;
-        let writer = database::storage::sqlite::SqliteWriter::create(page_size).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let writer =
+            database::storage::sqlite::SqliteWriter::create(page_size).map_err(|e| napi::Error::from_reason(e.to_string()))?;
         Ok(Self { writer })
     }
 
     /// Loads an existing SQLite main file for further mutation.
     #[napi(factory)]
     pub fn open(path: String) -> napi::Result<Self> {
-        let writer = database::storage::sqlite::SqliteWriter::open(&path).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let writer =
+            database::storage::sqlite::SqliteWriter::open(&path).map_err(|e| napi::Error::from_reason(e.to_string()))?;
         Ok(Self { writer })
     }
 

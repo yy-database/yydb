@@ -3,15 +3,17 @@
 //! Read-only inspection and snapshot writing only. SQL execution stays out of
 //! scope here, matching the Rust `sqlite` facade level table.
 
+use database::{
+    formats::sqlite::{RecordLimits, RecordValue, decode_library_version, validate_database},
+    storage::sqlite::{
+        ColumnSpec, SchemaObjectKind, TableLimits, TextEncoding, UpdateValue, WriteValue, decode_record, read_named_index,
+        read_named_table, read_named_without_rowid, read_schema,
+    },
+};
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
     types::{PyBytes, PyDict, PyList},
-};
-use database::formats::sqlite::{RecordLimits, RecordValue, decode_library_version, validate_database};
-use database::storage::sqlite::{
-    ColumnSpec, SchemaObjectKind, TableLimits, TextEncoding, UpdateValue, WriteValue, decode_record, read_named_index,
-    read_named_table, read_named_without_rowid, read_schema,
 };
 
 fn sqlite_error(error: impl ToString) -> PyErr {
@@ -163,7 +165,8 @@ fn json_to_write_value(json: &serde_json::Value) -> PyResult<WriteValue> {
                 WriteValue::Blob(bytes)
             }
             else if let Some(integer) = object.get("$i64").and_then(serde_json::Value::as_str) {
-                let value = integer.parse::<i64>().map_err(|_| PyRuntimeError::new_err("sqlite $i64 must be a decimal string"))?;
+                let value =
+                    integer.parse::<i64>().map_err(|_| PyRuntimeError::new_err("sqlite $i64 must be a decimal string"))?;
                 WriteValue::Integer(value)
             }
             else {
@@ -240,7 +243,8 @@ impl SqliteWriter {
             .map_err(|error| PyRuntimeError::new_err(format!("sqlite values JSON invalid: {error}")))?;
         let mut slots = Vec::with_capacity(values.len());
         for value in values {
-            if value.as_object().is_some_and(|object| object.get("$omit").and_then(serde_json::Value::as_bool).unwrap_or(false)) {
+            if value.as_object().is_some_and(|object| object.get("$omit").and_then(serde_json::Value::as_bool).unwrap_or(false))
+            {
                 slots.push(None);
                 continue;
             }

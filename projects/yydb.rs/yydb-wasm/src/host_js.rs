@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
+use database::udf::{HostFunctionHandle, HostRuntimeAdapter, Result as UdfResult, UdfError, UdfValue};
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::JsValue;
-use database::udf::{HostFunctionHandle, HostRuntimeAdapter, Result as UdfResult, UdfError, UdfValue};
 
 /// Invokes session-local host micros through a JS callback.
 pub struct JsHostAdapter {
