@@ -24,7 +24,7 @@ pub fn validate_document(document: &str) -> Result<()> {
         start: 0,
         end: document.len(),
     };
-    let _ = (_span, core::any::type_name::<vos::parser::vos_ast::Span>());
+    let _ = core::any::type_name::<vos::ast::Span>();
 
     if document.contains('\0') {
         return Err(Error::Schema {
