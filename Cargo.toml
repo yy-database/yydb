@@ -12,7 +12,7 @@ clap = { version = "4", features = ["derive"] }
 sha1 = "0.10"
 base64 = "0.22"
 uuid = { version = "1", features = ["serde", "v4"] }
-vos = { version = "0.1.0", git = "https://github.com/voml/vos-language.git", rev = "ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508" }
+vos = { version = "0.1.0", git = "https://github.com/voml/vos-language.git", rev = "461ddff1bf3cf5afa72dac2fe87d3fffff3c8e09" }
 oxc_allocator = "0.100.0"
 oxc_ast = "0.100.0"
 oxc_codegen = "0.100.0"
