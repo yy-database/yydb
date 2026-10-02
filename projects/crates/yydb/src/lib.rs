@@ -49,6 +49,7 @@ pub mod schema;
 pub mod udf;
 
 mod lease;
+mod ttl;
 
 /// YY wire protocol (`YYDB`|`YYDS` + version digits `0000`…).
 pub mod wire;
@@ -57,8 +58,9 @@ pub use journal::{JournalMode, OpenFlags};
 pub use objects::ObjectStore;
 pub use udf::ScalarUdf;
 pub use yydb_types::{
-    ChunkManifest, CommitSequence, Error, HashAlgo, LeaseExpectation, LeaseToken, ObjectKind,
-    ObjectRef, ReleaseOutcome, Result, SchemaVersion, Tier, Value, Vector, DEFAULT_CHUNK_SIZE,
+    ChunkManifest, CommitSequence, Error, EvictBudget, EvictReport, EvictionPolicy, HashAlgo,
+    LeaseExpectation, LeaseToken, NamespaceQuota, NamespaceStats, ObjectKind, ObjectRef,
+    RecordVersion, ReleaseOutcome, Result, SchemaVersion, Tier, Value, Vector, DEFAULT_CHUNK_SIZE,
     INLINE_BYTES_MAX,
 };
 
@@ -329,14 +331,60 @@ impl Connection {
     pub fn put(&self, key: impl Into<String>, value: impl AsRef<[u8]>) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
-        state.records.insert(key.into(), value.as_ref().to_vec());
+        ttl::put_record(&mut state.records, &key.into(), value.as_ref())?;
         self.write_state(&state)
+    }
+
+    /// Store a record that expires after `ttl`.
+    pub fn put_with_ttl(
+        &self,
+        key: impl Into<String>,
+        value: impl AsRef<[u8]>,
+        ttl: std::time::Duration,
+    ) -> Result<RecordVersion> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut state = self.read_state()?;
+        let version = ttl::put_with_ttl(
+            &mut state.records,
+            &key.into(),
+            value.as_ref(),
+            ttl.as_millis() as u64,
+        )?;
+        self.write_state(&state)?;
+        Ok(version)
+    }
+
+    /// Configure quota limits for a namespace prefix such as `cache/response/`.
+    pub fn set_namespace_quota(&self, namespace: &str, quota: NamespaceQuota) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut state = self.read_state()?;
+        ttl::set_namespace_quota(&mut state.records, namespace, quota);
+        self.write_state(&state)
+    }
+
+    /// Return byte and record usage for a namespace prefix.
+    pub fn namespace_stats(&self, namespace: &str) -> Result<NamespaceStats> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        Ok(ttl::namespace_stats(&self.read_state()?.records, namespace))
+    }
+
+    /// Remove expired TTL records under `namespace_prefix` up to `budget`.
+    pub fn evict_expired(&self, namespace_prefix: &str, budget: EvictBudget) -> Result<EvictReport> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut state = self.read_state()?;
+        let report = ttl::evict_expired(&mut state.records, namespace_prefix, budget)?;
+        self.write_state(&state)?;
+        Ok(report)
     }
 
     /// Fetch a raw byte record by key.
     pub fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
-        Ok(self.read_state()?.records.get(key).cloned())
+        let state = self.read_state()?;
+        if ttl::is_expired(&state.records, key) {
+            return Ok(None);
+        }
+        Ok(state.records.get(key).cloned())
     }
 
     /// Commit a batch in one journal snapshot. `None` deletes the key.
