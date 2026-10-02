@@ -3,7 +3,7 @@ name = "yy-execution"
 version.workspace = true
 edition.workspace = true
 license = "MPL-2.0"
-description = "Language-neutral scalar execution model shared by YYDB and YYDS"
+description = "Language-neutral execution model shared by YYDB and YYDS"
 publish = false
 
 [lib]
