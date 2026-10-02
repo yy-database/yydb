@@ -58,9 +58,9 @@ pub struct FileRef {
 #[derive(Debug, Clone)]
 pub struct VectorValue {
     /// Vector components in logical order.
-    pub values: Vec<f32>,
+    values: Vec<f32>,
     /// Metric used to interpret this vector.
-    pub metric: VectorMetric,
+    metric: VectorMetric,
 }
 
 impl PartialEq for VectorValue {
@@ -80,6 +80,9 @@ impl Eq for VectorValue {}
 impl VectorValue {
     /// Creates a vector after rejecting non-finite components.
     pub fn new(values: Vec<f32>, metric: VectorMetric) -> Result<Self, VectorValueError> {
+        if values.is_empty() || u32::try_from(values.len()).is_err() {
+            return Err(VectorValueError::InvalidDimension);
+        }
         if let Some(index) = values.iter().position(|value| !value.is_finite()) {
             return Err(VectorValueError::NonFiniteComponent { index });
         }
@@ -88,13 +91,25 @@ impl VectorValue {
 
     /// Returns the vector dimension.
     pub fn dimension(&self) -> u32 {
-        self.values.len().try_into().unwrap_or(u32::MAX)
+        self.values.len().try_into().expect("validated vector dimension")
+    }
+
+    /// Returns the finite vector components.
+    pub fn values(&self) -> &[f32] {
+        &self.values
+    }
+
+    /// Returns the vector metric.
+    pub fn metric(&self) -> VectorMetric {
+        self.metric
     }
 }
 
 /// Failure while constructing a vector value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VectorValueError {
+    /// The vector is empty or exceeds the dimension range.
+    InvalidDimension,
     /// A component was NaN or infinite.
     NonFiniteComponent {
         /// Position of the invalid component.
