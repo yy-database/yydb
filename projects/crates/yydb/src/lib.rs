@@ -49,6 +49,7 @@ pub mod schema;
 pub mod udf;
 
 mod lease;
+mod refs;
 mod ttl;
 
 /// YY wire protocol (`YYDB`|`YYDS` + version digits `0000`…).
@@ -60,7 +61,8 @@ pub use udf::ScalarUdf;
 pub use yydb_types::{
     ChunkManifest, CommitSequence, Error, EvictBudget, EvictReport, EvictionPolicy, HashAlgo,
     LeaseExpectation, LeaseToken, NamespaceQuota, NamespaceStats, ObjectKind, ObjectRef,
-    RecordVersion, ReleaseOutcome, Result, SchemaVersion, Tier, Value, Vector, DEFAULT_CHUNK_SIZE,
+    ReclaimReport, RecordVersion, ReleaseOutcome, Result, SchemaVersion, Tier, Value, Vector,
+    DEFAULT_CHUNK_SIZE,
     INLINE_BYTES_MAX,
 };
 
@@ -123,6 +125,11 @@ impl Batch {
 
     /// Drop pending mutations without writing.
     pub fn abort(self) {}
+
+    /// Queue a metadata record that references a CAS object.
+    pub fn attach_object(&mut self, object: &ObjectRef, metadata_key: impl Into<String>) {
+        self.put(metadata_key, refs::encode_object_ref(object));
+    }
 
     /// Atomically apply queued mutations through `conn`.
     pub fn commit(self, conn: &Connection) -> Result<()> {
@@ -489,6 +496,35 @@ impl Connection {
         lease::lease_until(&self.read_state()?.records, key)
     }
 
+    /// List CAS objects under `namespace_prefix` that have no committed metadata reference.
+    pub fn scan_orphans(&self, namespace_prefix: &str) -> Result<Vec<ObjectRef>> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let state = self.read_state()?;
+        let referenced = refs::referenced_hashes(&state.records, namespace_prefix);
+        Ok(self
+            .objects
+            .list_objects()?
+            .into_iter()
+            .filter(|object| !referenced.contains(&object.hash))
+            .collect())
+    }
+
+    /// Delete orphan objects that are still unreferenced after a fresh scan.
+    pub fn reclaim_orphans(&self, objects: &[ObjectRef]) -> Result<ReclaimReport> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let state = self.read_state()?;
+        let referenced = refs::referenced_hashes(&state.records, "");
+        let mut report = ReclaimReport::default();
+        for object in objects {
+            if referenced.contains(&object.hash) {
+                continue;
+            }
+            self.objects.remove_object(object)?;
+            report.reclaimed_objects += 1;
+        }
+        Ok(report)
+    }
+
     /// Store one CAS object at `objects/hash-2/<hash>.bytes`.
     pub fn put_chunk(&self, kind: ObjectKind, bytes: &[u8]) -> Result<ObjectRef> {
         self.objects.put_chunk(kind, bytes)
@@ -551,7 +587,21 @@ impl Connection {
     where
         F: Fn(&[Value]) -> Result<Value> + Send + Sync + 'static,
     {
-        self.create_scalar_variadic(name, Some(n_args), func)
+        self.create_scalar_versioned(name, 1, n_args, func)
+    }
+
+    /// Register a versioned Rust scalar UDF with a fixed arity.
+    pub fn create_scalar_versioned<F>(
+        &self,
+        name: &str,
+        version: u32,
+        n_args: usize,
+        func: F,
+    ) -> Result<()>
+    where
+        F: Fn(&[Value]) -> Result<Value> + Send + Sync + 'static,
+    {
+        self.create_scalar_variadic_versioned(name, version, Some(n_args), func)
     }
 
     /// Register a Rust scalar UDF; `None` arity accepts any argument count.
@@ -559,13 +609,37 @@ impl Connection {
     where
         F: Fn(&[Value]) -> Result<Value> + Send + Sync + 'static,
     {
-        let boxed: Arc<ScalarFn> = Arc::new(func);
-        let udf: Arc<dyn ScalarUdf> = Arc::new(ClosureUdf::new(arity, boxed));
-        self.register_scalar(name, udf)
+        self.create_scalar_variadic_versioned(name, 1, arity, func)
     }
 
-    /// Register an object-safe [`ScalarUdf`].
+    /// Register a versioned Rust scalar UDF with optional fixed arity.
+    pub fn create_scalar_variadic_versioned<F>(
+        &self,
+        name: &str,
+        version: u32,
+        arity: Option<usize>,
+        func: F,
+    ) -> Result<()>
+    where
+        F: Fn(&[Value]) -> Result<Value> + Send + Sync + 'static,
+    {
+        let boxed: Arc<ScalarFn> = Arc::new(func);
+        let udf: Arc<dyn ScalarUdf> = Arc::new(ClosureUdf::new(arity, boxed));
+        self.register_scalar_versioned(name, version, udf)
+    }
+
+    /// Register an object-safe [`ScalarUdf`] at version `1`.
     pub fn register_scalar(&self, name: &str, udf: Arc<dyn ScalarUdf>) -> Result<()> {
+        self.register_scalar_versioned(name, 1, udf)
+    }
+
+    /// Register an object-safe [`ScalarUdf`] at an explicit version.
+    pub fn register_scalar_versioned(
+        &self,
+        name: &str,
+        version: u32,
+        udf: Arc<dyn ScalarUdf>,
+    ) -> Result<()> {
         if name.is_empty() {
             return Err(Error::Udf {
                 name: String::new(),
@@ -575,7 +649,7 @@ impl Connection {
         self.udfs
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(name.to_owned(), RegisteredUdf { udf });
+            .insert(name.to_owned(), RegisteredUdf { udf, version });
         Ok(())
     }
 
@@ -606,8 +680,13 @@ impl Connection {
             .collect()
     }
 
-    /// Invoke a registered scalar UDF (also used by future query execution).
+    /// Invoke a registered scalar UDF at version `1`.
     pub fn call_scalar(&self, name: &str, args: &[Value]) -> Result<Value> {
+        self.call_scalar_version(name, 1, args)
+    }
+
+    /// Invoke a registered scalar UDF at an explicit version.
+    pub fn call_scalar_version(&self, name: &str, version: u32, args: &[Value]) -> Result<Value> {
         let guard = self
             .udfs
             .lock()
@@ -615,6 +694,13 @@ impl Connection {
         let entry = guard.get(name).ok_or_else(|| Error::UdfNotFound {
             name: name.to_owned(),
         })?;
+        if entry.version != version {
+            return Err(Error::UdfVersionMismatch {
+                name: name.to_owned(),
+                expected: entry.version,
+                got: version,
+            });
+        }
         if let Some(expected) = entry.udf.arity() {
             if args.len() != expected {
                 return Err(Error::UdfArity {
@@ -628,6 +714,7 @@ impl Connection {
             Error::Udf { .. }
             | Error::UdfArity { .. }
             | Error::UdfNotFound { .. }
+            | Error::UdfVersionMismatch { .. }
             | Error::ObjectNotFound { .. }
             | Error::ObjectCorrupt { .. }
             | Error::Unsupported(_) => error,
