@@ -1,11 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "backends/yydb",
-    "backends/yydb-types",
-    "backends/yydb-tools",
-    "backends/yydb-client",
-]
+members = ["projects/crates/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -25,6 +20,6 @@ oxc_ast = "0.100.0"
 oxc_codegen = "0.100.0"
 oxc_span = "0.100.0"
 oxc_syntax = "0.100.0"
-yydb = { path = "backends/yydb" }
-yydb-client = { path = "backends/yydb-client" }
-yydb-types = { version = "0.1.0", path = "backends/yydb-types" }
+yydb = { path = "projects/crates/yydb" }
+yydb-client = { path = "projects/crates/yydb-client" }
+yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }

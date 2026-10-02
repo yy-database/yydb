@@ -154,7 +154,7 @@ need permissions, audit, and fleet operations.
 
 ## Learn more
 
-- [YYDB user guides](https://github.com/yy-database/yydb.rs/tree/dev/frontends/homepage/documentation/zh-hans)
+- [YYDB user guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
 - [Rust API documentation](https://docs.rs/yydb)
 - [Repository and issue tracker](https://github.com/yy-database/yydb.rs)
 - [Implementation and protocol notes](./documentation/)

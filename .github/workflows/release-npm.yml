@@ -60,14 +60,14 @@ jobs:
         run: |
           set -euo pipefail
           SRC="target/${{ matrix.target }}/release/${{ matrix.bin }}"
-          DEST="frontends/${{ matrix.pkg }}/${{ matrix.bin }}"
+          DEST="projects/packages/${{ matrix.pkg }}/${{ matrix.bin }}"
           cp "$SRC" "$DEST"
           chmod +x "$DEST" || true
           ls -la "$DEST"
       - uses: actions/upload-artifact@v7
         with:
           name: engine-${{ matrix.pkg }}
-          path: frontends/${{ matrix.pkg }}/${{ matrix.bin }}
+          path: projects/packages/${{ matrix.pkg }}/${{ matrix.bin }}
           if-no-files-found: error
 
   publish-npm:

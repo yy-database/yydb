@@ -22,7 +22,7 @@ docker run --rm \
 
 The WebSocket endpoint is `ws://127.0.0.1:7700/wire` from the host. Connect with [
 `@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client) or
-the [local WebUI](https://github.com/yy-database/yydb.rs/tree/dev/frontends/yydb-webui).
+the [local WebUI](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-webui).
 
 ## Initialize or inspect a file
 
@@ -57,6 +57,6 @@ yydb serve app.yydb --bind 127.0.0.1:7700
 ## Links
 
 - [YYDB overview](https://github.com/yy-database/yydb.rs)
-- [User guides](https://github.com/yy-database/yydb.rs/tree/dev/frontends/homepage/documentation/zh-hans)
+- [User guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
 - [Release archives](https://github.com/yy-database/yydb.rs/releases)
 - [License](https://github.com/yy-database/yydb.rs/blob/dev/License.md)

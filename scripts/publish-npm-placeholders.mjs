@@ -20,32 +20,32 @@ const repo = "yy-database/yydb.rs";
 const packages = [
     {
         name: "@yydb/yydb-win32-x64",
-        directory: "frontends/yydb-win32-x64",
+        directory: "projects/packages/yydb-win32-x64",
         description: "Placeholder — prebuilt yydb engine for win32-x64",
     },
     {
         name: "@yydb/yydb-linux-x64",
-        directory: "frontends/yydb-linux-x64",
+        directory: "projects/packages/yydb-linux-x64",
         description: "Placeholder — prebuilt yydb engine for linux-x64",
     },
     {
         name: "@yydb/yydb-darwin-x64",
-        directory: "frontends/yydb-darwin-x64",
+        directory: "projects/packages/yydb-darwin-x64",
         description: "Placeholder — prebuilt yydb engine for darwin-x64",
     },
     {
         name: "@yydb/yydb-darwin-arm64",
-        directory: "frontends/yydb-darwin-arm64",
+        directory: "projects/packages/yydb-darwin-arm64",
         description: "Placeholder — prebuilt yydb engine for darwin-arm64",
     },
     {
         name: "@yydb/yydb-client",
-        directory: "frontends/yydb-client",
+        directory: "projects/packages/yydb-client",
         description: "Placeholder — YY wire TypeScript client",
     },
     {
         name: "@yydb/yydb",
-        directory: "frontends/yydb",
+        directory: "projects/packages/yydb",
         description: "Placeholder — YYDB Node product API",
     },
 ];
