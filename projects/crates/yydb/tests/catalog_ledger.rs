@@ -127,3 +127,35 @@ fn rejects_persisted_ledger_with_duplicate_identity() {
     assert!(matches!(Connection::open(&path), Err(Error::Corrupt(_))));
     common::cleanup(&path);
 }
+
+#[test]
+fn ignores_an_incomplete_wal_tail_after_the_last_complete_snapshot() {
+    let (_, path) = common::open_temp_db("wal-tail");
+    let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
+    connection.ensure_schema(1, INITIAL).unwrap();
+    connection.put("value", b"complete").unwrap();
+    drop(connection);
+    let mut bytes = std::fs::read(yydb::journal::wal_path(&path)).unwrap();
+    bytes.truncate(bytes.len() - 3);
+    std::fs::write(yydb::journal::wal_path(&path), bytes).unwrap();
+    let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
+    assert_eq!(connection.schema().unwrap().unwrap().version, 1);
+    assert_eq!(connection.get("value").unwrap(), None);
+    drop(connection);
+    common::cleanup(&path);
+}
+
+#[test]
+fn rejects_a_complete_wal_frame_with_a_bad_checksum() {
+    let (_, path) = common::open_temp_db("wal-checksum");
+    let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
+    connection.ensure_schema(1, INITIAL).unwrap();
+    drop(connection);
+    let wal = yydb::journal::wal_path(&path);
+    let mut bytes = std::fs::read(&wal).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0x80;
+    std::fs::write(&wal, bytes).unwrap();
+    assert!(matches!(Connection::open_with_flags(&path, OpenFlags::wal()), Err(Error::Corrupt(_))));
+    common::cleanup(&path);
+}

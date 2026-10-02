@@ -7,7 +7,7 @@
 
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -63,7 +63,8 @@ impl OpenFlags {
     }
 }
 
-const WAL_MAGIC: &[u8] = b"YYWL\x01";
+const WAL_MAGIC_V1: &[u8] = b"YYWL\x01";
+const WAL_MAGIC_V2: &[u8] = b"YYWL\x02";
 const SHM_MAGIC: &[u8] = b"YYSH\x01";
 const SHM_BYTES: usize = 32;
 
@@ -94,7 +95,8 @@ pub(crate) fn ensure_wal_sidecars(db: &Path) -> Result<()> {
     let shm = shm_path(db);
     if !wal.exists() {
         let mut file = File::create(&wal)?;
-        file.write_all(WAL_MAGIC)?;
+        file.write_all(WAL_MAGIC_V2)?;
+        file.sync_all()?;
     }
     if !shm.exists() {
         write_shm(&shm, ShmHeader::default())?;
@@ -138,86 +140,157 @@ pub(crate) fn write_shm(path: &Path, header: ShmHeader) -> Result<()> {
     buf[..SHM_MAGIC.len()].copy_from_slice(SHM_MAGIC);
     buf[5..9].copy_from_slice(&header.n_frames.to_le_bytes());
     buf[9..17].copy_from_slice(&header.wal_bytes.to_le_bytes());
-    fs::write(path, buf).map_err(Error::Io)
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)?;
+    file.write_all(&buf)?;
+    file.sync_all()?;
+    Ok(())
 }
 
 /// Append one full-state snapshot frame to the WAL and refresh SHM.
 pub(crate) fn append_snapshot_frame(db: &Path, payload: &[u8]) -> Result<()> {
     ensure_wal_sidecars(db)?;
     let wal = wal_path(db);
-    let mut file = OpenOptions::new().append(true).open(&wal)?;
-    // type 1 = full snapshot
-    file.write_all(&[1])?;
+    let bytes = fs::read(&wal)?;
+    let scanned = scan_wal(&bytes)?;
     let len = u32::try_from(payload.len()).map_err(|_| Error::Corrupt("wal frame too large"))?;
-    file.write_all(&len.to_le_bytes())?;
-    file.write_all(payload)?;
+    let n_frames = scanned
+        .n_frames
+        .checked_add(1)
+        .ok_or(Error::Corrupt("wal frame count exhausted"))?;
+    let mut frame = Vec::with_capacity(5 + payload.len());
+    frame.push(1);
+    frame.extend(len.to_le_bytes());
+    frame.extend(payload);
+    let mut file = OpenOptions::new().write(true).open(&wal)?;
+    file.set_len(scanned.valid_len as u64)?;
+    file.seek(SeekFrom::Start(scanned.valid_len as u64))?;
+    file.write_all(&frame)?;
+    if scanned.version == 2 {
+        file.write_all(blake3::hash(&frame).as_bytes())?;
+    }
     file.flush()?;
+    file.sync_all()?;
 
     let meta = file.metadata()?;
-    let mut shm = read_shm(&shm_path(db))?;
-    shm.n_frames = shm.n_frames.saturating_add(1);
-    shm.wal_bytes = meta.len();
-    write_shm(&shm_path(db), shm)?;
+    write_shm(
+        &shm_path(db),
+        ShmHeader {
+            n_frames,
+            wal_bytes: meta.len(),
+        },
+    )?;
     Ok(())
 }
 
 /// Replay all snapshot frames after `base` (later frames win).
-pub(crate) fn replay_wal_snapshots(db: &Path, mut base: Vec<u8>) -> Result<Vec<u8>> {
+pub(crate) fn replay_wal_snapshots(db: &Path, base: Vec<u8>) -> Result<Vec<u8>> {
     let wal = wal_path(db);
     if !wal.exists() {
         return Ok(base);
     }
     let bytes = fs::read(&wal)?;
-    if bytes.is_empty() {
-        return Ok(base);
-    }
-    if bytes.len() < WAL_MAGIC.len() || &bytes[..WAL_MAGIC.len()] != WAL_MAGIC {
+    let scanned = scan_wal(&bytes)?;
+    Ok(scanned
+        .last_payload
+        .map_or(base, |range| bytes[range].to_vec()))
+}
+
+struct WalScan {
+    version: u8,
+    valid_len: usize,
+    n_frames: u32,
+    last_payload: Option<std::ops::Range<usize>>,
+}
+
+fn scan_wal(bytes: &[u8]) -> Result<WalScan> {
+    if bytes.len() < WAL_MAGIC_V1.len() {
         return Err(Error::Corrupt("unknown wal header"));
     }
-    let mut cursor = WAL_MAGIC.len();
+    let header = &bytes[..WAL_MAGIC_V1.len()];
+    let version = if header == WAL_MAGIC_V1 {
+        1
+    } else if header == WAL_MAGIC_V2 {
+        2
+    } else {
+        return Err(Error::Corrupt("unknown wal header"));
+    };
+    let mut cursor = WAL_MAGIC_V1.len();
+    let mut scanned = WalScan {
+        version,
+        valid_len: cursor,
+        n_frames: 0,
+        last_payload: None,
+    };
     while cursor < bytes.len() {
-        let kind = *bytes
-            .get(cursor)
-            .ok_or(Error::Corrupt("truncated wal frame"))?;
+        let frame_start = cursor;
+        let kind = match bytes.get(cursor) {
+            Some(kind) => *kind,
+            None => break,
+        };
         cursor += 1;
         if kind != 1 {
             return Err(Error::Corrupt("unsupported wal frame type"));
         }
         if cursor + 4 > bytes.len() {
-            return Err(Error::Corrupt("truncated wal length"));
+            break;
         }
         let len = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
         cursor += 4;
-        if cursor + len > bytes.len() {
-            return Err(Error::Corrupt("truncated wal payload"));
+        let payload_end = cursor
+            .checked_add(len)
+            .ok_or(Error::Corrupt("wal length overflow"))?;
+        if payload_end > bytes.len() {
+            break;
         }
-        base = bytes[cursor..cursor + len].to_vec();
-        cursor += len;
+        let payload_start = cursor;
+        if version == 2 {
+            if payload_end + 32 > bytes.len() {
+                break;
+            }
+            let expected = blake3::hash(&bytes[frame_start..payload_end]);
+            if bytes[payload_end..payload_end + 32] != *expected.as_bytes() {
+                return Err(Error::Corrupt("wal frame checksum mismatch"));
+            }
+            cursor = payload_end + 32;
+        } else {
+            cursor = payload_end;
+        }
+        scanned.valid_len = cursor;
+        scanned.n_frames = scanned
+            .n_frames
+            .checked_add(1)
+            .ok_or(Error::Corrupt("wal frame count exhausted"))?;
+        scanned.last_payload = Some(payload_start..payload_end);
     }
-    Ok(base)
+    Ok(scanned)
 }
 
 pub(crate) fn truncate_wal(db: &Path) -> Result<()> {
     let wal = wal_path(db);
     let mut file = File::create(&wal)?;
-    file.write_all(WAL_MAGIC)?;
+    file.write_all(WAL_MAGIC_V2)?;
+    file.sync_all()?;
     write_shm(&shm_path(db), ShmHeader::default())?;
     Ok(())
 }
 
 pub(crate) fn wal_frame_count(db: &Path) -> Result<u32> {
-    Ok(read_shm(&shm_path(db))?.n_frames)
+    let wal = wal_path(db);
+    if !wal.exists() {
+        return Ok(0);
+    }
+    Ok(scan_wal(&fs::read(wal)?)?.n_frames)
 }
 
 /// Detect existing sidecars (useful for `info`).
 pub fn sidecar_status(db: &Path) -> Result<(bool, bool, u32)> {
     let wal = wal_path(db);
     let shm = shm_path(db);
-    let frames = if shm.exists() {
-        read_shm(&shm)?.n_frames
-    } else {
-        0
-    };
+    let frames = wal_frame_count(db)?;
     Ok((wal.exists(), shm.exists(), frames))
 }
 
