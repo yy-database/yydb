@@ -1,2 +1,2 @@
 packages:
-  - "frontends/*"
+  - "projects/packages/*"

@@ -37,7 +37,7 @@ jobs:
       - run: cargo build -p yydb-tools --release
 
   ts:
-    name: pnpm frontends
+    name: pnpm packages
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

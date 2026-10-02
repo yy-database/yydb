@@ -1,5 +1,5 @@
 /**
- * Publish prepared frontends/* packages. Skips versions already on the registry
+ * Publish prepared projects/packages/* packages. Skips versions already on the registry
  * (idempotent retry after partial failure).
  *
  * Env:
@@ -29,7 +29,7 @@ function npmViewVersion(name, version) {
 }
 
 function publishDir(dirName) {
-    const dir = path.join(root, "frontends", dirName);
+    const dir = path.join(root, "projects", "packages", dirName);
     const pkgPath = path.join(dir, "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     const { name, version } = pkg;

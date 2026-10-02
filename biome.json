@@ -28,7 +28,7 @@
             "package.json",
             "biome.json",
             "scripts/**",
-            "frontends/**",
+            "projects/packages/**",
             "!**/node_modules/**",
             "!**/dist/**",
             "!**/target/**",

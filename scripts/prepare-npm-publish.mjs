@@ -57,7 +57,7 @@ function preparePackageJson(pkgDir, { workspaceClientToVersion = false } = {}) {
         j.dependencies["@yydb/yydb-client"] = version || j.version;
     }
     // Provenance: repository.url must match the publishing GitHub repo.
-    // Keep monorepo `directory` so npm links to frontends/<pkg>.
+    // Keep monorepo `directory` so npm links to projects/packages/<pkg>.
     const ghRepo = (process.env.GITHUB_REPOSITORY || "").trim() || "yy-database/yydb.rs";
     const directory = path.relative(root, pkgDir).split(path.sep).join("/");
     j.repository = {
@@ -80,7 +80,7 @@ const platforms = [
 ];
 
 for (const [pkg, bin] of platforms) {
-    const destDir = path.join(root, "frontends", pkg);
+    const destDir = path.join(root, "projects", "packages", pkg);
     const dest = path.join(destDir, bin);
     fs.copyFileSync(findBinary(bin), dest);
     try {
@@ -91,8 +91,8 @@ for (const [pkg, bin] of platforms) {
     preparePackageJson(destDir);
 }
 
-preparePackageJson(path.join(root, "frontends", "yydb-client"));
-preparePackageJson(path.join(root, "frontends", "yydb"), {
+preparePackageJson(path.join(root, "projects", "packages", "yydb-client"));
+preparePackageJson(path.join(root, "projects", "packages", "yydb"), {
     workspaceClientToVersion: true,
 });
 

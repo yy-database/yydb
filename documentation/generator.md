@@ -3,7 +3,7 @@
 VOS schema → typed TypeScript for `@yydb/yydb` clients.
 
 This is a **component of `yydb-tools`** (the `yydb` binary), not a separate published crate. Implementation lives under
-`backends/yydb-tools/src/generator/`.
+`projects/crates/yydb-tools/src/generator/`.
 
 ## Pipeline
 
@@ -28,7 +28,7 @@ Emits:
 
 ## Fixture
 
-`backends/yydb-tools/fixtures/generator/setting.vos` →
+`projects/crates/yydb-tools/fixtures/generator/setting.vos` →
 `setting.generated.ts` (snapshot in `cargo test -p yydb-tools`).
 
 ## Out of scope (MVP)
