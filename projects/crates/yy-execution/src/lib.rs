@@ -123,22 +123,31 @@ pub struct RecordValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FieldHandle {
     schema_id: u64,
+    field_id: u64,
     index: u32,
     ty: Type,
 }
 
 impl FieldHandle {
-    /// Creates a field handle for a non-zero schema identity.
-    pub fn new(schema_id: u64, index: u32, ty: Type) -> Result<Self, FieldHandleError> {
+    /// Creates a field handle with non-zero schema and field identities.
+    pub fn new(schema_id: u64, field_id: u64, index: u32, ty: Type) -> Result<Self, FieldHandleError> {
         if schema_id == 0 {
             return Err(FieldHandleError::InvalidSchemaId);
         }
-        Ok(Self { schema_id, index, ty })
+        if field_id == 0 {
+            return Err(FieldHandleError::InvalidFieldId);
+        }
+        Ok(Self { schema_id, field_id, index, ty })
     }
 
     /// Returns the schema identity owning this field.
     pub fn schema_id(&self) -> u64 {
         self.schema_id
+    }
+
+    /// Returns the durable field identity.
+    pub fn field_id(&self) -> u64 {
+        self.field_id
     }
 
     /// Returns the positional field index.
@@ -157,6 +166,8 @@ impl FieldHandle {
 pub enum FieldHandleError {
     /// Zero is reserved for an absent schema identity.
     InvalidSchemaId,
+    /// Zero is reserved for an absent field identity.
+    InvalidFieldId,
 }
 
 impl RecordValue {
@@ -911,7 +922,7 @@ mod tests {
                 },
                 Node::ReadField {
                     record: 0,
-                    field: FieldHandle::new(7, 0, Type::I64).expect("field handle is valid"),
+                    field: FieldHandle::new(7, 101, 0, Type::I64).expect("field handle is valid"),
                 },
             ],
             output: 1,
@@ -940,7 +951,7 @@ mod tests {
                 },
                 Node::ReadField {
                     record: 0,
-                    field: FieldHandle::new(7, 1, Type::I64).expect("field handle is valid"),
+                    field: FieldHandle::new(7, 102, 1, Type::I64).expect("field handle is valid"),
                 },
             ],
             output: 1,
@@ -976,7 +987,7 @@ mod tests {
                 },
                 Node::ReadField {
                     record: 0,
-                    field: FieldHandle::new(8, 0, Type::I64).expect("field handle is valid"),
+                    field: FieldHandle::new(8, 201, 0, Type::I64).expect("field handle is valid"),
                 },
             ],
             output: 1,
