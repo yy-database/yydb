@@ -1521,7 +1521,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vos"
 version = "0.1.0"
-source = "git+https://github.com/voml/vos-language.git?rev=23de05b9ca92c985ebe262cc4bff10ee22745171#23de05b9ca92c985ebe262cc4bff10ee22745171"
+source = "git+https://github.com/voml/vos-language.git?rev=ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508#ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508"
 dependencies = [
  "uuid",
  "vos-ast",
@@ -1533,7 +1533,7 @@ dependencies = [
 [[package]]
 name = "vos-ast"
 version = "0.1.0"
-source = "git+https://github.com/voml/vos-language.git?rev=23de05b9ca92c985ebe262cc4bff10ee22745171#23de05b9ca92c985ebe262cc4bff10ee22745171"
+source = "git+https://github.com/voml/vos-language.git?rev=ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508#ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508"
 dependencies = [
  "serde",
 ]
@@ -1541,7 +1541,7 @@ dependencies = [
 [[package]]
 name = "vos-generator"
 version = "0.1.0"
-source = "git+https://github.com/voml/vos-language.git?rev=23de05b9ca92c985ebe262cc4bff10ee22745171#23de05b9ca92c985ebe262cc4bff10ee22745171"
+source = "git+https://github.com/voml/vos-language.git?rev=ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508#ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508"
 dependencies = [
  "dejavu",
  "once_cell",
@@ -1553,7 +1553,7 @@ dependencies = [
 [[package]]
 name = "vos-inspect"
 version = "0.1.0"
-source = "git+https://github.com/voml/vos-language.git?rev=23de05b9ca92c985ebe262cc4bff10ee22745171#23de05b9ca92c985ebe262cc4bff10ee22745171"
+source = "git+https://github.com/voml/vos-language.git?rev=ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508#ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508"
 dependencies = [
  "serde",
  "vos-ast",
@@ -1562,7 +1562,7 @@ dependencies = [
 [[package]]
 name = "vos-parser"
 version = "0.1.0"
-source = "git+https://github.com/voml/vos-language.git?rev=23de05b9ca92c985ebe262cc4bff10ee22745171#23de05b9ca92c985ebe262cc4bff10ee22745171"
+source = "git+https://github.com/voml/vos-language.git?rev=ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508#ddff6ca3a25f05af8b6ebf3fb2489bd5dad02508"
 dependencies = [
  "miette",
  "oak-vos",
