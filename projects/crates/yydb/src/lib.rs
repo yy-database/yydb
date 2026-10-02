@@ -86,11 +86,13 @@ use journal::{
 };
 use udf::{ClosureUdf, RegisteredUdf, ScalarFn};
 
-const MAGIC: &[u8] = b"YYDB\x01";
+const MAGIC: &[u8] = b"YYDB\x02";
+const LEGACY_MAGIC: &[u8] = b"YYDB\x01";
 
 #[derive(Debug, Default, Clone)]
 struct State {
     schema: Option<SchemaVersion>,
+    catalog: Option<vos::ast::CatalogSnapshot>,
     records: BTreeMap<String, Vec<u8>>,
 }
 
@@ -304,6 +306,16 @@ impl Connection {
         Ok(self.read_state()?.schema)
     }
 
+    /// Current persisted VOS identity ledger, if the database has one.
+    pub fn catalog_snapshot(&self) -> Result<Option<vos::ast::CatalogSnapshot>> {
+        Ok(self.read_state()?.catalog)
+    }
+
+    /// Bind local execution handles using persisted identities, never fresh source order.
+    pub fn execution_catalog(&self) -> Result<Option<schema::ExecutionCatalog>> {
+        self.catalog_snapshot()?.as_ref().map(schema::execution_catalog_from_snapshot).transpose()
+    }
+
     /// Number of stored key/value records.
     pub fn record_count(&self) -> Result<usize> {
         Ok(self
@@ -322,21 +334,57 @@ impl Connection {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         schema::validate_document(document)?;
         let mut state = self.read_state()?;
-        match &state.schema {
-            Some(schema) if schema.version != version => {
-                return Err(Error::SchemaConflict {
-                    expected: version,
-                    found: schema.version,
-                });
+        if let Some(current) = &state.schema {
+            if current.version != version {
+                return Err(Error::SchemaConflict { expected: version, found: current.version });
             }
-            Some(_) => return Ok(()),
-            None => {
-                state.schema = Some(SchemaVersion {
-                    version,
-                    document: document.to_owned(),
-                })
+            if current.document != document {
+                return Err(Error::Schema { message: "schema document changed without a new version".into() });
             }
+            if state.catalog.is_some() { return Ok(()); }
         }
+        let parsed = vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
+            message: diagnostics.to_string(),
+        })?;
+        state.catalog = Some(vos::catalog_from_document(&parsed).map_err(|message| Error::Schema { message })?);
+        state.schema = Some(SchemaVersion { version, document: document.to_owned() });
+        self.write_state(&state)
+    }
+
+    /// Publish a VOS schema and explicitly evolve its persisted identity ledger.
+    ///
+    /// Existing type and field identities are preserved only by exact name
+    /// matching or by mappings in `renames`. Unmapped renames become a removal
+    /// plus a new identity, and removed identities remain tombstoned.
+    pub fn migrate_schema(
+        &self,
+        expected_version: u32,
+        version: u32,
+        document: &str,
+        renames: &vos::ast::RenameMap,
+    ) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        schema::validate_document(document)?;
+        let parsed = vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
+            message: diagnostics.to_string(),
+        })?;
+        let mut state = self.read_state()?;
+        let current = state.schema.as_ref().ok_or_else(|| Error::Schema {
+            message: "schema migration requires an existing schema".into(),
+        })?;
+        if current.version != expected_version {
+            return Err(Error::SchemaConflict { expected: expected_version, found: current.version });
+        }
+        if version <= expected_version {
+            return Err(Error::Schema { message: "schema migration must advance the version".into() });
+        }
+        let previous_catalog = state.catalog.as_ref().ok_or_else(|| Error::Schema {
+            message: "initialize the legacy identity ledger with ensure_schema before migration".into(),
+        })?;
+        let catalog = vos::evolve_catalog(previous_catalog, &parsed, renames)
+            .map_err(|message| Error::Schema { message })?;
+        state.schema = Some(SchemaVersion { version, document: document.to_owned() });
+        state.catalog = Some(catalog);
         self.write_state(&state)
     }
 
@@ -811,7 +859,8 @@ fn write_main(path: &Path, state: &State) -> Result<()> {
 }
 
 fn encode(state: &State) -> Result<Vec<u8>> {
-    let mut bytes = MAGIC.to_vec();
+    let legacy = state.schema.is_some() && state.catalog.is_none();
+    let mut bytes = if legacy { LEGACY_MAGIC.to_vec() } else { MAGIC.to_vec() };
     match &state.schema {
         Some(schema) => {
             bytes.push(1);
@@ -825,12 +874,24 @@ fn encode(state: &State) -> Result<Vec<u8>> {
         write_bytes(&mut bytes, key.as_bytes())?;
         write_bytes(&mut bytes, value)?;
     }
+    if legacy { return Ok(bytes); }
+    match &state.catalog {
+        Some(catalog) => {
+            bytes.push(1);
+            let encoded = serde_json::to_vec(catalog)
+                .map_err(|_| Error::Corrupt("catalog serialization failed"))?;
+            write_bytes(&mut bytes, &encoded)?;
+        }
+        None => bytes.push(0),
+    }
     Ok(bytes)
 }
 
 fn decode(bytes: &[u8]) -> Result<State> {
     let mut cursor = 0;
-    if take(bytes, &mut cursor, MAGIC.len())? != MAGIC {
+    let header = take(bytes, &mut cursor, MAGIC.len())?;
+    let legacy = header == LEGACY_MAGIC;
+    if header != MAGIC && !legacy {
         return Err(Error::Corrupt("unknown file header"));
     }
     let schema = match take(bytes, &mut cursor, 1)? {
@@ -849,10 +910,28 @@ fn decode(bytes: &[u8]) -> Result<State> {
             .map_err(|_| Error::Corrupt("record key is not UTF-8"))?;
         records.insert(key, read_bytes(bytes, &mut cursor)?);
     }
-    if cursor != bytes.len() {
-        return Err(Error::Corrupt("trailing data"));
+    if !legacy {
+        let catalog = match take(bytes, &mut cursor, 1)? {
+            [0] => None,
+            [1] => Some(
+                serde_json::from_slice(&read_bytes(bytes, &mut cursor)?)
+                    .map_err(|_| Error::Corrupt("catalog is invalid JSON"))?,
+            ),
+            _ => return Err(Error::Corrupt("unknown catalog marker")),
+        };
+        if cursor != bytes.len() {
+            return Err(Error::Corrupt("trailing data"));
+        }
+        if schema.is_some() != catalog.is_some() {
+            return Err(Error::Corrupt("schema and catalog presence differ"));
+        }
+        if let (Some(schema), Some(catalog)) = (&schema, &catalog) {
+            schema::validate_snapshot(&schema.document, catalog)?;
+        }
+        return Ok(State { schema, catalog, records });
     }
-    Ok(State { schema, records })
+    if cursor != bytes.len() { return Err(Error::Corrupt("trailing data")); }
+    Ok(State { schema, catalog: None, records })
 }
 
 fn write_u32(bytes: &mut Vec<u8>, value: usize) -> Result<()> {
