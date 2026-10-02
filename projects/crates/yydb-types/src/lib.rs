@@ -166,6 +166,13 @@ pub struct EvictBudget {
     pub max_records: usize,
 }
 
+/// Summary of CAS objects removed by orphan reclamation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReclaimReport {
+    /// Objects deleted from the store.
+    pub reclaimed_objects: u64,
+}
+
 /// Summary of keys removed by TTL or quota eviction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EvictReport {
