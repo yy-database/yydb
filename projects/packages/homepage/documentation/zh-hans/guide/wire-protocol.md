@@ -10,8 +10,8 @@
 
 Rust（本仓库）：
 
-- `backends/yydb`：YYDB 嵌入式门面
-- `backends/yydb-client`：YYDB 远程 TCP 客户端
+- `projects/crates/yydb`：YYDB 嵌入式门面
+- `projects/crates/yydb-client`：YYDB 远程 TCP 客户端
 
 完整说明：[`../../../../../documentation/serve-protocol.md`](../../../../../documentation/serve-protocol.md)。
 

@@ -77,6 +77,6 @@ operating system's file permissions for the `.yydb` file.
 ## Links
 
 - [YYDB overview](https://github.com/yy-database/yydb.rs)
-- [User guides](https://github.com/yy-database/yydb.rs/tree/dev/frontends/homepage/documentation/zh-hans)
+- [User guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
 - [API documentation](https://docs.rs/yydb)
 - [License](https://github.com/yy-database/yydb.rs/blob/dev/License.md)

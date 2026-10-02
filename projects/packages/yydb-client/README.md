@@ -72,6 +72,6 @@ Protocol details for implementers are in the
 ## Links
 
 - [Node file API](https://www.npmjs.com/package/@yydb/yydb)
-- [Local WebUI](https://github.com/yy-database/yydb.rs/tree/dev/frontends/yydb-webui)
-- [YYDB user guides](https://github.com/yy-database/yydb.rs/tree/dev/frontends/homepage/documentation/zh-hans)
+- [Local WebUI](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-webui)
+- [YYDB user guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
 - [License](https://github.com/yy-database/yydb.rs/blob/dev/License.md)

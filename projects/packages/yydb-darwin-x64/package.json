@@ -1,11 +1,11 @@
 {
-    "name": "@yydb/yydb-linux-x64",
+    "name": "@yydb/yydb-darwin-x64",
     "version": "0.1.0",
-    "description": "YYDB CLI engine for Linux x64; installed automatically by @yydb/yydb",
+    "description": "YYDB CLI engine for Intel Macs; installed automatically by @yydb/yydb",
     "license": "MPL-2.0",
     "private": true,
     "os": [
-        "linux"
+        "darwin"
     ],
     "cpu": [
         "x64"
@@ -20,9 +20,9 @@
     "repository": {
         "type": "git",
         "url": "git+https://github.com/yy-database/yydb.rs.git",
-        "directory": "frontends/yydb-linux-x64"
+        "directory": "projects/packages/yydb-darwin-x64"
     },
-    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/frontends/yydb-linux-x64#readme",
+    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-darwin-x64#readme",
     "bugs": {
         "url": "https://github.com/yy-database/yydb.rs/issues"
     },
