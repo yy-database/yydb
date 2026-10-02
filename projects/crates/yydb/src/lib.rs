@@ -59,6 +59,8 @@ pub mod wire;
 pub use journal::{JournalMode, OpenFlags};
 pub use objects::ObjectStore;
 pub use udf::ScalarUdf;
+/// Language-neutral execution programs accepted by the embedded host.
+pub use yy_execution as execution;
 pub use yydb_types::{
     ChunkManifest, CommitSequence, DoctorIssue, DoctorReport, DoctorSeverity, Error, EvictBudget,
     EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken, NamespaceQuota,
@@ -647,6 +649,14 @@ impl Connection {
     /// Register an object-safe [`ScalarUdf`] at version `1`.
     pub fn register_scalar(&self, name: &str, udf: Arc<dyn ScalarUdf>) -> Result<()> {
         self.register_scalar_versioned(name, 1, udf)
+    }
+
+    /// Register a validated local read-only execution body with its identity and version.
+    pub fn register_execution_udf(&self, body: execution::ValidatedUdf) -> Result<()> {
+        let name = body.id().to_owned();
+        let version = body.version();
+        let adapter = udf::ExecutionUdf::new(body)?;
+        self.register_scalar_versioned(&name, version, Arc::new(adapter))
     }
 
     /// Register an object-safe [`ScalarUdf`] at an explicit version.
