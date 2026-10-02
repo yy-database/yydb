@@ -60,7 +60,7 @@ pub use journal::{JournalMode, OpenFlags};
 pub use objects::ObjectStore;
 pub use udf::ScalarUdf;
 /// Language-neutral execution programs accepted by the embedded host.
-pub use yy_execution as execution;
+pub use yydb_execution as execution;
 pub use yydb_types::{
     ChunkManifest, CommitSequence, DoctorIssue, DoctorReport, DoctorSeverity, Error, EvictBudget,
     EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken, NamespaceQuota,

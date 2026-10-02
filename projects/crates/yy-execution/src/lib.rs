@@ -1,7 +1,8 @@
-//! Language-neutral execution model for YYDB and YYDS.
+//! Stable local execution model owned by YYDB.
 //!
-//! VOS, SQL, and other frontends lower into this model. This crate deliberately
-//! has no dependency on a frontend, storage engine, parser, or execution host.
+//! VOS frontends lower into this model through YYDB's local binder. This crate
+//! deliberately has no dependency on Oak, VOS, YYDS, or a remote execution
+//! protocol.
 
 #![deny(missing_docs)]
 

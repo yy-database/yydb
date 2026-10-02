@@ -1,9 +1,9 @@
 [package]
-name = "yy-execution"
+name = "yydb-execution"
 version.workspace = true
 edition.workspace = true
 license = "MPL-2.0"
-description = "Language-neutral execution model shared by YYDB and YYDS"
+description = "Stable local execution model owned by YYDB"
 publish = false
 
 [lib]

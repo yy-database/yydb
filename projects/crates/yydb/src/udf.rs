@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use yy_execution::{UdfEffect, UdfPlacement, ValidatedUdf};
+use yydb_execution::{UdfEffect, UdfPlacement, ValidatedUdf};
 use yydb_types::{Result, Value};
 
 pub(crate) struct ExecutionUdf {
@@ -39,9 +39,9 @@ impl ScalarUdf for ExecutionUdf {
         let inputs = args
             .iter()
             .map(|value| match value {
-                Value::Bool(value) => Ok(yy_execution::Value::Bool(*value)),
-                Value::I64(value) => Ok(yy_execution::Value::I64(*value)),
-                Value::Text(value) => Ok(yy_execution::Value::Text(value.clone())),
+                Value::Bool(value) => Ok(yydb_execution::Value::Bool(*value)),
+                Value::I64(value) => Ok(yydb_execution::Value::I64(*value)),
+                Value::Text(value) => Ok(yydb_execution::Value::Text(value.clone())),
                 _ => Err(yydb_types::Error::Unsupported(
                     "value type is not supported by scalar execution",
                 )),
@@ -55,9 +55,9 @@ impl ScalarUdf for ExecutionUdf {
                 message: format!("{error:?}"),
             })?;
         Ok(match result {
-            yy_execution::Value::Bool(value) => Value::Bool(value),
-            yy_execution::Value::I64(value) => Value::I64(value),
-            yy_execution::Value::Text(value) => Value::Text(value),
+            yydb_execution::Value::Bool(value) => Value::Bool(value),
+            yydb_execution::Value::I64(value) => Value::I64(value),
+            yydb_execution::Value::Text(value) => Value::Text(value),
             _ => return Err(yydb_types::Error::Unsupported(
                 "execution result type is not supported by the local scalar bridge",
             )),
