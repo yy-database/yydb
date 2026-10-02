@@ -20,3 +20,6 @@ vos = { workspace = true }
 yydb-types = { workspace = true }
 yydb-execution = { workspace = true }
 serde_json = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }

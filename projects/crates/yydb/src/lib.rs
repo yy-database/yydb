@@ -76,8 +76,10 @@ pub use vos;
 use std::{
     collections::BTreeMap,
     fs,
+    io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use journal::{
@@ -855,7 +857,76 @@ fn load_file_state(path: &Path) -> Result<State> {
 }
 
 fn write_main(path: &Path, state: &State) -> Result<()> {
-    fs::write(path, encode(state)?).map_err(Error::Io)
+    let bytes = encode(state)?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let temp = path.with_file_name(format!(
+        ".{}.yydb-tmp-{}-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("database"),
+        std::process::id(),
+        nonce
+    ));
+    let result = (|| -> Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        drop(file);
+        replace_main_file(&temp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+#[cfg(not(windows))]
+fn replace_main_file(temp: &Path, destination: &Path) -> Result<()> {
+    fs::rename(temp, destination).map_err(Error::Io)
+}
+
+#[cfg(windows)]
+fn replace_main_file(temp: &Path, destination: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
+    }
+
+    let temp_wide = wide(temp);
+    let destination_wide = wide(destination);
+    let result = unsafe {
+        if destination.exists() {
+            ReplaceFileW(
+                destination_wide.as_ptr(),
+                temp_wide.as_ptr(),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        } else {
+            MoveFileExW(
+                temp_wide.as_ptr(),
+                destination_wide.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        }
+    };
+    if result == 0 {
+        Err(Error::Io(std::io::Error::last_os_error()))
+    } else {
+        Ok(())
+    }
 }
 
 fn encode(state: &State) -> Result<Vec<u8>> {
@@ -1003,6 +1074,34 @@ mod tests {
             reopened.get("project/meta").unwrap(),
             Some(b"Spark".to_vec())
         );
+        cleanup(&path);
+    }
+
+    #[test]
+    fn atomically_replaces_main_image_without_leaving_temp_files() {
+        let path = temp_db("atomic");
+        let conn = Connection::open(&path).unwrap();
+        conn.ensure_schema(1, "table Project { @@id: uuid }").unwrap();
+        conn.put("project/meta", b"Spark").unwrap();
+        drop(conn);
+
+        let file_name = path.file_name().unwrap().to_string_lossy();
+        let prefix = format!(".{file_name}.yydb-tmp-");
+        let leftovers = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(&prefix)
+            })
+            .count();
+        assert_eq!(leftovers, 0);
+
+        let reopened = Connection::open(&path).unwrap();
+        assert_eq!(reopened.get("project/meta").unwrap(), Some(b"Spark".to_vec()));
+        drop(reopened);
         cleanup(&path);
     }
 
