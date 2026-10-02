@@ -170,6 +170,74 @@ pub enum FieldHandleError {
     InvalidFieldId,
 }
 
+/// One field entry in a published record layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayoutField {
+    /// Durable field identity.
+    pub field_id: u64,
+    /// Virtual row position.
+    pub index: u32,
+    /// Published execution type.
+    pub ty: Type,
+}
+
+/// Published record layout used to verify field handles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordLayout {
+    schema_id: u64,
+    fields: Vec<LayoutField>,
+}
+
+impl RecordLayout {
+    /// Creates a layout with unique non-zero field identities and positions.
+    pub fn new(schema_id: u64, fields: Vec<LayoutField>) -> Result<Self, RecordLayoutError> {
+        if schema_id == 0 {
+            return Err(RecordLayoutError::InvalidSchemaId);
+        }
+        for (position, field) in fields.iter().enumerate() {
+            if field.field_id == 0 {
+                return Err(RecordLayoutError::InvalidFieldId);
+            }
+            if fields[..position].iter().any(|prior| prior.field_id == field.field_id) {
+                return Err(RecordLayoutError::DuplicateFieldId { field_id: field.field_id });
+            }
+            if fields[..position].iter().any(|prior| prior.index == field.index) {
+                return Err(RecordLayoutError::DuplicateIndex { index: field.index });
+            }
+        }
+        Ok(Self { schema_id, fields })
+    }
+
+    /// Returns the schema identity.
+    pub fn schema_id(&self) -> u64 {
+        self.schema_id
+    }
+
+    /// Returns the published field entries.
+    pub fn fields(&self) -> &[LayoutField] {
+        &self.fields
+    }
+}
+
+/// Failure while constructing a record layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordLayoutError {
+    /// Zero is reserved for an absent schema identity.
+    InvalidSchemaId,
+    /// Zero is reserved for an absent field identity.
+    InvalidFieldId,
+    /// A field identity occurs more than once.
+    DuplicateFieldId {
+        /// Repeated field identity.
+        field_id: u64,
+    },
+    /// A virtual position occurs more than once.
+    DuplicateIndex {
+        /// Repeated virtual position.
+        index: u32,
+    },
+}
+
 impl RecordValue {
     /// Creates a record value with a non-zero schema identity.
     pub fn new(schema_id: u64, fields: Vec<Value>) -> Result<Self, RecordValueError> {
@@ -445,6 +513,16 @@ impl ValidatedProgram {
         Ok(Self(program))
     }
 
+    /// Validates a program and its record field handles against published layouts.
+    pub fn validate_with_layouts(
+        program: Program,
+        layouts: &[RecordLayout],
+    ) -> Result<Self, ValidationError> {
+        validate_program(&program)?;
+        validate_layout_bindings(&program, layouts)?;
+        Ok(Self(program))
+    }
+
     /// Evaluates the program with positional parameters and host inputs.
     pub fn evaluate(&self, parameters: &[Value], inputs: &[Value]) -> Result<Value, EvalError> {
         evaluate_program(&self.0, parameters, inputs)
@@ -506,6 +584,35 @@ pub enum ValidationError {
         expected: u64,
         /// Found schema identity.
         found: u64,
+    },
+    /// No published layout exists for a record schema used by a field read.
+    RecordLayoutNotFound {
+        /// Consumer node.
+        node: NodeId,
+        /// Missing schema identity.
+        schema_id: u64,
+    },
+    /// A field handle is absent from its published record layout.
+    LayoutFieldNotFound {
+        /// Consumer node.
+        node: NodeId,
+        /// Missing field identity.
+        field_id: u64,
+    },
+    /// A field handle disagrees with its published layout entry.
+    LayoutFieldMismatch {
+        /// Consumer node.
+        node: NodeId,
+        /// Durable field identity.
+        field_id: u64,
+        /// Published virtual position.
+        expected_index: u32,
+        /// Handle virtual position.
+        found_index: u32,
+        /// Published type.
+        expected_type: Type,
+        /// Handle type.
+        found_type: Type,
     },
     /// A node operand has a type different from the required type.
     TypeMismatch {
@@ -659,6 +766,42 @@ fn validate_program(program: &Program) -> Result<(), ValidationError> {
             expected: program.output_type,
             found,
         });
+    }
+    Ok(())
+}
+
+fn validate_layout_bindings(
+    program: &Program,
+    layouts: &[RecordLayout],
+) -> Result<(), ValidationError> {
+    for (position, node) in program.nodes.iter().enumerate() {
+        let node_id = position as NodeId;
+        let Node::ReadField { field, .. } = node else { continue };
+        let layout = layouts
+            .iter()
+            .find(|layout| layout.schema_id == field.schema_id)
+            .ok_or(ValidationError::RecordLayoutNotFound {
+                node: node_id,
+                schema_id: field.schema_id,
+            })?;
+        let layout_field = layout
+            .fields
+            .iter()
+            .find(|layout_field| layout_field.field_id == field.field_id)
+            .ok_or(ValidationError::LayoutFieldNotFound {
+                node: node_id,
+                field_id: field.field_id,
+            })?;
+        if layout_field.index != field.index || layout_field.ty != field.ty {
+            return Err(ValidationError::LayoutFieldMismatch {
+                node: node_id,
+                field_id: field.field_id,
+                expected_index: layout_field.index,
+                found_index: field.index,
+                expected_type: layout_field.ty,
+                found_type: field.ty,
+            });
+        }
     }
     Ok(())
 }
@@ -1003,6 +1146,73 @@ mod tests {
                 found: 7,
             }
         );
+    }
+
+    #[test]
+    fn validates_field_handles_against_a_published_layout() {
+        let field = FieldHandle::new(7, 101, 0, Type::I64).expect("field handle is valid");
+        let layout = RecordLayout::new(
+            7,
+            vec![LayoutField {
+                field_id: 101,
+                index: 0,
+                ty: Type::I64,
+            }],
+        )
+        .expect("layout is valid");
+        let record_type = Type::Record {
+            schema_id: 7,
+            field_count: 1,
+        };
+        let program = ValidatedProgram::validate_with_layouts(
+            Program {
+                parameters: vec![],
+                inputs: vec![record_type],
+                nodes: vec![
+                    Node::Input { index: 0, ty: record_type },
+                    Node::ReadField { record: 0, field },
+                ],
+                output: 1,
+                output_type: Type::I64,
+            },
+            &[layout],
+        )
+        .expect("layout-bound program validates");
+        let row = RecordValue::new(7, vec![Value::I64(42)]).unwrap();
+        assert_eq!(program.evaluate(&[], &[Value::Record(row)]), Ok(Value::I64(42)));
+    }
+
+    #[test]
+    fn rejects_a_field_handle_that_disagrees_with_layout_type() {
+        let field = FieldHandle::new(7, 101, 0, Type::Text).expect("field handle is valid");
+        let layout = RecordLayout::new(
+            7,
+            vec![LayoutField {
+                field_id: 101,
+                index: 0,
+                ty: Type::I64,
+            }],
+        )
+        .expect("layout is valid");
+        let record_type = Type::Record {
+            schema_id: 7,
+            field_count: 1,
+        };
+        let error = ValidatedProgram::validate_with_layouts(
+            Program {
+                parameters: vec![],
+                inputs: vec![record_type],
+                nodes: vec![
+                    Node::Input { index: 0, ty: record_type },
+                    Node::ReadField { record: 0, field },
+                ],
+                output: 1,
+                output_type: Type::Text,
+            },
+            &[layout],
+        )
+        .expect_err("layout mismatch must be rejected");
+        assert!(matches!(error, ValidationError::LayoutFieldMismatch { field_id: 101, .. }));
     }
 
     #[test]

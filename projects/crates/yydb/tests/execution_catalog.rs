@@ -20,22 +20,26 @@ fn lowers_vos_catalog_identities_into_a_field_read() {
         schema_id: table.schema_id,
         field_count: 2,
     };
-    let program = ValidatedProgram::validate(Program {
-        parameters: vec![],
-        inputs: vec![row_type],
-        nodes: vec![
-            Node::Input {
-                index: 0,
-                ty: row_type,
-            },
-            Node::ReadField {
-                record: 0,
-                field: field.handle,
-            },
-        ],
-        output: 1,
-        output_type: Type::I64,
-    })
+    let layout = table.layout().expect("catalog layout is valid");
+    let program = ValidatedProgram::validate_with_layouts(
+        Program {
+            parameters: vec![],
+            inputs: vec![row_type],
+            nodes: vec![
+                Node::Input {
+                    index: 0,
+                    ty: row_type,
+                },
+                Node::ReadField {
+                    record: 0,
+                    field: field.handle,
+                },
+            ],
+            output: 1,
+            output_type: Type::I64,
+        },
+        &[layout],
+    )
     .expect("catalog-bound program validates");
     let row = RecordValue::new(table.schema_id, vec![Value::I64(42), Value::Bool(true)]).unwrap();
     assert_eq!(
