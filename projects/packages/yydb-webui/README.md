@@ -51,6 +51,6 @@ network; do not expose `yydb serve` to the public internet.
 ## Links
 
 - [Node file API](https://www.npmjs.com/package/@yydb/yydb)
-- [YYDB user guides](https://github.com/yy-database/yydb.rs/tree/dev/frontends/homepage/documentation/zh-hans)
+- [YYDB user guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
 - [Docker image](https://github.com/yy-database/yydb.rs/tree/dev/docker/yydb)
 - [License](https://github.com/yy-database/yydb.rs/blob/dev/License.md)

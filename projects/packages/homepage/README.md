@@ -5,11 +5,11 @@ evaluating or using YYDB; the database engine and client packages live alongside
 
 ## User guides
 
-- [中文文档首页](https://github.com/yy-database/yydb.rs/tree/dev/frontends/homepage/documentation/zh-hans)
+- [中文文档首页](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
 - [嵌入与
-  `serve`](https://github.com/yy-database/yydb.rs/blob/dev/frontends/homepage/documentation/zh-hans/guide/embed-and-serve.md)
-- [Serve 安全边界](https://github.com/yy-database/yydb.rs/blob/dev/frontends/homepage/documentation/zh-hans/guide/serve-security.md)
-- [线协议概览](https://github.com/yy-database/yydb.rs/blob/dev/frontends/homepage/documentation/zh-hans/guide/wire-protocol.md)
+  `serve`](https://github.com/yy-database/yydb.rs/blob/dev/projects/packages/homepage/documentation/zh-hans/guide/embed-and-serve.md)
+- [Serve 安全边界](https://github.com/yy-database/yydb.rs/blob/dev/projects/packages/homepage/documentation/zh-hans/guide/serve-security.md)
+- [线协议概览](https://github.com/yy-database/yydb.rs/blob/dev/projects/packages/homepage/documentation/zh-hans/guide/wire-protocol.md)
 
 ## Run the docs site locally
 
@@ -34,4 +34,4 @@ The repository's implementation and protocol notes are maintained separately in 
 |--------------------------------------------------------------------------------------------|-------------------------|
 | [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb)                                   | Node.js file API        |
 | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client)                     | Browser and wire client |
-| [`@yydb/yydb-webui`](https://github.com/yy-database/yydb.rs/tree/dev/frontends/yydb-webui) | Local database explorer |
+| [`@yydb/yydb-webui`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-webui) | Local database explorer |

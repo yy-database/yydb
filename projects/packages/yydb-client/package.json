@@ -28,9 +28,9 @@
     "repository": {
         "type": "git",
         "url": "git+https://github.com/yy-database/yydb.rs.git",
-        "directory": "frontends/yydb-client"
+        "directory": "projects/packages/yydb-client"
     },
-    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/frontends/yydb-client#readme",
+    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-client#readme",
     "bugs": {
         "url": "https://github.com/yy-database/yydb.rs/issues"
     },

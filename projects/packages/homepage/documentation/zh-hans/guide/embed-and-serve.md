@@ -2,8 +2,8 @@
 
 | 角色                  | 包                      | 说明                                                          |
 |-----------------------|-------------------------|---------------------------------------------------------------|
-| YYDB 进程内嵌入       | `backends/yydb`（Rust） | 仅 Rust 宿主；UDF                                             |
-| YYDB Rust 远程客户端  | `backends/yydb-client`  | TCP → `yydb serve`                                            |
+| YYDB 进程内嵌入       | `projects/crates/yydb`（Rust） | 仅 Rust 宿主；UDF                                             |
+| YYDB Rust 远程客户端  | `projects/crates/yydb-client`  | TCP → `yydb serve`                                            |
 | **TS 产品包（推荐）** | `@yydb/yydb`            | **一个依赖**：`Database.open("app.yydb")`，自动管理引擎二进制 |
 | TS 线协议             | `@yydb/yydb-client`     | WebUI / 浏览器 / 高级用法                                     |
 

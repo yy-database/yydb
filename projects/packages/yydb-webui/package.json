@@ -13,9 +13,9 @@
     "repository": {
         "type": "git",
         "url": "git+https://github.com/yy-database/yydb.rs.git",
-        "directory": "frontends/yydb-webui"
+        "directory": "projects/packages/yydb-webui"
     },
-    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/frontends/yydb-webui#readme",
+    "homepage": "https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-webui#readme",
     "bugs": {
         "url": "https://github.com/yy-database/yydb.rs/issues"
     },
