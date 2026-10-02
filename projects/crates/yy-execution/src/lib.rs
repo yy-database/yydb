@@ -163,6 +163,26 @@ impl ValidatedUdf {
         self.metadata.version
     }
 
+    /// Returns the parameter signature required by this body.
+    pub fn parameter_types(&self) -> &[Type] {
+        &self.metadata.program.parameters
+    }
+
+    /// Returns the host input signature required by this body.
+    pub fn input_types(&self) -> &[Type] {
+        &self.metadata.program.inputs
+    }
+
+    /// Returns the declared effect for host capability admission.
+    pub fn effect(&self) -> UdfEffect {
+        self.metadata.effect
+    }
+
+    /// Returns the requested placement for host capability admission.
+    pub fn placement(&self) -> UdfPlacement {
+        self.metadata.placement
+    }
+
     /// Evaluates the validated UDF body.
     pub fn evaluate(&self, parameters: &[Value], inputs: &[Value]) -> Result<Value, EvalError> {
         evaluate_program(&self.metadata.program, parameters, inputs)

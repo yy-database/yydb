@@ -23,3 +23,4 @@ oxc_syntax = "0.100.0"
 yydb = { path = "projects/crates/yydb" }
 yydb-client = { path = "projects/crates/yydb-client" }
 yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }
+yy-execution = { version = "0.1.0", path = "projects/crates/yy-execution" }
