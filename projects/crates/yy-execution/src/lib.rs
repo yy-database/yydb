@@ -1,4 +1,4 @@
-//! Language-neutral scalar execution model for YYDB and YYDS.
+//! Language-neutral execution model for YYDB and YYDS.
 //!
 //! VOS, SQL, and other frontends lower into this model. This crate deliberately
 //! has no dependency on a frontend, storage engine, parser, or execution host.
@@ -8,35 +8,133 @@
 /// A node identifier in an execution Program.
 pub type NodeId = u32;
 
-/// Runtime types supported by the first scalar execution slice.
+/// Metric used to interpret a vector value or vector index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VectorMetric {
+    /// Cosine distance or similarity.
+    Cosine,
+    /// Euclidean distance.
+    Euclidean,
+    /// Inner product.
+    Dot,
+}
+
+/// Runtime types supported by the execution model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
+    /// Explicit null value.
+    Null,
     /// Boolean value.
     Bool,
     /// Signed 64-bit integer.
     I64,
     /// UTF-8 text value.
     Text,
+    /// Opaque bytes.
+    Bytes,
+    /// Immutable file or object reference.
+    File,
+    /// Fixed-dimension vector with an explicit metric.
+    Vector {
+        /// Number of vector components.
+        dimension: u32,
+        /// Metric used by vector operations and indexes.
+        metric: VectorMetric,
+    },
 }
 
-/// Runtime value supported by the first scalar execution slice.
+/// Immutable reference to a published file or object manifest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRef {
+    /// Stable object identity supplied by the catalog.
+    pub object_id: String,
+    /// Published manifest generation.
+    pub generation: u64,
+    /// Logical byte length of the referenced object.
+    pub byte_len: u64,
+}
+
+/// A vector value with an explicit metric and finite components.
+#[derive(Debug, Clone)]
+pub struct VectorValue {
+    /// Vector components in logical order.
+    pub values: Vec<f32>,
+    /// Metric used to interpret this vector.
+    pub metric: VectorMetric,
+}
+
+impl PartialEq for VectorValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.metric == other.metric
+            && self.values.len() == other.values.len()
+            && self
+                .values
+                .iter()
+                .zip(&other.values)
+                .all(|(left, right)| left.to_bits() == right.to_bits())
+    }
+}
+
+impl Eq for VectorValue {}
+
+impl VectorValue {
+    /// Creates a vector after rejecting non-finite components.
+    pub fn new(values: Vec<f32>, metric: VectorMetric) -> Result<Self, VectorValueError> {
+        if let Some(index) = values.iter().position(|value| !value.is_finite()) {
+            return Err(VectorValueError::NonFiniteComponent { index });
+        }
+        Ok(Self { values, metric })
+    }
+
+    /// Returns the vector dimension.
+    pub fn dimension(&self) -> u32 {
+        self.values.len().try_into().unwrap_or(u32::MAX)
+    }
+}
+
+/// Failure while constructing a vector value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VectorValueError {
+    /// A component was NaN or infinite.
+    NonFiniteComponent {
+        /// Position of the invalid component.
+        index: usize,
+    },
+}
+
+/// Runtime value supported by the execution model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
+    /// Explicit null value.
+    Null,
     /// Boolean value.
     Bool(bool),
     /// Signed 64-bit integer.
     I64(i64),
     /// UTF-8 text value.
     Text(String),
+    /// Opaque bytes.
+    Bytes(Vec<u8>),
+    /// Immutable file or object reference.
+    File(FileRef),
+    /// Fixed-dimension vector value.
+    Vector(VectorValue),
 }
 
 impl Value {
     /// Returns the execution type of this value.
     pub fn ty(&self) -> Type {
         match self {
+            Self::Null => Type::Null,
             Self::Bool(_) => Type::Bool,
             Self::I64(_) => Type::I64,
             Self::Text(_) => Type::Text,
+            Self::Bytes(_) => Type::Bytes,
+            Self::File(_) => Type::File,
+            Self::Vector(value) => Type::Vector {
+                dimension: value.dimension(),
+                metric: value.metric,
+            },
         }
     }
 }
@@ -452,7 +550,12 @@ fn ensure_type(value: &Value, expected: Type) -> Result<(), EvalError> {
 fn as_i64(value: &Value) -> i64 {
     match value {
         Value::I64(value) => *value,
-        Value::Bool(_) | Value::Text(_) => unreachable!("validated integer operand"),
+        Value::Null
+        | Value::Bool(_)
+        | Value::Text(_)
+        | Value::Bytes(_)
+        | Value::File(_)
+        | Value::Vector(_) => unreachable!("validated integer operand"),
     }
 }
 
@@ -586,5 +689,49 @@ mod tests {
             udf.evaluate(&[], &[Value::I64(4), Value::I64(6)]),
             Ok(Value::I64(10))
         );
+    }
+
+    #[test]
+    fn preserves_file_and_vector_value_identity() {
+        let file = Value::File(FileRef {
+            object_id: "asset-1".into(),
+            generation: 3,
+            byte_len: 4096,
+        });
+        assert_eq!(file.ty(), Type::File);
+
+        let vector = VectorValue::new(vec![0.25, 0.5, 0.75], VectorMetric::Cosine)
+            .expect("finite vector is valid");
+        assert_eq!(vector.dimension(), 3);
+        assert_eq!(Value::Vector(vector).ty(), Type::Vector {
+            dimension: 3,
+            metric: VectorMetric::Cosine,
+        });
+    }
+
+    #[test]
+    fn rejects_non_finite_vector_components() {
+        assert_eq!(
+            VectorValue::new(vec![1.0, f32::NAN], VectorMetric::Dot),
+            Err(VectorValueError::NonFiniteComponent { index: 1 })
+        );
+    }
+
+    #[test]
+    fn equality_handles_null_and_opaque_values_without_coercion() {
+        let program = ValidatedProgram::validate(Program {
+            parameters: vec![],
+            inputs: vec![],
+            nodes: vec![
+                Node::Literal(Value::Null),
+                Node::Literal(Value::Null),
+                Node::Equal { left: 0, right: 1 },
+            ],
+            output: 2,
+            output_type: Type::Bool,
+        })
+        .expect("null equality is valid");
+
+        assert_eq!(program.evaluate(&[], &[]), Ok(Value::Bool(true)));
     }
 }
