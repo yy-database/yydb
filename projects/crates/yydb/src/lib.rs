@@ -93,6 +93,38 @@ enum Backend {
     },
 }
 
+/// Pending record mutations applied atomically by [`Batch::commit`].
+#[derive(Debug, Default)]
+pub struct Batch {
+    changes: Vec<(String, Option<Vec<u8>>)>,
+}
+
+impl Batch {
+    /// Create an empty batch.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Queue an upsert for commit.
+    pub fn put(&mut self, key: impl Into<String>, value: impl AsRef<[u8]>) {
+        self.changes
+            .push((key.into(), Some(value.as_ref().to_vec())));
+    }
+
+    /// Queue a delete for commit.
+    pub fn delete(&mut self, key: impl Into<String>) {
+        self.changes.push((key.into(), None));
+    }
+
+    /// Drop pending mutations without writing.
+    pub fn abort(self) {}
+
+    /// Atomically apply queued mutations through `conn`.
+    pub fn commit(self, conn: &Connection) -> Result<()> {
+        conn.write_batch(&self.changes)
+    }
+}
+
 /// A connection to a YYDB database (file-backed or in-memory).
 ///
 /// Embedded `Connection` handle. DDL and query language are **VOS**.
@@ -100,6 +132,7 @@ enum Backend {
 /// Binary payloads use [`ObjectStore`] (`objects/hash-2/*.bytes`).
 pub struct Connection {
     backend: Backend,
+    operation_lock: Mutex<()>,
     udfs: Mutex<BTreeMap<String, RegisteredUdf>>,
     objects: ObjectStore,
 }
@@ -131,6 +164,7 @@ impl Connection {
             }
         }
         let connection = Self {
+            operation_lock: Mutex::new(()),
             backend: Backend::File {
                 path: path.clone(),
                 journal_mode: Mutex::new(flags.journal_mode),
@@ -151,6 +185,7 @@ impl Connection {
             .unwrap_or(0);
         let root = std::env::temp_dir().join(format!("yydb-mem-objects-{nonce}"));
         Ok(Self {
+            operation_lock: Mutex::new(()),
             backend: Backend::Memory {
                 state: Mutex::new(State::default()),
             },
@@ -222,6 +257,7 @@ impl Connection {
     ///
     /// No-op when not in WAL mode or when there is nothing to fold.
     pub fn checkpoint(&self) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let Backend::File { path, journal_mode } = &self.backend else {
             return Ok(());
         };
@@ -260,6 +296,7 @@ impl Connection {
     /// `vos` git @ `dev`); it is validated before persistence. Schema migration
     /// is an explicit future operation.
     pub fn ensure_schema(&self, version: u32, document: &str) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         schema::validate_document(document)?;
         let mut state = self.read_state()?;
         match &state.schema {
@@ -286,6 +323,7 @@ impl Connection {
     /// payloads — prefer [`Self::put_chunk`] / [`Self::put_file_chunked`] into
     /// the unified `objects/` CAS (see `INLINE_BYTES_MAX`).
     pub fn put(&self, key: impl Into<String>, value: impl AsRef<[u8]>) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         state.records.insert(key.into(), value.as_ref().to_vec());
         self.write_state(&state)
@@ -293,7 +331,46 @@ impl Connection {
 
     /// Fetch a raw byte record by key.
     pub fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         Ok(self.read_state()?.records.get(key).cloned())
+    }
+
+    /// Commit a batch in one journal snapshot. `None` deletes the key.
+    /// Operations are serialized on this connection, not across separate handles or processes.
+    pub fn write_batch(&self, changes: &[(String, Option<Vec<u8>>)]) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut state = self.read_state()?;
+        for (key, value) in changes {
+            match value {
+                Some(bytes) => { state.records.insert(key.clone(), bytes.clone()); }
+                None => { state.records.remove(key); }
+            }
+        }
+        self.write_state(&state)
+    }
+
+    /// Replace or delete a key only if its current bytes match `expected`.
+    /// `None` as expected requires an absent key. Atomic on a shared connection.
+    pub fn compare_exchange(&self, key: &str, expected: Option<&[u8]>, replacement: Option<&[u8]>) -> Result<bool> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut state = self.read_state()?;
+        if state.records.get(key).map(Vec::as_slice) != expected { return Ok(false); }
+        match replacement {
+            Some(bytes) => { state.records.insert(key.to_owned(), bytes.to_vec()); }
+            None => { state.records.remove(key); }
+        }
+        self.write_state(&state)?;
+        Ok(true)
+    }
+
+    /// Scan keys in lexical order with an exclusive continuation key and a result limit.
+    pub fn scan_prefix(&self, prefix: &str, after: Option<&str>, limit: usize) -> Result<Vec<(String, Vec<u8>)>> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let state = self.read_state()?;
+        Ok(state.records.range(prefix.to_owned()..)
+            .take_while(|(key, _)| key.starts_with(prefix))
+            .filter(|(key, _)| after.map_or(true, |cursor| key.as_str() > cursor))
+            .take(limit).map(|(key, value)| (key.clone(), value.clone())).collect())
     }
 
     /// Store one CAS object at `objects/hash-2/<hash>.bytes`.
@@ -618,6 +695,24 @@ mod tests {
         assert_eq!(conn.get("k").unwrap(), Some(b"v".to_vec()));
         assert_eq!(conn.schema().unwrap().unwrap().version, 2);
         assert_eq!(conn.record_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn batch_compare_exchange_and_prefix_scan_are_atomic_on_connection() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.write_batch(&[
+            ("frontier/a".into(), Some(b"queued".to_vec())),
+            ("frontier/b".into(), Some(b"queued".to_vec())),
+            ("other/c".into(), Some(b"ignored".to_vec())),
+        ])
+        .unwrap();
+        assert_eq!(
+            conn.scan_prefix("frontier/", None, 10).unwrap().len(),
+            2
+        );
+        assert!(conn.compare_exchange("frontier/a", Some(b"queued"), Some(b"claimed")).unwrap());
+        assert!(!conn.compare_exchange("frontier/a", Some(b"queued"), Some(b"stale")).unwrap());
+        assert_eq!(conn.get("frontier/a").unwrap(), Some(b"claimed".to_vec()));
     }
 
     #[test]
