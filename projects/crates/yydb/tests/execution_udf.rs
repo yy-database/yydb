@@ -100,3 +100,30 @@ fn rejects_unsupported_effects_placements_and_captured_parameters_before_registr
     ));
     assert!(conn.list_scalars().is_empty());
 }
+
+#[test]
+fn lowers_and_evaluates_an_oak_validated_vos_scalar() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.register_vos_scalar("micro double(value: i64) -> i64 { value + value }")
+        .unwrap();
+    assert_eq!(
+        conn.call_scalar("double", &[Value::I64(21)]).unwrap(),
+        Value::I64(42)
+    );
+}
+
+#[test]
+fn rejects_vos_udf_parse_errors_and_unsupported_lowering() {
+    let conn = Connection::open_in_memory().unwrap();
+    assert!(matches!(
+        conn.register_vos_scalar("micro broken(value: i64) -> i64 { value + }")
+            .unwrap_err(),
+        Error::Udf { .. }
+    ));
+    assert!(matches!(
+        conn.register_vos_scalar("micro text(value: i64) -> i64 { value == value }")
+            .unwrap_err(),
+        Error::Udf { .. }
+    ));
+    assert!(conn.list_scalars().is_empty());
+}
