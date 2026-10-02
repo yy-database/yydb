@@ -7,7 +7,7 @@
 //! goes through the `vos` facade so YYDB / YYDS / tooling stay aligned as
 //! `vos-parser` grows.
 
-use yy_execution::{FieldHandle, Type};
+use yy_execution::{FieldHandle, LayoutField, RecordLayout, RecordLayoutError, Type};
 use yydb_types::{Error, Result};
 
 /// Canonical remote used by this workspace for shared VOS semantics.
@@ -44,6 +44,23 @@ pub struct ExecutionField {
     pub name: String,
     /// Schema-bound execution handle.
     pub handle: FieldHandle,
+}
+
+impl ExecutionType {
+    /// Converts catalog fields into the published execution layout contract.
+    pub fn layout(&self) -> std::result::Result<RecordLayout, RecordLayoutError> {
+        RecordLayout::new(
+            self.schema_id,
+            self.fields
+                .iter()
+                .map(|field| LayoutField {
+                    field_id: field.field_id,
+                    index: field.virtual_field,
+                    ty: field.handle.ty(),
+                })
+                .collect(),
+        )
+    }
 }
 
 /// Parse, validate, and lower initial VOS catalog identities into execution handles.
