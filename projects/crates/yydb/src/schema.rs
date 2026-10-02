@@ -7,7 +7,7 @@
 //! goes through the `vos` facade so YYDB / YYDS / tooling stay aligned as
 //! `vos-parser` grows.
 
-use yy_execution::{FieldHandle, LayoutField, RecordLayout, RecordLayoutError, Type};
+use yydb_execution::{FieldHandle, LayoutField, RecordLayout, RecordLayoutError, Type};
 use yydb_types::{Error, Result};
 
 /// Canonical remote used by this workspace for shared VOS semantics.
