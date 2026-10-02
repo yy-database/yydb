@@ -293,4 +293,80 @@ impl ObjectStore {
         }
         Ok(out)
     }
+
+    /// Enumerate every object file under `objects/hash-2/`.
+    pub fn list_objects(&self) -> Result<Vec<ObjectRef>> {
+        let mut objects = Vec::new();
+        let hash_root = self.cas_root();
+        if !hash_root.exists() {
+            return Ok(objects);
+        }
+        for prefix_entry in fs::read_dir(&hash_root)? {
+            let prefix_path = prefix_entry?.path();
+            if !prefix_path.is_dir() {
+                continue;
+            }
+            for file_entry in fs::read_dir(prefix_path)? {
+                let path = file_entry?.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("bytes") {
+                    continue;
+                }
+                let hash_hex = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .ok_or(Error::ObjectCorrupt {
+                        message: "object file name is not UTF-8".into(),
+                    })?;
+                if hash_hex.len() != 64 {
+                    continue;
+                }
+                let bytes = fs::read(&path)?;
+                let hash = decode_hash_hex(hash_hex)?;
+                objects.push(ObjectRef {
+                    algo: HashAlgo::Blake3,
+                    hash,
+                    size: bytes.len() as u64,
+                    kind: ObjectKind::Blob,
+                });
+            }
+        }
+        Ok(objects)
+    }
+
+    /// Delete a CAS object when it is no longer referenced.
+    pub fn remove_object(&self, object: &ObjectRef) -> Result<()> {
+        let path = self.path_for(object);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        self.hot
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&object.hash);
+        self.pinned
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&object.hash);
+        Ok(())
+    }
+}
+
+fn decode_hash_hex(hash_hex: &str) -> Result<[u8; 32]> {
+    let mut hash = [0_u8; 32];
+    for (index, chunk) in hash_hex.as_bytes().chunks(2).enumerate() {
+        if chunk.len() != 2 {
+            return Err(Error::ObjectCorrupt {
+                message: "hash hex has odd length".into(),
+            });
+        }
+        let byte = u8::from_str_radix(
+            &String::from_utf8_lossy(chunk),
+            16,
+        )
+        .map_err(|_| Error::ObjectCorrupt {
+            message: "hash hex is not valid".into(),
+        })?;
+        hash[index] = byte;
+    }
+    Ok(hash)
 }
