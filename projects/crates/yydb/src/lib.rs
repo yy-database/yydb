@@ -52,6 +52,7 @@ mod doctor;
 mod lease;
 mod refs;
 mod ttl;
+mod vos_udf;
 
 /// YY wire protocol (`YYDB`|`YYDS` + version digits `0000`…).
 pub mod wire;
@@ -712,6 +713,21 @@ impl Connection {
         let version = body.version();
         let adapter = udf::ExecutionUdf::new(body)?;
         self.register_scalar_versioned(&name, version, Arc::new(adapter))
+    }
+
+    /// Parse and register a VOS-authored local scalar UDF.
+    ///
+    /// The source is parsed through the VOS facade, which uses Oak for the
+    /// language surface. Only the validated local scalar subset is lowered by
+    /// this embedded binder. The body is not persisted in the `.yydb` file.
+    pub fn register_vos_scalar(&self, source: &str) -> Result<()> {
+        self.register_vos_scalar_versioned(source, 1)
+    }
+
+    /// Parse and register a versioned VOS-authored local scalar UDF.
+    pub fn register_vos_scalar_versioned(&self, source: &str, version: u32) -> Result<()> {
+        let body = vos_udf::lower(source, version)?;
+        self.register_execution_udf(body)
     }
 
     /// Register an object-safe [`ScalarUdf`] at an explicit version.
