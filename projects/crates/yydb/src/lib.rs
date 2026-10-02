@@ -48,6 +48,7 @@ pub mod schema;
 /// Rust scalar UDF traits and registration helpers.
 pub mod udf;
 
+mod doctor;
 mod lease;
 mod refs;
 mod ttl;
@@ -59,9 +60,10 @@ pub use journal::{JournalMode, OpenFlags};
 pub use objects::ObjectStore;
 pub use udf::ScalarUdf;
 pub use yydb_types::{
-    ChunkManifest, CommitSequence, Error, EvictBudget, EvictReport, EvictionPolicy, HashAlgo,
-    LeaseExpectation, LeaseToken, NamespaceQuota, NamespaceStats, ObjectKind, ObjectRef,
-    ReclaimReport, RecordVersion, ReleaseOutcome, Result, SchemaVersion, Tier, Value, Vector,
+    ChunkManifest, CommitSequence, DoctorIssue, DoctorReport, DoctorSeverity, Error, EvictBudget,
+    EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken, NamespaceQuota,
+    NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion, ReleaseOutcome, Result,
+    SchemaVersion, Tier, Value, Vector,
     DEFAULT_CHUNK_SIZE,
     INLINE_BYTES_MAX,
 };
@@ -280,7 +282,8 @@ impl Connection {
         if mode != JournalMode::Wal {
             return Ok(());
         }
-        let state = load_file_state(path)?;
+        let mut state = load_file_state(path)?;
+        doctor::record_checkpoint(&mut state.records);
         write_main(path, &state)?;
         truncate_wal(path)?;
         Ok(())
@@ -405,6 +408,7 @@ impl Connection {
                 None => { state.records.remove(key); }
             }
         }
+        lease::bump_commit_sequence(&mut state.records);
         self.write_state(&state)
     }
 
@@ -507,6 +511,18 @@ impl Connection {
             .into_iter()
             .filter(|object| !referenced.contains(&object.hash))
             .collect())
+    }
+
+    /// Run read-only consistency probes against this database.
+    pub fn doctor(&self) -> Result<DoctorReport> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let state = self.read_state()?;
+        doctor::diagnose(
+            &state.records,
+            &self.objects,
+            self.path(),
+            self.wal_path(),
+        )
     }
 
     /// Delete orphan objects that are still unreferenced after a fresh scan.
