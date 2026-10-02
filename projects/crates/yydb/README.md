@@ -55,6 +55,6 @@ The query engine and distributed services are separate parts of the YY product r
 ## Documentation
 
 - [Rust API reference](https://docs.rs/yydb)
-- [YYDB user guides](https://github.com/yy-database/yydb.rs/tree/dev/frontends/homepage/documentation/zh-hans)
+- [YYDB user guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
 - [Repository](https://github.com/yy-database/yydb.rs)
 - [License](https://github.com/yy-database/yydb.rs/blob/dev/License.md)
