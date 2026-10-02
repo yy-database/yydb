@@ -119,6 +119,46 @@ pub struct RecordValue {
     fields: Vec<Value>,
 }
 
+/// A stable typed handle for one field in a record schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FieldHandle {
+    schema_id: u64,
+    index: u32,
+    ty: Type,
+}
+
+impl FieldHandle {
+    /// Creates a field handle for a non-zero schema identity.
+    pub fn new(schema_id: u64, index: u32, ty: Type) -> Result<Self, FieldHandleError> {
+        if schema_id == 0 {
+            return Err(FieldHandleError::InvalidSchemaId);
+        }
+        Ok(Self { schema_id, index, ty })
+    }
+
+    /// Returns the schema identity owning this field.
+    pub fn schema_id(&self) -> u64 {
+        self.schema_id
+    }
+
+    /// Returns the positional field index.
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+
+    /// Returns the declared field type.
+    pub fn ty(&self) -> Type {
+        self.ty
+    }
+}
+
+/// Failure while constructing a field handle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldHandleError {
+    /// Zero is reserved for an absent schema identity.
+    InvalidSchemaId,
+}
+
 impl RecordValue {
     /// Creates a record value with a non-zero schema identity.
     pub fn new(schema_id: u64, fields: Vec<Value>) -> Result<Self, RecordValueError> {
@@ -234,10 +274,8 @@ pub enum Node {
     ReadField {
         /// Record expression node.
         record: NodeId,
-        /// Positional field index.
-        index: u32,
-        /// Expected field type.
-        ty: Type,
+        /// Stable schema and field contract.
+        field: FieldHandle,
     },
     /// Checked signed integer addition.
     AddI64 {
@@ -449,6 +487,15 @@ pub enum ValidationError {
         /// Declared number of fields.
         field_count: u32,
     },
+    /// A field handle belongs to a different record schema.
+    FieldSchemaMismatch {
+        /// Consumer node.
+        node: NodeId,
+        /// Expected schema identity.
+        expected: u64,
+        /// Found schema identity.
+        found: u64,
+    },
     /// A node operand has a type different from the required type.
     TypeMismatch {
         /// Consumer node.
@@ -554,23 +601,30 @@ fn validate_program(program: &Program) -> Result<(), ValidationError> {
                 require_type(node, expected, *ty)?;
                 expected
             }
-            Node::ReadField { record, index, ty } => {
+            Node::ReadField { record, field } => {
                 let record_type = reference_type(&types, node, *record)?;
-                let Type::Record { field_count, .. } = record_type else {
+                let Type::Record { schema_id, field_count } = record_type else {
                     return Err(ValidationError::TypeMismatch {
                         node,
                         expected: Type::Record { schema_id: 0, field_count: 0 },
                         found: record_type,
                     });
                 };
-                if *index >= field_count {
+                if schema_id != field.schema_id {
+                    return Err(ValidationError::FieldSchemaMismatch {
+                        node,
+                        expected: field.schema_id,
+                        found: schema_id,
+                    });
+                }
+                if field.index >= field_count {
                     return Err(ValidationError::FieldOutOfBounds {
                         node,
-                        index: *index,
+                        index: field.index,
                         field_count,
                     });
                 }
-                *ty
+                field.ty
             }
             Node::AddI64 { left, right } => {
                 require_type(node, Type::I64, reference_type(&types, node, *left)?)?;
@@ -632,10 +686,10 @@ fn evaluate_program(
             Node::Input { index, .. } => {
                 inputs[usize::try_from(*index).expect("validated input index")].clone()
             }
-            Node::ReadField { record, index, ty } => {
+            Node::ReadField { record, field } => {
                 let record = as_record(&values[usize::try_from(*record).expect("validated node index")]);
-                let value = record.field(*index).expect("validated record field index").clone();
-                ensure_type(&value, *ty)?;
+                let value = record.field(field.index).expect("validated record field index").clone();
+                ensure_type(&value, field.ty)?;
                 value
             }
             Node::AddI64 { left, right } => {
@@ -857,8 +911,7 @@ mod tests {
                 },
                 Node::ReadField {
                     record: 0,
-                    index: 0,
-                    ty: Type::I64,
+                    field: FieldHandle::new(7, 0, Type::I64).expect("field handle is valid"),
                 },
             ],
             output: 1,
@@ -887,8 +940,7 @@ mod tests {
                 },
                 Node::ReadField {
                     record: 0,
-                    index: 1,
-                    ty: Type::I64,
+                    field: FieldHandle::new(7, 1, Type::I64).expect("field handle is valid"),
                 },
             ],
             output: 1,
@@ -902,6 +954,42 @@ mod tests {
                 node: 1,
                 index: 1,
                 field_count: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_field_handles_from_another_schema() {
+        let error = ValidatedProgram::validate(Program {
+            parameters: vec![],
+            inputs: vec![Type::Record {
+                schema_id: 7,
+                field_count: 1,
+            }],
+            nodes: vec![
+                Node::Input {
+                    index: 0,
+                    ty: Type::Record {
+                        schema_id: 7,
+                        field_count: 1,
+                    },
+                },
+                Node::ReadField {
+                    record: 0,
+                    field: FieldHandle::new(8, 0, Type::I64).expect("field handle is valid"),
+                },
+            ],
+            output: 1,
+            output_type: Type::I64,
+        })
+        .expect_err("field handle schema identity must match the record");
+
+        assert_eq!(
+            error,
+            ValidationError::FieldSchemaMismatch {
+                node: 1,
+                expected: 8,
+                found: 7,
             }
         );
     }
