@@ -306,7 +306,12 @@ impl Connection {
 
     /// Number of stored key/value records.
     pub fn record_count(&self) -> Result<usize> {
-        Ok(self.read_state()?.records.len())
+        Ok(self
+            .read_state()?
+            .records
+            .keys()
+            .filter(|key| !ttl::is_reserved_key(key))
+            .count())
     }
 
     /// Stores the database truth schema when empty and rejects a mismatched
