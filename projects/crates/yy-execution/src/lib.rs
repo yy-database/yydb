@@ -41,6 +41,13 @@ pub enum Type {
         /// Metric used by vector operations and indexes.
         metric: VectorMetric,
     },
+    /// Schema-identified record with a fixed number of fields.
+    Record {
+        /// Stable schema identity assigned by the catalog.
+        schema_id: u64,
+        /// Number of positional fields in the record.
+        field_count: u32,
+    },
 }
 
 /// Immutable reference to a published file or object manifest.
@@ -105,6 +112,50 @@ impl VectorValue {
     }
 }
 
+/// A schema-identified record value with positional fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordValue {
+    schema_id: u64,
+    fields: Vec<Value>,
+}
+
+impl RecordValue {
+    /// Creates a record value with a non-zero schema identity.
+    pub fn new(schema_id: u64, fields: Vec<Value>) -> Result<Self, RecordValueError> {
+        if schema_id == 0 {
+            return Err(RecordValueError::InvalidSchemaId);
+        }
+        if u32::try_from(fields.len()).is_err() {
+            return Err(RecordValueError::TooManyFields);
+        }
+        Ok(Self { schema_id, fields })
+    }
+
+    /// Returns the stable schema identity.
+    pub fn schema_id(&self) -> u64 {
+        self.schema_id
+    }
+
+    /// Returns all positional fields.
+    pub fn fields(&self) -> &[Value] {
+        &self.fields
+    }
+
+    /// Returns one positional field.
+    pub fn field(&self, index: u32) -> Option<&Value> {
+        self.fields.get(index as usize)
+    }
+}
+
+/// Failure while constructing a record value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordValueError {
+    /// Zero is reserved for an absent schema identity.
+    InvalidSchemaId,
+    /// The field count does not fit the execution type range.
+    TooManyFields,
+}
+
 /// Failure while constructing a vector value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VectorValueError {
@@ -134,6 +185,8 @@ pub enum Value {
     File(FileRef),
     /// Fixed-dimension vector value.
     Vector(VectorValue),
+    /// Schema-identified record value.
+    Record(RecordValue),
 }
 
 impl Value {
@@ -149,6 +202,10 @@ impl Value {
             Self::Vector(value) => Type::Vector {
                 dimension: value.dimension(),
                 metric: value.metric,
+            },
+            Self::Record(value) => Type::Record {
+                schema_id: value.schema_id,
+                field_count: value.fields.len().try_into().expect("validated record field count"),
             },
         }
     }
@@ -171,6 +228,15 @@ pub enum Node {
         /// Positional input index.
         index: u32,
         /// Declared input type.
+        ty: Type,
+    },
+    /// Reads one positional field from a schema-identified record.
+    ReadField {
+        /// Record expression node.
+        record: NodeId,
+        /// Positional field index.
+        index: u32,
+        /// Expected field type.
         ty: Type,
     },
     /// Checked signed integer addition.
@@ -374,6 +440,15 @@ pub enum ValidationError {
         /// Invalid input index.
         index: u32,
     },
+    /// A record field index is outside the declared record shape.
+    FieldOutOfBounds {
+        /// Consumer node.
+        node: NodeId,
+        /// Invalid field index.
+        index: u32,
+        /// Declared number of fields.
+        field_count: u32,
+    },
     /// A node operand has a type different from the required type.
     TypeMismatch {
         /// Consumer node.
@@ -479,6 +554,24 @@ fn validate_program(program: &Program) -> Result<(), ValidationError> {
                 require_type(node, expected, *ty)?;
                 expected
             }
+            Node::ReadField { record, index, ty } => {
+                let record_type = reference_type(&types, node, *record)?;
+                let Type::Record { field_count, .. } = record_type else {
+                    return Err(ValidationError::TypeMismatch {
+                        node,
+                        expected: Type::Record { schema_id: 0, field_count: 0 },
+                        found: record_type,
+                    });
+                };
+                if *index >= field_count {
+                    return Err(ValidationError::FieldOutOfBounds {
+                        node,
+                        index: *index,
+                        field_count,
+                    });
+                }
+                *ty
+            }
             Node::AddI64 { left, right } => {
                 require_type(node, Type::I64, reference_type(&types, node, *left)?)?;
                 require_type(node, Type::I64, reference_type(&types, node, *right)?)?;
@@ -539,6 +632,12 @@ fn evaluate_program(
             Node::Input { index, .. } => {
                 inputs[usize::try_from(*index).expect("validated input index")].clone()
             }
+            Node::ReadField { record, index, ty } => {
+                let record = as_record(&values[usize::try_from(*record).expect("validated node index")]);
+                let value = record.field(*index).expect("validated record field index").clone();
+                ensure_type(&value, *ty)?;
+                value
+            }
             Node::AddI64 { left, right } => {
                 let left = as_i64(&values[usize::try_from(*left).expect("validated node index")]);
                 let right = as_i64(&values[usize::try_from(*right).expect("validated node index")]);
@@ -570,7 +669,21 @@ fn as_i64(value: &Value) -> i64 {
         | Value::Text(_)
         | Value::Bytes(_)
         | Value::File(_)
-        | Value::Vector(_) => unreachable!("validated integer operand"),
+        | Value::Vector(_)
+        | Value::Record(_) => unreachable!("validated integer operand"),
+    }
+}
+
+fn as_record(value: &Value) -> &RecordValue {
+    match value {
+        Value::Record(value) => value,
+        Value::Null
+        | Value::Bool(_)
+        | Value::I64(_)
+        | Value::Text(_)
+        | Value::Bytes(_)
+        | Value::File(_)
+        | Value::Vector(_) => unreachable!("validated record operand"),
     }
 }
 
@@ -722,6 +835,75 @@ mod tests {
             dimension: 3,
             metric: VectorMetric::Cosine,
         });
+    }
+
+    #[test]
+    fn validates_and_reads_a_typed_record_field() {
+        let record = RecordValue::new(7, vec![Value::I64(42), Value::Text("ready".into())])
+            .expect("record schema identity and field count are valid");
+        let program = ValidatedProgram::validate(Program {
+            parameters: vec![],
+            inputs: vec![Type::Record {
+                schema_id: 7,
+                field_count: 2,
+            }],
+            nodes: vec![
+                Node::Input {
+                    index: 0,
+                    ty: Type::Record {
+                        schema_id: 7,
+                        field_count: 2,
+                    },
+                },
+                Node::ReadField {
+                    record: 0,
+                    index: 0,
+                    ty: Type::I64,
+                },
+            ],
+            output: 1,
+            output_type: Type::I64,
+        })
+        .expect("record field access is valid");
+
+        assert_eq!(program.evaluate(&[], &[Value::Record(record)]), Ok(Value::I64(42)));
+    }
+
+    #[test]
+    fn rejects_record_field_out_of_bounds() {
+        let error = ValidatedProgram::validate(Program {
+            parameters: vec![],
+            inputs: vec![Type::Record {
+                schema_id: 7,
+                field_count: 1,
+            }],
+            nodes: vec![
+                Node::Input {
+                    index: 0,
+                    ty: Type::Record {
+                        schema_id: 7,
+                        field_count: 1,
+                    },
+                },
+                Node::ReadField {
+                    record: 0,
+                    index: 1,
+                    ty: Type::I64,
+                },
+            ],
+            output: 1,
+            output_type: Type::I64,
+        })
+        .expect_err("record field index must fit the declared shape");
+
+        assert_eq!(
+            error,
+            ValidationError::FieldOutOfBounds {
+                node: 1,
+                index: 1,
+                field_count: 1,
+            }
+        );
     }
 
     #[test]
