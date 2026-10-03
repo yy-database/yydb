@@ -239,13 +239,7 @@ pub fn validate_document(document: &str) -> Result<()> {
             message: "VOS schema document must not contain NUL bytes".into(),
         });
     }
-    let input = vos::parse_oak(document).map_err(|message| Error::Schema { message })?;
-    input
-        .project_schema()
-        .map(|_| ())
-        .map_err(|diagnostics| Error::Schema {
-            message: format!("VOS semantic projection failed: {diagnostics:?}"),
-        })
+    vos::validate_schema(document).map(|_| ()).map_err(|message| Error::Schema { message })
 }
 
 #[cfg(test)]
