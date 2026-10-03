@@ -5,7 +5,7 @@ name: Release
 # Publishes @yydb/* (OIDC) and GitHub Release native-binding zips.
 # Already-published npm versions / existing release assets are skipped (retry-safe).
 # Trusted Publisher workflow filename must stay: release-npm.yml
-# Setup: documentation/ci-secrets.md
+# Release setup: AGENTS.md
 
 on:
   push:

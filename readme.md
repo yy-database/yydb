@@ -2,7 +2,8 @@
 
 **A local database whose schema travels with the data.**
 
-[![CI](https://github.com/yy-database/yydb.rs/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb.rs/actions/workflows/ci.yml)
+[![Check Rust](https://github.com/yy-database/yydb/actions/workflows/check-rust.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb/actions/workflows/check-rust.yml)
+[![Check TypeScript](https://github.com/yy-database/yydb/actions/workflows/check-typescript.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb/actions/workflows/check-typescript.yml)
 [![npm](https://img.shields.io/npm/v/@yydb/yydb?label=%40yydb%2Fyydb)](https://www.npmjs.com/package/@yydb/yydb)
 [![crates.io](https://img.shields.io/crates/v/yydb)](https://crates.io/crates/yydb)
 [![docs.rs](https://docs.rs/yydb/badge.svg)](https://docs.rs/yydb)
@@ -100,11 +101,11 @@ YYDB into a hosted cluster control plane.
 
 ## 🚀 Pick a way to use it
 
-| You are using                            | Start with                                                                                                                   |
-|------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
-| TypeScript or Node.js                    | [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb)                                                                     |
-| Rust                                     | [`yydb`](https://crates.io/crates/yydb) and its [API docs](https://docs.rs/yydb)                                             |
-| Browser or an existing `yydb serve` host | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client)                                                       |
+| You are using                            | Start with                                                                                                                                                |
+|------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| TypeScript or Node.js                    | [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb)                                                                                                  |
+| Rust                                     | [`yydb`](https://crates.io/crates/yydb) and its [API docs](https://docs.rs/yydb)                                                                          |
+| Browser or an existing `yydb serve` host | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client)                                                                                    |
 | CLI                                      | `npx @yydb/yydb` / [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) or [release native bindings](https://github.com/yy-database/yydb.rs/releases) |
 
 ### Node.js
@@ -122,7 +123,8 @@ await db.put("theme", "dark");
 await db.close();
 ```
 
-The package installs the matching platform native binding and starts a private loopback `yydb serve` process when `Database.open()` runs.
+The package installs the matching platform native binding and starts a private loopback `yydb serve` process when
+`Database.open()` runs.
 
 ### Rust
 
@@ -143,13 +145,13 @@ fn main() -> Result<()> {
 
 ### Rust crate layout
 
-| Layer | Crate | Role |
-|-------|-------|------|
-| Bottom | `yydb-types` | `Value`, `Error`, CAS refs |
-| Engine | `yydb-execution`, `yydb-udf`, `yydb-query` | Execution IR, UDF contract, VOS query/DML |
-| **Facade** | **`yydb`** | **`Connection` + re-exports — normal app dependency** |
-| Transport | `yydb-client`, `yydb-server` | Remote wire client / serve loop |
-| Bindings | `yydb-napi`, `yydb-pyo3` | Node / Python hosts (thin layers on `yydb`) |
+| Layer      | Crate                                      | Role                                                  |
+|------------|--------------------------------------------|-------------------------------------------------------|
+| Bottom     | `yydb-types`                               | `Value`, `Error`, CAS refs                            |
+| Engine     | `yydb-execution`, `yydb-udf`, `yydb-query` | Execution IR, UDF contract, VOS query/DML             |
+| **Facade** | **`yydb`**                                 | **`Connection` + re-exports — normal app dependency** |
+| Transport  | `yydb-client`, `yydb-server`               | Remote wire client / serve loop                       |
+| Bindings   | `yydb-napi`, `yydb-pyo3`                   | Node / Python hosts (thin layers on `yydb`)           |
 
 See [`projects/crates/yydb/readme.md`](./projects/crates/yydb/readme.md) for the facade contract.
 
@@ -170,7 +172,7 @@ need permissions, audit, and fleet operations.
 - [YYDB user guides](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/homepage/documentation/zh-hans)
 - [Rust API documentation](https://docs.rs/yydb)
 - [Repository and issue tracker](https://github.com/yy-database/yydb.rs)
-- [Implementation and protocol notes](./documentation/)
+- [Agent skills (`@yydb/yydb-skills`)](./projects/packages/yydb-skills)
 
 ## License
 

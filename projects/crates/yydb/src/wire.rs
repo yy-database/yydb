@@ -3,7 +3,7 @@
 //! Header prefix: product magic `YYDB` | `YYDS` (backend **self-claim** only —
 //! same wire semantics either way), then four ASCII version digits (`0000`,
 //! `0001`, …). Frontends accept either magic and do not require it to match a
-//! preferred product. This crate encodes as `YYDB`. See `documentation/serve-protocol.md`.
+//! preferred product. This crate encodes as `YYDB`. See `@yydb/yydb-skills` (`yydb-serve-protocol`).
 
 use std::io::{Read, Write};
 
