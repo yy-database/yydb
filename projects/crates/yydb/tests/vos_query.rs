@@ -74,3 +74,62 @@ fn query_rows_survive_reopen() {
     assert_eq!(rows.len(), 1);
     let _ = std::fs::remove_file(&path);
 }
+
+const BLOG_SCHEMA: &str = r#"
+table User {
+    @@user_id: uuid,
+    user_name: utf8,
+    active: bool,
+}
+
+table Post {
+    @@post_id: uuid,
+    author: &User,
+    title: utf8,
+    published: bool,
+}
+"#;
+
+#[test]
+fn query_filters_posts_by_referenced_author_name() {
+    let conn = Connection::open_in_memory().expect("open");
+    conn.ensure_schema(1, BLOG_SCHEMA).expect("schema");
+    conn.execute(
+        r#"
+        User {
+            user_id: "550e8400-e29b-41d4-a716-446655440000",
+            user_name: "ada",
+            active: true,
+        }.insert()
+        User {
+            user_id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+            user_name: "linus",
+            active: true,
+        }.insert()
+        Post {
+            post_id: "11111111-1111-4111-8111-111111111101",
+            author: "550e8400-e29b-41d4-a716-446655440000",
+            title: "Ada post",
+            published: true,
+        }.insert()
+        Post {
+            post_id: "22222222-2222-4222-8222-222222222202",
+            author: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+            title: "Linus post",
+            published: true,
+        }.insert()
+        "#,
+    )
+    .expect("seed");
+
+    let rows = conn
+        .query(
+            r#"Post.filter(x => x.published && x.author.user_name == "ada").collect()"#,
+        )
+        .expect("query");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].get("title"),
+        Some(&Value::Text("Ada post".into()))
+    );
+}

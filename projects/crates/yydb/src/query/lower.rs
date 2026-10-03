@@ -183,14 +183,16 @@ fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[Expr]) -> Result<()
 }
 
 fn lower_predicate(expr: &Expr) -> Result<Pred> {
-    let body = match expr {
-        Expr::Lambda(lambda) => lambda.body.as_ref(),
-        other => other,
-    };
-    lower_pred_body(body)
+    match expr {
+        Expr::Lambda(lambda) => {
+            let param = lambda.params.first().map(String::as_str);
+            lower_pred_body(lambda.body.as_ref(), param)
+        }
+        other => lower_pred_body(other, None),
+    }
 }
 
-fn lower_pred_body(expr: &Expr) -> Result<Pred> {
+fn lower_pred_body(expr: &Expr, param: Option<&str>) -> Result<Pred> {
     match expr {
         Expr::Literal(Literal::Bool(true)) => Ok(Pred::True),
         Expr::Literal(Literal::Bool(false)) => Ok(Pred::False),
@@ -200,8 +202,8 @@ fn lower_pred_body(expr: &Expr) -> Result<Pred> {
             right,
             ..
         } => Ok(Pred::And(
-            Box::new(lower_pred_body(left)?),
-            Box::new(lower_pred_body(right)?),
+            Box::new(lower_pred_body(left, param)?),
+            Box::new(lower_pred_body(right, param)?),
         )),
         Expr::Binary {
             op: BinaryOp::Or,
@@ -209,8 +211,8 @@ fn lower_pred_body(expr: &Expr) -> Result<Pred> {
             right,
             ..
         } => Ok(Pred::Or(
-            Box::new(lower_pred_body(left)?),
-            Box::new(lower_pred_body(right)?),
+            Box::new(lower_pred_body(left, param)?),
+            Box::new(lower_pred_body(right, param)?),
         )),
         Expr::Binary {
             op,
@@ -218,14 +220,12 @@ fn lower_pred_body(expr: &Expr) -> Result<Pred> {
             right,
             ..
         } => {
-            let field = match left.as_ref() {
-                Expr::Member { name, .. } | Expr::Name { name, .. } => name.clone(),
-                _ => {
-                    return Err(query_error(
-                        "Phase 1 filters must compare a field access on the left",
-                    ));
-                }
-            };
+            let path = lower_field_path(left.as_ref(), param)?;
+            if path.is_empty() {
+                return Err(query_error(
+                    "Phase 1 filters must compare a field access on the left",
+                ));
+            }
             let (literal, kind) = match right.as_ref() {
                 Expr::Literal(Literal::Bool(b)) => (b.to_string(), LiteralKind::Bool),
                 Expr::Literal(Literal::Int(t)) => (t.clone(), LiteralKind::Int),
@@ -241,7 +241,7 @@ fn lower_pred_body(expr: &Expr) -> Result<Pred> {
             };
             if matches!(op, BinaryOp::Eq) && kind == LiteralKind::Bool {
                 let value = literal == "true";
-                return Ok(Pred::FieldBool { field, value });
+                return Ok(Pred::FieldBool { path, value });
             }
             let cmp = match op {
                 BinaryOp::Eq => CmpOp::Eq,
@@ -253,17 +253,36 @@ fn lower_pred_body(expr: &Expr) -> Result<Pred> {
                 _ => return Err(query_error("unsupported comparison in filter")),
             };
             Ok(Pred::FieldCmp {
-                field,
+                path,
                 op: cmp,
                 literal,
                 kind,
             })
         }
-        Expr::Member { name, .. } | Expr::Name { name, .. } => Ok(Pred::FieldBool {
-            field: name.clone(),
-            value: true,
-        }),
-        _ => Err(query_error("unsupported predicate shape")),
+        _ => {
+            let path = lower_field_path(expr, param)?;
+            if path.is_empty() {
+                return Err(query_error("unsupported predicate shape"));
+            }
+            Ok(Pred::FieldBool {
+                path,
+                value: true,
+            })
+        }
+    }
+}
+
+fn lower_field_path(expr: &Expr, param: Option<&str>) -> Result<Vec<String>> {
+    match expr {
+        Expr::Member { object, name, .. } => {
+            let mut path = lower_field_path(object.as_ref(), param)?;
+            path.push(name.clone());
+            Ok(path)
+        }
+        Expr::Name { name, .. } if Some(name.as_str()) == param => Ok(Vec::new()),
+        _ => Err(query_error(
+            "Phase 1 filters must use field paths rooted at the lambda parameter",
+        )),
     }
 }
 
