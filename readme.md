@@ -104,7 +104,7 @@ does not turn YYDB into a hosted multi-node database.
 | TypeScript or Node.js                    | [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb)                                                                     |
 | Rust                                     | [`yydb`](https://crates.io/crates/yydb) and its [API docs](https://docs.rs/yydb)                                             |
 | Browser or an existing `yydb serve` host | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client)                                                       |
-| CLI or container                         | [Release binaries](https://github.com/yy-database/yydb.rs/releases) or [`ghcr.io/yy-database/yydb`](./docker/yydb/README.md) |
+| CLI or container                         | `npx @yydb/yydb` / [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb), [release native bindings](https://github.com/yy-database/yydb.rs/releases), or [`ghcr.io/yy-database/yydb`](./docker/yydb/README.md) |
 
 ### Node.js
 
@@ -121,7 +121,7 @@ await db.put("theme", "dark");
 await db.close();
 ```
 
-The package installs the matching platform engine and manages a private loopback process for `Database.open()`.
+The package installs the matching platform native binding and starts a private loopback `yydb serve` process when `Database.open()` runs.
 
 ### Rust
 

@@ -2,7 +2,7 @@
 
 **The official container image for the YYDB CLI and local wire server.**
 
-The image contains the same `yydb` binary published in the platform release archives. It is currently built for
+The image ships the TypeScript `yydb` CLI (`node dist/cli.js`) plus the `linux/x64` `yydb-napi` binding. It is currently built for
 `linux/amd64`.
 
 [![GHCR](https://img.shields.io/badge/ghcr.io-yy--database%2Fyydb-blue)](https://github.com/yy-database/yydb.rs/pkgs/container/yydb)

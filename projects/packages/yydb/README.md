@@ -12,7 +12,7 @@
 npm install @yydb/yydb
 ```
 
-Node.js 18 or newer is supported. The matching native engine is installed as an optional platform dependency and is
+Node.js 18 or newer is supported. The matching `yydb-napi` binding is installed as an optional platform dependency and is
 started on a private loopback endpoint when `Database.open()` runs.
 
 ## Example
@@ -55,8 +55,8 @@ await db.serverVersion();
 await db.close();
 ```
 
-`OpenOptions` supports `binary` (an explicit engine path), `port` (a preferred loopback port), and `serveArgs` (extra
-arguments for the local engine).
+`OpenOptions` supports `cli` (an explicit CLI script path), `port` (a preferred loopback port), and `serveArgs` (extra
+arguments forwarded to `yydb serve`). `binary` is a deprecated alias for `cli`.
 
 ## Use a different package when
 
@@ -64,7 +64,7 @@ arguments for the local engine).
 |-------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Browser code or a host that already runs `yydb serve` | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client)                                                                                        |
 | In-process Rust access                                | [`yydb`](https://crates.io/crates/yydb)                                                                                                                       |
-| A CLI or container                                    | [YYDB releases](https://github.com/yy-database/yydb.rs/releases) or [`ghcr.io/yy-database/yydb`](https://github.com/yy-database/yydb.rs/tree/dev/docker/yydb) |
+| A CLI or container                                    | [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) CLI, [release native bindings](https://github.com/yy-database/yydb.rs/releases), or [`ghcr.io/yy-database/yydb`](https://github.com/yy-database/yydb.rs/tree/dev/docker/yydb) |
 
 For Electron, the main process can use `@yydb/yydb`; renderer code can use
 `@yydb/yydb-client` against the main process endpoint.
