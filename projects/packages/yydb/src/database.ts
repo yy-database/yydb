@@ -181,8 +181,8 @@ export class Database {
 
     /**
      * Install a [`defineMicro`](./database.ts) definition into the current
-     * session registry and sync metadata to the private engine. TS micros are
-     * host-local and never written to `.yydb`.
+     * session registry and sync metadata to the private engine. Host micros are
+     * session-local and never written to `.yydb`.
      */
     async registerMicro<
         TArgs extends readonly UdfTypeDescriptor[],

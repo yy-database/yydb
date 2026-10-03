@@ -6,7 +6,7 @@ use yydb_execution::ValidatedUdf;
 use yydb_types::{Error, Result, Value};
 use yydb_udf::{
     Budget, NativeHandler, NativeUdfDefinition, Placement, RegisterOptions, Signature, UdfError,
-    TypeScriptHostAdapter, TypeScriptMicroDefinition, TypeScriptMicroImplementation, UdfIdentity,
+    HostMicroDefinition, HostMicroImplementation, HostRuntimeAdapter, UdfIdentity,
     UdfInvocation, UdfPolicy, UdfRegistry, UdfType, UdfValue, VosProgramImplementation,
     lower_micro_scalar, lower_vos_macro,
 };
@@ -18,7 +18,7 @@ use crate::udf::{validate_local_execution_body, RegisteredUdf, ScalarFn, ScalarU
 pub(crate) struct UdfSubsystem {
     registry: UdfRegistry,
     legacy: std::collections::BTreeMap<String, RegisteredUdf>,
-    ts_adapter: Option<Arc<dyn TypeScriptHostAdapter>>,
+    host_adapter: Option<Arc<dyn HostRuntimeAdapter>>,
 }
 
 impl Default for UdfSubsystem {
@@ -26,7 +26,7 @@ impl Default for UdfSubsystem {
         Self {
             registry: UdfRegistry::default(),
             legacy: std::collections::BTreeMap::new(),
-            ts_adapter: None,
+            host_adapter: None,
         }
     }
 }
@@ -79,16 +79,16 @@ impl UdfSubsystem {
         self.register_native_udf(definition)
     }
 
-    pub(crate) fn set_ts_host_adapter(&mut self, adapter: Arc<dyn TypeScriptHostAdapter>) {
-        self.ts_adapter = Some(adapter);
+    pub(crate) fn set_host_adapter(&mut self, adapter: Arc<dyn HostRuntimeAdapter>) {
+        self.host_adapter = Some(adapter);
     }
 
-    pub(crate) fn register_ts_micro(&mut self, definition: TypeScriptMicroDefinition) -> Result<()> {
+    pub(crate) fn register_host_micro(&mut self, definition: HostMicroDefinition) -> Result<()> {
         definition.validate().map_err(map_udf_error)?;
         let session = definition.session_definition();
         let name = session.identity.name().to_owned();
-        if let Some(adapter) = self.ts_adapter.clone() {
-            let implementation = Arc::new(TypeScriptMicroImplementation::new(definition, adapter));
+        if let Some(adapter) = self.host_adapter.clone() {
+            let implementation = Arc::new(HostMicroImplementation::new(definition, adapter));
             self.registry
                 .register_session_micro(session, implementation, RegisterOptions::new())
                 .map_err(map_udf_error)?;

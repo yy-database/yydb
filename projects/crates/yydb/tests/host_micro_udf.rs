@@ -1,17 +1,16 @@
 use std::sync::Arc;
 
 use yydb::{
-    Connection, TypeScriptFunctionHandle, TypeScriptHostAdapter, TypeScriptMicroDefinition,
-    UdfType, Value,
+    Connection, HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, UdfType, Value,
 };
 use yydb_udf::UdfValue;
 
 struct TrimAdapter;
 
-impl TypeScriptHostAdapter for TrimAdapter {
+impl HostRuntimeAdapter for TrimAdapter {
     fn invoke_scalar(
         &self,
-        handle: &TypeScriptFunctionHandle,
+        handle: &HostFunctionHandle,
         args: &[UdfValue],
     ) -> yydb_udf::Result<UdfValue> {
         assert_eq!(handle.function_id, "normalize");
@@ -24,7 +23,7 @@ impl TypeScriptHostAdapter for TrimAdapter {
 
     fn invoke_batch(
         &self,
-        _handle: &TypeScriptFunctionHandle,
+        _handle: &HostFunctionHandle,
         _batches: &[Vec<UdfValue>],
     ) -> yydb_udf::Result<Vec<UdfValue>> {
         Err(yydb_udf::UdfError::UnsupportedType)
@@ -32,10 +31,10 @@ impl TypeScriptHostAdapter for TrimAdapter {
 }
 
 #[test]
-fn registers_and_calls_a_ts_micro_through_connection() {
+fn registers_and_calls_a_host_micro_through_connection() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.set_ts_host_adapter(Arc::new(TrimAdapter));
-    let definition = TypeScriptMicroDefinition::from_scalar(
+    conn.set_host_adapter(Arc::new(TrimAdapter));
+    let definition = HostMicroDefinition::from_scalar(
         "text.normalize",
         1,
         vec![UdfType::Text],
@@ -46,7 +45,7 @@ fn registers_and_calls_a_ts_micro_through_connection() {
         [4u8; 32],
     )
     .expect("definition");
-    conn.register_ts_micro(definition).expect("register");
+    conn.register_host_micro(definition).expect("register");
 
     let result = conn
         .call_scalar("text.normalize", &[Value::Text("  Hi  ".into())])

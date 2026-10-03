@@ -8,7 +8,7 @@
 use std::io::{Read, Write};
 
 use yydb_types::{Error, Result, SchemaVersion, Value};
-use yydb_udf::{TypeScriptFunctionHandle, UdfValue};
+use yydb_udf::{HostFunctionHandle, UdfValue};
 
 use crate::Connection;
 
@@ -57,9 +57,9 @@ pub enum MsgType {
     KvPut,
     /// KV put ack.
     KvPutOk,
-    /// Register a session-local TypeScript micro (metadata only).
+    /// Register a session-local host micro (metadata only).
     MicroRegister,
-    /// TypeScript micro registration ack.
+    /// Host micro registration ack.
     MicroRegisterOk,
     /// Server asks the wire peer to run a host micro (S→C).
     MicroHostInvoke,
@@ -398,7 +398,7 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
             Err(error) => error_frame(id, error.to_string()),
         },
         MsgType::MicroRegister => match decode_micro_register(&request.body) {
-            Ok(definition) => match conn.register_ts_micro(definition) {
+            Ok(definition) => match conn.register_host_micro(definition) {
                 Ok(()) => Frame::new(MsgType::MicroRegisterOk, id, Vec::new()),
                 Err(error) => error_frame(id, error.to_string()),
             },
@@ -590,7 +590,7 @@ fn runtime_value_to_udf(value: &Value) -> Result<UdfValue> {
 }
 
 /// Encode a `MicroHostInvoke` body.
-pub fn encode_micro_host_invoke(handle: &TypeScriptFunctionHandle, args: &[UdfValue]) -> Vec<u8> {
+pub fn encode_micro_host_invoke(handle: &HostFunctionHandle, args: &[UdfValue]) -> Vec<u8> {
     let mut body = Vec::new();
     push_u64(&mut body, handle.host_id);
     push_u32(&mut body, handle.version);
@@ -600,7 +600,7 @@ pub fn encode_micro_host_invoke(handle: &TypeScriptFunctionHandle, args: &[UdfVa
 }
 
 /// Decode a `MicroHostInvoke` body.
-pub fn decode_micro_host_invoke(body: &[u8]) -> Result<(TypeScriptFunctionHandle, Vec<UdfValue>)> {
+pub fn decode_micro_host_invoke(body: &[u8]) -> Result<(HostFunctionHandle, Vec<UdfValue>)> {
     let mut offset = 0;
     let host_id = read_u64(body, &mut offset)?;
     let handle_version = read_u32(body, &mut offset)?;
@@ -611,7 +611,7 @@ pub fn decode_micro_host_invoke(body: &[u8]) -> Result<(TypeScriptFunctionHandle
         .to_owned();
     let args = decode_udf_values(body, &mut offset)?;
     Ok((
-        TypeScriptFunctionHandle {
+        HostFunctionHandle {
             host_id,
             function_id,
             version: handle_version,
@@ -675,7 +675,7 @@ pub fn decode_scalar_call_ok(body: &[u8]) -> Result<Value> {
 }
 
 /// Encode a `MicroRegister` body.
-pub fn encode_micro_register(definition: &yydb_udf::TypeScriptMicroDefinition) -> Vec<u8> {
+pub fn encode_micro_register(definition: &yydb_udf::HostMicroDefinition) -> Vec<u8> {
     let mut body = Vec::new();
     push_u64(&mut body, definition.handle.host_id);
     push_u32(&mut body, definition.handle.version);
@@ -693,7 +693,7 @@ pub fn encode_micro_register(definition: &yydb_udf::TypeScriptMicroDefinition) -
 }
 
 /// Decode a `MicroRegister` body.
-pub fn decode_micro_register(body: &[u8]) -> Result<yydb_udf::TypeScriptMicroDefinition> {
+pub fn decode_micro_register(body: &[u8]) -> Result<yydb_udf::HostMicroDefinition> {
     let mut offset = 0;
     let host_id = read_u64(body, &mut offset)?;
     let handle_version = read_u32(body, &mut offset)?;
@@ -730,7 +730,7 @@ pub fn decode_micro_register(body: &[u8]) -> Result<yydb_udf::TypeScriptMicroDef
     }
     let mut fingerprint = [0_u8; 32];
     fingerprint.copy_from_slice(&body[offset..offset + 32]);
-    yydb_udf::TypeScriptMicroDefinition::from_scalar(
+    yydb_udf::HostMicroDefinition::from_scalar(
         name,
         udf_version,
         args,
@@ -864,10 +864,10 @@ mod tests {
 
     #[test]
     fn dispatch_micro_register_records_session_metadata() {
-        use yydb_udf::TypeScriptMicroDefinition;
+        use yydb_udf::HostMicroDefinition;
 
         let conn = Connection::open_in_memory().unwrap();
-        let definition = TypeScriptMicroDefinition::from_scalar(
+        let definition = HostMicroDefinition::from_scalar(
             "text.normalize",
             1,
             vec![yydb_udf::UdfType::Text],
@@ -888,7 +888,7 @@ mod tests {
 
     #[test]
     fn micro_host_invoke_roundtrip_codec() {
-        let handle = TypeScriptFunctionHandle {
+        let handle = HostFunctionHandle {
             host_id: 9,
             function_id: "normalize".into(),
             version: 1,

@@ -102,7 +102,7 @@ export class Client {
         await this.roundtrip(MsgType.KvPut, encodeKvPut(key, bytes));
     }
 
-    /** Register a session-local TypeScript micro contract on the remote engine. */
+    /** Register a session-local host micro contract on the remote engine. */
     async registerMicro(payload: MicroRegisterPayload): Promise<void> {
         await this.roundtrip(MsgType.MicroRegister, encodeMicroRegister(payload));
     }

@@ -11,7 +11,7 @@ use std::{
 use sha1::{Digest, Sha1};
 
 use crate::{
-    ts_wire_host::TcpTypeScriptHostAdapter,
+    host_wire::TcpWireHostAdapter,
     wire::{self, dispatch, read_frame, write_frame, Frame},
     Connection, Error,
 };
@@ -80,8 +80,8 @@ fn handle_client(stream: TcpStream, conn: &Connection) -> Result<(), Box<dyn std
 }
 
 fn handle_tcp(mut stream: TcpStream, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
-    let adapter = Arc::new(TcpTypeScriptHostAdapter::new(stream.try_clone()?));
-    conn.set_ts_host_adapter(adapter);
+    let adapter = Arc::new(TcpWireHostAdapter::new(stream.try_clone()?));
+    conn.set_host_adapter(adapter);
     loop {
         let request = match read_frame(&mut stream) {
             Ok(frame) => frame,

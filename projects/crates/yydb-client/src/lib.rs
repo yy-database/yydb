@@ -23,7 +23,7 @@ use yydb::wire::{
     read_frame, write_frame, Frame, MsgType,
 };
 use yydb_types::Value;
-use yydb_udf::TypeScriptMicroDefinition;
+use yydb_udf::HostMicroDefinition;
 
 /// Handle to a remote YYDB server started with `yydb serve`.
 pub struct Client {
@@ -97,8 +97,8 @@ impl Client {
         Ok(())
     }
 
-    /// Register a session-local TypeScript micro contract on the remote engine.
-    pub fn register_ts_micro(&self, definition: &TypeScriptMicroDefinition) -> Result<()> {
+    /// Register a session-local host micro contract on the remote engine.
+    pub fn register_host_micro(&self, definition: &HostMicroDefinition) -> Result<()> {
         let response = self.roundtrip(
             MsgType::MicroRegister,
             encode_micro_register(definition),
