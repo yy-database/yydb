@@ -17,7 +17,11 @@ pub struct UdfIdentity {
 
 impl UdfIdentity {
     /// Creates a new identity after validating non-empty fields.
-    pub fn new(namespace: impl Into<String>, name: impl Into<String>, version: u32) -> Result<Self> {
+    pub fn new(
+        namespace: impl Into<String>,
+        name: impl Into<String>,
+        version: u32,
+    ) -> Result<Self> {
         let namespace = namespace.into();
         let name = name.into();
         if name.is_empty() {

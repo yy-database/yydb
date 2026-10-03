@@ -16,8 +16,12 @@ pub(crate) enum LeaseRecord {
         fencing_token: u64,
         lease_until_ms: u64,
     },
-    RetryAt { when_ms: u64 },
-    Failed { reason: String },
+    RetryAt {
+        when_ms: u64,
+    },
+    Failed {
+        reason: String,
+    },
 }
 
 pub(crate) fn now_millis() -> u64 {
@@ -50,8 +54,7 @@ pub(crate) fn decode_record(bytes: &[u8]) -> Result<LeaseRecord> {
             let worker_id = String::from_utf8(bytes[start..end].to_vec())
                 .map_err(|_| Error::Corrupt("lease worker is not UTF-8"))?;
             let fencing_token = u64::from_le_bytes(bytes[end..end + 8].try_into().unwrap());
-            let lease_until_ms =
-                u64::from_le_bytes(bytes[end + 8..end + 16].try_into().unwrap());
+            let lease_until_ms = u64::from_le_bytes(bytes[end + 8..end + 16].try_into().unwrap());
             Ok(LeaseRecord::Claimed {
                 worker_id,
                 fencing_token,
@@ -127,7 +130,10 @@ impl LeaseRecord {
     }
 }
 
-pub(crate) fn read_u64_meta(records: &std::collections::BTreeMap<String, Vec<u8>>, key: &str) -> u64 {
+pub(crate) fn read_u64_meta(
+    records: &std::collections::BTreeMap<String, Vec<u8>>,
+    key: &str,
+) -> u64 {
     records
         .get(key)
         .and_then(|bytes| {
@@ -140,7 +146,11 @@ pub(crate) fn read_u64_meta(records: &std::collections::BTreeMap<String, Vec<u8>
         .unwrap_or(0)
 }
 
-pub(crate) fn write_u64_meta(records: &mut std::collections::BTreeMap<String, Vec<u8>>, key: &str, value: u64) {
+pub(crate) fn write_u64_meta(
+    records: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    key: &str,
+    value: u64,
+) {
     records.insert(key.to_owned(), value.to_le_bytes().to_vec());
 }
 
@@ -150,7 +160,9 @@ pub(crate) fn next_fencing_token(records: &mut std::collections::BTreeMap<String
     next
 }
 
-pub(crate) fn bump_commit_sequence(records: &mut std::collections::BTreeMap<String, Vec<u8>>) -> u64 {
+pub(crate) fn bump_commit_sequence(
+    records: &mut std::collections::BTreeMap<String, Vec<u8>>,
+) -> u64 {
     let next = read_u64_meta(records, META_COMMIT_SEQ) + 1;
     write_u64_meta(records, META_COMMIT_SEQ, next);
     next
@@ -194,11 +206,17 @@ pub(crate) fn claim_lease(
 
     let claimable = match (&current, expectation) {
         (None, _) => true,
-        (Some(LeaseRecord::Queued), LeaseExpectation::Queued | LeaseExpectation::AbsentOrExpired) => true,
+        (
+            Some(LeaseRecord::Queued),
+            LeaseExpectation::Queued | LeaseExpectation::AbsentOrExpired,
+        ) => true,
         (Some(LeaseRecord::Claimed { lease_until_ms, .. }), LeaseExpectation::AbsentOrExpired) => {
             *lease_until_ms <= now
         }
-        (Some(LeaseRecord::RetryAt { .. } | LeaseRecord::Failed { .. }), LeaseExpectation::AbsentOrExpired) => true,
+        (
+            Some(LeaseRecord::RetryAt { .. } | LeaseRecord::Failed { .. }),
+            LeaseExpectation::AbsentOrExpired,
+        ) => true,
         _ => false,
     };
     if !claimable {

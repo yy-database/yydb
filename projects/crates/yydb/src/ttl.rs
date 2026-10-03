@@ -73,7 +73,10 @@ fn matching_namespace(records: &BTreeMap<String, Vec<u8>>, key: &str) -> Option<
         .map(str::to_owned)
 }
 
-pub(crate) fn namespace_stats(records: &BTreeMap<String, Vec<u8>>, namespace: &str) -> NamespaceStats {
+pub(crate) fn namespace_stats(
+    records: &BTreeMap<String, Vec<u8>>,
+    namespace: &str,
+) -> NamespaceStats {
     let mut stats = NamespaceStats::default();
     for (key, value) in records {
         if is_reserved_key(key) || !key.starts_with(namespace) {
@@ -118,7 +121,10 @@ fn bump_record_version(records: &mut BTreeMap<String, Vec<u8>>, key: &str) -> Re
 }
 
 fn remove_record(records: &mut BTreeMap<String, Vec<u8>>, key: &str) -> u64 {
-    let bytes = records.remove(key).map(|value| value.len() as u64).unwrap_or(0);
+    let bytes = records
+        .remove(key)
+        .map(|value| value.len() as u64)
+        .unwrap_or(0);
     records.remove(&ttl_meta_key(key));
     records.remove(&lru_meta_key(key));
     records.remove(&version_meta_key(key));
@@ -231,15 +237,13 @@ pub(crate) fn evict_expired(
         if report.evicted_records as usize >= budget.max_records {
             break;
         }
-        let expires_at = records
-            .get(&ttl_meta_key(&key))
-            .and_then(|bytes| {
-                if bytes.len() == 8 {
-                    Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap()))
-                } else {
-                    None
-                }
-            });
+        let expires_at = records.get(&ttl_meta_key(&key)).and_then(|bytes| {
+            if bytes.len() == 8 {
+                Some(u64::from_le_bytes(bytes.as_slice().try_into().unwrap()))
+            } else {
+                None
+            }
+        });
         if expires_at.is_some_and(|deadline| deadline <= now) {
             report.evicted_bytes += remove_record(records, &key);
             report.evicted_records += 1;

@@ -64,8 +64,8 @@ pub mod query;
 /// Common embed imports (`use yydb::prelude::*`).
 pub mod prelude {
     pub use crate::{
-        Batch, Connection, Error, JournalMode, ObjectRef, ObjectStore, OpenFlags, QueryRow,
-        Result, SchemaVersion, Value,
+        Batch, Connection, Error, JournalMode, ObjectRef, ObjectStore, OpenFlags, QueryRow, Result,
+        SchemaVersion, Value,
     };
 }
 
@@ -98,9 +98,7 @@ pub use yydb_types::{
     ChunkManifest, CommitSequence, DoctorIssue, DoctorReport, DoctorSeverity, Error, EvictBudget,
     EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken, NamespaceQuota,
     NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion, ReleaseOutcome, Result,
-    SchemaVersion, Tier, Value, Vector,
-    DEFAULT_CHUNK_SIZE,
-    INLINE_BYTES_MAX,
+    SchemaVersion, Tier, Value, Vector, DEFAULT_CHUNK_SIZE, INLINE_BYTES_MAX,
 };
 
 /// VOS schema language facade (`git+https://github.com/voml/vos-language.git?branch=dev`).
@@ -119,8 +117,8 @@ use journal::{
     append_snapshot_frame, ensure_wal_sidecars, remove_wal_sidecars, replay_wal_snapshots,
     shm_path, truncate_wal, wal_frame_count, wal_path,
 };
-use udf_bridge::UdfSubsystem;
 use udf::{ClosureUdf, ScalarFn};
+use udf_bridge::UdfSubsystem;
 
 const MAGIC: &[u8] = b"YYDB\x02";
 const LEGACY_MAGIC: &[u8] = b"YYDB\x01";
@@ -315,7 +313,10 @@ impl Connection {
     ///
     /// No-op when not in WAL mode or when there is nothing to fold.
     pub fn checkpoint(&self) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let Backend::File { path, journal_mode } = &self.backend else {
             return Ok(());
         };
@@ -352,7 +353,10 @@ impl Connection {
 
     /// Bind local execution handles using persisted identities, never fresh source order.
     pub fn execution_catalog(&self) -> Result<Option<schema::ExecutionCatalog>> {
-        self.catalog_snapshot()?.as_ref().map(schema::execution_catalog_from_snapshot).transpose()
+        self.catalog_snapshot()?
+            .as_ref()
+            .map(schema::execution_catalog_from_snapshot)
+            .transpose()
     }
 
     /// Number of stored key/value records.
@@ -377,7 +381,10 @@ impl Connection {
     /// `// @yydb-schema-version: <n>` in leading comments). To change the schema
     /// document after persistence, call [`Self::migrate_schema`].
     pub fn ensure_schema(&self, document: &str) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         schema::validate_document(document)?;
         let mut state = self.read_state()?;
         if let Some(current) = &state.schema {
@@ -397,11 +404,16 @@ impl Connection {
             .as_ref()
             .map(|schema| schema.version)
             .unwrap_or_else(|| schema::initial_version(document));
-        let parsed = vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
-            message: diagnostics.to_string(),
-        })?;
-        state.catalog = Some(vos::catalog_from_document(&parsed).map_err(|message| Error::Schema { message })?);
-        state.schema = Some(SchemaVersion { version, document: document.to_owned() });
+        let parsed =
+            vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
+                message: diagnostics.to_string(),
+            })?;
+        state.catalog =
+            Some(vos::catalog_from_document(&parsed).map_err(|message| Error::Schema { message })?);
+        state.schema = Some(SchemaVersion {
+            version,
+            document: document.to_owned(),
+        });
         self.write_state(&state)
     }
 
@@ -411,11 +423,15 @@ impl Connection {
     /// matching or by mappings in `renames`. When the document carries
     /// `// @yydb-schema-version: <n>`, `n` must equal the new version.
     pub fn migrate_schema(&self, document: &str, renames: &vos::ast::RenameMap) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         schema::validate_document(document)?;
-        let parsed = vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
-            message: diagnostics.to_string(),
-        })?;
+        let parsed =
+            vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
+                message: diagnostics.to_string(),
+            })?;
         let mut state = self.read_state()?;
         let current = state.schema.as_ref().ok_or_else(|| Error::Schema {
             message: "schema migration requires an existing schema".into(),
@@ -428,14 +444,20 @@ impl Connection {
         })?;
         let catalog = vos::evolve_catalog(previous_catalog, &parsed, renames)
             .map_err(|message| Error::Schema { message })?;
-        state.schema = Some(SchemaVersion { version, document: document.to_owned() });
+        state.schema = Some(SchemaVersion {
+            version,
+            document: document.to_owned(),
+        });
         state.catalog = Some(catalog);
         self.write_state(&state)
     }
 
     /// Execute a Phase 1 VOS read pipeline (for example `User.filter(x => x.active).collect()`).
     pub fn query(&self, source: &str) -> Result<Vec<query::QueryRow>> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.active_state_unlocked()?;
         if let Some(catalog) = state.catalog.as_ref() {
             if let Some(rows) = query::try_insert_returning(source, catalog, &mut state.records)? {
@@ -448,7 +470,10 @@ impl Connection {
 
     /// Execute unit-valued VOS write programs (for example `User { … }.insert()`).
     pub fn execute(&self, source: &str) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         self.mutate_active_state_unlocked(|state| {
             let catalog = state.catalog.as_ref().ok_or_else(|| Error::Schema {
                 message: "call ensure_schema before execute".into(),
@@ -464,7 +489,10 @@ impl Connection {
     /// in-memory snapshot. [`Self::commit`] persists the snapshot, and
     /// [`Self::rollback`] discards it.
     pub fn begin(&self) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut slot = self
             .txn
             .lock()
@@ -480,7 +508,10 @@ impl Connection {
 
     /// Commit the open data transaction.
     pub fn commit(&self) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut slot = self
             .txn
             .lock()
@@ -496,7 +527,10 @@ impl Connection {
 
     /// Roll back the open data transaction.
     pub fn rollback(&self) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut slot = self
             .txn
             .lock()
@@ -525,7 +559,10 @@ impl Connection {
         pk: impl AsRef<str>,
         row: query::QueryRow,
     ) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         self.mutate_active_state_unlocked(|state| {
             query::upsert_row(&mut state.records, table.as_ref(), pk.as_ref(), &row)
         })
@@ -537,7 +574,10 @@ impl Connection {
     /// payloads — prefer [`Self::put_chunk`] / [`Self::put_file_chunked`] into
     /// the unified `objects/` CAS (see `INLINE_BYTES_MAX`).
     pub fn put(&self, key: impl Into<String>, value: impl AsRef<[u8]>) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         ttl::put_record(&mut state.records, &key.into(), value.as_ref())?;
         self.write_state(&state)
@@ -550,7 +590,10 @@ impl Connection {
         value: impl AsRef<[u8]>,
         ttl: std::time::Duration,
     ) -> Result<RecordVersion> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         let version = ttl::put_with_ttl(
             &mut state.records,
@@ -564,7 +607,10 @@ impl Connection {
 
     /// Configure quota limits for a namespace prefix such as `cache/response/`.
     pub fn set_namespace_quota(&self, namespace: &str, quota: NamespaceQuota) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         ttl::set_namespace_quota(&mut state.records, namespace, quota);
         self.write_state(&state)
@@ -572,13 +618,23 @@ impl Connection {
 
     /// Return byte and record usage for a namespace prefix.
     pub fn namespace_stats(&self, namespace: &str) -> Result<NamespaceStats> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         Ok(ttl::namespace_stats(&self.read_state()?.records, namespace))
     }
 
     /// Remove expired TTL records under `namespace_prefix` up to `budget`.
-    pub fn evict_expired(&self, namespace_prefix: &str, budget: EvictBudget) -> Result<EvictReport> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+    pub fn evict_expired(
+        &self,
+        namespace_prefix: &str,
+        budget: EvictBudget,
+    ) -> Result<EvictReport> {
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         let report = ttl::evict_expired(&mut state.records, namespace_prefix, budget)?;
         self.write_state(&state)?;
@@ -587,7 +643,10 @@ impl Connection {
 
     /// Fetch a raw byte record by key.
     pub fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let state = self.read_state()?;
         if ttl::is_expired(&state.records, key) {
             return Ok(None);
@@ -598,12 +657,19 @@ impl Connection {
     /// Commit a batch in one journal snapshot. `None` deletes the key.
     /// Operations are serialized on this connection, not across separate handles or processes.
     pub fn write_batch(&self, changes: &[(String, Option<Vec<u8>>)]) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         for (key, value) in changes {
             match value {
-                Some(bytes) => { state.records.insert(key.clone(), bytes.clone()); }
-                None => { state.records.remove(key); }
+                Some(bytes) => {
+                    state.records.insert(key.clone(), bytes.clone());
+                }
+                None => {
+                    state.records.remove(key);
+                }
             }
         }
         lease::bump_commit_sequence(&mut state.records);
@@ -612,26 +678,52 @@ impl Connection {
 
     /// Replace or delete a key only if its current bytes match `expected`.
     /// `None` as expected requires an absent key. Atomic on a shared connection.
-    pub fn compare_exchange(&self, key: &str, expected: Option<&[u8]>, replacement: Option<&[u8]>) -> Result<bool> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+    pub fn compare_exchange(
+        &self,
+        key: &str,
+        expected: Option<&[u8]>,
+        replacement: Option<&[u8]>,
+    ) -> Result<bool> {
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
-        if state.records.get(key).map(Vec::as_slice) != expected { return Ok(false); }
+        if state.records.get(key).map(Vec::as_slice) != expected {
+            return Ok(false);
+        }
         match replacement {
-            Some(bytes) => { state.records.insert(key.to_owned(), bytes.to_vec()); }
-            None => { state.records.remove(key); }
+            Some(bytes) => {
+                state.records.insert(key.to_owned(), bytes.to_vec());
+            }
+            None => {
+                state.records.remove(key);
+            }
         }
         self.write_state(&state)?;
         Ok(true)
     }
 
     /// Scan keys in lexical order with an exclusive continuation key and a result limit.
-    pub fn scan_prefix(&self, prefix: &str, after: Option<&str>, limit: usize) -> Result<Vec<(String, Vec<u8>)>> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+    pub fn scan_prefix(
+        &self,
+        prefix: &str,
+        after: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<(String, Vec<u8>)>> {
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let state = self.read_state()?;
-        Ok(state.records.range(prefix.to_owned()..)
+        Ok(state
+            .records
+            .range(prefix.to_owned()..)
             .take_while(|(key, _)| key.starts_with(prefix))
             .filter(|(key, _)| after.map_or(true, |cursor| key.as_str() > cursor))
-            .take(limit).map(|(key, value)| (key.clone(), value.clone())).collect())
+            .take(limit)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect())
     }
 
     /// Claim a lease on `key` for `worker_id`.
@@ -642,7 +734,10 @@ impl Connection {
         lease_duration: std::time::Duration,
         expectation: LeaseExpectation,
     ) -> Result<LeaseToken> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         let token = lease::claim_lease(
             &mut state.records,
@@ -657,7 +752,10 @@ impl Connection {
 
     /// Extend the lease deadline for an active token.
     pub fn renew_lease(&self, token: &LeaseToken, new_lease_until: u64) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         lease::renew_lease(&mut state.records, token, new_lease_until)?;
         self.write_state(&state)
@@ -665,7 +763,10 @@ impl Connection {
 
     /// Release a lease with a store-visible outcome.
     pub fn release_lease(&self, token: &LeaseToken, outcome: ReleaseOutcome) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         lease::release_lease(&mut state.records, token, outcome)?;
         self.write_state(&state)
@@ -673,7 +774,10 @@ impl Connection {
 
     /// Apply `batch` only when `token` matches the active claim.
     pub fn commit_with_lease(&self, token: &LeaseToken, batch: Batch) -> Result<CommitSequence> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
         lease::verify_token(&state.records, token)?;
         for (key, value) in batch.changes {
@@ -694,13 +798,19 @@ impl Connection {
 
     /// Read the active lease deadline for `key`, if any.
     pub fn lease_until_millis(&self, key: &str) -> Result<Option<u64>> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         lease::lease_until(&self.read_state()?.records, key)
     }
 
     /// List CAS objects under `namespace_prefix` that have no committed metadata reference.
     pub fn scan_orphans(&self, namespace_prefix: &str) -> Result<Vec<ObjectRef>> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let state = self.read_state()?;
         let referenced = refs::referenced_hashes(&state.records, namespace_prefix);
         Ok(self
@@ -713,19 +823,20 @@ impl Connection {
 
     /// Run read-only consistency probes against this database.
     pub fn doctor(&self) -> Result<DoctorReport> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let state = self.read_state()?;
-        doctor::diagnose(
-            &state.records,
-            &self.objects,
-            self.path(),
-            self.wal_path(),
-        )
+        doctor::diagnose(&state.records, &self.objects, self.path(), self.wal_path())
     }
 
     /// Delete orphan objects that are still unreferenced after a fresh scan.
     pub fn reclaim_orphans(&self, objects: &[ObjectRef]) -> Result<ReclaimReport> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let state = self.read_state()?;
         let referenced = refs::referenced_hashes(&state.records, "");
         let mut report = ReclaimReport::default();
@@ -954,7 +1065,10 @@ impl Connection {
     }
 
     fn reconcile_leases_on_open(&self) -> Result<()> {
-        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self
+            .operation_lock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         self.mutate_active_state_unlocked(|state| {
             lease::reconcile_expired_leases(&mut state.records)?;
             Ok(())
@@ -1115,7 +1229,11 @@ fn replace_main_file(temp: &Path, destination: &Path) -> Result<()> {
 
 fn encode(state: &State) -> Result<Vec<u8>> {
     let legacy = state.schema.is_some() && state.catalog.is_none();
-    let mut bytes = if legacy { LEGACY_MAGIC.to_vec() } else { MAGIC.to_vec() };
+    let mut bytes = if legacy {
+        LEGACY_MAGIC.to_vec()
+    } else {
+        MAGIC.to_vec()
+    };
     match &state.schema {
         Some(schema) => {
             bytes.push(1);
@@ -1129,7 +1247,9 @@ fn encode(state: &State) -> Result<Vec<u8>> {
         write_bytes(&mut bytes, key.as_bytes())?;
         write_bytes(&mut bytes, value)?;
     }
-    if legacy { return Ok(bytes); }
+    if legacy {
+        return Ok(bytes);
+    }
     match &state.catalog {
         Some(catalog) => {
             bytes.push(1);
@@ -1183,10 +1303,20 @@ fn decode(bytes: &[u8]) -> Result<State> {
         if let (Some(schema), Some(catalog)) = (&schema, &catalog) {
             schema::validate_snapshot(&schema.document, catalog)?;
         }
-        return Ok(State { schema, catalog, records });
+        return Ok(State {
+            schema,
+            catalog,
+            records,
+        });
     }
-    if cursor != bytes.len() { return Err(Error::Corrupt("trailing data")); }
-    Ok(State { schema, catalog: None, records })
+    if cursor != bytes.len() {
+        return Err(Error::Corrupt("trailing data"));
+    }
+    Ok(State {
+        schema,
+        catalog: None,
+        records,
+    })
 }
 
 fn write_u32(bytes: &mut Vec<u8>, value: usize) -> Result<()> {
@@ -1274,17 +1404,15 @@ mod tests {
         let leftovers = fs::read_dir(path.parent().unwrap())
             .unwrap()
             .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(&prefix)
-            })
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
             .count();
         assert_eq!(leftovers, 0);
 
         let reopened = Connection::open(&path).unwrap();
-        assert_eq!(reopened.get("project/meta").unwrap(), Some(b"Spark".to_vec()));
+        assert_eq!(
+            reopened.get("project/meta").unwrap(),
+            Some(b"Spark".to_vec())
+        );
         drop(reopened);
         cleanup(&path);
     }
@@ -1309,12 +1437,13 @@ mod tests {
             ("other/c".into(), Some(b"ignored".to_vec())),
         ])
         .unwrap();
-        assert_eq!(
-            conn.scan_prefix("frontier/", None, 10).unwrap().len(),
-            2
-        );
-        assert!(conn.compare_exchange("frontier/a", Some(b"queued"), Some(b"claimed")).unwrap());
-        assert!(!conn.compare_exchange("frontier/a", Some(b"queued"), Some(b"stale")).unwrap());
+        assert_eq!(conn.scan_prefix("frontier/", None, 10).unwrap().len(), 2);
+        assert!(conn
+            .compare_exchange("frontier/a", Some(b"queued"), Some(b"claimed"))
+            .unwrap());
+        assert!(!conn
+            .compare_exchange("frontier/a", Some(b"queued"), Some(b"stale"))
+            .unwrap());
         assert_eq!(conn.get("frontier/a").unwrap(), Some(b"claimed".to_vec()));
     }
 

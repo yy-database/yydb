@@ -55,7 +55,11 @@ pub enum Error {
     /// Lease has expired.
     LeaseExpired { key: String },
     /// Registered UDF version does not match the invocation.
-    UdfVersionMismatch { name: String, expected: u32, got: u32 },
+    UdfVersionMismatch {
+        name: String,
+        expected: u32,
+        got: u32,
+    },
     /// Namespace quota cannot admit another record.
     QuotaExceeded { namespace: String },
 }
@@ -94,7 +98,11 @@ impl fmt::Display for Error {
                 write!(f, "fencing mismatch on key {key}")
             }
             Self::LeaseExpired { key } => write!(f, "lease expired on key {key}"),
-            Self::UdfVersionMismatch { name, expected, got } => write!(
+            Self::UdfVersionMismatch {
+                name,
+                expected,
+                got,
+            } => write!(
                 f,
                 "UDF {name} version mismatch: expected {expected}, got {got}"
             ),

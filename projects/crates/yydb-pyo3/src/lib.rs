@@ -22,12 +22,8 @@ fn version() -> String {
 #[pyfunction]
 #[pyo3(signature = (db_path, bind, insecure_bind=None))]
 fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> PyResult<()> {
-    yydb_server::run_serve(
-        Path::new(&db_path),
-        &bind,
-        insecure_bind.unwrap_or(false),
-    )
-    .map_err(map_err)?;
+    yydb_server::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
+        .map_err(map_err)?;
     Ok(())
 }
 
@@ -65,10 +61,7 @@ fn info_text(db_path: String) -> PyResult<String> {
         }
         None => lines.push("schema=(none)".to_owned()),
     }
-    lines.push(format!(
-        "records={}",
-        conn.record_count().map_err(map_err)?
-    ));
+    lines.push(format!("records={}", conn.record_count().map_err(map_err)?));
     lines.push(format!("journal_mode={}", conn.journal_mode().as_str()));
     if let (Some(wal), Some(shm)) = (conn.wal_path(), conn.shm_path()) {
         let (wal_on, shm_on, frames) =

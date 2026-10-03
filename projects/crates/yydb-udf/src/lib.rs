@@ -9,22 +9,21 @@
 mod capability;
 mod contract;
 mod error;
+mod host;
 mod identity;
 mod implementation;
 mod invocation;
 mod native;
 mod registry;
-mod host;
 mod value;
 mod vos;
 
-pub use capability::{
-    CapabilitySet, Determinism, Effect, Placement, UdfPolicy,
-};
-pub use contract::{
-    ImplementationKind, Signature, UdfDefinition, UdfType,
-};
+pub use capability::{CapabilitySet, Determinism, Effect, Placement, UdfPolicy};
+pub use contract::{ImplementationKind, Signature, UdfDefinition, UdfType};
 pub use error::{Result, UdfError};
+pub use host::{
+    HostFunctionHandle, HostMicroDefinition, HostMicroImplementation, HostRuntimeAdapter,
+};
 pub use identity::{UdfFingerprint, UdfIdentity};
 pub use implementation::UdfImplementation;
 pub use invocation::{Budget, InvocationMode, UdfContext, UdfInvocation};
@@ -33,8 +32,5 @@ pub use registry::{
     CatalogUdfEntry, CatalogUdfRegistry, HostUdfEntry, HostUdfRegistry, RegisterOptions,
     SessionUdfEntry, SessionUdfRegistry, UdfRegistry,
 };
-pub use host::{
-    HostFunctionHandle, HostMicroDefinition, HostMicroImplementation, HostRuntimeAdapter,
-};
 pub use value::UdfValue;
-pub use vos::{LoweredUdf, VosProgramImplementation, lower_micro_scalar, lower_vos_macro};
+pub use vos::{lower_micro_scalar, lower_vos_macro, LoweredUdf, VosProgramImplementation};

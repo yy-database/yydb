@@ -1,16 +1,7 @@
-import type {
-    InferUdfArgs,
-    InferUdfReturn,
-    MicroEffect,
-    MicroInvocationMode,
-    UdfTypeDescriptor,
-} from "./udf-types.js";
+import type { InferUdfArgs, InferUdfReturn, MicroEffect, MicroInvocationMode, UdfTypeDescriptor } from './udf-types.js';
 
 /** Input accepted by [`Database.defineMicro`](./database.ts). */
-export interface TsMicroDefinitionInput<
-    TArgs extends readonly UdfTypeDescriptor[],
-    TReturn extends UdfTypeDescriptor,
-> {
+export interface TsMicroDefinitionInput<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor> {
     readonly name: string;
     readonly version: number;
     readonly args: TArgs;
@@ -33,7 +24,7 @@ export interface DefinedMicro<
     readonly effect: MicroEffect;
     readonly deterministic: boolean;
     readonly mode: MicroInvocationMode;
-    readonly placement: "host";
+    readonly placement: 'host';
     readonly fn: (...args: InferUdfArgs<TArgs>) => InferUdfReturn<TReturn>;
 }
 
@@ -47,10 +38,7 @@ export interface MicroHandle {
     readonly implementationVersion: number;
 }
 
-type AnyDefinedMicro = DefinedMicro<
-    readonly UdfTypeDescriptor[],
-    UdfTypeDescriptor
->;
+type AnyDefinedMicro = DefinedMicro<readonly UdfTypeDescriptor[], UdfTypeDescriptor>;
 
 interface RegisteredMicro {
     readonly handle: MicroHandle;
@@ -114,14 +102,10 @@ export class MicroSessionRegistry {
             hostId: payload.hostId,
             functionId: payload.functionId,
             implementationVersion: payload.handleVersion,
-            name: "",
+            name: '',
             version: 0,
         };
-        return this.invokeScalar(handle, [...payload.args]) as
-            | string
-            | number
-            | boolean
-            | null;
+        return this.invokeScalar(handle, [...payload.args]) as string | number | boolean | null;
     }
 
     /** Invokes a registered scalar micro (host adapter entry point). */
@@ -130,13 +114,11 @@ export class MicroSessionRegistry {
         if (!definition) {
             throw new Error(`micro not found: ${handle.functionId}`);
         }
-        if (definition.mode !== "scalar") {
+        if (definition.mode !== 'scalar') {
             throw new Error(`micro ${definition.name} is not scalar mode`);
         }
         if (args.length !== definition.args.length) {
-            throw new Error(
-                `micro ${definition.name} arity mismatch: expected ${definition.args.length}, got ${args.length}`,
-            );
+            throw new Error(`micro ${definition.name} arity mismatch: expected ${definition.args.length}, got ${args.length}`);
         }
         validateArgTypes(definition, args);
         const result = definition.fn(...(args as []));
@@ -151,24 +133,23 @@ export class MicroSessionRegistry {
 }
 
 /** Builds a session-local micro definition without registering it. */
-export function defineMicro<
-    TArgs extends readonly UdfTypeDescriptor[],
-    TReturn extends UdfTypeDescriptor,
->(input: TsMicroDefinitionInput<TArgs, TReturn>): DefinedMicro<TArgs, TReturn> {
+export function defineMicro<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor>(
+    input: TsMicroDefinitionInput<TArgs, TReturn>,
+): DefinedMicro<TArgs, TReturn> {
     if (!input.name.trim()) {
-        throw new Error("micro name must not be empty");
+        throw new Error('micro name must not be empty');
     }
     if (!Number.isInteger(input.version) || input.version <= 0) {
-        throw new Error("micro version must be a positive integer");
+        throw new Error('micro version must be a positive integer');
     }
-    if (input.effect !== "pure") {
-        throw new Error("TS micro effect must be pure in Phase 1");
+    if (input.effect !== 'pure') {
+        throw new Error('TS micro effect must be pure in Phase 1');
     }
     if (!input.deterministic) {
-        throw new Error("TS micro must be deterministic in Phase 1");
+        throw new Error('TS micro must be deterministic in Phase 1');
     }
-    if (typeof input.fn !== "function") {
-        throw new Error("micro fn must be a function");
+    if (typeof input.fn !== 'function') {
+        throw new Error('micro fn must be a function');
     }
     return {
         name: input.name,
@@ -177,8 +158,8 @@ export function defineMicro<
         returns: input.returns,
         effect: input.effect,
         deterministic: input.deterministic,
-        mode: input.mode ?? "scalar",
-        placement: "host",
+        mode: input.mode ?? 'scalar',
+        placement: 'host',
         fn: input.fn,
     };
 }
@@ -192,22 +173,22 @@ function validateArgTypes(definition: AnyDefinedMicro, args: unknown[]): void {
         const kind = definition.args[index]?.kind;
         const value = args[index];
         switch (kind) {
-            case "i64":
-                if (typeof value !== "number" || !Number.isInteger(value)) {
+            case 'i64':
+                if (typeof value !== 'number' || !Number.isInteger(value)) {
                     throw new Error(`micro ${definition.name} arg ${index} expects i64`);
                 }
                 break;
-            case "bool":
-                if (typeof value !== "boolean") {
+            case 'bool':
+                if (typeof value !== 'boolean') {
                     throw new Error(`micro ${definition.name} arg ${index} expects bool`);
                 }
                 break;
-            case "text":
-                if (typeof value !== "string") {
+            case 'text':
+                if (typeof value !== 'string') {
                     throw new Error(`micro ${definition.name} arg ${index} expects text`);
                 }
                 break;
-            case "null":
+            case 'null':
                 if (value !== null) {
                     throw new Error(`micro ${definition.name} arg ${index} expects null`);
                 }
@@ -220,24 +201,24 @@ function validateArgTypes(definition: AnyDefinedMicro, args: unknown[]): void {
 
 function validateReturnType(descriptor: UdfTypeDescriptor, value: unknown): void {
     switch (descriptor.kind) {
-        case "i64":
-            if (typeof value !== "number" || !Number.isInteger(value)) {
-                throw new Error("micro return expects i64");
+        case 'i64':
+            if (typeof value !== 'number' || !Number.isInteger(value)) {
+                throw new Error('micro return expects i64');
             }
             break;
-        case "bool":
-            if (typeof value !== "boolean") {
-                throw new Error("micro return expects bool");
+        case 'bool':
+            if (typeof value !== 'boolean') {
+                throw new Error('micro return expects bool');
             }
             break;
-        case "text":
-            if (typeof value !== "string") {
-                throw new Error("micro return expects text");
+        case 'text':
+            if (typeof value !== 'string') {
+                throw new Error('micro return expects text');
             }
             break;
-        case "null":
+        case 'null':
             if (value !== null) {
-                throw new Error("micro return expects null");
+                throw new Error('micro return expects null');
             }
             break;
         default:

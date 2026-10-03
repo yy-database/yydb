@@ -78,6 +78,8 @@ importers:
 
   projects/packages/yydb-linux-x64: {}
 
+  projects/packages/yydb-skills: {}
+
   projects/packages/yydb-webui:
     dependencies:
       '@yydb/yydb-client':

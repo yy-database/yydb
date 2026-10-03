@@ -1,16 +1,11 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import fs from "node:fs";
-import net from "node:net";
-import path from "node:path";
-import { connect, type Client } from "@yydb/yydb-client/node";
-import {
-    defineMicro as buildMicro,
-    type DefinedMicro,
-    type MicroHandle,
-    MicroSessionRegistry,
-} from "./micro.js";
-import { resolveYydbCli } from "./resolve-bin.js";
-import type { UdfScalarKind, UdfTypeDescriptor } from "./udf-types.js";
+import { spawn, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+import { connect, type Client } from '@yydb/yydb-client/node';
+import { defineMicro as buildMicro, type DefinedMicro, type MicroHandle, MicroSessionRegistry } from './micro.js';
+import { resolveYydbCli } from './resolve-bin.js';
+import type { UdfScalarKind, UdfTypeDescriptor } from './udf-types.js';
 
 function microFingerprint(name: string, version: number): Uint8Array {
     const bytes = new Uint8Array(32);
@@ -21,7 +16,7 @@ function microFingerprint(name: string, version: number): Uint8Array {
     return bytes;
 }
 
-export type { SchemaVersion } from "@yydb/yydb-client";
+export type { SchemaVersion } from '@yydb/yydb-client';
 
 export interface OpenOptions {
     /** Override CLI script path (tests / special installs). */
@@ -37,11 +32,11 @@ export interface OpenOptions {
 async function freeLoopbackPort(): Promise<number> {
     return await new Promise((resolve, reject) => {
         const server = net.createServer();
-        server.listen(0, "127.0.0.1", () => {
+        server.listen(0, '127.0.0.1', () => {
             const address = server.address();
-            if (!address || typeof address === "string") {
+            if (!address || typeof address === 'string') {
                 server.close();
-                reject(new Error("could not allocate loopback port"));
+                reject(new Error('could not allocate loopback port'));
                 return;
             }
             const { port } = address;
@@ -50,7 +45,7 @@ async function freeLoopbackPort(): Promise<number> {
                 else resolve(port);
             });
         });
-        server.on("error", reject);
+        server.on('error', reject);
     });
 }
 
@@ -63,7 +58,7 @@ async function waitForTcp(host: string, port: number, timeoutMs: number) {
                     socket.end();
                     resolve();
                 });
-                socket.on("error", reject);
+                socket.on('error', reject);
             });
             return;
         } catch {
@@ -90,9 +85,7 @@ export class Database {
         this.client = client;
         this.child = child;
         this.microRegistry = new MicroSessionRegistry();
-        this.client.setMicroHostHandler((payload) =>
-            this.microRegistry.invokeFromWire(payload),
-        );
+        this.client.setMicroHostHandler((payload) => this.microRegistry.invokeFromWire(payload));
     }
 
     /**
@@ -105,41 +98,37 @@ export class Database {
         const cli = options.cli ?? options.binary ?? resolveYydbCli();
         const port = options.port ?? (await freeLoopbackPort());
         const bind = `127.0.0.1:${port}`;
-        const args = [cli, "serve", resolved, "--bind", bind, ...(options.serveArgs ?? [])];
+        const args = [cli, 'serve', resolved, '--bind', bind, ...(options.serveArgs ?? [])];
 
         const child = spawn(process.execPath, args, {
-            stdio: "pipe",
+            stdio: 'pipe',
             windowsHide: true,
         });
 
-        let stderr = "";
-        child.stderr?.setEncoding("utf8");
-        child.stderr?.on("data", (chunk: string) => {
+        let stderr = '';
+        child.stderr?.setEncoding('utf8');
+        child.stderr?.on('data', (chunk: string) => {
             stderr += chunk;
         });
 
         const exitPromise = new Promise<never>((_, reject) => {
-            child.once("exit", (code, signal) => {
-                reject(
-                    new Error(
-                        `yydb engine exited early (code=${code}, signal=${signal}): ${stderr.trim()}`,
-                    ),
-                );
+            child.once('exit', (code, signal) => {
+                reject(new Error(`yydb engine exited early (code=${code}, signal=${signal}): ${stderr.trim()}`));
             });
-            child.once("error", reject);
+            child.once('error', reject);
         });
 
         try {
-            await Promise.race([waitForTcp("127.0.0.1", port, 8_000), exitPromise]);
+            await Promise.race([waitForTcp('127.0.0.1', port, 8_000), exitPromise]);
             const client = await connect(bind);
-            child.removeAllListeners("exit");
-            child.removeAllListeners("error");
-            child.on("exit", () => {
+            child.removeAllListeners('exit');
+            child.removeAllListeners('error');
+            child.on('exit', () => {
                 /* closed via Database.close or crash */
             });
             return new Database(resolved, bind, client, child);
         } catch (error) {
-            child.kill("SIGTERM");
+            child.kill('SIGTERM');
             throw error;
         }
     }
@@ -172,10 +161,9 @@ export class Database {
      * Build a typed session-local micro definition. Does not register it with
      * the engine until [`registerMicro`](./database.ts) is called.
      */
-    defineMicro<
-        TArgs extends readonly UdfTypeDescriptor[],
-        TReturn extends UdfTypeDescriptor,
-    >(definition: Parameters<typeof buildMicro<TArgs, TReturn>>[0]): DefinedMicro<TArgs, TReturn> {
+    defineMicro<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor>(
+        definition: Parameters<typeof buildMicro<TArgs, TReturn>>[0],
+    ): DefinedMicro<TArgs, TReturn> {
         return buildMicro(definition);
     }
 
@@ -184,10 +172,9 @@ export class Database {
      * session registry and sync metadata to the private engine. Host micros are
      * session-local and never written to `.yydb`.
      */
-    async registerMicro<
-        TArgs extends readonly UdfTypeDescriptor[],
-        TReturn extends UdfTypeDescriptor,
-    >(definition: DefinedMicro<TArgs, TReturn>): Promise<MicroHandle> {
+    async registerMicro<TArgs extends readonly UdfTypeDescriptor[], TReturn extends UdfTypeDescriptor>(
+        definition: DefinedMicro<TArgs, TReturn>,
+    ): Promise<MicroHandle> {
         const handle = this.microRegistry.register(definition);
         await this.client.registerMicro({
             hostId: handle.hostId,
@@ -220,11 +207,11 @@ export class Database {
             return;
         }
         await new Promise<void>((resolve) => {
-            child.once("exit", () => resolve());
-            child.kill("SIGTERM");
+            child.once('exit', () => resolve());
+            child.kill('SIGTERM');
             setTimeout(() => {
                 if (child.exitCode === null && !child.killed) {
-                    child.kill("SIGKILL");
+                    child.kill('SIGKILL');
                 }
                 resolve();
             }, 2_000);

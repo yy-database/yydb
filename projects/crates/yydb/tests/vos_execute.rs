@@ -32,10 +32,7 @@ fn execute_inserts_one_user_row() {
         .query(r#"User.filter(x => x.active).collect()"#)
         .expect("query");
     assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0].get("user_name"),
-        Some(&Value::Text("ada".into()))
-    );
+    assert_eq!(rows[0].get("user_name"), Some(&Value::Text("ada".into())));
 }
 
 #[test]
@@ -113,10 +110,7 @@ fn query_static_insert_returns_row() {
         )
         .expect("insert returning");
     assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0].get("user_name"),
-        Some(&Value::Text("ada".into()))
-    );
+    assert_eq!(rows[0].get("user_name"), Some(&Value::Text("ada".into())));
 }
 
 const BLOG_WITH_MACRO: &str = r#"

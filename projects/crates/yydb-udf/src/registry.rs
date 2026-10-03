@@ -92,8 +92,7 @@ impl CatalogUdfRegistry {
     /// Returns the version registered for `name`, if any.
     pub fn version_for_name(&self, name: &str) -> Option<u32> {
         self.entries.values().find_map(|entry| {
-            (entry.definition.identity.name() == name)
-                .then_some(entry.definition.identity.version)
+            (entry.definition.identity.name() == name).then_some(entry.definition.identity.version)
         })
     }
 }
@@ -106,11 +105,7 @@ pub struct SessionUdfRegistry {
 
 impl SessionUdfRegistry {
     /// Registers a session-local UDF.
-    pub fn register(
-        &mut self,
-        definition: UdfDefinition,
-        options: RegisterOptions,
-    ) -> Result<()> {
+    pub fn register(&mut self, definition: UdfDefinition, options: RegisterOptions) -> Result<()> {
         definition.validate()?;
         let key = logical_key(&definition.identity);
         self.entries.insert(
@@ -139,8 +134,7 @@ impl SessionUdfRegistry {
     /// Returns the version registered for `name`, if any.
     pub fn version_for_name(&self, name: &str) -> Option<u32> {
         self.entries.values().find_map(|entry| {
-            (entry.definition.identity.name() == name)
-                .then_some(entry.definition.identity.version)
+            (entry.definition.identity.name() == name).then_some(entry.definition.identity.version)
         })
     }
 
@@ -276,9 +270,7 @@ impl UdfRegistry {
         if let Some(entry) = self.catalog.get(identity) {
             return Some(&entry.definition);
         }
-        self.builtins
-            .get(identity)
-            .map(|entry| &entry.definition)
+        self.builtins.get(identity).map(|entry| &entry.definition)
     }
 
     /// Returns logical function names registered in the catalog.
@@ -325,7 +317,6 @@ impl UdfRegistry {
         }
         signature.ensure_args(&UdfValue::argument_types(&invocation.args))?;
         let mut context = UdfContext::new(budget);
-        host.implementation
-            .invoke(&mut context, &invocation.args)
+        host.implementation.invoke(&mut context, &invocation.args)
     }
 }

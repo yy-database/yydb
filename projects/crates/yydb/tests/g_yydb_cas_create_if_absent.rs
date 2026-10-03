@@ -14,9 +14,6 @@ fn g_yydb_cas_create_if_absent() {
     assert!(!conn
         .compare_exchange("lease/item", None, Some(b"again"))
         .unwrap());
-    assert_eq!(
-        conn.get("lease/item").unwrap(),
-        Some(b"new".to_vec())
-    );
+    assert_eq!(conn.get("lease/item").unwrap(), Some(b"new".to_vec()));
     cleanup(&path);
 }

@@ -92,11 +92,7 @@ impl HostMicroDefinition {
 /// Adapter that owns the real function registry in an external host runtime.
 pub trait HostRuntimeAdapter: Send + Sync {
     /// Invokes one scalar call through the host runtime.
-    fn invoke_scalar(
-        &self,
-        handle: &HostFunctionHandle,
-        args: &[UdfValue],
-    ) -> Result<UdfValue>;
+    fn invoke_scalar(&self, handle: &HostFunctionHandle, args: &[UdfValue]) -> Result<UdfValue>;
 
     /// Invokes a bounded batch call through the host runtime.
     fn invoke_batch(
@@ -118,7 +114,10 @@ impl HostMicroImplementation {
         definition: HostMicroDefinition,
         adapter: std::sync::Arc<dyn HostRuntimeAdapter>,
     ) -> Self {
-        Self { definition, adapter }
+        Self {
+            definition,
+            adapter,
+        }
     }
 }
 
@@ -132,7 +131,9 @@ impl UdfImplementation for HostMicroImplementation {
     }
 
     fn invoke(&self, context: &mut UdfContext, args: &[UdfValue]) -> Result<UdfValue> {
-        self.definition.signature.ensure_args(&UdfValue::argument_types(args))?;
+        self.definition
+            .signature
+            .ensure_args(&UdfValue::argument_types(args))?;
         context.check_cancelled()?;
         context.charge(1)?;
         self.adapter.invoke_scalar(&self.definition.handle, args)

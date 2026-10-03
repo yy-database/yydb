@@ -100,7 +100,10 @@ impl VectorValue {
 
     /// Returns the vector dimension.
     pub fn dimension(&self) -> u32 {
-        self.values.len().try_into().expect("validated vector dimension")
+        self.values
+            .len()
+            .try_into()
+            .expect("validated vector dimension")
     }
 
     /// Returns the finite vector components.
@@ -132,14 +135,24 @@ pub struct FieldHandle {
 
 impl FieldHandle {
     /// Creates a field handle with non-zero schema and field identities.
-    pub fn new(schema_id: u64, field_id: u64, index: u32, ty: Type) -> Result<Self, FieldHandleError> {
+    pub fn new(
+        schema_id: u64,
+        field_id: u64,
+        index: u32,
+        ty: Type,
+    ) -> Result<Self, FieldHandleError> {
         if schema_id == 0 {
             return Err(FieldHandleError::InvalidSchemaId);
         }
         if field_id == 0 {
             return Err(FieldHandleError::InvalidFieldId);
         }
-        Ok(Self { schema_id, field_id, index, ty })
+        Ok(Self {
+            schema_id,
+            field_id,
+            index,
+            ty,
+        })
     }
 
     /// Returns the schema identity owning this field.
@@ -200,10 +213,18 @@ impl RecordLayout {
             if field.field_id == 0 {
                 return Err(RecordLayoutError::InvalidFieldId);
             }
-            if fields[..position].iter().any(|prior| prior.field_id == field.field_id) {
-                return Err(RecordLayoutError::DuplicateFieldId { field_id: field.field_id });
+            if fields[..position]
+                .iter()
+                .any(|prior| prior.field_id == field.field_id)
+            {
+                return Err(RecordLayoutError::DuplicateFieldId {
+                    field_id: field.field_id,
+                });
             }
-            if fields[..position].iter().any(|prior| prior.index == field.index) {
+            if fields[..position]
+                .iter()
+                .any(|prior| prior.index == field.index)
+            {
                 return Err(RecordLayoutError::DuplicateIndex { index: field.index });
             }
         }
@@ -326,7 +347,11 @@ impl Value {
             },
             Self::Record(value) => Type::Record {
                 schema_id: value.schema_id,
-                field_count: value.fields.len().try_into().expect("validated record field count"),
+                field_count: value
+                    .fields
+                    .len()
+                    .try_into()
+                    .expect("validated record field count"),
             },
         }
     }
@@ -728,10 +753,17 @@ fn validate_program(program: &Program) -> Result<(), ValidationError> {
             }
             Node::ReadField { record, field } => {
                 let record_type = reference_type(&types, node, *record)?;
-                let Type::Record { schema_id, field_count } = record_type else {
+                let Type::Record {
+                    schema_id,
+                    field_count,
+                } = record_type
+                else {
                     return Err(ValidationError::TypeMismatch {
                         node,
-                        expected: Type::Record { schema_id: 0, field_count: 0 },
+                        expected: Type::Record {
+                            schema_id: 0,
+                            field_count: 0,
+                        },
                         found: record_type,
                     });
                 };
@@ -783,7 +815,9 @@ fn validate_layout_bindings(
 ) -> Result<(), ValidationError> {
     for (position, node) in program.nodes.iter().enumerate() {
         let node_id = position as NodeId;
-        let Node::ReadField { field, .. } = node else { continue };
+        let Node::ReadField { field, .. } = node else {
+            continue;
+        };
         let layout = layouts
             .iter()
             .find(|layout| layout.schema_id == field.schema_id)
@@ -848,8 +882,12 @@ fn evaluate_program(
                 inputs[usize::try_from(*index).expect("validated input index")].clone()
             }
             Node::ReadField { record, field } => {
-                let record = as_record(&values[usize::try_from(*record).expect("validated node index")]);
-                let value = record.field(field.index).expect("validated record field index").clone();
+                let record =
+                    as_record(&values[usize::try_from(*record).expect("validated node index")]);
+                let value = record
+                    .field(field.index)
+                    .expect("validated record field index")
+                    .clone();
                 ensure_type(&value, field.ty)?;
                 value
             }
@@ -1046,10 +1084,13 @@ mod tests {
         let vector = VectorValue::new(vec![0.25, 0.5, 0.75], VectorMetric::Cosine)
             .expect("finite vector is valid");
         assert_eq!(vector.dimension(), 3);
-        assert_eq!(Value::Vector(vector).ty(), Type::Vector {
-            dimension: 3,
-            metric: VectorMetric::Cosine,
-        });
+        assert_eq!(
+            Value::Vector(vector).ty(),
+            Type::Vector {
+                dimension: 3,
+                metric: VectorMetric::Cosine,
+            }
+        );
     }
 
     #[test]
@@ -1080,7 +1121,10 @@ mod tests {
         })
         .expect("record field access is valid");
 
-        assert_eq!(program.evaluate(&[], &[Value::Record(record)]), Ok(Value::I64(42)));
+        assert_eq!(
+            program.evaluate(&[], &[Value::Record(record)]),
+            Ok(Value::I64(42))
+        );
     }
 
     #[test]
@@ -1176,7 +1220,10 @@ mod tests {
                 parameters: vec![],
                 inputs: vec![record_type],
                 nodes: vec![
-                    Node::Input { index: 0, ty: record_type },
+                    Node::Input {
+                        index: 0,
+                        ty: record_type,
+                    },
                     Node::ReadField { record: 0, field },
                 ],
                 output: 1,
@@ -1186,7 +1233,10 @@ mod tests {
         )
         .expect("layout-bound program validates");
         let row = RecordValue::new(7, vec![Value::I64(42)]).unwrap();
-        assert_eq!(program.evaluate(&[], &[Value::Record(row)]), Ok(Value::I64(42)));
+        assert_eq!(
+            program.evaluate(&[], &[Value::Record(row)]),
+            Ok(Value::I64(42))
+        );
     }
 
     #[test]
@@ -1210,7 +1260,10 @@ mod tests {
                 parameters: vec![],
                 inputs: vec![record_type],
                 nodes: vec![
-                    Node::Input { index: 0, ty: record_type },
+                    Node::Input {
+                        index: 0,
+                        ty: record_type,
+                    },
                     Node::ReadField { record: 0, field },
                 ],
                 output: 1,
@@ -1219,7 +1272,10 @@ mod tests {
             &[layout],
         )
         .expect_err("layout mismatch must be rejected");
-        assert!(matches!(error, ValidationError::LayoutFieldMismatch { field_id: 101, .. }));
+        assert!(matches!(
+            error,
+            ValidationError::LayoutFieldMismatch { field_id: 101, .. }
+        ));
     }
 
     #[test]
