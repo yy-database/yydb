@@ -219,6 +219,27 @@ impl UdfRegistry {
         self.session.register(definition, options)
     }
 
+    /// Registers a session-local micro and binds its host implementation.
+    pub fn register_session_micro(
+        &mut self,
+        definition: UdfDefinition,
+        implementation: Arc<dyn UdfImplementation>,
+        options: RegisterOptions,
+    ) -> Result<()> {
+        self.register_session(definition, options)?;
+        self.bind_host(implementation)
+    }
+
+    /// Registers a catalog macro and binds its host implementation.
+    pub fn register_catalog_macro(
+        &mut self,
+        definition: UdfDefinition,
+        implementation: Arc<dyn UdfImplementation>,
+    ) -> Result<()> {
+        self.catalog_mut().register(definition)?;
+        self.bind_host(implementation)
+    }
+
     /// Installs a host implementation after verifying catalog/session metadata exists.
     pub fn bind_host(&mut self, implementation: Arc<dyn UdfImplementation>) -> Result<()> {
         let identity = implementation.identity();

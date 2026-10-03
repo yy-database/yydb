@@ -29,7 +29,7 @@ fn double_native() -> NativeUdfDefinition {
 fn native_udf_registers_and_invokes_through_host_registry() {
     let native = double_native();
     native.validate().expect("native definition");
-    let definition = native.catalog_definition();
+    let definition = native.session_definition();
     let identity = definition.identity.clone();
 
     let mut registry = UdfRegistry::default();
@@ -93,12 +93,13 @@ fn missing_host_implementation_returns_unavailable() {
         signature: Signature::new(vec![UdfType::Text], UdfType::Text),
         policy: UdfPolicy::pure_embedded(),
         placement: Placement::Host,
-        implementation_kind: ImplementationKind::TypeScript,
+        implementation_kind: ImplementationKind::TypeScriptMicro,
         fingerprint: [3u8; 32],
     };
-    let registry = UdfRegistry::default();
-    let mut registry = registry;
-    registry.catalog_mut().register(definition).expect("catalog");
+    let mut registry = UdfRegistry::default();
+    registry
+        .register_session(definition, RegisterOptions::new())
+        .expect("session");
     assert!(matches!(
         registry.invoke(
             &UdfInvocation {
