@@ -24,6 +24,11 @@ export default defineConfig({
             '**/*.vue',
         ],
     },
+    trust: {
+        repo: 'yy-database/yydb',
+        file: 'release-npm.yml',
+        environment: 'NPM_PUBLISH',
+    },
     publish: {
         packages: [
             '@yydb/yydb-win32-x64',
