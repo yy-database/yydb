@@ -5,15 +5,15 @@
  * Frontends accept either magic and do not require product consistency.
  */
 
-export const MAGIC_YYDB = new TextEncoder().encode("YYDB");
-export const MAGIC_YYDS = new TextEncoder().encode("YYDS");
+export const MAGIC_YYDB = new TextEncoder().encode('YYDB');
+export const MAGIC_YYDS = new TextEncoder().encode('YYDS');
 /** @deprecated Use MAGIC_YYDB — encode default product. */
 export const MAGIC = MAGIC_YYDB;
 
 /** Current wire version digits. */
-export const WIRE_VERSION = new TextEncoder().encode("0000");
+export const WIRE_VERSION = new TextEncoder().encode('0000');
 /** Next planned wire version (not spoken yet). */
-export const WIRE_VERSION_NEXT = new TextEncoder().encode("0001");
+export const WIRE_VERSION_NEXT = new TextEncoder().encode('0001');
 
 export const HEADER_LEN = 20;
 export const MAX_BODY_LEN = 16 * 1024 * 1024;
@@ -41,14 +41,10 @@ export const MsgType = {
 } as const;
 
 /** Phase-1 scalar kinds on the YY wire micro register path. */
-export type WireUdfScalarKind = "null" | "bool" | "i64" | "text";
+export type WireUdfScalarKind = 'null' | 'bool' | 'i64' | 'text';
 
 /** Phase-1 scalar value on the YY wire host invoke path. */
-export type WireUdfScalarValue =
-    | null
-    | boolean
-    | number
-    | string;
+export type WireUdfScalarValue = null | boolean | number | string;
 
 export interface MicroHostInvokePayload {
     hostId: number;
@@ -59,7 +55,7 @@ export interface MicroHostInvokePayload {
 
 export type MsgTypeCode = (typeof MsgType)[keyof typeof MsgType];
 
-export type ProductMagic = "YYDB" | "YYDS";
+export type ProductMagic = 'YYDB' | 'YYDS';
 
 export interface Frame {
     msgType: number;
@@ -87,27 +83,27 @@ function readU32(view: DataView, offset: number) {
 }
 
 function productBytes(product: ProductMagic): Uint8Array {
-    return product === "YYDS" ? MAGIC_YYDS : MAGIC_YYDB;
+    return product === 'YYDS' ? MAGIC_YYDS : MAGIC_YYDB;
 }
 
 function parseProduct(bytes: Uint8Array): ProductMagic {
     const text = new TextDecoder().decode(bytes.subarray(0, 4));
-    if (text === "YYDB" || text === "YYDS") {
+    if (text === 'YYDB' || text === 'YYDS') {
         return text;
     }
-    throw new Error("wire frame bad product magic (want YYDB|YYDS)");
+    throw new Error('wire frame bad product magic (want YYDB|YYDS)');
 }
 
 function checkVersion(bytes: Uint8Array) {
     const version = new TextDecoder().decode(bytes.subarray(4, 8));
-    if (version !== "0000") {
+    if (version !== '0000') {
         throw new Error(`wire version not supported (got ${version}, want 0000)`);
     }
 }
 
-export function encodeFrame(frame: Frame, product: ProductMagic = "YYDB"): Uint8Array {
+export function encodeFrame(frame: Frame, product: ProductMagic = 'YYDB'): Uint8Array {
     if (frame.body.byteLength > MAX_BODY_LEN) {
-        throw new Error("wire body too large");
+        throw new Error('wire body too large');
     }
     const out = new Uint8Array(HEADER_LEN + frame.body.byteLength);
     out.set(productBytes(product), 0);
@@ -123,7 +119,7 @@ export function encodeFrame(frame: Frame, product: ProductMagic = "YYDB"): Uint8
 
 export function decodeFrame(bytes: Uint8Array): Frame {
     if (bytes.byteLength < HEADER_LEN) {
-        throw new Error("wire frame truncated header");
+        throw new Error('wire frame truncated header');
     }
     const product = parseProduct(bytes);
     checkVersion(bytes);
@@ -133,11 +129,11 @@ export function decodeFrame(bytes: Uint8Array): Frame {
     const requestId = readU32(view, 12);
     const bodyLen = readU32(view, 16);
     if (bodyLen > MAX_BODY_LEN) {
-        throw new Error("wire body too large");
+        throw new Error('wire body too large');
     }
     const need = HEADER_LEN + bodyLen;
     if (bytes.byteLength < need) {
-        throw new Error("wire frame truncated body");
+        throw new Error('wire frame truncated body');
     }
     return {
         msgType,
@@ -185,13 +181,13 @@ export interface MicroRegisterPayload {
 
 function encodeUdfTypeTag(kind: WireUdfScalarKind): number {
     switch (kind) {
-        case "null":
+        case 'null':
             return 0;
-        case "bool":
+        case 'bool':
             return 1;
-        case "i64":
+        case 'i64':
             return 2;
-        case "text":
+        case 'text':
             return 3;
         default:
             throw new Error(`unsupported wire udf type: ${kind}`);
@@ -210,28 +206,28 @@ function encodeUdfValue(out: number[], value: WireUdfScalarValue): void {
         out.push(0);
         return;
     }
-    if (typeof value === "boolean") {
+    if (typeof value === 'boolean') {
         out.push(1, value ? 1 : 0);
         return;
     }
-    if (typeof value === "number") {
+    if (typeof value === 'number') {
         out.push(2);
         const view = new DataView(new ArrayBuffer(8));
         view.setBigInt64(0, BigInt(value), true);
         out.push(...new Uint8Array(view.buffer));
         return;
     }
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
         out.push(3);
         pushBytes(out, new TextEncoder().encode(value));
         return;
     }
-    throw new Error("unsupported wire udf value");
+    throw new Error('unsupported wire udf value');
 }
 
 function decodeUdfValue(body: Uint8Array, offset: { n: number }): WireUdfScalarValue {
     if (offset.n >= body.byteLength) {
-        throw new Error("wire scalar value missing tag");
+        throw new Error('wire scalar value missing tag');
     }
     const tag = body[offset.n]!;
     offset.n += 1;
@@ -240,7 +236,7 @@ function decodeUdfValue(body: Uint8Array, offset: { n: number }): WireUdfScalarV
             return null;
         case 1: {
             if (offset.n >= body.byteLength) {
-                throw new Error("wire bool value truncated");
+                throw new Error('wire bool value truncated');
             }
             const value = body[offset.n]! !== 0;
             offset.n += 1;
@@ -248,7 +244,7 @@ function decodeUdfValue(body: Uint8Array, offset: { n: number }): WireUdfScalarV
         }
         case 2: {
             if (offset.n + 8 > body.byteLength) {
-                throw new Error("wire i64 value truncated");
+                throw new Error('wire i64 value truncated');
             }
             const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
             const value = Number(view.getBigInt64(offset.n, true));
@@ -261,13 +257,13 @@ function decodeUdfValue(body: Uint8Array, offset: { n: number }): WireUdfScalarV
             return new TextDecoder().decode(bytes);
         }
         default:
-            throw new Error("wire scalar value has invalid type tag");
+            throw new Error('wire scalar value has invalid type tag');
     }
 }
 
 function encodeUdfValues(values: readonly WireUdfScalarValue[]): number[] {
     if (values.length > 255) {
-        throw new Error("wire scalar arg count exceeds u8");
+        throw new Error('wire scalar arg count exceeds u8');
     }
     const out: number[] = [values.length];
     for (const value of values) {
@@ -278,7 +274,7 @@ function encodeUdfValues(values: readonly WireUdfScalarValue[]): number[] {
 
 function decodeUdfValues(body: Uint8Array, offset: { n: number }): WireUdfScalarValue[] {
     if (offset.n >= body.byteLength) {
-        throw new Error("wire scalar args missing count");
+        throw new Error('wire scalar args missing count');
     }
     const count = body[offset.n]!;
     offset.n += 1;
@@ -308,11 +304,7 @@ export function encodeMicroHostInvokeOk(value: WireUdfScalarValue): Uint8Array {
 }
 
 /** Encode a `ScalarCall` body. */
-export function encodeScalarCall(
-    name: string,
-    version: number,
-    args: readonly WireUdfScalarValue[],
-): Uint8Array {
+export function encodeScalarCall(name: string, version: number, args: readonly WireUdfScalarValue[]): Uint8Array {
     const out: number[] = [];
     pushU32(out, version >>> 0);
     pushBytes(out, new TextEncoder().encode(name));
@@ -327,7 +319,7 @@ export function decodeScalarCallOk(body: Uint8Array): WireUdfScalarValue {
 
 function readU64At(body: Uint8Array, offset: { n: number }): bigint {
     if (offset.n + 8 > body.byteLength) {
-        throw new Error("wire body truncated u64");
+        throw new Error('wire body truncated u64');
     }
     const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
     const value = view.getBigUint64(offset.n, true);
@@ -337,7 +329,7 @@ function readU64At(body: Uint8Array, offset: { n: number }): bigint {
 
 export function encodeMicroRegister(payload: MicroRegisterPayload): Uint8Array {
     if (payload.fingerprint.byteLength !== 32) {
-        throw new Error("micro register fingerprint must be 32 bytes");
+        throw new Error('micro register fingerprint must be 32 bytes');
     }
     const out: number[] = [];
     pushU64(out, payload.hostId);
@@ -346,7 +338,7 @@ export function encodeMicroRegister(payload: MicroRegisterPayload): Uint8Array {
     pushBytes(out, new TextEncoder().encode(payload.name));
     pushBytes(out, new TextEncoder().encode(payload.functionId));
     if (payload.args.length > 255) {
-        throw new Error("micro register supports at most 255 args");
+        throw new Error('micro register supports at most 255 args');
     }
     out.push(payload.args.length);
     for (const arg of payload.args) {
@@ -366,7 +358,7 @@ export function encodeKvPut(key: string, value: Uint8Array): Uint8Array {
 
 function readU32At(body: Uint8Array, offset: { n: number }): number {
     if (offset.n + 4 > body.byteLength) {
-        throw new Error("wire body truncated u32");
+        throw new Error('wire body truncated u32');
     }
     const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
     const value = readU32(view, offset.n);
@@ -376,7 +368,7 @@ function readU32At(body: Uint8Array, offset: { n: number }): number {
 
 function readBytesAt(body: Uint8Array, offset: { n: number }, len: number): Uint8Array {
     if (offset.n + len > body.byteLength) {
-        throw new Error("wire body truncated bytes");
+        throw new Error('wire body truncated bytes');
     }
     const slice = body.slice(offset.n, offset.n + len);
     offset.n += len;
@@ -390,7 +382,7 @@ export interface SchemaVersion {
 
 export function decodeSchemaGetOk(body: Uint8Array): SchemaVersion | null {
     if (body.byteLength === 0) {
-        throw new Error("schema get ok empty");
+        throw new Error('schema get ok empty');
     }
     if (body[0] === 0) {
         return null;
@@ -404,7 +396,7 @@ export function decodeSchemaGetOk(body: Uint8Array): SchemaVersion | null {
 
 export function decodeKvGetOk(body: Uint8Array): Uint8Array | null {
     if (body.byteLength === 0) {
-        throw new Error("kv get ok empty");
+        throw new Error('kv get ok empty');
     }
     if (body[0] === 0) {
         return null;

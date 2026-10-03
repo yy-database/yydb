@@ -30,11 +30,13 @@ fn g_yydb_quota_response_evict() {
 
     let stats = conn.namespace_stats("cache/response/").unwrap();
     assert_eq!(
-        stats.records_used,
-        2,
+        stats.records_used, 2,
         "gate G-YYDB-5 fixture yydb.quota.response_evict expected LRU eviction to two records"
     );
     assert_eq!(conn.get("cache/response/a").unwrap(), None);
-    assert_eq!(conn.get("cache/response/c").unwrap(), Some(b"three".to_vec()));
+    assert_eq!(
+        conn.get("cache/response/c").unwrap(),
+        Some(b"three".to_vec())
+    );
     cleanup(&path);
 }

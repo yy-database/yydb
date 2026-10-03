@@ -19,13 +19,9 @@ fn g_yydb_cas_race_two_writers() {
 
     let wins = [first, second].iter().filter(|won| **won).count();
     assert_eq!(
-        wins,
-        1,
+        wins, 1,
         "gate G-YYDB-2 fixture yydb.cas.race_two_writers expected exactly one CAS winner"
     );
-    assert_eq!(
-        conn.get("frontier/x").unwrap(),
-        Some(b"winner".to_vec())
-    );
+    assert_eq!(conn.get("frontier/x").unwrap(), Some(b"winner".to_vec()));
     cleanup(&path);
 }

@@ -32,7 +32,9 @@ fn query_filters_active_users() {
         .query(r#"User.filter(x => x.active).collect()"#)
         .expect("query");
     assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row.get("active") == Some(&Value::Bool(true))));
+    assert!(rows
+        .iter()
+        .all(|row| row.get("active") == Some(&Value::Bool(true))));
 }
 
 #[test]
@@ -123,15 +125,10 @@ fn query_filters_posts_by_referenced_author_name() {
     .expect("seed");
 
     let rows = conn
-        .query(
-            r#"Post.filter(x => x.published && x.author.user_name == "ada").collect()"#,
-        )
+        .query(r#"Post.filter(x => x.published && x.author.user_name == "ada").collect()"#)
         .expect("query");
     assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0].get("title"),
-        Some(&Value::Text("Ada post".into()))
-    );
+    assert_eq!(rows[0].get("title"), Some(&Value::Text("Ada post".into())));
 }
 
 #[test]
@@ -161,19 +158,11 @@ fn query_projects_nested_reference_fields() {
         )
         .expect("query");
     assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0].get("title"),
-        Some(&Value::Text("Ada post".into()))
-    );
-    let author = rows[0]
-        .get("author")
-        .expect("nested author projection");
+    assert_eq!(rows[0].get("title"), Some(&Value::Text("Ada post".into())));
+    let author = rows[0].get("author").expect("nested author projection");
     match author {
         Value::Row(nested) => {
-            assert_eq!(
-                nested.get("user_name"),
-                Some(&Value::Text("ada".into()))
-            );
+            assert_eq!(nested.get("user_name"), Some(&Value::Text("ada".into())));
         }
         other => panic!("expected nested row, got {other:?}"),
     }

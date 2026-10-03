@@ -1,26 +1,13 @@
-import {
-    decodeFrame,
-    decodeMicroHostInvoke,
-    encodeFrame,
-    encodeMicroHostInvokeOk,
-    MsgType,
-    type Frame,
-} from "./wire.js";
-import { normalizeTcpHostPort, type MicroHostHandler, type Transport } from "./transport.js";
+import { decodeFrame, decodeMicroHostInvoke, encodeFrame, encodeMicroHostInvokeOk, MsgType, type Frame } from './wire.js';
+import { normalizeTcpHostPort, type MicroHostHandler, type Transport } from './transport.js';
 
-async function readExact(
-    readExactBytes: (n: number) => Promise<Uint8Array>,
-    n: number,
-): Promise<Uint8Array> {
+async function readExact(readExactBytes: (n: number) => Promise<Uint8Array>, n: number): Promise<Uint8Array> {
     return readExactBytes(n);
 }
 
 async function readFrame(readExactBytes: (n: number) => Promise<Uint8Array>): Promise<Frame> {
     const header = await readExact(readExactBytes, 20);
-    const bodyLen = new DataView(header.buffer, header.byteOffset, header.byteLength).getUint32(
-        16,
-        true,
-    );
+    const bodyLen = new DataView(header.buffer, header.byteOffset, header.byteLength).getUint32(16, true);
     const body = bodyLen > 0 ? await readExact(readExactBytes, bodyLen) : new Uint8Array();
     const full = new Uint8Array(20 + body.byteLength);
     full.set(header, 0);
@@ -30,15 +17,15 @@ async function readFrame(readExactBytes: (n: number) => Promise<Uint8Array>): Pr
 
 /** Node.js TCP transport for `yydb serve` binary frames. */
 export async function openTcpTransport(endpoint: string): Promise<Transport> {
-    const net = await import("node:net");
+    const net = await import('node:net');
     const hostport = normalizeTcpHostPort(endpoint);
-    const [host, portText] = hostport.includes("]:")
+    const [host, portText] = hostport.includes(']:')
         ? (() => {
               const rest = hostport.slice(1);
-              const idx = rest.indexOf("]:");
+              const idx = rest.indexOf(']:');
               return [rest.slice(0, idx), rest.slice(idx + 2)] as const;
           })()
-        : (hostport.split(":") as [string, string]);
+        : (hostport.split(':') as [string, string]);
     const port = Number(portText);
     if (!host || !Number.isFinite(port)) {
         throw new Error(`invalid TCP endpoint: ${endpoint}`);
@@ -46,15 +33,15 @@ export async function openTcpTransport(endpoint: string): Promise<Transport> {
 
     const socket = net.createConnection({ host, port });
     await new Promise<void>((resolve, reject) => {
-        socket.once("connect", () => resolve());
-        socket.once("error", reject);
+        socket.once('connect', () => resolve());
+        socket.once('error', reject);
     });
 
     let buffer = new Uint8Array(0);
     const waiters: Array<() => void> = [];
     let microHostHandler: MicroHostHandler | undefined;
 
-    socket.on("data", (chunk: Buffer) => {
+    socket.on('data', (chunk: Buffer) => {
         const next = new Uint8Array(buffer.byteLength + chunk.byteLength);
         next.set(buffer, 0);
         next.set(chunk, buffer.byteLength);
@@ -88,7 +75,7 @@ export async function openTcpTransport(endpoint: string): Promise<Transport> {
             return false;
         }
         if (!microHostHandler) {
-            throw new Error("received MicroHostInvoke without a micro host handler");
+            throw new Error('received MicroHostInvoke without a micro host handler');
         }
         const payload = decodeMicroHostInvoke(frame.body);
         const result = await microHostHandler(payload);

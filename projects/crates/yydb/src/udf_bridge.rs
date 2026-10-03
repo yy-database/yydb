@@ -5,10 +5,10 @@ use std::sync::Arc;
 use yydb_execution::ValidatedUdf;
 use yydb_types::{Error, Result, Value};
 use yydb_udf::{
-    Budget, NativeHandler, NativeUdfDefinition, Placement, RegisterOptions, Signature, UdfError,
-    HostMicroDefinition, HostMicroImplementation, HostRuntimeAdapter, UdfIdentity,
-    UdfInvocation, UdfPolicy, UdfRegistry, UdfType, UdfValue, VosProgramImplementation,
-    lower_micro_scalar, lower_vos_macro,
+    lower_micro_scalar, lower_vos_macro, Budget, HostMicroDefinition, HostMicroImplementation,
+    HostRuntimeAdapter, NativeHandler, NativeUdfDefinition, Placement, RegisterOptions, Signature,
+    UdfError, UdfIdentity, UdfInvocation, UdfPolicy, UdfRegistry, UdfType, UdfValue,
+    VosProgramImplementation,
 };
 
 type UdfBridgeResult<T> = std::result::Result<T, UdfError>;
@@ -155,10 +155,7 @@ impl UdfSubsystem {
             let udf_args = values_to_udf(args)?;
             let result = self
                 .registry
-                .invoke(
-                    &UdfInvocation::scalar(identity, udf_args),
-                    Budget::new(64),
-                )
+                .invoke(&UdfInvocation::scalar(identity, udf_args), Budget::new(64))
                 .map_err(|error| map_udf_error_with_name(error, name, expected, args.len()))?;
             return udf_to_value(result);
         }
@@ -291,7 +288,9 @@ fn map_udf_error_with_name(
     got_arity: usize,
 ) -> Error {
     match error {
-        UdfError::NotFound => Error::UdfNotFound { name: name.to_owned() },
+        UdfError::NotFound => Error::UdfNotFound {
+            name: name.to_owned(),
+        },
         UdfError::VersionMismatch => Error::UdfVersionMismatch {
             name: name.to_owned(),
             expected: 0,
@@ -302,9 +301,9 @@ fn map_udf_error_with_name(
             expected: expected_arity,
             got: got_arity,
         },
-        UdfError::UnsupportedType | UdfError::UnsupportedEffect => Error::Unsupported(
-            "value or effect is outside the supported yydb-udf subset",
-        ),
+        UdfError::UnsupportedType | UdfError::UnsupportedEffect => {
+            Error::Unsupported("value or effect is outside the supported yydb-udf subset")
+        }
         UdfError::SignatureMismatch => Error::Udf {
             name: name.to_owned(),
             message: "UDF argument types do not match the registered signature".into(),

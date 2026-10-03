@@ -12,9 +12,9 @@ import {
     MsgType,
     SchemaVersion,
     WireUdfScalarValue,
-} from "./wire.js";
-import type { MicroHostHandler, Transport } from "./transport.js";
-import { openWebSocketTransport } from "./ws.js";
+} from './wire.js';
+import type { MicroHostHandler, Transport } from './transport.js';
+import { openWebSocketTransport } from './ws.js';
 
 export type {
     Frame,
@@ -24,9 +24,9 @@ export type {
     SchemaVersion,
     WireUdfScalarKind,
     WireUdfScalarValue,
-} from "./wire.js";
-export type { MicroHostHandler } from "./transport.js";
-export { MsgType, encodeFrame, decodeFrame } from "./wire.js";
+} from './wire.js';
+export type { MicroHostHandler } from './transport.js';
+export { MsgType, encodeFrame, decodeFrame } from './wire.js';
 
 export interface ConnectOptions {
     /** `ws://127.0.0.1:7700/wire` or `127.0.0.1:7700` (upgraded to `/wire`). */
@@ -55,9 +55,9 @@ export class Client {
 
     /** Open WebSocket to `yydb serve` `/wire` and Hello-handshake. */
     static async connect(options: ConnectOptions | string): Promise<Client> {
-        const endpoint = typeof options === "string" ? options : options.endpoint;
+        const endpoint = typeof options === 'string' ? options : options.endpoint;
         if (!endpoint.trim()) {
-            throw new Error("empty serve endpoint");
+            throw new Error('empty serve endpoint');
         }
         const transport = await openWebSocketTransport(endpoint);
         const client = new Client(endpoint, transport);
@@ -98,7 +98,7 @@ export class Client {
     }
 
     async put(key: string, value: Uint8Array | string): Promise<void> {
-        const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
+        const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
         await this.roundtrip(MsgType.KvPut, encodeKvPut(key, bytes));
     }
 
@@ -113,15 +113,8 @@ export class Client {
     }
 
     /** Invoke a registered scalar UDF on the remote engine. */
-    async callScalar(
-        name: string,
-        version: number,
-        args: readonly WireUdfScalarValue[],
-    ): Promise<WireUdfScalarValue> {
-        const response = await this.roundtrip(
-            MsgType.ScalarCall,
-            encodeScalarCall(name, version, args),
-        );
+    async callScalar(name: string, version: number, args: readonly WireUdfScalarValue[]): Promise<WireUdfScalarValue> {
+        const response = await this.roundtrip(MsgType.ScalarCall, encodeScalarCall(name, version, args));
         return decodeScalarCallOk(response.body);
     }
 
@@ -134,7 +127,7 @@ export class Client {
             body,
         });
         if (response.requestId !== requestId) {
-            throw new Error("wire response request_id mismatch");
+            throw new Error('wire response request_id mismatch');
         }
         if (response.msgType === MsgType.Error) {
             throw new Error(new TextDecoder().decode(response.body));

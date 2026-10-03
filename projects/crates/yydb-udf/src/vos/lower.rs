@@ -27,16 +27,15 @@ pub fn lower_vos_macro(source: &str, version: u32) -> Result<LoweredUdf> {
 
 /// Lowers one VOS `micro` declaration into a [`LoweredUdf`].
 pub fn lower_micro_scalar(source: &str, version: u32) -> Result<LoweredUdf> {
-    let parsed = vos::parser::parse_program(source).map_err(|diagnostics| {
-        UdfError::ExecutionFailed {
+    let parsed =
+        vos::parser::parse_program(source).map_err(|diagnostics| UdfError::ExecutionFailed {
             message: diagnostics
                 .errors
                 .into_iter()
                 .map(|error| error.message)
                 .collect::<Vec<_>>()
                 .join(" | "),
-        }
-    })?;
+        })?;
     if !parsed.statements.is_empty() || parsed.result.is_some() || parsed.micros.len() != 1 {
         return Err(UdfError::InvalidDefinition);
     }

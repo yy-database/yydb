@@ -17,20 +17,16 @@ pub fn version() -> String {
 /// Run `yydb-server` on `bind` for the database at `db_path`.
 #[napi]
 pub fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> Result<()> {
-    yydb_server::run_serve(
-        Path::new(&db_path),
-        &bind,
-        insecure_bind.unwrap_or(false),
-    )
-    .map_err(|error| Error::from_reason(error.to_string()))?;
+    yydb_server::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false))
+        .map_err(|error| Error::from_reason(error.to_string()))?;
     Ok(())
 }
 
 /// Open `db_path` and ensure the VOS schema when needed.
 #[napi]
 pub fn init_db(db_path: String, schema_document: Option<String>) -> Result<()> {
-    let conn = yydb::Connection::open(&db_path)
-        .map_err(|error| Error::from_reason(error.to_string()))?;
+    let conn =
+        yydb::Connection::open(&db_path).map_err(|error| Error::from_reason(error.to_string()))?;
     let schema = conn
         .schema()
         .map_err(|error| Error::from_reason(error.to_string()))?;
@@ -47,8 +43,8 @@ pub fn init_db(db_path: String, schema_document: Option<String>) -> Result<()> {
 /// Return multi-line database diagnostics for `db_path`.
 #[napi]
 pub fn info_text(db_path: String) -> Result<String> {
-    let conn = yydb::Connection::open(&db_path)
-        .map_err(|error| Error::from_reason(error.to_string()))?;
+    let conn =
+        yydb::Connection::open(&db_path).map_err(|error| Error::from_reason(error.to_string()))?;
     let path_display = conn
         .path()
         .map(|path| path.display().to_string())
@@ -74,10 +70,9 @@ pub fn info_text(db_path: String) -> Result<String> {
     ));
     lines.push(format!("journal_mode={}", conn.journal_mode().as_str()));
     if let (Some(wal), Some(shm)) = (conn.wal_path(), conn.shm_path()) {
-        let (wal_on, shm_on, frames) = yydb::journal::sidecar_status(
-            conn.path().expect("file-backed"),
-        )
-        .map_err(|error| Error::from_reason(error.to_string()))?;
+        let (wal_on, shm_on, frames) =
+            yydb::journal::sidecar_status(conn.path().expect("file-backed"))
+                .map_err(|error| Error::from_reason(error.to_string()))?;
         lines.push(format!("wal={} exists={wal_on}", wal.display()));
         lines.push(format!("shm={} exists={shm_on}", shm.display()));
         lines.push(format!("wal_frames={frames}"));

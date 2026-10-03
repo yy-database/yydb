@@ -66,9 +66,11 @@ impl ScalarUdf for ExecutionUdf {
             yydb_execution::Value::Bool(value) => Value::Bool(value),
             yydb_execution::Value::I64(value) => Value::I64(value),
             yydb_execution::Value::Text(value) => Value::Text(value),
-            _ => return Err(yydb_types::Error::Unsupported(
-                "execution result type is not supported by the local scalar bridge",
-            )),
+            _ => {
+                return Err(yydb_types::Error::Unsupported(
+                    "execution result type is not supported by the local scalar bridge",
+                ))
+            }
         })
     }
 }

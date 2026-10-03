@@ -84,7 +84,9 @@ impl UdfImplementation for VosProgramImplementation {
     }
 
     fn invoke(&self, context: &mut UdfContext, args: &[UdfValue]) -> Result<UdfValue> {
-        self.lowered.signature.ensure_args(&UdfValue::argument_types(args))?;
+        self.lowered
+            .signature
+            .ensure_args(&UdfValue::argument_types(args))?;
         context.check_cancelled()?;
         context.charge(1)?;
         let execution_args = args

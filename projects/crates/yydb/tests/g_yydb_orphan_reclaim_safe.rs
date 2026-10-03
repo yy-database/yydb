@@ -17,7 +17,9 @@ fn g_yydb_orphan_reclaim_safe() {
     let orphan = conn.put_chunk(ObjectKind::Blob, b"drop").unwrap();
     let orphans = conn.scan_orphans("pages/").unwrap();
     assert!(
-        orphans.iter().any(|object| object.hash_hex() == orphan.hash_hex()),
+        orphans
+            .iter()
+            .any(|object| object.hash_hex() == orphan.hash_hex()),
         "gate G-YYDB-7 fixture yydb.orphan.reclaim_safe expected orphan object"
     );
 

@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use vos::ast::TypeExpr;
 use vos::ast::catalog::{CatalogSnapshot, TypeEntry, TypeKind};
+use vos::ast::TypeExpr;
 
 use yydb_types::{Error, Result, Value};
 
@@ -41,7 +41,11 @@ fn value_to_pk(value: &Value) -> Result<String> {
         Value::I64(number) => number.to_string(),
         Value::Bool(flag) => flag.to_string(),
         Value::Null => return Err(resolve_error("reference key cannot be null")),
-        _ => return Err(resolve_error("reference key must be text, uuid, integer, or bool")),
+        _ => {
+            return Err(resolve_error(
+                "reference key must be text, uuid, integer, or bool",
+            ))
+        }
     })
 }
 
@@ -65,10 +69,7 @@ pub fn resolve_field_path(
     let mut current: &QueryRow = row;
 
     for (index, segment) in path.iter().enumerate() {
-        let value = current
-            .get(segment)
-            .cloned()
-            .unwrap_or(Value::Null);
+        let value = current.get(segment).cloned().unwrap_or(Value::Null);
         if index + 1 == path.len() {
             return Ok(value);
         }
@@ -110,10 +111,7 @@ pub fn resolve_row_at_path(
     let mut current: &QueryRow = row;
 
     for segment in path {
-        let value = current
-            .get(segment)
-            .cloned()
-            .unwrap_or(Value::Null);
+        let value = current.get(segment).cloned().unwrap_or(Value::Null);
         let entry = table_entry(catalog, current_table)?;
         let field = entry
             .fields

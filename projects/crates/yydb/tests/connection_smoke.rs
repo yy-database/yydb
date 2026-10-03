@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use yydb::{
     journal::{shm_path, wal_path},
-    Connection, JournalMode, ObjectKind, OpenFlags, Tier, Vector, Value,
+    Connection, JournalMode, ObjectKind, OpenFlags, Tier, Value, Vector,
 };
 
 fn temp_db(label: &str) -> PathBuf {
@@ -52,17 +52,15 @@ fn atomically_replaces_main_image_without_leaving_temp_files() {
     let leftovers = fs::read_dir(path.parent().unwrap())
         .unwrap()
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(&prefix)
-        })
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
         .count();
     assert_eq!(leftovers, 0);
 
     let reopened = Connection::open(&path).unwrap();
-    assert_eq!(reopened.get("project/meta").unwrap(), Some(b"Spark".to_vec()));
+    assert_eq!(
+        reopened.get("project/meta").unwrap(),
+        Some(b"Spark".to_vec())
+    );
     drop(reopened);
     cleanup(&path);
 }

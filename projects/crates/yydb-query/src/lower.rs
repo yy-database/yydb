@@ -21,7 +21,9 @@ pub fn lower_program(program: &Program) -> Result<Vec<QueryOp>> {
             Stmt::Let(let_) => bindings.push((let_.name.clone(), let_.value.clone())),
             Stmt::Expr(expr) => return lower_exec_expr(expr, &bindings),
             _ => {
-                return Err(query_error("unsupported statement in Phase 1 query program"));
+                return Err(query_error(
+                    "unsupported statement in Phase 1 query program",
+                ));
             }
         }
     }
@@ -73,7 +75,11 @@ fn expand_bindings(expr: &Expr, bindings: &[(String, Expr)]) -> Result<Expr> {
 
 fn split_collect(expr: &Expr) -> Result<Expr> {
     match expr {
-        Expr::Call { callee, args, span: _ } => match callee.as_ref() {
+        Expr::Call {
+            callee,
+            args,
+            span: _,
+        } => match callee.as_ref() {
             Expr::Member { object, name, .. } if name == "collect" => {
                 if !args.is_empty() {
                     return Err(query_error("`.collect()` takes no arguments"));
@@ -178,7 +184,9 @@ fn push_method(ops: &mut Vec<QueryOp>, method: &str, args: &[Expr]) -> Result<()
         "insert" | "update" | "delete" => Err(query_error(format!(
             "write method `.{method}` is not supported by the Phase 1 query executor"
         ))),
-        other => Err(query_error(format!("unsupported pipeline method `.{other}`"))),
+        other => Err(query_error(format!(
+            "unsupported pipeline method `.{other}`"
+        ))),
     }
 }
 
@@ -215,10 +223,7 @@ fn lower_pred_body(expr: &Expr, param: Option<&str>) -> Result<Pred> {
             Box::new(lower_pred_body(right, param)?),
         )),
         Expr::Binary {
-            op,
-            left,
-            right,
-            ..
+            op, left, right, ..
         } => {
             let path = lower_field_path(left.as_ref(), param)?;
             if path.is_empty() {
@@ -264,10 +269,7 @@ fn lower_pred_body(expr: &Expr, param: Option<&str>) -> Result<Pred> {
             if path.is_empty() {
                 return Err(query_error("unsupported predicate shape"));
             }
-            Ok(Pred::FieldBool {
-                path,
-                value: true,
-            })
+            Ok(Pred::FieldBool { path, value: true })
         }
     }
 }
@@ -293,7 +295,9 @@ fn lower_field_lambda(expr: &Expr) -> Result<String> {
     };
     match body {
         Expr::Member { name, .. } => Ok(name.clone()),
-        _ => Err(query_error("Phase 1 sort key must be a field access lambda")),
+        _ => Err(query_error(
+            "Phase 1 sort key must be a field access lambda",
+        )),
     }
 }
 
@@ -311,9 +315,7 @@ fn lower_projection(expr: &Expr) -> Result<Vec<ProjectField>> {
             for item in items {
                 match item {
                     ProjItem::Star { .. } => {
-                        return Err(query_error(
-                            "Phase 1 projection does not expand `*` yet",
-                        ));
+                        return Err(query_error("Phase 1 projection does not expand `*` yet"));
                     }
                     ProjItem::Field(init) => {
                         fields.push(lower_project_field(init, param)?);
@@ -342,7 +344,9 @@ fn lower_project_field(init: &FieldInit, param: Option<&str>) -> Result<ProjectF
 
 fn lower_project_expr(expr: &Expr, param: Option<&str>) -> Result<ProjectExpr> {
     match expr {
-        Expr::StructProj { receiver, items, .. } => {
+        Expr::StructProj {
+            receiver, items, ..
+        } => {
             let path = lower_field_path(receiver.as_ref(), param)?;
             let mut fields = Vec::new();
             for item in items {
@@ -372,12 +376,14 @@ fn lower_project_expr(expr: &Expr, param: Option<&str>) -> Result<ProjectExpr> {
 
 fn literal_u64(expr: Option<&Expr>, method: &str) -> Result<u64> {
     let Some(expr) = expr else {
-        return Err(query_error(format!("`.{method}` requires a count argument")));
+        return Err(query_error(format!(
+            "`.{method}` requires a count argument"
+        )));
     };
     match expr {
-        Expr::Literal(Literal::Int(t)) => t.parse::<u64>().map_err(|_| {
-            query_error(format!("invalid `{method}` count"))
-        }),
+        Expr::Literal(Literal::Int(t)) => t
+            .parse::<u64>()
+            .map_err(|_| query_error(format!("invalid `{method}` count"))),
         _ => Err(query_error(format!(
             "`.{method}` count must be an integer literal"
         ))),

@@ -1,5 +1,5 @@
 /** Scalar types supported by the MVP emitter (expand with `vos-parser`). */
-export type ScalarType = "uuid" | "utf8" | "bool" | "i64" | "f64";
+export type ScalarType = 'uuid' | 'utf8' | 'bool' | 'i64' | 'f64';
 
 export interface SchemaField {
     readonly name: string;
@@ -23,13 +23,13 @@ export interface TsSchemaIr {
 
 export function scalarToTs(ty: ScalarType): string {
     switch (ty) {
-        case "uuid":
-        case "utf8":
-            return "string";
-        case "bool":
-            return "boolean";
-        case "i64":
-        case "f64":
-            return "number";
+        case 'uuid':
+        case 'utf8':
+            return 'string';
+        case 'bool':
+            return 'boolean';
+        case 'i64':
+        case 'f64':
+            return 'number';
     }
 }

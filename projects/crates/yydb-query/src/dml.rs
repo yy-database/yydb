@@ -120,9 +120,7 @@ fn expand_program(program: &Program, schema_document: Option<&str>) -> Result<Pr
                     }
                     Stmt::Let(let_) => statements.push(Stmt::Let(let_.clone())),
                     _ => {
-                        return Err(dml_error(
-                            "unsupported statement in expanded macro body",
-                        ));
+                        return Err(dml_error("unsupported statement in expanded macro body"));
                     }
                 }
             }
@@ -153,9 +151,7 @@ fn expand_expr_into_program(
                 }
                 Stmt::Let(let_) => statements.push(Stmt::Let(let_.clone())),
                 _ => {
-                    return Err(dml_error(
-                        "unsupported statement in expanded macro body",
-                    ));
+                    return Err(dml_error("unsupported statement in expanded macro body"));
                 }
             }
         }
@@ -184,17 +180,13 @@ fn expand_macro_call(expr: &Expr, schema_document: Option<&str>) -> Result<Progr
             "Phase 1 macro expansion does not bind parameters for `{name}()`"
         )));
     }
-    let document = schema_document.ok_or_else(|| {
-        dml_error("macro expansion requires an installed schema document")
+    let document = schema_document
+        .ok_or_else(|| dml_error("macro expansion requires an installed schema document"))?;
+    let document = vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
+        message: diagnostics.to_string(),
     })?;
-    let document = vos::parser::parse_document(document).map_err(|diagnostics| {
-        Error::Schema {
-            message: diagnostics.to_string(),
-        }
-    })?;
-    find_macro_body(&document, name).ok_or_else(|| {
-        dml_error(format!("unknown schema macro `{name}`"))
-    })
+    find_macro_body(&document, name)
+        .ok_or_else(|| dml_error(format!("unknown schema macro `{name}`")))
 }
 
 fn find_macro_body(document: &Document, name: &str) -> Option<Program> {
@@ -248,9 +240,11 @@ fn upsert_row_for_table(
     row: &QueryRow,
 ) -> Result<QueryRow> {
     let pk_field = primary_field_name(table_entry(catalog, table)?)?;
-    let pk = row
-        .get(pk_field)
-        .ok_or_else(|| dml_error(format!("insert row is missing primary key field `{pk_field}`")))?;
+    let pk = row.get(pk_field).ok_or_else(|| {
+        dml_error(format!(
+            "insert row is missing primary key field `{pk_field}`"
+        ))
+    })?;
     let pk_text = value_to_key(pk)?;
     store::upsert_row(records, table, &pk_text, row)?;
     Ok(row.clone())
@@ -308,7 +302,10 @@ fn type_name_from_expr(expr: &Expr) -> Result<String> {
     }
 }
 
-fn table_entry<'a>(catalog: &'a CatalogSnapshot, name: &str) -> Result<&'a vos::ast::catalog::TypeEntry> {
+fn table_entry<'a>(
+    catalog: &'a CatalogSnapshot,
+    name: &str,
+) -> Result<&'a vos::ast::catalog::TypeEntry> {
     catalog
         .types
         .iter()
@@ -335,11 +332,15 @@ fn lower_field_inits(
             .fields
             .iter()
             .find(|field| field.current_name == init.name)
-            .ok_or_else(|| dml_error(format!("unknown field `{}` on `{}`", init.name, entry.name)))?;
-        let value = init
-            .value
-            .as_ref()
-            .ok_or_else(|| dml_error(format!("field `{}` requires an explicit initializer", init.name)))?;
+            .ok_or_else(|| {
+                dml_error(format!("unknown field `{}` on `{}`", init.name, entry.name))
+            })?;
+        let value = init.value.as_ref().ok_or_else(|| {
+            dml_error(format!(
+                "field `{}` requires an explicit initializer",
+                init.name
+            ))
+        })?;
         row.insert(init.name.clone(), eval_literal(value, &slot.ty)?);
     }
     Ok(row)
@@ -358,9 +359,10 @@ fn literal_to_value(literal: &Literal, _ty: &vos::ast::TypeExpr) -> Result<Value
     Ok(match literal {
         Literal::Null => Value::Null,
         Literal::Bool(value) => Value::Bool(*value),
-        Literal::Int(text) => Value::I64(text.parse().map_err(|_| {
-            dml_error(format!("invalid integer literal `{text}`"))
-        })?),
+        Literal::Int(text) => Value::I64(
+            text.parse()
+                .map_err(|_| dml_error(format!("invalid integer literal `{text}`")))?,
+        ),
         Literal::String(text) | Literal::Ident(text) => Value::Text(text.clone()),
         Literal::Float(text) => Value::Text(text.clone()),
         _ => {

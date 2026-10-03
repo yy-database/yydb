@@ -1,8 +1,8 @@
 mod common;
 
 use std::collections::BTreeMap;
-use yydb::{Connection, Error, OpenFlags};
 use yydb::vos::ast::{FieldId, FieldPath, RenameMap};
+use yydb::{Connection, Error, OpenFlags};
 
 const INITIAL: &str = "table User { @@id: i64, name: utf8, active: bool }";
 const REORDERED: &str = "table User { active: bool, name: utf8, @@id: i64 }";
@@ -12,18 +12,27 @@ fn persists_reorder_rename_and_tombstones_across_reopen() {
     let (connection, path) = common::open_temp_db("catalog-ledger");
     connection.ensure_schema(INITIAL).unwrap();
     let initial = connection.catalog_snapshot().unwrap().unwrap();
-    connection.migrate_schema(REORDERED, &RenameMap::default()).unwrap();
+    connection
+        .migrate_schema(REORDERED, &RenameMap::default())
+        .unwrap();
     drop(connection);
     let connection = common::reopen(&path);
     let reordered = connection.catalog_snapshot().unwrap().unwrap();
     assert_eq!(reordered.types[0].type_id, initial.types[0].type_id);
-    for (before, after) in initial.types[0].fields.iter().zip(&reordered.types[0].fields) {
+    for (before, after) in initial.types[0]
+        .fields
+        .iter()
+        .zip(&reordered.types[0].fields)
+    {
         assert_eq!(before.field_id, after.field_id);
         assert_eq!(before.virtual_field, after.virtual_field);
     }
     let renames = RenameMap {
         fields: BTreeMap::from([(
-            FieldPath { type_name: "User".into(), field_name: "name".into() },
+            FieldPath {
+                type_name: "User".into(),
+                field_name: "name".into(),
+            },
             "label".into(),
         )]),
         ..RenameMap::default()
@@ -75,9 +84,7 @@ fn failed_migrations_leave_schema_and_ledger_unchanged() {
         types: BTreeMap::from([("Missing".into(), "User".into())]),
         ..RenameMap::default()
     };
-    assert!(connection
-        .migrate_schema(REORDERED, &invalid)
-        .is_err());
+    assert!(connection.migrate_schema(REORDERED, &invalid).is_err());
     assert_eq!(connection.schema().unwrap().unwrap().document, INITIAL);
     assert_eq!(connection.catalog_snapshot().unwrap(), initial);
     assert_eq!(connection.schema_version().unwrap(), Some(1));
@@ -88,7 +95,9 @@ fn recovers_the_same_ledger_from_wal_before_checkpoint() {
     let (_, path) = common::open_temp_db("catalog-wal");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     connection.ensure_schema(INITIAL).unwrap();
-    connection.migrate_schema(REORDERED, &RenameMap::default()).unwrap();
+    connection
+        .migrate_schema(REORDERED, &RenameMap::default())
+        .unwrap();
     let expected = connection.catalog_snapshot().unwrap();
     drop(connection);
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
@@ -177,6 +186,9 @@ fn rejects_a_complete_wal_frame_with_a_bad_checksum() {
     let last = bytes.len() - 1;
     bytes[last] ^= 0x80;
     std::fs::write(&wal, bytes).unwrap();
-    assert!(matches!(Connection::open_with_flags(&path, OpenFlags::wal()), Err(Error::Corrupt(_))));
+    assert!(matches!(
+        Connection::open_with_flags(&path, OpenFlags::wal()),
+        Err(Error::Corrupt(_))
+    ));
     common::cleanup(&path);
 }
