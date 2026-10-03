@@ -36,6 +36,9 @@ importers:
 
   projects/packages/yydb:
     dependencies:
+      '@vmz/commander':
+        specifier: ^0.2.0
+        version: 0.2.8
       '@yydb/yydb-client':
         specifier: workspace:*
         version: link:../yydb-client
@@ -456,6 +459,10 @@ packages:
       vite: ^5.0.0 || ^6.0.0
       vue: ^3.2.25
 
+  '@vmz/commander@0.2.8':
+    resolution: {integrity: sha512-hDTOJGKHam1+GYnOJY8M0yqctrBt8RfdkvUVmkeu1LQVRyfWRZ8kqWnTdYcW8PoCWKP4DdDpcWJrbmI7rn68Bg==}
+    engines: {node: '>=20'}
+
   '@volar/language-core@2.4.15':
     resolution: {integrity: sha512-3VHw+QZU0ZG9IuQmzT68IyN4hZNd9GchGPhbD9+pa8CVv7rnoOZwo7T8weIbrRmihqy3ATpdfXFnqRrfPVK6CA==}
 
@@ -843,6 +850,8 @@ snapshots:
     dependencies:
       vite: 5.4.21(@types/node@20.19.43)
       vue: 3.5.41(typescript@5.3.3)
+
+  '@vmz/commander@0.2.8': {}
 
   '@volar/language-core@2.4.15':
     dependencies:
