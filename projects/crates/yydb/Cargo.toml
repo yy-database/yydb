@@ -22,6 +22,7 @@ vos = { workspace = true }
 yydb-types = { workspace = true }
 yydb-execution = { workspace = true }
 yydb-udf = { workspace = true }
+yydb-query = { workspace = true }
 serde_json = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
