@@ -1,4 +1,4 @@
-//! TypeScript session micro handles and host adapter boundary.
+//! Session host micro handles and language-neutral host runtime adapter boundary.
 
 use crate::capability::{Placement, UdfPolicy};
 use crate::contract::{ImplementationKind, Signature, UdfDefinition};
@@ -8,20 +8,20 @@ use crate::implementation::UdfImplementation;
 use crate::invocation::{InvocationMode, UdfContext};
 use crate::value::UdfValue;
 
-/// Opaque handle to a process-local TypeScript function.
+/// Opaque handle to a function registered in an external host runtime.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TypeScriptFunctionHandle {
+pub struct HostFunctionHandle {
     /// Host runtime instance identifier.
     pub host_id: u64,
-    /// Function identifier inside the TS registry.
+    /// Function identifier inside the host registry.
     pub function_id: String,
     /// Monotonic implementation version.
     pub version: u32,
 }
 
-/// Session-local TypeScript micro metadata without persisting the JS closure.
+/// Session-local host micro metadata without persisting the host callback.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeScriptMicroDefinition {
+pub struct HostMicroDefinition {
     /// Logical identity.
     pub identity: UdfIdentity,
     /// Typed signature.
@@ -29,12 +29,12 @@ pub struct TypeScriptMicroDefinition {
     /// Execution policy.
     pub policy: UdfPolicy,
     /// Opaque host handle.
-    pub handle: TypeScriptFunctionHandle,
+    pub handle: HostFunctionHandle,
     /// Registration fingerprint.
     pub fingerprint: [u8; 32],
 }
 
-impl TypeScriptMicroDefinition {
+impl HostMicroDefinition {
     /// Builds a Phase-1 pure deterministic scalar micro from contract fields.
     pub fn from_scalar(
         name: &str,
@@ -53,7 +53,7 @@ impl TypeScriptMicroDefinition {
             identity,
             signature,
             policy: UdfPolicy::pure_host(),
-            handle: TypeScriptFunctionHandle {
+            handle: HostFunctionHandle {
                 host_id,
                 function_id,
                 version: handle_version,
@@ -64,14 +64,14 @@ impl TypeScriptMicroDefinition {
 
     /// Builds session metadata for this host micro.
     ///
-    /// TypeScript micros never enter the `.yydb` catalog.
+    /// Host micros never enter the `.yydb` catalog.
     pub fn session_definition(&self) -> UdfDefinition {
         UdfDefinition {
             identity: self.identity.clone(),
             signature: self.signature.clone(),
             policy: self.policy,
             placement: Placement::Host,
-            implementation_kind: ImplementationKind::TypeScriptMicro,
+            implementation_kind: ImplementationKind::HostMicro,
             fingerprint: self.fingerprint,
         }
     }
@@ -89,40 +89,40 @@ impl TypeScriptMicroDefinition {
     }
 }
 
-/// Host adapter that owns the real JS function registry.
-pub trait TypeScriptHostAdapter: Send + Sync {
+/// Adapter that owns the real function registry in an external host runtime.
+pub trait HostRuntimeAdapter: Send + Sync {
     /// Invokes one scalar call through the host runtime.
     fn invoke_scalar(
         &self,
-        handle: &TypeScriptFunctionHandle,
+        handle: &HostFunctionHandle,
         args: &[UdfValue],
     ) -> Result<UdfValue>;
 
     /// Invokes a bounded batch call through the host runtime.
     fn invoke_batch(
         &self,
-        handle: &TypeScriptFunctionHandle,
+        handle: &HostFunctionHandle,
         batches: &[Vec<UdfValue>],
     ) -> Result<Vec<UdfValue>>;
 }
 
-/// Host-side implementation strategy backed by a TS adapter.
-pub struct TypeScriptMicroImplementation {
-    definition: TypeScriptMicroDefinition,
-    adapter: std::sync::Arc<dyn TypeScriptHostAdapter>,
+/// Host-side implementation strategy backed by a runtime adapter.
+pub struct HostMicroImplementation {
+    definition: HostMicroDefinition,
+    adapter: std::sync::Arc<dyn HostRuntimeAdapter>,
 }
 
-impl TypeScriptMicroImplementation {
+impl HostMicroImplementation {
     /// Creates a host implementation from metadata and an adapter.
     pub fn new(
-        definition: TypeScriptMicroDefinition,
-        adapter: std::sync::Arc<dyn TypeScriptHostAdapter>,
+        definition: HostMicroDefinition,
+        adapter: std::sync::Arc<dyn HostRuntimeAdapter>,
     ) -> Self {
         Self { definition, adapter }
     }
 }
 
-impl UdfImplementation for TypeScriptMicroImplementation {
+impl UdfImplementation for HostMicroImplementation {
     fn identity(&self) -> &UdfIdentity {
         &self.definition.identity
     }

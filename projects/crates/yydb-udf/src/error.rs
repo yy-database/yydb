@@ -23,7 +23,7 @@ pub enum UdfError {
     CapabilityDenied,
     /// Catalog requires an implementation that the current host did not register.
     ImplementationUnavailable,
-    /// The TypeScript host disconnected or is unavailable.
+    /// The external host runtime disconnected or is unavailable.
     HostDisconnected,
     /// The invocation exceeded its time budget.
     Timeout,
