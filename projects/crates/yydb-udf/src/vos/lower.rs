@@ -6,10 +6,24 @@ use vos::ast::{BuiltinType, Expr, FnDecl, FnKind, Literal, TypeExpr};
 use yydb_execution::{Node, Program, Type, Udf, UdfEffect, UdfPlacement, Value};
 
 use crate::capability::{Placement, UdfPolicy};
-use crate::contract::{ImplementationKind, Signature, UdfDefinition, UdfType};
+use crate::contract::{Signature, UdfType};
 use crate::error::{Result, UdfError};
 use crate::identity::UdfIdentity;
 use crate::vos::LoweredUdf;
+
+/// Lowers one VOS `macro` declaration into a [`LoweredUdf`].
+///
+/// Until the VOS schema parser accepts durable `macro` items, this entry point
+/// rewrites the `macro` keyword to the supported `micro` program parser surface.
+pub fn lower_vos_macro(source: &str, version: u32) -> Result<LoweredUdf> {
+    let trimmed = source.trim();
+    let micro_source = if let Some(rest) = trimmed.strip_prefix("macro") {
+        format!("micro{rest}")
+    } else {
+        return Err(UdfError::InvalidDefinition);
+    };
+    lower_micro_scalar(&micro_source, version)
+}
 
 /// Lowers one VOS `micro` declaration into a [`LoweredUdf`].
 pub fn lower_micro_scalar(source: &str, version: u32) -> Result<LoweredUdf> {
@@ -97,20 +111,6 @@ fn lower_declaration(declaration: &FnDecl, version: u32, source: &str) -> Result
         program,
         source_fingerprint: LoweredUdf::fingerprint_source(source),
     })
-}
-
-impl LoweredUdf {
-    /// Builds catalog metadata for a lowered VOS micro/macro body.
-    pub fn catalog_definition(&self) -> UdfDefinition {
-        UdfDefinition {
-            identity: self.identity.clone(),
-            signature: self.signature.clone(),
-            policy: self.policy,
-            placement: self.placement,
-            implementation_kind: ImplementationKind::VosProgram,
-            fingerprint: self.source_fingerprint,
-        }
-    }
 }
 
 fn lower_expr(

@@ -1,4 +1,4 @@
-//! TypeScript host UDF handles and adapter boundary.
+//! TypeScript session micro handles and host adapter boundary.
 
 use crate::capability::{Placement, UdfPolicy};
 use crate::contract::{ImplementationKind, Signature, UdfDefinition};
@@ -19,9 +19,9 @@ pub struct TypeScriptFunctionHandle {
     pub version: u32,
 }
 
-/// Metadata required to register a TS UDF without persisting the JS closure.
+/// Session-local TypeScript micro metadata without persisting the JS closure.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeScriptUdfDefinition {
+pub struct TypeScriptMicroDefinition {
     /// Logical identity.
     pub identity: UdfIdentity,
     /// Typed signature.
@@ -34,22 +34,24 @@ pub struct TypeScriptUdfDefinition {
     pub fingerprint: [u8; 32],
 }
 
-impl TypeScriptUdfDefinition {
-    /// Builds catalog metadata for this host UDF.
-    pub fn catalog_definition(&self) -> UdfDefinition {
+impl TypeScriptMicroDefinition {
+    /// Builds session metadata for this host micro.
+    ///
+    /// TypeScript micros never enter the `.yydb` catalog.
+    pub fn session_definition(&self) -> UdfDefinition {
         UdfDefinition {
             identity: self.identity.clone(),
             signature: self.signature.clone(),
             policy: self.policy,
             placement: Placement::Host,
-            implementation_kind: ImplementationKind::TypeScript,
+            implementation_kind: ImplementationKind::TypeScriptMicro,
             fingerprint: self.fingerprint,
         }
     }
 
     /// Validates metadata before host installation.
     pub fn validate(&self) -> Result<()> {
-        self.catalog_definition().validate()?;
+        self.session_definition().validate()?;
         if self.handle.function_id.is_empty() {
             return Err(UdfError::InvalidDefinition);
         }
@@ -78,22 +80,22 @@ pub trait TypeScriptHostAdapter: Send + Sync {
 }
 
 /// Host-side implementation strategy backed by a TS adapter.
-pub struct TypeScriptImplementation {
-    definition: TypeScriptUdfDefinition,
+pub struct TypeScriptMicroImplementation {
+    definition: TypeScriptMicroDefinition,
     adapter: std::sync::Arc<dyn TypeScriptHostAdapter>,
 }
 
-impl TypeScriptImplementation {
+impl TypeScriptMicroImplementation {
     /// Creates a host implementation from metadata and an adapter.
     pub fn new(
-        definition: TypeScriptUdfDefinition,
+        definition: TypeScriptMicroDefinition,
         adapter: std::sync::Arc<dyn TypeScriptHostAdapter>,
     ) -> Self {
         Self { definition, adapter }
     }
 }
 
-impl UdfImplementation for TypeScriptImplementation {
+impl UdfImplementation for TypeScriptMicroImplementation {
     fn identity(&self) -> &UdfIdentity {
         &self.definition.identity
     }
