@@ -48,6 +48,9 @@ pub mod schema;
 /// Rust scalar UDF traits and registration helpers.
 pub mod udf;
 
+/// Phase 1 VOS read query executor.
+pub mod query;
+
 mod doctor;
 mod lease;
 mod refs;
@@ -397,6 +400,26 @@ impl Connection {
             .map_err(|message| Error::Schema { message })?;
         state.schema = Some(SchemaVersion { version, document: document.to_owned() });
         state.catalog = Some(catalog);
+        self.write_state(&state)
+    }
+
+    /// Execute a Phase 1 VOS read pipeline (for example `User.filter(x => x.active).collect()`).
+    pub fn query(&self, source: &str) -> Result<Vec<query::QueryRow>> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let state = self.read_state()?;
+        query::execute(source, &state.records)
+    }
+
+    /// Upsert one logical table row used by the Phase 1 query executor.
+    pub fn upsert_row(
+        &self,
+        table: impl AsRef<str>,
+        pk: impl AsRef<str>,
+        row: query::QueryRow,
+    ) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut state = self.read_state()?;
+        query::upsert_row(&mut state.records, table.as_ref(), pk.as_ref(), &row)?;
         self.write_state(&state)
     }
 
