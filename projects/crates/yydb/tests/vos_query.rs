@@ -20,7 +20,7 @@ fn user_row(user_name: &str, active: bool) -> BTreeMap<String, Value> {
 #[test]
 fn query_filters_active_users() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, USER_SCHEMA).expect("schema");
+    conn.ensure_schema(USER_SCHEMA).expect("schema");
     conn.upsert_row("User", "ada", user_row("ada", true))
         .expect("seed ada");
     conn.upsert_row("User", "linus", user_row("linus", true))
@@ -38,7 +38,7 @@ fn query_filters_active_users() {
 #[test]
 fn query_collect_all_rows_with_true_predicate() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, USER_SCHEMA).expect("schema");
+    conn.ensure_schema(USER_SCHEMA).expect("schema");
     conn.upsert_row("User", "ada", user_row("ada", true))
         .expect("seed");
 
@@ -62,7 +62,7 @@ fn query_rows_survive_reopen() {
 
     {
         let conn = Connection::open(&path).expect("open");
-        conn.ensure_schema(1, USER_SCHEMA).expect("schema");
+        conn.ensure_schema(USER_SCHEMA).expect("schema");
         conn.upsert_row("User", "ada", user_row("ada", true))
             .expect("seed");
     }
@@ -93,7 +93,7 @@ table Post {
 #[test]
 fn query_filters_posts_by_referenced_author_name() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, BLOG_SCHEMA).expect("schema");
+    conn.ensure_schema(BLOG_SCHEMA).expect("schema");
     conn.execute(
         r#"
         User {
@@ -137,7 +137,7 @@ fn query_filters_posts_by_referenced_author_name() {
 #[test]
 fn query_projects_nested_reference_fields() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, BLOG_SCHEMA).expect("schema");
+    conn.ensure_schema(BLOG_SCHEMA).expect("schema");
     conn.execute(
         r#"
         User {

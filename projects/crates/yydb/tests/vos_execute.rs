@@ -18,7 +18,7 @@ table Post {
 #[test]
 fn execute_inserts_one_user_row() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, BLOG_SCHEMA).expect("schema");
+    conn.ensure_schema(BLOG_SCHEMA).expect("schema");
     conn.execute(
         r#"User {
             user_id: "550e8400-e29b-41d4-a716-446655440000",
@@ -41,7 +41,7 @@ fn execute_inserts_one_user_row() {
 #[test]
 fn execute_runs_seed_blog_insert_program() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, BLOG_SCHEMA).expect("schema");
+    conn.ensure_schema(BLOG_SCHEMA).expect("schema");
     conn.execute(
         r#"
         User {
@@ -83,7 +83,7 @@ fn execute_runs_seed_blog_insert_program() {
 #[test]
 fn execute_static_insert_call() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, BLOG_SCHEMA).expect("schema");
+    conn.ensure_schema(BLOG_SCHEMA).expect("schema");
     conn.execute(
         r#"User::insert({
             user_id: "550e8400-e29b-41d4-a716-446655440000",
@@ -102,7 +102,7 @@ fn execute_static_insert_call() {
 #[test]
 fn query_static_insert_returns_row() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, BLOG_SCHEMA).expect("schema");
+    conn.ensure_schema(BLOG_SCHEMA).expect("schema");
     let rows = conn
         .query(
             r#"User::insert({
@@ -143,7 +143,7 @@ macro seed_blog() -> unit {
 #[test]
 fn execute_expands_schema_macro_call() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, BLOG_WITH_MACRO).expect("schema");
+    conn.ensure_schema(BLOG_WITH_MACRO).expect("schema");
     conn.execute("seed_blog()").expect("macro");
 
     let rows = conn

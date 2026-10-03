@@ -1,9 +1,19 @@
-//! YYDB public facade — Rust embed `Connection` with **VOS as the only DDL and
+//! YYDB public facade -- Rust embed `Connection` with **VOS as the only DDL and
 //! query language**.
 //!
-//! **Embedded host:** Rust only. Register native [UDFs](udf) on
-//! [`Connection`]. Lightweight remote hosts use [`@yydb/yydb-client`](../../packages/yydb-client)
-//! against `yydb-server` (started by `@yydb/yydb` CLI `serve` or `Database.open()`).
+//! ## Crate layering
+//!
+//! | Layer | Crate | Role |
+//! |-------|-------|------|
+//! | Bottom | `yydb-types` | `Error`, `Value`, CAS refs |
+//! | Engine | `yydb-execution`, `yydb-udf`, `yydb-query` | Execution IR, UDF, query/DML |
+//! | **Facade** | **`yydb`** | `Connection`, `wire`, re-exports |
+//! | Transport | `yydb-client`, `yydb-server` | Remote client / serve loop |
+//! | Bindings | `yydb-napi`, `yydb-pyo3`, ... | Language hosts only |
+//!
+//! **Embedded host:** register native [UDFs](udf) on [`Connection`]. Remote Rust
+//! hosts use [`yydb-client`]. Lightweight TS hosts use `@yydb/yydb-client` against
+//! `yydb-server`.
 //!
 //! Durable layout is still **one primary `.yydb` file**. Optional journal
 //! sidecars `{path}-wal` / `{path}-shm` appear when
@@ -16,7 +26,7 @@
 //!
 //! fn main() -> Result<()> {
 //!     let conn = Connection::open_with_flags("app.yydb", OpenFlags::wal())?;
-//!     conn.ensure_schema(1, "table Project { @@id: uuid, title: utf8 }")?;
+//!     conn.ensure_schema("table Project { @@id: uuid, title: utf8 }")?;
 //!     conn.create_scalar("double", 1, |args| match args {
 //!         [Value::I64(n)] => Ok(Value::I64(n * 2)),
 //!         _ => Err(yydb::Error::Udf {
@@ -45,11 +55,19 @@ pub mod objects;
 /// Shared VOS schema contract (`vos` git @ `dev`).
 pub mod schema;
 
-/// Rust scalar UDF traits and registration helpers.
+/// UDF traits (`ScalarUdf`) and registry types (`UdfRegistry`, ...).
 pub mod udf;
 
 /// Phase 1 VOS query executor (read pipelines + insert writes).
 pub mod query;
+
+/// Common embed imports (`use yydb::prelude::*`).
+pub mod prelude {
+    pub use crate::{
+        Batch, Connection, Error, JournalMode, ObjectRef, ObjectStore, OpenFlags, QueryRow,
+        Result, SchemaVersion, Value,
+    };
+}
 
 mod doctor;
 mod lease;
@@ -62,12 +80,20 @@ pub mod wire;
 
 pub use journal::{JournalMode, OpenFlags};
 pub use objects::ObjectStore;
+pub use query::QueryRow;
 pub use udf::ScalarUdf;
-/// Language-neutral execution programs accepted by the embedded host.
+
 pub use yydb_execution as execution;
-pub use yydb_udf::{
-    HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, UdfType,
+pub use yydb_query;
+pub use yydb_types;
+pub use yydb_udf;
+
+pub use udf::{
+    HostFunctionHandle, HostMicroDefinition, HostRuntimeAdapter, UdfError, UdfRegistry, UdfType,
+    UdfValue,
 };
+/// Result alias for UDF host functions and registry operations.
+pub type UdfResult<T = UdfValue> = yydb_udf::Result<T>;
 pub use yydb_types::{
     ChunkManifest, CommitSequence, DoctorIssue, DoctorReport, DoctorSeverity, Error, EvictBudget,
     EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken, NamespaceQuota,
@@ -339,23 +365,38 @@ impl Connection {
             .count())
     }
 
-    /// Stores the database truth schema when empty and rejects a mismatched
-    /// version thereafter. `document` is **VOS** source (shared with
-    /// `vos` git @ `dev`); it is validated before persistence. Schema migration
-    /// is an explicit future operation.
-    pub fn ensure_schema(&self, version: u32, document: &str) -> Result<()> {
+    /// Current persisted schema version, if any.
+    pub fn schema_version(&self) -> Result<Option<u32>> {
+        Ok(self.schema()?.map(|schema| schema.version))
+    }
+
+    /// Persist the database-truth VOS schema on first use, then require an exact
+    /// document match on later calls.
+    ///
+    /// The initial version is [`schema::initial_version`] (`1`, or
+    /// `// @yydb-schema-version: <n>` in leading comments). To change the schema
+    /// document after persistence, call [`Self::migrate_schema`].
+    pub fn ensure_schema(&self, document: &str) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         schema::validate_document(document)?;
         let mut state = self.read_state()?;
         if let Some(current) = &state.schema {
-            if current.version != version {
-                return Err(Error::SchemaConflict { expected: version, found: current.version });
-            }
             if current.document != document {
-                return Err(Error::Schema { message: "schema document changed without a new version".into() });
+                return Err(Error::Schema {
+                    message:
+                        "schema document changed -- call migrate_schema to advance the version"
+                            .into(),
+                });
             }
-            if state.catalog.is_some() { return Ok(()); }
+            if state.catalog.is_some() {
+                return Ok(());
+            }
         }
+        let version = state
+            .schema
+            .as_ref()
+            .map(|schema| schema.version)
+            .unwrap_or_else(|| schema::initial_version(document));
         let parsed = vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
             message: diagnostics.to_string(),
         })?;
@@ -364,18 +405,12 @@ impl Connection {
         self.write_state(&state)
     }
 
-    /// Publish a VOS schema and explicitly evolve its persisted identity ledger.
+    /// Evolve the persisted schema to the next version (`current + 1`).
     ///
     /// Existing type and field identities are preserved only by exact name
-    /// matching or by mappings in `renames`. Unmapped renames become a removal
-    /// plus a new identity, and removed identities remain tombstoned.
-    pub fn migrate_schema(
-        &self,
-        expected_version: u32,
-        version: u32,
-        document: &str,
-        renames: &vos::ast::RenameMap,
-    ) -> Result<()> {
+    /// matching or by mappings in `renames`. When the document carries
+    /// `// @yydb-schema-version: <n>`, `n` must equal the new version.
+    pub fn migrate_schema(&self, document: &str, renames: &vos::ast::RenameMap) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         schema::validate_document(document)?;
         let parsed = vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
@@ -385,14 +420,11 @@ impl Connection {
         let current = state.schema.as_ref().ok_or_else(|| Error::Schema {
             message: "schema migration requires an existing schema".into(),
         })?;
-        if current.version != expected_version {
-            return Err(Error::SchemaConflict { expected: expected_version, found: current.version });
-        }
-        if version <= expected_version {
-            return Err(Error::Schema { message: "schema migration must advance the version".into() });
-        }
+        let expected = current.version;
+        let version = expected + 1;
+        schema::validate_migration_version(document, version)?;
         let previous_catalog = state.catalog.as_ref().ok_or_else(|| Error::Schema {
-            message: "initialize the legacy identity ledger with ensure_schema before migration".into(),
+            message: "initialize the identity ledger with ensure_schema before migration".into(),
         })?;
         let catalog = vos::evolve_catalog(previous_catalog, &parsed, renames)
             .map_err(|message| Error::Schema { message })?;
@@ -1215,7 +1247,7 @@ mod tests {
     fn stores_schema_and_records_in_one_reopenable_file() {
         let path = temp_db("reopen");
         let conn = Connection::open(&path).unwrap();
-        conn.ensure_schema(1, "table Project { @@id: uuid }").unwrap();
+        conn.ensure_schema("table Project { @@id: uuid }").unwrap();
         conn.put("project/meta", b"Spark").unwrap();
         drop(conn);
 
@@ -1233,7 +1265,7 @@ mod tests {
     fn atomically_replaces_main_image_without_leaving_temp_files() {
         let path = temp_db("atomic");
         let conn = Connection::open(&path).unwrap();
-        conn.ensure_schema(1, "table Project { @@id: uuid }").unwrap();
+        conn.ensure_schema("table Project { @@id: uuid }").unwrap();
         conn.put("project/meta", b"Spark").unwrap();
         drop(conn);
 
@@ -1261,10 +1293,10 @@ mod tests {
     fn open_in_memory_roundtrip() {
         let conn = Connection::open_in_memory().unwrap();
         assert!(conn.path().is_none());
-        conn.ensure_schema(2, "table Demo { @@id: uuid }").unwrap();
+        conn.ensure_schema("table Demo { @@id: uuid }").unwrap();
         conn.put("k", b"v").unwrap();
         assert_eq!(conn.get("k").unwrap(), Some(b"v".to_vec()));
-        assert_eq!(conn.schema().unwrap().unwrap().version, 2);
+        assert_eq!(conn.schema().unwrap().unwrap().version, 1);
         assert_eq!(conn.record_count().unwrap(), 1);
     }
 
@@ -1332,7 +1364,7 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .ends_with(".yydb-shm"));
-        conn.ensure_schema(1, "table T { @@id: uuid }").unwrap();
+        conn.ensure_schema("table T { @@id: uuid }").unwrap();
         conn.put("a", b"1").unwrap();
         conn.put("b", b"2").unwrap();
         assert!(conn.wal_frame_count().unwrap() >= 2);

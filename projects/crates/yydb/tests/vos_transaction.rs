@@ -19,7 +19,7 @@ User {
 #[test]
 fn transaction_commit_persists_execute_writes() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, USER_SCHEMA).expect("schema");
+    conn.ensure_schema(USER_SCHEMA).expect("schema");
     conn.begin().expect("begin");
     assert!(conn.in_transaction());
     conn.execute(INSERT_ADA).expect("insert in txn");
@@ -41,7 +41,7 @@ fn transaction_commit_persists_execute_writes() {
 #[test]
 fn transaction_rollback_discards_execute_writes() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, USER_SCHEMA).expect("schema");
+    conn.ensure_schema(USER_SCHEMA).expect("schema");
     conn.begin().expect("begin");
     conn.execute(INSERT_ADA).expect("insert in txn");
     conn.rollback().expect("rollback");
@@ -56,7 +56,7 @@ fn transaction_rollback_discards_execute_writes() {
 #[test]
 fn nested_begin_is_rejected() {
     let conn = Connection::open_in_memory().expect("open");
-    conn.ensure_schema(1, USER_SCHEMA).expect("schema");
+    conn.ensure_schema(USER_SCHEMA).expect("schema");
     conn.begin().expect("begin");
     let err = conn.begin().expect_err("nested begin");
     assert!(err.to_string().contains("transaction already open"));
