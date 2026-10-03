@@ -53,7 +53,9 @@ function publishDir(dirName) {
             console.log(`skip ${name}@${version} (exists after publish error)`);
             return 'skipped';
         }
-        throw new Error(`npm publish failed for ${name}@${version}`);
+        throw new Error(
+            `npm publish failed for ${name}@${version}. If CI shows ENEEDAUTH, run pnpm placeholder:trust so Trusted Publisher targets yy-database/yydb (not yy-database/yydb.rs).`,
+        );
     }
     return 'published';
 }
