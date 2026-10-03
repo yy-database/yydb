@@ -81,6 +81,45 @@ fn execute_runs_seed_blog_insert_program() {
 }
 
 #[test]
+fn execute_static_insert_call() {
+    let conn = Connection::open_in_memory().expect("open");
+    conn.ensure_schema(1, BLOG_SCHEMA).expect("schema");
+    conn.execute(
+        r#"User::insert({
+            user_id: "550e8400-e29b-41d4-a716-446655440000",
+            user_name: "ada",
+            active: true,
+        })"#,
+    )
+    .expect("static insert");
+
+    let rows = conn
+        .query(r#"User.filter(x => true).collect()"#)
+        .expect("query");
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn query_static_insert_returns_row() {
+    let conn = Connection::open_in_memory().expect("open");
+    conn.ensure_schema(1, BLOG_SCHEMA).expect("schema");
+    let rows = conn
+        .query(
+            r#"User::insert({
+                user_id: "550e8400-e29b-41d4-a716-446655440000",
+                user_name: "ada",
+                active: true,
+            })"#,
+        )
+        .expect("insert returning");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].get("user_name"),
+        Some(&Value::Text("ada".into()))
+    );
+}
+
+#[test]
 fn execute_requires_schema() {
     let conn = Connection::open_in_memory().expect("open");
     let err = conn
