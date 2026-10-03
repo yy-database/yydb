@@ -86,6 +86,31 @@ fn session_cannot_shadow_catalog_without_explicit_flag() {
 }
 
 #[test]
+fn remove_session_entry_unbinds_host() {
+    let native = double_native();
+    let definition = native.session_definition();
+    let identity = definition.identity.clone();
+
+    let mut registry = UdfRegistry::default();
+    registry
+        .register_session_micro(
+            definition,
+            Arc::new(native.into_implementation()),
+            RegisterOptions::new(),
+        )
+        .expect("register");
+    registry.remove_session_by_name("double").expect("remove");
+    assert!(registry.resolve_definition(&identity).is_none());
+    assert!(matches!(
+        registry.invoke(
+            &UdfInvocation::scalar(identity, vec![UdfValue::I64(1)]),
+            Budget::new(1),
+        ),
+        Err(yydb_udf::UdfError::ImplementationUnavailable)
+    ));
+}
+
+#[test]
 fn missing_host_implementation_returns_unavailable() {
     let identity = UdfIdentity::new("text", "normalize", 1).expect("identity");
     let definition = UdfDefinition {
