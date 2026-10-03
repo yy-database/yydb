@@ -14,18 +14,24 @@ pub(crate) struct ExecutionUdf {
     body: ValidatedUdf,
 }
 
+/// Validates a local read-only execution body before UDF registration.
+pub(crate) fn validate_local_execution_body(body: &ValidatedUdf) -> Result<()> {
+    if body.effect() != UdfEffect::Read || body.placement() != UdfPlacement::Local {
+        return Err(yydb_types::Error::Unsupported(
+            "local scalar execution requires a local read-only UDF",
+        ));
+    }
+    if !body.parameter_types().is_empty() {
+        return Err(yydb_types::Error::Unsupported(
+            "local scalar execution does not bind captured parameters",
+        ));
+    }
+    Ok(())
+}
+
 impl ExecutionUdf {
     pub(crate) fn new(body: ValidatedUdf) -> Result<Self> {
-        if body.effect() != UdfEffect::Read || body.placement() != UdfPlacement::Local {
-            return Err(yydb_types::Error::Unsupported(
-                "local scalar execution requires a local read-only UDF",
-            ));
-        }
-        if !body.parameter_types().is_empty() {
-            return Err(yydb_types::Error::Unsupported(
-                "local scalar execution does not bind captured parameters",
-            ));
-        }
+        validate_local_execution_body(&body)?;
         Ok(Self { body })
     }
 }
