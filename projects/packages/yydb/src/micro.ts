@@ -43,6 +43,8 @@ export interface MicroHandle {
     readonly version: number;
     readonly functionId: string;
     readonly hostId: number;
+    /** Monotonic host implementation version for opaque handle checks. */
+    readonly implementationVersion: number;
 }
 
 type AnyDefinedMicro = DefinedMicro<
@@ -85,6 +87,7 @@ export class MicroSessionRegistry {
             version: definition.version,
             functionId,
             hostId: this.hostId,
+            implementationVersion: 1,
         };
         const entry: RegisteredMicro = { handle, definition: definition as AnyDefinedMicro };
         this.byKey.set(key, entry);
