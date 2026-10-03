@@ -37,7 +37,7 @@ jobs:
           toolchain: nightly-2026-07-20
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
-      - run: cargo build -p yydb-tools --release
+      - run: cargo build -p yydb-napi --release
 
   ts:
     name: pnpm packages

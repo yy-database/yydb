@@ -28,10 +28,10 @@ if (!repo) {
 }
 
 const packages = [
-    { pkg: "yydb-win32-x64", bin: "yydb.exe" },
-    { pkg: "yydb-linux-x64", bin: "yydb" },
-    { pkg: "yydb-darwin-x64", bin: "yydb" },
-    { pkg: "yydb-darwin-arm64", bin: "yydb" },
+    { pkg: "yydb-win32-x64", bin: "yydb.win32-x64.node" },
+    { pkg: "yydb-linux-x64", bin: "yydb.linux-x64.node" },
+    { pkg: "yydb-darwin-x64", bin: "yydb.darwin-x64.node" },
+    { pkg: "yydb-darwin-arm64", bin: "yydb.darwin-arm64.node" },
 ];
 
 function run(cmd, args, opts = {}) {
