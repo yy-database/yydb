@@ -6,7 +6,8 @@ use yydb_execution::ValidatedUdf;
 use yydb_types::{Error, Result, Value};
 use yydb_udf::{
     Budget, NativeHandler, NativeUdfDefinition, Placement, RegisterOptions, Signature, UdfError,
-    UdfIdentity, UdfInvocation, UdfPolicy, UdfRegistry, UdfType, UdfValue, VosProgramImplementation,
+    TypeScriptHostAdapter, TypeScriptMicroDefinition, TypeScriptMicroImplementation, UdfIdentity,
+    UdfInvocation, UdfPolicy, UdfRegistry, UdfType, UdfValue, VosProgramImplementation,
     lower_micro_scalar, lower_vos_macro,
 };
 
@@ -17,6 +18,7 @@ use crate::udf::{validate_local_execution_body, RegisteredUdf, ScalarFn, ScalarU
 pub(crate) struct UdfSubsystem {
     registry: UdfRegistry,
     legacy: std::collections::BTreeMap<String, RegisteredUdf>,
+    ts_adapter: Option<Arc<dyn TypeScriptHostAdapter>>,
 }
 
 impl Default for UdfSubsystem {
@@ -24,6 +26,7 @@ impl Default for UdfSubsystem {
         Self {
             registry: UdfRegistry::default(),
             legacy: std::collections::BTreeMap::new(),
+            ts_adapter: None,
         }
     }
 }
@@ -76,6 +79,28 @@ impl UdfSubsystem {
         self.register_native_udf(definition)
     }
 
+    pub(crate) fn set_ts_host_adapter(&mut self, adapter: Arc<dyn TypeScriptHostAdapter>) {
+        self.ts_adapter = Some(adapter);
+    }
+
+    pub(crate) fn register_ts_micro(&mut self, definition: TypeScriptMicroDefinition) -> Result<()> {
+        definition.validate().map_err(map_udf_error)?;
+        let session = definition.session_definition();
+        let name = session.identity.name().to_owned();
+        if let Some(adapter) = self.ts_adapter.clone() {
+            let implementation = Arc::new(TypeScriptMicroImplementation::new(definition, adapter));
+            self.registry
+                .register_session_micro(session, implementation, RegisterOptions::new())
+                .map_err(map_udf_error)?;
+        } else {
+            self.registry
+                .register_session(session, RegisterOptions::new())
+                .map_err(map_udf_error)?;
+        }
+        self.legacy.remove(&name);
+        Ok(())
+    }
+
     pub(crate) fn register_native_udf(&mut self, definition: NativeUdfDefinition) -> Result<()> {
         definition.validate().map_err(map_udf_error)?;
         let session = definition.session_definition();
@@ -92,11 +117,12 @@ impl UdfSubsystem {
     }
 
     pub(crate) fn remove_scalar(&mut self, name: &str) -> Result<()> {
-        let removed_legacy = self.legacy.remove(name).is_some();
-        if removed_legacy {
+        if self.legacy.remove(name).is_some() {
             return Ok(());
         }
-        Err(Error::UdfNotFound { name: name.to_owned() })
+        self.registry
+            .remove_session_by_name(name)
+            .map_err(map_udf_error)
     }
 
     pub(crate) fn list_scalars(&self) -> Vec<String> {

@@ -56,6 +56,10 @@ pub enum MsgType {
     KvPut,
     /// KV put ack.
     KvPutOk,
+    /// Register a session-local TypeScript micro (metadata only).
+    MicroRegister,
+    /// TypeScript micro registration ack.
+    MicroRegisterOk,
     /// Error reply.
     Error,
     /// Unrecognized type (still framed so the peer can answer with Error).
@@ -78,6 +82,8 @@ impl MsgType {
             10 => Self::KvGetOk,
             11 => Self::KvPut,
             12 => Self::KvPutOk,
+            13 => Self::MicroRegister,
+            14 => Self::MicroRegisterOk,
             255 => Self::Error,
             other => Self::Unknown(other),
         }
@@ -98,6 +104,8 @@ impl MsgType {
             Self::KvGetOk => 10,
             Self::KvPut => 11,
             Self::KvPutOk => 12,
+            Self::MicroRegister => 13,
+            Self::MicroRegisterOk => 14,
             Self::Error => 255,
             Self::Unknown(code) => code,
         }
@@ -372,12 +380,20 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
             },
             Err(error) => error_frame(id, error.to_string()),
         },
+        MsgType::MicroRegister => match decode_micro_register(&request.body) {
+            Ok(definition) => match conn.register_ts_micro(definition) {
+                Ok(()) => Frame::new(MsgType::MicroRegisterOk, id, Vec::new()),
+                Err(error) => error_frame(id, error.to_string()),
+            },
+            Err(error) => error_frame(id, error.to_string()),
+        },
         MsgType::HelloOk
         | MsgType::InfoOk
         | MsgType::SchemaGetOk
         | MsgType::SchemaEnsureOk
         | MsgType::KvGetOk
         | MsgType::KvPutOk
+        | MsgType::MicroRegisterOk
         | MsgType::Error => error_frame(id, "unexpected client message type"),
         MsgType::Unknown(code) => error_frame(id, format!("unknown msg_type {code}")),
     }
@@ -396,6 +412,119 @@ pub fn encode_kv_get(key: &str) -> Vec<u8> {
     let mut body = Vec::new();
     push_bytes(&mut body, key.as_bytes());
     body
+}
+
+fn push_u64(out: &mut Vec<u8>, value: u64) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn read_u64(buf: &[u8], offset: &mut usize) -> Result<u64> {
+    if *offset + 8 > buf.len() {
+        return Err(Error::Corrupt("wire body truncated u64"));
+    }
+    let value = u64::from_le_bytes([
+        buf[*offset],
+        buf[*offset + 1],
+        buf[*offset + 2],
+        buf[*offset + 3],
+        buf[*offset + 4],
+        buf[*offset + 5],
+        buf[*offset + 6],
+        buf[*offset + 7],
+    ]);
+    *offset += 8;
+    Ok(value)
+}
+
+fn encode_udf_type_tag(ty: yydb_udf::UdfType) -> u8 {
+    match ty {
+        yydb_udf::UdfType::Null => 0,
+        yydb_udf::UdfType::Bool => 1,
+        yydb_udf::UdfType::I64 => 2,
+        yydb_udf::UdfType::Text => 3,
+    }
+}
+
+fn decode_udf_type_tag(tag: u8) -> Result<yydb_udf::UdfType> {
+    match tag {
+        0 => Ok(yydb_udf::UdfType::Null),
+        1 => Ok(yydb_udf::UdfType::Bool),
+        2 => Ok(yydb_udf::UdfType::I64),
+        3 => Ok(yydb_udf::UdfType::Text),
+        _ => Err(Error::Corrupt("wire micro register has invalid udf type tag")),
+    }
+}
+
+/// Encode a `MicroRegister` body.
+pub fn encode_micro_register(definition: &yydb_udf::TypeScriptMicroDefinition) -> Vec<u8> {
+    let mut body = Vec::new();
+    push_u64(&mut body, definition.handle.host_id);
+    push_u32(&mut body, definition.handle.version);
+    push_u32(&mut body, definition.identity.version);
+    push_bytes(&mut body, definition.identity.name().as_bytes());
+    push_bytes(&mut body, definition.handle.function_id.as_bytes());
+    let arg_count = definition.signature.args.len();
+    body.push(arg_count as u8);
+    for ty in &definition.signature.args {
+        body.push(encode_udf_type_tag(*ty));
+    }
+    body.push(encode_udf_type_tag(definition.signature.returns));
+    body.extend_from_slice(&definition.fingerprint);
+    body
+}
+
+/// Decode a `MicroRegister` body.
+pub fn decode_micro_register(body: &[u8]) -> Result<yydb_udf::TypeScriptMicroDefinition> {
+    let mut offset = 0;
+    let host_id = read_u64(body, &mut offset)?;
+    let handle_version = read_u32(body, &mut offset)?;
+    let udf_version = read_u32(body, &mut offset)?;
+    let name_len = read_u32(body, &mut offset)?;
+    let name = read_bytes(body, &mut offset, name_len)?;
+    let name = std::str::from_utf8(name)
+        .map_err(|_| Error::Corrupt("micro register name is not utf-8"))?;
+    let function_id_len = read_u32(body, &mut offset)?;
+    let function_id = read_bytes(body, &mut offset, function_id_len)?;
+    let function_id = std::str::from_utf8(function_id)
+        .map_err(|_| Error::Corrupt("micro register function_id is not utf-8"))?
+        .to_owned();
+    if offset >= body.len() {
+        return Err(Error::Corrupt("micro register missing arg count"));
+    }
+    let arg_count = body[offset] as usize;
+    offset += 1;
+    let mut args = Vec::with_capacity(arg_count);
+    for _ in 0..arg_count {
+        if offset >= body.len() {
+            return Err(Error::Corrupt("micro register truncated arg types"));
+        }
+        args.push(decode_udf_type_tag(body[offset])?);
+        offset += 1;
+    }
+    if offset >= body.len() {
+        return Err(Error::Corrupt("micro register missing return type"));
+    }
+    let returns = decode_udf_type_tag(body[offset])?;
+    offset += 1;
+    if offset + 32 > body.len() {
+        return Err(Error::Corrupt("micro register missing fingerprint"));
+    }
+    let mut fingerprint = [0_u8; 32];
+    fingerprint.copy_from_slice(&body[offset..offset + 32]);
+    yydb_udf::TypeScriptMicroDefinition::from_scalar(
+        name,
+        udf_version,
+        args,
+        returns,
+        host_id,
+        function_id,
+        handle_version,
+        fingerprint,
+    )
+    .map_err(|error| Error::Udf {
+        name: name.to_owned(),
+        message: error.to_string(),
+    })
 }
 
 /// Encode a `KvPut` body.
@@ -512,6 +641,30 @@ mod tests {
             decode_kv_get_ok(&get.body).unwrap().as_deref(),
             Some(b"b".as_slice())
         );
+    }
+
+    #[test]
+    fn dispatch_micro_register_records_session_metadata() {
+        use yydb_udf::TypeScriptMicroDefinition;
+
+        let conn = Connection::open_in_memory().unwrap();
+        let definition = TypeScriptMicroDefinition::from_scalar(
+            "text.normalize",
+            1,
+            vec![yydb_udf::UdfType::Text],
+            yydb_udf::UdfType::Text,
+            9,
+            "normalize",
+            1,
+            [2u8; 32],
+        )
+        .unwrap();
+        let response = dispatch(
+            &conn,
+            &Frame::new(MsgType::MicroRegister, 4, encode_micro_register(&definition)),
+        );
+        assert_eq!(response.msg_type, MsgType::MicroRegisterOk);
+        assert!(conn.list_scalars().contains(&"text.normalize".to_owned()));
     }
 
     #[test]
