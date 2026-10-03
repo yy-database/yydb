@@ -21,6 +21,7 @@ target/
 node_modules/
 dist/
 .env.placeholder.local
+.cache/
 
 # Java/Maven
 target/
