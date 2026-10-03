@@ -8,7 +8,8 @@ a small Rust API. It uses the same storage engine as the YYDB CLI and TypeScript
 
 [![crates.io](https://img.shields.io/crates/v/yydb)](https://crates.io/crates/yydb)
 [![docs.rs](https://docs.rs/yydb/badge.svg)](https://docs.rs/yydb)
-[![CI](https://github.com/yy-database/yydb.rs/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb.rs/actions/workflows/ci.yml)
+[![Check Rust](https://github.com/yy-database/yydb/actions/workflows/check-rust.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb/actions/workflows/check-rust.yml)
+[![Check TypeScript](https://github.com/yy-database/yydb/actions/workflows/check-typescript.yml/badge.svg?branch=dev)](https://github.com/yy-database/yydb/actions/workflows/check-typescript.yml)
 [![License](https://img.shields.io/badge/license-MPL--2.0-blue)](https://github.com/yy-database/yydb.rs/blob/dev/License.md)
 
 ## Install
@@ -55,13 +56,13 @@ Bindings (`yydb-napi`, `yydb-pyo3`, future `yydb-wasm`, …) are **thin language
 layers** on top of `yydb` / `yydb-server`. They are not folded into the facade and
 must not couple to each other.
 
-| Layer | Crate | When to depend |
-|-------|-------|----------------|
-| Bottom | `yydb-types` | Extending engine internals only |
-| Engine | `yydb-execution`, `yydb-udf`, `yydb-query` | Facade implementation / query or UDF authors |
-| **Facade** | **`yydb`** | **Default — embedded `Connection`** |
-| Transport | `yydb-client`, `yydb-server` | Remote client or serve process |
-| Bindings | `yydb-napi`, `yydb-pyo3`, … | Node / Python / WASM hosts only |
+| Layer      | Crate                                      | When to depend                               |
+|------------|--------------------------------------------|----------------------------------------------|
+| Bottom     | `yydb-types`                               | Extending engine internals only              |
+| Engine     | `yydb-execution`, `yydb-udf`, `yydb-query` | Facade implementation / query or UDF authors |
+| **Facade** | **`yydb`**                                 | **Default — embedded `Connection`**          |
+| Transport  | `yydb-client`, `yydb-server`               | Remote client or serve process               |
+| Bindings   | `yydb-napi`, `yydb-pyo3`, …                | Node / Python / WASM hosts only              |
 
 ## Included in the 0.1 API
 
@@ -76,14 +77,14 @@ must not couple to each other.
 
 Distributed services beyond the embedded engine are separate parts of the YY product roadmap.
 
-| Need | Surface |
-|------|---------|
-| Rust embed | `yydb` (`Connection`) |
-| Rust wire server | `yydb-server` (used by `yydb-napi` / `yydb-pyo3` `serve`) |
-| Rust remote client | `yydb-client` |
-| Node all-in-one (CLI + engine + serve) | `@yydb/yydb` (`yydb-napi`) |
-| Python embed / serve | `yydb-pyo3` |
-| Lightweight TS wire client | `@yydb/yydb-client` |
+| Need                                   | Surface                                                   |
+|----------------------------------------|-----------------------------------------------------------|
+| Rust embed                             | `yydb` (`Connection`)                                     |
+| Rust wire server                       | `yydb-server` (used by `yydb-napi` / `yydb-pyo3` `serve`) |
+| Rust remote client                     | `yydb-client`                                             |
+| Node all-in-one (CLI + engine + serve) | `@yydb/yydb` (`yydb-napi`)                                |
+| Python embed / serve                   | `yydb-pyo3`                                               |
+| Lightweight TS wire client             | `@yydb/yydb-client`                                       |
 
 ## Documentation
 

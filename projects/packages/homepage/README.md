@@ -25,13 +25,12 @@ Create a production build with:
 pnpm --filter @yydb/yydb-homepage build
 ```
 
-The repository's implementation and protocol notes are maintained separately in [
-`yydb/documentation/`](https://github.com/yy-database/yydb.rs/tree/dev/documentation).
+Integrator Agent Skills ship in [`@yydb/yydb-skills`](../yydb-skills) (`npx skills add @yydb/yydb-skills --list`).
 
 ## Related packages
 
-| Package                                                                                    | Use                     |
-|--------------------------------------------------------------------------------------------|-------------------------|
-| [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb)                                   | Node.js file API        |
-| [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client)                     | Browser and wire client |
+| Package                                                                                            | Use                     |
+|----------------------------------------------------------------------------------------------------|-------------------------|
+| [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb)                                           | Node.js file API        |
+| [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client)                             | Browser and wire client |
 | [`@yydb/yydb-webui`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-webui) | Local database explorer |
