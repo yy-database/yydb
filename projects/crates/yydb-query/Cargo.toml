@@ -1,0 +1,18 @@
+[package]
+name = "yydb-query"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Phase 1 VOS query and DML executor for YYDB"
+readme = "readme.md"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+vos = { workspace = true }
+yydb-types = { workspace = true }

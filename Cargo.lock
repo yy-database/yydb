@@ -1325,6 +1325,7 @@ dependencies = [
  "vos",
  "windows-sys",
  "yydb-execution",
+ "yydb-query",
  "yydb-types",
  "yydb-udf",
 ]
@@ -1351,6 +1352,15 @@ dependencies = [
  "napi-derive",
  "yydb",
  "yydb-server",
+]
+
+[[package]]
+name = "yydb-query"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "vos",
+ "yydb-types",
 ]
 
 [[package]]
