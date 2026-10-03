@@ -1,9 +1,6 @@
-import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-const require = createRequire(import.meta.url);
 
 export type PlatformKey = "win32-x64" | "linux-x64" | "darwin-x64" | "darwin-arm64";
 
@@ -16,11 +13,12 @@ export function platformKey(platform = process.platform, arch = process.arch): P
     return null;
 }
 
-function binaryName(platform = process.platform): string {
-    return platform === "win32" ? "yydb.exe" : "yydb";
+/** Native binding filename inside each `@yydb/yydb-<platform>` package. */
+export function nativeBindingName(key: PlatformKey): string {
+    return `yydb.${key}.node`;
 }
 
-function existsExecutable(filePath: string): boolean {
+function existsFile(filePath: string): boolean {
     try {
         fs.accessSync(filePath, fs.constants.F_OK);
         return true;
@@ -30,46 +28,30 @@ function existsExecutable(filePath: string): boolean {
 }
 
 /**
- * Resolve the `yydb` engine binary without asking the app developer to
- * configure downloads. Order: `YYDB_BIN` → optional platform package →
- * cargo `target/{release,debug}` (monorepo).
+ * Resolve the TypeScript `yydb` CLI entry script.
+ * Order: `YYDB_CLI` → this package `dist/cli.js`.
  */
-export function resolveYydbBinary(): string {
-    const fromEnv = process.env.YYDB_BIN?.trim();
+export function resolveYydbCli(): string {
+    const fromEnv = process.env.YYDB_CLI?.trim();
     if (fromEnv) {
-        if (!existsExecutable(fromEnv)) {
-            throw new Error(`YYDB_BIN points to missing binary: ${fromEnv}`);
+        if (!existsFile(fromEnv)) {
+            throw new Error(`YYDB_CLI points to missing script: ${fromEnv}`);
         }
         return path.resolve(fromEnv);
     }
-
-    const key = platformKey();
-    if (key) {
-        const pkg = `@yydb/yydb-${key}`;
-        const name = binaryName();
-        try {
-            const pkgJson = require.resolve(`${pkg}/package.json`);
-            const candidate = path.join(path.dirname(pkgJson), name);
-            if (existsExecutable(candidate)) {
-                return candidate;
-            }
-        } catch {
-            // optionalDependency not installed for this platform
-        }
-    }
-
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const repoRoot = path.resolve(here, "../../..");
-    for (const profile of ["release", "debug"] as const) {
-        const candidate = path.join(repoRoot, "target", profile, binaryName());
-        if (existsExecutable(candidate)) {
-            return candidate;
-        }
+    const candidate = path.join(here, "cli.js");
+    if (!existsFile(candidate)) {
+        throw new Error(
+            "YYDB CLI script not found. Build `@yydb/yydb` (`pnpm --filter @yydb/yydb build`) or set YYDB_CLI.",
+        );
     }
+    return candidate;
+}
 
-    throw new Error(
-        "YYDB engine binary not found. Install the matching optionalDependency " +
-            `(@yydb/yydb-${key ?? "<platform>"}), set YYDB_BIN, or build ` +
-            "`cargo build -p yydb-tools` in this repo.",
-    );
+/**
+ * @deprecated Use {@link resolveYydbCli}. Kept for callers that still import this name.
+ */
+export function resolveYydbBinary(): string {
+    return resolveYydbCli();
 }

@@ -18,4 +18,9 @@ export {
     type UdfScalarKind,
     type UdfTypeDescriptor,
 } from "./udf-types.js";
-export { resolveYydbBinary, platformKey } from "./resolve-bin.js";
+export {
+    nativeBindingName,
+    platformKey,
+    resolveYydbBinary,
+    resolveYydbCli,
+} from "./resolve-bin.js";
