@@ -1,6 +1,6 @@
 # `@yydb/yydb-darwin-arm64`
 
-**The YYDB CLI engine for Apple Silicon Macs.**
+**The YYDB native binding for Apple Silicon Macs.**
 
 This package is selected automatically when you install
 [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) on `darwin/arm64`. Most applications should install the parent
@@ -10,18 +10,18 @@ package rather than depend on this platform package directly.
 npm install @yydb/yydb
 ```
 
-The package also exposes the `yydb` executable:
+The TypeScript `yydb` CLI ships from `@yydb/yydb` and loads this `.node` binding:
 
 ```text
-yydb --help
-yydb serve app.yydb --bind 127.0.0.1:7700
+npx yydb --help
+npx yydb serve app.yydb --bind 127.0.0.1:7700
 ```
 
 | Field       | Value                                 |
 |-------------|---------------------------------------|
 | npm package | `@yydb/yydb-darwin-arm64`             |
 | Platform    | macOS, Apple Silicon (`darwin/arm64`) |
-| Binary      | `yydb`                                |
+| Binding     | `yydb.darwin-arm64.node`              |
 
 For Intel Macs, use [`@yydb/yydb-darwin-x64`](https://www.npmjs.com/package/@yydb/yydb-darwin-x64).
 
