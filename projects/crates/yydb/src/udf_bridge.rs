@@ -7,7 +7,7 @@ use yydb_types::{Error, Result, Value};
 use yydb_udf::{
     Budget, NativeHandler, NativeUdfDefinition, Placement, RegisterOptions, Signature, UdfError,
     UdfIdentity, UdfInvocation, UdfPolicy, UdfRegistry, UdfType, UdfValue, VosProgramImplementation,
-    lower_micro_scalar,
+    lower_micro_scalar, lower_vos_macro,
 };
 
 type UdfBridgeResult<T> = std::result::Result<T, UdfError>;
@@ -49,26 +49,43 @@ impl UdfSubsystem {
     pub(crate) fn register_execution_udf(&mut self, body: ValidatedUdf) -> Result<()> {
         validate_local_execution_body(&body)?;
         let lowered = execution_body_to_lowered(body).map_err(map_udf_error)?;
-        self.install_lowered(lowered, RegisterOptions::new())?;
+        self.install_session_lowered(lowered, RegisterOptions::new())?;
         Ok(())
     }
 
     pub(crate) fn register_vos_scalar(&mut self, source: &str, version: u32) -> Result<()> {
         let lowered = lower_micro_scalar(source, version).map_err(map_udf_error)?;
-        self.install_lowered(lowered, RegisterOptions::new())?;
+        self.install_session_lowered(lowered, RegisterOptions::new())?;
         Ok(())
+    }
+
+    pub(crate) fn register_vos_macro(&mut self, source: &str, version: u32) -> Result<()> {
+        let lowered = lower_vos_macro(source, version).map_err(map_udf_error)?;
+        self.install_catalog_lowered(lowered)?;
+        Ok(())
+    }
+
+    pub(crate) fn register_closure_scalar(
+        &mut self,
+        name: &str,
+        version: u32,
+        arity: Option<usize>,
+        func: Arc<ScalarFn>,
+    ) -> Result<()> {
+        let definition = native_from_closure(name, version, arity, func).map_err(map_udf_error)?;
+        self.register_native_udf(definition)
     }
 
     pub(crate) fn register_native_udf(&mut self, definition: NativeUdfDefinition) -> Result<()> {
         definition.validate().map_err(map_udf_error)?;
-        let catalog = definition.catalog_definition();
-        let name = catalog.identity.name().to_owned();
+        let session = definition.session_definition();
+        let name = session.identity.name().to_owned();
         self.registry
-            .catalog_mut()
-            .register(catalog)
-            .map_err(map_udf_error)?;
-        self.registry
-            .bind_host(Arc::new(definition.into_implementation()))
+            .register_session_micro(
+                session,
+                Arc::new(definition.into_implementation()),
+                RegisterOptions::new(),
+            )
             .map_err(map_udf_error)?;
         self.legacy.remove(&name);
         Ok(())
@@ -164,17 +181,30 @@ impl UdfSubsystem {
         })
     }
 
-    fn install_lowered(
+    fn install_session_lowered(
         &mut self,
         lowered: yydb_udf::LoweredUdf,
         options: RegisterOptions,
     ) -> Result<()> {
         let name = lowered.identity.name().to_owned();
+        let definition = lowered.session_definition();
+        let implementation = Arc::new(VosProgramImplementation::new(lowered));
         self.registry
-            .register_session(lowered.catalog_definition(), options)
+            .register_session(definition, options)
             .map_err(map_udf_error)?;
         self.registry
-            .bind_host(Arc::new(VosProgramImplementation::new(lowered)))
+            .bind_host(implementation)
+            .map_err(map_udf_error)?;
+        self.legacy.remove(&name);
+        Ok(())
+    }
+
+    fn install_catalog_lowered(&mut self, lowered: yydb_udf::LoweredUdf) -> Result<()> {
+        let name = lowered.identity.name().to_owned();
+        let definition = lowered.catalog_definition();
+        let implementation = Arc::new(VosProgramImplementation::new(lowered));
+        self.registry
+            .register_catalog_macro(definition, implementation)
             .map_err(map_udf_error)?;
         self.legacy.remove(&name);
         Ok(())
