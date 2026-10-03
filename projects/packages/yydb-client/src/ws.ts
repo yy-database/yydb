@@ -1,5 +1,12 @@
-import { decodeFrame, encodeFrame, type Frame } from "./wire.js";
-import { normalizeWsUrl, type Transport } from "./transport.js";
+import {
+    decodeFrame,
+    decodeMicroHostInvoke,
+    encodeFrame,
+    encodeMicroHostInvokeOk,
+    MsgType,
+    type Frame,
+} from "./wire.js";
+import { normalizeWsUrl, type MicroHostHandler, type Transport } from "./transport.js";
 
 /** Browser / any host with WebSocket — path `/wire`, binary frames. */
 export async function openWebSocketTransport(endpoint: string): Promise<Transport> {
@@ -14,39 +21,63 @@ export async function openWebSocketTransport(endpoint: string): Promise<Transpor
         });
     });
 
-    let pending: { resolve: (frame: Frame) => void; reject: (error: Error) => void } | null = null;
+    let microHostHandler: MicroHostHandler | undefined;
+    const buffer: Frame[] = [];
+    const waiters: Array<() => void> = [];
 
     ws.addEventListener("message", (event) => {
-        try {
-            const data =
-                event.data instanceof ArrayBuffer
-                    ? new Uint8Array(event.data)
-                    : new Uint8Array(event.data as ArrayBuffer);
-            const frame = decodeFrame(data);
-            if (pending) {
-                const slot = pending;
-                pending = null;
-                slot.resolve(frame);
-            }
-        } catch (error) {
-            if (pending) {
-                const slot = pending;
-                pending = null;
-                slot.reject(error as Error);
-            }
+        const data =
+            event.data instanceof ArrayBuffer
+                ? new Uint8Array(event.data)
+                : new Uint8Array(event.data as ArrayBuffer);
+        buffer.push(decodeFrame(data));
+        for (const wake of waiters.splice(0)) {
+            wake();
         }
     });
 
+    async function readFrame(): Promise<Frame> {
+        while (buffer.length === 0) {
+            await new Promise<void>((resolve) => waiters.push(resolve));
+        }
+        return buffer.shift()!;
+    }
+
+    async function writeFrame(frame: Frame): Promise<void> {
+        ws.send(encodeFrame(frame));
+    }
+
+    async function handleServerPush(frame: Frame): Promise<boolean> {
+        if (frame.msgType !== MsgType.MicroHostInvoke) {
+            return false;
+        }
+        if (!microHostHandler) {
+            throw new Error("received MicroHostInvoke without a micro host handler");
+        }
+        const payload = decodeMicroHostInvoke(frame.body);
+        const result = await microHostHandler(payload);
+        await writeFrame({
+            msgType: MsgType.MicroHostInvokeOk,
+            flags: 0,
+            requestId: frame.requestId,
+            body: encodeMicroHostInvokeOk(result),
+        });
+        return true;
+    }
+
     return {
-        send(frame) {
-            return new Promise((resolve, reject) => {
-                if (pending) {
-                    reject(new Error("overlapping websocket requests"));
-                    return;
+        setMicroHostHandler(handler) {
+            microHostHandler = handler;
+        },
+        async send(frame) {
+            await writeFrame(frame);
+            while (true) {
+                const response = await readFrame();
+                if (await handleServerPush(response)) {
+                    continue;
                 }
-                pending = { resolve, reject };
-                ws.send(encodeFrame(frame));
-            });
+                return response;
+            }
         },
         close() {
             ws.close();
