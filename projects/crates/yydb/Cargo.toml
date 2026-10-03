@@ -15,7 +15,9 @@ categories = ["database-implementations", "embedded"]
 path = "src/lib.rs"
 
 [dependencies]
+base64 = { workspace = true }
 blake3 = { workspace = true }
+sha1 = { workspace = true }
 vos = { workspace = true }
 yydb-types = { workspace = true }
 yydb-execution = { workspace = true }
