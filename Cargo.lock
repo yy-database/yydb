@@ -1350,6 +1350,18 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "yydb",
+ "yydb-server",
+]
+
+[[package]]
+name = "yydb-server"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "sha1",
+ "yydb",
+ "yydb-types",
+ "yydb-udf",
 ]
 
 [[package]]

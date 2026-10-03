@@ -14,6 +14,7 @@ name = "yydb_napi"
 napi = { version = "2.16", default-features = false, features = ["napi4"] }
 napi-derive = "2.16"
 yydb = { path = "../yydb" }
+yydb-server = { path = "../yydb-server" }
 
 [build-dependencies]
 napi-build = "2.6"

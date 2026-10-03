@@ -1,0 +1,3 @@
+# Local monorepo override (gitignored). CI resolves git `dev` only.
+[patch."https://github.com/voml/vos-language.git"]
+vos = { path = "../vos-language/projects/crates/vos" }

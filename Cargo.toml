@@ -15,6 +15,7 @@ serde_json = "1"
 vos = { version = "0.1.0", git = "https://github.com/voml/vos-language.git", branch = "dev" }
 yydb = { path = "projects/crates/yydb" }
 yydb-client = { path = "projects/crates/yydb-client" }
+yydb-server = { path = "projects/crates/yydb-server" }
 yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }
 yydb-execution = { version = "0.1.0", path = "projects/crates/yydb-execution" }
 yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }

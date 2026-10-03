@@ -4,13 +4,12 @@ use std::net::TcpStream;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-use yydb_udf::{
-    HostFunctionHandle, HostRuntimeAdapter, Result as UdfResult, UdfError, UdfValue,
-};
-
-use crate::wire::{
+use yydb::wire::{
     self, decode_micro_host_invoke_ok, encode_micro_host_invoke, read_frame, write_frame, Frame,
     MsgType,
+};
+use yydb_udf::{
+    HostFunctionHandle, HostRuntimeAdapter, Result as UdfResult, UdfError, UdfValue,
 };
 
 /// Invokes host micros on the wire peer that owns the host registry.
