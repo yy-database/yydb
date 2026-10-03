@@ -3,7 +3,14 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { connect, type Client } from "@yydb/yydb-client/node";
+import {
+    defineMicro as buildMicro,
+    type DefinedMicro,
+    type MicroHandle,
+    MicroSessionRegistry,
+} from "./micro.js";
 import { resolveYydbBinary } from "./resolve-bin.js";
+import type { UdfTypeDescriptor } from "./udf-types.js";
 
 export type { SchemaVersion } from "@yydb/yydb-client";
 
@@ -64,12 +71,14 @@ export class Database {
     readonly endpoint: string;
     private client: Client;
     private child: ChildProcess | null;
+    private readonly microRegistry: MicroSessionRegistry;
 
     private constructor(dbPath: string, endpoint: string, client: Client, child: ChildProcess) {
         this.path = dbPath;
         this.endpoint = endpoint;
         this.client = client;
         this.child = child;
+        this.microRegistry = new MicroSessionRegistry();
     }
 
     /**
@@ -143,6 +152,28 @@ export class Database {
 
     async put(key: string, value: Uint8Array | string): Promise<void> {
         await this.client.put(key, value);
+    }
+
+    /**
+     * Build a typed session-local micro definition. Does not register it with
+     * the engine until [`registerMicro`](./database.ts) is called.
+     */
+    defineMicro<
+        TArgs extends readonly UdfTypeDescriptor[],
+        TReturn extends UdfTypeDescriptor,
+    >(definition: Parameters<typeof buildMicro<TArgs, TReturn>>[0]): DefinedMicro<TArgs, TReturn> {
+        return buildMicro(definition);
+    }
+
+    /**
+     * Install a [`defineMicro`](./database.ts) definition into the current
+     * session registry. TS micros are host-local and never written to `.yydb`.
+     */
+    registerMicro<
+        TArgs extends readonly UdfTypeDescriptor[],
+        TReturn extends UdfTypeDescriptor,
+    >(definition: DefinedMicro<TArgs, TReturn>): MicroHandle {
+        return this.microRegistry.register(definition);
     }
 
     /** Stop the private engine process. */

@@ -19,7 +19,7 @@
     ],
     "scripts": {
         "build": "tsc -p tsconfig.json",
-        "test": "node --experimental-strip-types --test src/resolve-bin.test.ts"
+        "test": "node --experimental-strip-types --test src/**/*.test.ts"
     },
     "repository": {
         "type": "git",
