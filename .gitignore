@@ -20,6 +20,7 @@ target/
 # Node
 node_modules/
 dist/
+.env.placeholder.local
 
 # Java/Maven
 target/
