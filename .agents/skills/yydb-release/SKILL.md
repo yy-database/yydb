@@ -13,7 +13,7 @@ description: >-
 |------------------|------------------------------------------|-----------------------------------|---------------------------------------|
 | Check Rust       | `.github/workflows/check-rust.yml`       | push/PR `dev` / `main` / `master` | `rustfmt`, `cargo test`, `napi`       |
 | Check TypeScript | `.github/workflows/check-typescript.yml` | push/PR `dev` / `main` / `master` | Nifty format, pnpm build/test         |
-| Release          | `.github/workflows/release-npm.yml`      | push tag `v*.*.*`                 | npm OIDC + GitHub Release engine zips |
+| Release          | `.github/workflows/release-npm.yml`      | push tag `v*.*.*`                 | npm OIDC (`@yydb/*` incl. platform `.node`) |
 
 Release does **not** depend on CI. Tag `vX.Y.Z` → npm version `X.Y.Z`.
 
@@ -42,7 +42,6 @@ Uses **`NPM_TOTP_SECRET`** in **`.env.placeholder.local`** (not `npm login`). Ca
 ## Trusted Publisher
 
 ```bash
-$env:NIFTY_TRUST_FILE = "release-npm.yml"
 pnpm placeholder:trust
 ```
 

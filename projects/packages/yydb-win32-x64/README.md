@@ -23,7 +23,7 @@ npx yydb serve app.yydb --bind 127.0.0.1:7700
 | Platform    | Windows x64 (`win32/x64`) |
 | Binding     | `yydb.win32-x64.node`     |
 
-Other platforms are listed on the [YYDB releases page](https://github.com/yy-database/yydb.rs/releases).
+Other platforms install as `@yydb/yydb-linux-x64`, `@yydb/yydb-darwin-x64`, and `@yydb/yydb-darwin-arm64` via `@yydb/yydb` optionalDependencies.
 
 [YYDB overview](https://github.com/yy-database/yydb.rs) ·
 [License](https://github.com/yy-database/yydb.rs/blob/dev/License.md)
