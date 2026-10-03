@@ -4,6 +4,42 @@ use yydb::{
     Connection, Error,
 };
 
+fn resolved_user_contract() -> yydb::vos::ResolvedContract {
+    yydb::vos::ResolvedContract {
+        format_version: "vos-resolved-contract-v1".into(),
+        identity_manifest_version: "vos-identity-manifest-v0".into(),
+        schema_fingerprint: "0".repeat(64),
+        types: vec![yydb::vos::contract::ResolvedTypeContract {
+            type_id: 7,
+            canonical_path: vec!["demo".into(), "User".into()],
+            kind: yydb::vos::contract::TypeContractKind::Table,
+            fields: vec![yydb::vos::contract::ResolvedFieldContract {
+                field_id: 11,
+                virtual_field_index: 3,
+                canonical_name: "id".into(),
+                canonical_type: yydb::vos::contract::ResolvedCanonicalType::Builtin(vec![
+                    "i64".into(),
+                ]),
+                attributes: vec![],
+                default_value: None,
+            }],
+        }],
+    }
+}
+
+#[test]
+fn lowers_resolved_contract_without_reparsing_or_reassigning_identity() {
+    let contract = resolved_user_contract();
+    let catalog = yydb::schema::execution_catalog_from_resolved_contract(&contract)
+        .expect("resolved contract lowers");
+    let table = &catalog.types[0];
+    assert_eq!(table.schema_id, 7);
+    assert_eq!(table.name, "User");
+    assert_eq!(table.fields[0].field_id, 11);
+    assert_eq!(table.fields[0].virtual_field, 3);
+    assert_eq!(table.fields[0].handle.index(), 3);
+}
+
 #[test]
 fn lowers_vos_catalog_identities_into_a_field_read() {
     let source = "class Request { name: utf8 } table User { @@id: i64, active: bool }";
