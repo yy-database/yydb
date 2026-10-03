@@ -2,7 +2,11 @@
 name = "yydb-client"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Rust remote client for yydb serve (non-embedded; TCP binary wire v1)"
+readme = "readme.md"
 publish = false
 
 [lib]
@@ -10,5 +14,3 @@ path = "src/lib.rs"
 
 [dependencies]
 yydb = { workspace = true }
-yydb-types = { workspace = true }
-yydb-udf = { workspace = true }

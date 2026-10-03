@@ -1,4 +1,8 @@
-# YYDB bytes storage: unified `objects/` CAS
+# Historical YYDB bytes storage draft: per-object `objects/` CAS
+
+> Historical note: this document describes an earlier per-object CAS experiment. It is not the current `.yydb` or `.yydx` storage contract. Current YYDB `.yydb` is a single persistent file with deletable `-wal` and `-shm` companions. Only `.yydx` may use a sibling `<app-name>-objects/` directory containing aggregated `.blob` segments. Do not create or restore `<app-name>.yydb.objects/` from this document.
+
+> Companion cleanup requires committed changes to be durably checkpointed and no active readers or writers depending on those files. This note does not authorize discarding committed, uncheckpointed WAL data.
 
 ## Non-goals
 

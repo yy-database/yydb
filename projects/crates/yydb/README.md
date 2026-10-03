@@ -24,7 +24,7 @@ use yydb::{Connection, Result};
 
 fn main() -> Result<()> {
     let db = Connection::open("app.yydb")?;
-    db.ensure_schema(1, "table Project { @@id: uuid, title: utf8 }")?;
+    db.ensure_schema("table Project { @@id: uuid, title: utf8 }")?;
     db.put("project/title", b"Spark")?;
 
     assert_eq!(
@@ -38,6 +38,31 @@ fn main() -> Result<()> {
 `Connection::open` creates the file when needed. Use
 `Connection::open_in_memory()` for tests and short-lived tools.
 
+## Crate layering
+
+`yydb` is the **facade**: one normal Rust dependency for embed hosts. It owns
+`Connection`, re-exports `yydb-types` (`Value`, `Error`, …), folds in
+`yydb-query` as `yydb::query`, and exposes execution/UDF/wire surfaces.
+`yydb-types` is the **bottom package** — engine internals and bindings build on it,
+but applications should not need a direct dependency.
+
+```rust
+use yydb::prelude::*;
+// advanced UDF: use yydb::udf::UdfRegistry;
+```
+
+Bindings (`yydb-napi`, `yydb-pyo3`, future `yydb-wasm`, …) are **thin language
+layers** on top of `yydb` / `yydb-server`. They are not folded into the facade and
+must not couple to each other.
+
+| Layer | Crate | When to depend |
+|-------|-------|----------------|
+| Bottom | `yydb-types` | Extending engine internals only |
+| Engine | `yydb-execution`, `yydb-udf`, `yydb-query` | Facade implementation / query or UDF authors |
+| **Facade** | **`yydb`** | **Default — embedded `Connection`** |
+| Transport | `yydb-client`, `yydb-server` | Remote client or serve process |
+| Bindings | `yydb-napi`, `yydb-pyo3`, … | Node / Python / WASM hosts only |
+
 ## Included in the 0.1 API
 
 - versioned VOS schema validation and persistence;
@@ -46,16 +71,18 @@ fn main() -> Result<()> {
 - content-addressed binary objects with chunked file and range access;
 - vector payloads stored through the same object references;
 - process-local native scalar UDFs;
-- shared wire frame types for hosts and clients.
+- Phase 1 VOS query/DML (`yydb::query`, backed by `yydb-query`);
+- shared wire frame types for hosts and clients (`yydb::wire`).
 
-The query engine and distributed services are separate parts of the YY product roadmap.
+Distributed services beyond the embedded engine are separate parts of the YY product roadmap.
 
 | Need | Surface |
 |------|---------|
 | Rust embed | `yydb` (`Connection`) |
-| Rust wire server | `yydb-server` (used by `@yydb/yydb` N-API `serve`) |
+| Rust wire server | `yydb-server` (used by `yydb-napi` / `yydb-pyo3` `serve`) |
 | Rust remote client | `yydb-client` |
-| Node all-in-one (CLI + engine + serve) | `@yydb/yydb` |
+| Node all-in-one (CLI + engine + serve) | `@yydb/yydb` (`yydb-napi`) |
+| Python embed / serve | `yydb-pyo3` |
 | Lightweight TS wire client | `@yydb/yydb-client` |
 
 ## Documentation

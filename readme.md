@@ -78,8 +78,8 @@ their structured data:
 | **One engine, several hosts** | Rust embed, the `yydb` CLI, Node.js, browsers, and WebUI share the same file and wire model.                                  |
 
 The object store is deliberately unified: files, bytes, vectors, and future ANN segments use one
-`<db>.objects/objects/…` layout. YYDB 0.1 provides vector and object persistence; ANN indexing/search and the full VOS
-query executor are separate capabilities still being developed.
+`<db>.objects/objects/…` layout. YYDB 0.1 provides vector and object persistence and a Phase 1 VOS query/DML executor
+(`yydb::query`). ANN indexing/search and distributed services remain separate roadmap items.
 
 ## 📦 What the current release provides
 
@@ -92,10 +92,11 @@ YYDB 0.1 is deliberately small and usable today:
 - content-addressed, chunked storage for larger binary objects, including range reads for native files;
 - vector payload persistence in the same object store;
 - native Rust scalar UDFs;
+- Phase 1 VOS query/DML on embedded connections;
 - a shared wire client for a separately managed local engine.
 
-The full VOS query engine and distributed services are being developed as separate product surfaces. This repository
-does not turn YYDB into a hosted multi-node database.
+Distributed multi-node services are a separate product surface ([YYDS](#yydb-and-yyds)). This repository does not turn
+YYDB into a hosted cluster control plane.
 
 ## 🚀 Pick a way to use it
 
@@ -130,15 +131,27 @@ cargo add yydb
 ```
 
 ```rust
-use yydb::{Connection, Result};
+use yydb::prelude::*;
 
 fn main() -> Result<()> {
     let db = Connection::open("app.yydb")?;
-    db.ensure_schema(1, "table Project { @@id: uuid, title: utf8 }")?;
+    db.ensure_schema("table Project { @@id: uuid, title: utf8 }")?;
     db.put("project/title", b"Spark")?;
     Ok(())
 }
 ```
+
+### Rust crate layout
+
+| Layer | Crate | Role |
+|-------|-------|------|
+| Bottom | `yydb-types` | `Value`, `Error`, CAS refs |
+| Engine | `yydb-execution`, `yydb-udf`, `yydb-query` | Execution IR, UDF contract, VOS query/DML |
+| **Facade** | **`yydb`** | **`Connection` + re-exports — normal app dependency** |
+| Transport | `yydb-client`, `yydb-server` | Remote wire client / serve loop |
+| Bindings | `yydb-napi`, `yydb-pyo3` | Node / Python hosts (thin layers on `yydb`) |
+
+See [`projects/crates/yydb/readme.md`](./projects/crates/yydb/readme.md) for the facade contract.
 
 ## 🔒 Local by default
 
