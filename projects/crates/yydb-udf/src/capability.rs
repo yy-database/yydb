@@ -81,7 +81,7 @@ impl UdfPolicy {
         }
     }
 
-    /// Returns a pure host policy for TypeScript session micros.
+    /// Returns a pure host policy for session host micros.
     pub fn pure_host() -> Self {
         Self {
             effect: Effect::Pure,

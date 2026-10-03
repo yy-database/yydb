@@ -13,7 +13,7 @@ mod implementation;
 mod invocation;
 mod native;
 mod registry;
-mod typescript;
+mod host;
 mod value;
 mod vos;
 
@@ -32,9 +32,8 @@ pub use registry::{
     CatalogUdfEntry, CatalogUdfRegistry, HostUdfEntry, HostUdfRegistry, RegisterOptions,
     SessionUdfEntry, SessionUdfRegistry, UdfRegistry,
 };
-pub use typescript::{
-    TypeScriptFunctionHandle, TypeScriptHostAdapter, TypeScriptMicroDefinition,
-    TypeScriptMicroImplementation,
+pub use host::{
+    HostFunctionHandle, HostMicroDefinition, HostMicroImplementation, HostRuntimeAdapter,
 };
 pub use value::UdfValue;
 pub use vos::{LoweredUdf, VosProgramImplementation, lower_micro_scalar, lower_vos_macro};
