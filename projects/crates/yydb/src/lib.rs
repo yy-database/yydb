@@ -166,6 +166,7 @@ impl Batch {
 pub struct Connection {
     backend: Backend,
     operation_lock: Mutex<()>,
+    txn: Mutex<Option<State>>,
     udfs: Mutex<UdfSubsystem>,
     objects: ObjectStore,
 }
@@ -198,6 +199,7 @@ impl Connection {
         }
         let connection = Self {
             operation_lock: Mutex::new(()),
+            txn: Mutex::new(None),
             backend: Backend::File {
                 path: path.clone(),
                 journal_mode: Mutex::new(flags.journal_mode),
@@ -220,6 +222,7 @@ impl Connection {
         let root = std::env::temp_dir().join(format!("yydb-mem-objects-{nonce}"));
         Ok(Self {
             operation_lock: Mutex::new(()),
+            txn: Mutex::new(None),
             backend: Backend::Memory {
                 state: Mutex::new(State::default()),
             },
@@ -406,19 +409,79 @@ impl Connection {
     /// Execute a Phase 1 VOS read pipeline (for example `User.filter(x => x.active).collect()`).
     pub fn query(&self, source: &str) -> Result<Vec<query::QueryRow>> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
-        let state = self.read_state()?;
+        let state = self.active_state_unlocked()?;
         query::execute(source, &state.records)
     }
 
     /// Execute unit-valued VOS write programs (for example `User { … }.insert()`).
     pub fn execute(&self, source: &str) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
-        let mut state = self.read_state()?;
-        let catalog = state.catalog.as_ref().ok_or_else(|| Error::Schema {
-            message: "call ensure_schema before execute".into(),
-        })?;
-        query::execute_write(source, catalog, &mut state.records)?;
+        self.mutate_active_state_unlocked(|state| {
+            let catalog = state.catalog.as_ref().ok_or_else(|| Error::Schema {
+                message: "call ensure_schema before execute".into(),
+            })?;
+            query::execute_write(source, catalog, &mut state.records)
+        })
+    }
+
+    /// Begin a data transaction on this connection.
+    ///
+    /// While open, `query` / `execute` / `upsert_row` read and write against an
+    /// in-memory snapshot. [`Self::commit`] persists the snapshot, and
+    /// [`Self::rollback`] discards it.
+    pub fn begin(&self) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut slot = self
+            .txn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if slot.is_some() {
+            return Err(Error::Schema {
+                message: "transaction already open".into(),
+            });
+        }
+        *slot = Some(self.read_state()?);
+        Ok(())
+    }
+
+    /// Commit the open data transaction.
+    pub fn commit(&self) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut slot = self
+            .txn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(state) = slot.take() else {
+            return Err(Error::Schema {
+                message: "no open transaction".into(),
+            });
+        };
+        drop(slot);
         self.write_state(&state)
+    }
+
+    /// Roll back the open data transaction.
+    pub fn rollback(&self) -> Result<()> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut slot = self
+            .txn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if slot.is_none() {
+            return Err(Error::Schema {
+                message: "no open transaction".into(),
+            });
+        }
+        *slot = None;
+        Ok(())
+    }
+
+    /// Whether a data transaction is open on this connection.
+    pub fn in_transaction(&self) -> bool {
+        self.txn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
     }
 
     /// Upsert one logical table row used by the Phase 1 query executor.
@@ -429,9 +492,9 @@ impl Connection {
         row: query::QueryRow,
     ) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
-        let mut state = self.read_state()?;
-        query::upsert_row(&mut state.records, table.as_ref(), pk.as_ref(), &row)?;
-        self.write_state(&state)
+        self.mutate_active_state_unlocked(|state| {
+            query::upsert_row(&mut state.records, table.as_ref(), pk.as_ref(), &row)
+        })
     }
 
     /// Insert or replace a raw byte record keyed by `key`.
@@ -858,9 +921,46 @@ impl Connection {
 
     fn reconcile_leases_on_open(&self) -> Result<()> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
-        let mut state = self.read_state()?;
-        lease::reconcile_expired_leases(&mut state.records)?;
-        self.write_state(&state)
+        self.mutate_active_state_unlocked(|state| {
+            lease::reconcile_expired_leases(&mut state.records)?;
+            Ok(())
+        })
+    }
+
+    fn active_state_unlocked(&self) -> Result<State> {
+        if let Some(state) = self
+            .txn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
+            Ok(state.clone())
+        } else {
+            self.read_state()
+        }
+    }
+
+    fn replace_active_state_unlocked(&self, state: State) -> Result<()> {
+        let mut slot = self
+            .txn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if slot.is_some() {
+            *slot = Some(state);
+            Ok(())
+        } else {
+            drop(slot);
+            self.write_state(&state)
+        }
+    }
+
+    fn mutate_active_state_unlocked<F>(&self, f: F) -> Result<()>
+    where
+        F: FnOnce(&mut State) -> Result<()>,
+    {
+        let mut state = self.active_state_unlocked()?;
+        f(&mut state)?;
+        self.replace_active_state_unlocked(state)
     }
 
     fn read_state(&self) -> Result<State> {
