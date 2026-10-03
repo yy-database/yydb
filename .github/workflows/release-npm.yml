@@ -86,8 +86,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
-          scope: "@yydb"
+          # Do not set registry-url: it writes _authToken into npmrc and blocks OIDC (npm E404 on PUT).
           cache: pnpm
       - name: Ensure npm CLI supports OIDC
         run: |
@@ -124,7 +123,20 @@ jobs:
       - run: pnpm --filter @yydb/yydb-client build
       - run: pnpm --filter @yydb/yydb build
 
-      # OIDC only ? do not set NODE_AUTH_TOKEN (even empty).
+      - name: Strip token-style npmrc (OIDC only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NODE_AUTH_TOKEN NPM_TOKEN || true
+          for f in "${HOME}/.npmrc" "${NPM_CONFIG_USERCONFIG:-}" "${RUNNER_TEMP:-}/.npmrc"; do
+            [[ -n "${f}" && -f "${f}" ]] || continue
+            if grep -q '_authToken' "${f}"; then
+              grep -v '_authToken' "${f}" > "${f}.oidc" && mv "${f}.oidc" "${f}"
+              echo "stripped _authToken from ${f}"
+            fi
+          done
+
+      # OIDC only — do not set NODE_AUTH_TOKEN (even empty).
       - name: Publish npm
         run: node scripts/publish-npm-packages.mjs
 
