@@ -18,7 +18,17 @@ pub fn execute(source: &str, records: &std::collections::BTreeMap<String, Vec<u8
 pub fn execute_write(
     source: &str,
     catalog: &vos::ast::CatalogSnapshot,
+    schema_document: Option<&str>,
     records: &mut std::collections::BTreeMap<String, Vec<u8>>,
 ) -> yydb_types::Result<()> {
-    dml::execute(source, catalog, records)
+    dml::execute(source, catalog, schema_document, records)
+}
+
+/// Run a single `Type::insert({ … })` program and return the stored row when recognized.
+pub fn try_insert_returning(
+    source: &str,
+    catalog: &vos::ast::CatalogSnapshot,
+    records: &mut std::collections::BTreeMap<String, Vec<u8>>,
+) -> yydb_types::Result<Option<Vec<QueryRow>>> {
+    dml::try_insert_returning(source, catalog, records)
 }

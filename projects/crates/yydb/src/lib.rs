@@ -409,7 +409,13 @@ impl Connection {
     /// Execute a Phase 1 VOS read pipeline (for example `User.filter(x => x.active).collect()`).
     pub fn query(&self, source: &str) -> Result<Vec<query::QueryRow>> {
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
-        let state = self.active_state_unlocked()?;
+        let mut state = self.active_state_unlocked()?;
+        if let Some(catalog) = state.catalog.as_ref() {
+            if let Some(rows) = query::try_insert_returning(source, catalog, &mut state.records)? {
+                self.replace_active_state_unlocked(state)?;
+                return Ok(rows);
+            }
+        }
         query::execute(source, &state.records)
     }
 
@@ -420,7 +426,8 @@ impl Connection {
             let catalog = state.catalog.as_ref().ok_or_else(|| Error::Schema {
                 message: "call ensure_schema before execute".into(),
             })?;
-            query::execute_write(source, catalog, &mut state.records)
+            let schema_document = state.schema.as_ref().map(|schema| schema.document.as_str());
+            query::execute_write(source, catalog, schema_document, &mut state.records)
         })
     }
 
