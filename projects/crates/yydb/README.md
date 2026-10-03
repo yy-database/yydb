@@ -48,9 +48,15 @@ fn main() -> Result<()> {
 - process-local native scalar UDFs;
 - shared wire frame types for hosts and clients.
 
-The query engine and distributed services are separate parts of the YY product roadmap. For a Node.js application, use
-[`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb); for a browser or an existing server endpoint, use
-[`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client).
+The query engine and distributed services are separate parts of the YY product roadmap.
+
+| Need | Surface |
+|------|---------|
+| Rust embed | `yydb` (`Connection`) |
+| Rust wire server | `yydb-server` (used by `@yydb/yydb` N-API `serve`) |
+| Rust remote client | `yydb-client` |
+| Node all-in-one (CLI + engine + serve) | `@yydb/yydb` |
+| Lightweight TS wire client | `@yydb/yydb-client` |
 
 ## Documentation
 

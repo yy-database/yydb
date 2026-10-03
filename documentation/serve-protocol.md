@@ -12,8 +12,8 @@ Binary request/response framing for **YY-family** servers that speak VOS-native 
 `YYDB` / `YYDS` are a **backend self-claim** only. Wire semantics are the same; frontends accept either and **do not
 strongly require** the magic to match any preferred product name. Version digits are what actually gate compatibility.
 
-In this repository the reference host is `yydb serve` and encodes `YYDB` +
-`0000`. The TypeScript client (`@yydb/yydb-client`) and WebUI/homepage speak the same layout. This is **not** an HTTP
+In this repository the reference host is `yydb serve` (Rust `yydb-server`, invoked by `@yydb/yydb` CLI) and encodes
+`YYDB` + `0000`. The lightweight TypeScript client (`@yydb/yydb-client`) and WebUI/homepage speak the same layout. This is **not** an HTTP
 JSON API and **not** a SQL dialect.
 
 ## Threat model (no ACL) — YYDB reference serve
