@@ -239,7 +239,9 @@ pub fn validate_document(document: &str) -> Result<()> {
             message: "VOS schema document must not contain NUL bytes".into(),
         });
     }
-    vos::validate_schema(document).map(|_| ()).map_err(|message| Error::Schema { message })
+    vos::validate_schema(document)
+        .map(|_| ())
+        .map_err(|message| Error::Schema { message })
 }
 
 #[cfg(test)]
