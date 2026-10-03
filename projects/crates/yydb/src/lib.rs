@@ -361,13 +361,19 @@ impl Connection {
     /// Bind local execution handles using persisted identities, never fresh source order.
     pub fn execution_catalog(&self) -> Result<Option<schema::ExecutionCatalog>> {
         let state = self.read_state()?;
-        match (state.resolved_contract, state.catalog) {
-            (Some(contract), _) => {
-                schema::execution_catalog_from_resolved_contract(&contract).map(Some)
-            }
-            (None, Some(catalog)) => schema::execution_catalog_from_snapshot(&catalog).map(Some),
-            (None, None) => Ok(None),
-        }
+        let Some(contract) = state.resolved_contract else {
+            let Some(schema) = state.schema else {
+                return Ok(None);
+            };
+            self.ensure_schema(&schema.document)?;
+            let state = self.read_state()?;
+            return state
+                .resolved_contract
+                .as_ref()
+                .map(schema::execution_catalog_from_resolved_contract)
+                .transpose();
+        };
+        schema::execution_catalog_from_resolved_contract(&contract).map(Some)
     }
 
     /// Number of stored key/value records.
