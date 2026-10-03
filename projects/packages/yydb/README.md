@@ -1,6 +1,10 @@
 # `@yydb/yydb`
 
-**Open a portable `.yydb` database from Node.js with one dependency.**
+**All-in-one YYDB for Node.js: CLI, embedded engine, and local `serve`.**
+
+Open a `.yydb` file with one dependency — `@yydb/yydb` spawns a private loopback server and talks to it over the YY
+wire protocol. For a **lightweight client only** (browser, renderer, or an app that already runs `yydb serve`), use
+[`@yydb/yydb-client`](../yydb-client).
 
 [![npm](https://img.shields.io/npm/v/@yydb/yydb)](https://www.npmjs.com/package/@yydb/yydb)
 [![Node.js](https://img.shields.io/node/v/@yydb/yydb)](https://www.npmjs.com/package/@yydb/yydb)
@@ -60,11 +64,13 @@ arguments forwarded to `yydb serve`). `binary` is a deprecated alias for `cli`.
 
 ## Use a different package when
 
-| Need                                                  | Package                                                                                                                                                       |
-|-------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Browser code or a host that already runs `yydb serve` | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client)                                                                                        |
-| In-process Rust access                                | [`yydb`](https://crates.io/crates/yydb)                                                                                                                       |
-| A CLI                                                 | [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) or [release native bindings](https://github.com/yy-database/yydb.rs/releases) |
+| Need | Package |
+|------|---------|
+| Node all-in-one (CLI + engine + serve) | **`@yydb/yydb`** (this package) |
+| Lightweight wire client only | [`@yydb/yydb-client`](../yydb-client) |
+| In-process Rust embed | [`yydb`](https://crates.io/crates/yydb) |
+| Rust wire server crate (used by N-API) | [`yydb-server`](../../crates/yydb-server) |
+| Rust remote client | [`yydb-client`](../../crates/yydb-client) |
 
 For Electron, the main process can use `@yydb/yydb`; renderer code can use
 `@yydb/yydb-client` against the main process endpoint.

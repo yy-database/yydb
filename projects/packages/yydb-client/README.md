@@ -1,8 +1,9 @@
 # `@yydb/yydb-client`
 
-**A TypeScript client for the YY wire protocol over WebSocket or TCP.**
+**Lightweight TypeScript client for the YY wire protocol (WebSocket or TCP).**
 
-Use it from a browser, WebUI, Electron renderer, or a Node application that already owns a `yydb serve` process.
+Use this when you already run `yydb serve` (from [`@yydb/yydb`](../yydb) CLI or another host) and only need the client
+surface — browser, WebUI, Electron renderer, or a thin Node process.
 
 [![npm](https://img.shields.io/npm/v/@yydb/yydb-client)](https://www.npmjs.com/package/@yydb/yydb-client)
 [![Node.js](https://img.shields.io/node/v/@yydb/yydb-client)](https://www.npmjs.com/package/@yydb/yydb-client)

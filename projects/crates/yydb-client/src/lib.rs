@@ -1,8 +1,8 @@
 //! Rust **remote** client for **`yydb serve`** (YY wire `YYDB`+`0000` over TCP).
 //!
 //! This is the non-embedded Rust surface. For in-process access use the
-//! [`yydb`] embed facade (`projects/crates/yydb`). Browser / Node TypeScript hosts
-//! should use `projects/packages/yydb-client` (`@yy-database/yydb-client`) instead.
+//! [`yydb`] embed facade. Browser and Node TypeScript hosts should use
+//! `@yydb/yydb-client`. The all-in-one Node product is `@yydb/yydb` (CLI + engine + serve).
 //!
 //! YYDB serve has **no ACL**. Connect only to loopback endpoints you control.
 
