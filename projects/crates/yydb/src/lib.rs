@@ -62,6 +62,9 @@ pub use objects::ObjectStore;
 pub use udf::ScalarUdf;
 /// Language-neutral execution programs accepted by the embedded host.
 pub use yydb_execution as execution;
+pub use yydb_udf::{
+    TypeScriptFunctionHandle, TypeScriptHostAdapter, TypeScriptMicroDefinition, UdfType,
+};
 pub use yydb_types::{
     ChunkManifest, CommitSequence, DoctorIssue, DoctorReport, DoctorSeverity, Error, EvictBudget,
     EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken, NamespaceQuota,
@@ -754,6 +757,22 @@ impl Connection {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .register_vos_macro(source, version)
+    }
+
+    /// Install the process-local TypeScript host adapter used by [`register_ts_micro`].
+    pub fn set_ts_host_adapter(&self, adapter: Arc<dyn TypeScriptHostAdapter>) {
+        self.udfs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .set_ts_host_adapter(adapter);
+    }
+
+    /// Register a session-local TypeScript micro through the host adapter.
+    pub fn register_ts_micro(&self, definition: TypeScriptMicroDefinition) -> Result<()> {
+        self.udfs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .register_ts_micro(definition)
     }
 
     /// Register an object-safe [`ScalarUdf`] at an explicit version.

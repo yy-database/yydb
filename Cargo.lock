@@ -1667,6 +1667,7 @@ version = "0.1.0"
 dependencies = [
  "yydb",
  "yydb-types",
+ "yydb-udf",
 ]
 
 [[package]]
