@@ -10,7 +10,16 @@ import {
     MicroSessionRegistry,
 } from "./micro.js";
 import { resolveYydbBinary } from "./resolve-bin.js";
-import type { UdfTypeDescriptor } from "./udf-types.js";
+import type { UdfScalarKind, UdfTypeDescriptor } from "./udf-types.js";
+
+function microFingerprint(name: string, version: number): Uint8Array {
+    const bytes = new Uint8Array(32);
+    const seed = `${name}@${version}`;
+    for (let index = 0; index < bytes.byteLength; index += 1) {
+        bytes[index] = seed.charCodeAt(index % seed.length) & 0xff;
+    }
+    return bytes;
+}
 
 export type { SchemaVersion } from "@yydb/yydb-client";
 
@@ -167,13 +176,25 @@ export class Database {
 
     /**
      * Install a [`defineMicro`](./database.ts) definition into the current
-     * session registry. TS micros are host-local and never written to `.yydb`.
+     * session registry and sync metadata to the private engine. TS micros are
+     * host-local and never written to `.yydb`.
      */
-    registerMicro<
+    async registerMicro<
         TArgs extends readonly UdfTypeDescriptor[],
         TReturn extends UdfTypeDescriptor,
-    >(definition: DefinedMicro<TArgs, TReturn>): MicroHandle {
-        return this.microRegistry.register(definition);
+    >(definition: DefinedMicro<TArgs, TReturn>): Promise<MicroHandle> {
+        const handle = this.microRegistry.register(definition);
+        await this.client.registerMicro({
+            hostId: handle.hostId,
+            handleVersion: handle.implementationVersion,
+            udfVersion: definition.version,
+            name: definition.name,
+            functionId: handle.functionId,
+            args: definition.args.map((arg) => arg.kind as UdfScalarKind),
+            returns: definition.returns.kind as UdfScalarKind,
+            fingerprint: microFingerprint(definition.name, definition.version),
+        });
+        return handle;
     }
 
     /** Stop the private engine process. */
