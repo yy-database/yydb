@@ -71,10 +71,10 @@ fn rejects_invalid_schema_and_unsupported_types_without_coercion() {
 fn refuses_invalid_vos_before_publishing_schema() {
     let conn = Connection::open_in_memory().unwrap();
     assert!(matches!(
-        conn.ensure_schema(1, "table User { id: i64 }"),
+        conn.ensure_schema("table User { id: i64 }"),
         Err(Error::Schema { .. })
     ));
     assert!(conn.schema().unwrap().is_none());
-    conn.ensure_schema(1, "table User { @@id: i64 }").unwrap();
+    conn.ensure_schema("table User { @@id: i64 }").unwrap();
     assert_eq!(conn.schema().unwrap().unwrap().version, 1);
 }

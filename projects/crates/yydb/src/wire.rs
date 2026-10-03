@@ -377,7 +377,7 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
             Err(error) => error_frame(id, error.to_string()),
         },
         MsgType::SchemaEnsure => match decode_schema_ensure(&request.body) {
-            Ok((version, document)) => match conn.ensure_schema(version, &document) {
+            Ok((_version, document)) => match conn.ensure_schema(&document) {
                 Ok(()) => Frame::new(MsgType::SchemaEnsureOk, id, Vec::new()),
                 Err(error) => error_frame(id, error.to_string()),
             },
@@ -842,7 +842,7 @@ mod tests {
     #[test]
     fn dispatch_hello_info_kv() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.ensure_schema(1, "table T { @@id: uuid }").unwrap();
+        conn.ensure_schema("table T { @@id: uuid }").unwrap();
         conn.put("a", b"b").unwrap();
 
         let hello = dispatch(&conn, &Frame::new(MsgType::Hello, 1, Vec::new()));

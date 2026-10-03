@@ -15,15 +15,13 @@ use std::{
     sync::Mutex,
 };
 
-pub use yydb_types::{Error, Result, SchemaVersion};
+pub use yydb::{Error, HostMicroDefinition, Result, SchemaVersion, Value};
 
 use yydb::wire::{
     self, decode_error_message, decode_kv_get_ok, decode_scalar_call_ok, decode_schema_get_ok,
     encode_kv_get, encode_kv_put, encode_micro_register, encode_scalar_call, encode_schema_ensure,
     read_frame, write_frame, Frame, MsgType,
 };
-use yydb_types::Value;
-use yydb_udf::HostMicroDefinition;
 
 /// Handle to a remote YYDB server started with `yydb serve`.
 pub struct Client {
@@ -67,10 +65,10 @@ impl Client {
     }
 
     /// Ensure the remote schema (VOS document).
-    pub fn ensure_schema(&self, version: u32, document: &str) -> Result<()> {
+    pub fn ensure_schema(&self, document: &str) -> Result<()> {
         let response = self.roundtrip(
             MsgType::SchemaEnsure,
-            encode_schema_ensure(version, document),
+            encode_schema_ensure(0, document),
         )?;
         expect_type(&response, MsgType::SchemaEnsureOk)?;
         Ok(())
@@ -213,7 +211,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let conn = Arc::new(Connection::open_in_memory().unwrap());
-        conn.ensure_schema(1, "table T { @@id: uuid }").unwrap();
+        conn.ensure_schema("table T { @@id: uuid }").unwrap();
 
         let server_conn = Arc::clone(&conn);
         thread::spawn(move || {
@@ -247,7 +245,7 @@ mod tests {
 
         conn.create_scalar("double", 1, |args| match args {
             [Value::I64(n)] => Ok(Value::I64(n * 2)),
-            _ => Err(yydb_types::Error::Udf {
+            _ => Err(Error::Udf {
                 name: "double".into(),
                 message: "expected i64".into(),
             }),
