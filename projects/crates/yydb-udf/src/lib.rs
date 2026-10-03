@@ -1,7 +1,8 @@
 //! YYDB UDF subsystem: contract, registry, and host adapters.
 //!
-//! This crate sits above [`yydb-execution`] and below the `yydb` facade. It does
-//! not replace the execution model and is not shared with YYDS.
+//! Sits above [`yydb-execution`] and below the [`yydb`] facade. Applications
+//! should use `yydb::udf` (`UdfRegistry`, `HostMicroDefinition`, …) instead of
+//! depending here directly. Not shared with YYDS.
 
 #![warn(missing_docs)]
 

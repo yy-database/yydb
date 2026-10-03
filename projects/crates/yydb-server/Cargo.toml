@@ -2,11 +2,12 @@
 name = "yydb-server"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "YYDB wire server (TCP + WebSocket /wire) for out-of-process clients"
-license = "MPL-2.0"
-repository = "https://github.com/yy-database/yydb.rs"
 homepage = "https://github.com/yy-database/yydb.rs"
-readme = "README.md"
+readme = "readme.md"
 keywords = ["database", "embedded", "server", "vos"]
 categories = ["database-implementations"]
 publish = false
@@ -18,5 +19,3 @@ path = "src/lib.rs"
 base64 = { workspace = true }
 sha1 = { workspace = true }
 yydb = { workspace = true }
-yydb-types = { workspace = true }
-yydb-udf = { workspace = true }
