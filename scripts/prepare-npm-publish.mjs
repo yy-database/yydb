@@ -58,7 +58,7 @@ function preparePackageJson(pkgDir, { workspaceClientToVersion = false } = {}) {
     }
     // Provenance: repository.url must match the publishing GitHub repo.
     // Keep monorepo `directory` so npm links to projects/packages/<pkg>.
-    const ghRepo = (process.env.GITHUB_REPOSITORY || "").trim() || "yy-database/yydb.rs";
+    const ghRepo = (process.env.GITHUB_REPOSITORY || "").trim() || "yy-database/yydb";
     const directory = path.relative(root, pkgDir).split(path.sep).join("/");
     j.repository = {
         type: "git",

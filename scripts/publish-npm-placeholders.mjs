@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 const dryRun = process.argv.includes("--dry-run");
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const repo = "yy-database/yydb.rs";
+const repo = "yy-database/yydb";
 
 const packages = [
     {
@@ -50,6 +50,16 @@ const packages = [
     },
 ];
 
+function npmViewVersion(name, version) {
+    const r = spawnSync(
+        "npm",
+        ["view", `${name}@${version}`, "version", "--registry", "https://registry.npmjs.org"],
+        { encoding: "utf8", shell: true },
+    );
+    if (r.status !== 0) return null;
+    return (r.stdout || "").trim() || null;
+}
+
 const staging = fs.mkdtempSync(path.join(os.tmpdir(), "yydb-npm-ph-"));
 console.log(`staging: ${staging}`);
 
@@ -76,6 +86,12 @@ for (const pkg of packages) {
         path.join(dir, "README.md"),
         `# ${pkg.name}\n\nPlaceholder 0.0.0 for npm Trusted Publisher bootstrap.\nReal releases replace this from CI (\`release-npm.yml\`).\n`,
     );
+
+    const existing = npmViewVersion(pkg.name, "0.0.0");
+    if (existing === "0.0.0") {
+        console.log(`skip ${pkg.name}@0.0.0 (already published)`);
+        continue;
+    }
 
     console.log(
         dryRun ? `[dry-run] would publish ${pkg.name}@0.0.0` : `publishing ${pkg.name}@0.0.0`,
