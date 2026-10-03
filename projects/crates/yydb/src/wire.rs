@@ -7,7 +7,8 @@
 
 use std::io::{Read, Write};
 
-use yydb_types::{Error, Result, SchemaVersion};
+use yydb_types::{Error, Result, SchemaVersion, Value};
+use yydb_udf::{TypeScriptFunctionHandle, UdfValue};
 
 use crate::Connection;
 
@@ -60,6 +61,14 @@ pub enum MsgType {
     MicroRegister,
     /// TypeScript micro registration ack.
     MicroRegisterOk,
+    /// Server asks the wire peer to run a host micro (S→C).
+    MicroHostInvoke,
+    /// Host micro result (C→S).
+    MicroHostInvokeOk,
+    /// Invoke a registered scalar UDF (C→S).
+    ScalarCall,
+    /// Scalar UDF result (S→C).
+    ScalarCallOk,
     /// Error reply.
     Error,
     /// Unrecognized type (still framed so the peer can answer with Error).
@@ -84,6 +93,10 @@ impl MsgType {
             12 => Self::KvPutOk,
             13 => Self::MicroRegister,
             14 => Self::MicroRegisterOk,
+            15 => Self::MicroHostInvoke,
+            16 => Self::MicroHostInvokeOk,
+            17 => Self::ScalarCall,
+            18 => Self::ScalarCallOk,
             255 => Self::Error,
             other => Self::Unknown(other),
         }
@@ -106,6 +119,10 @@ impl MsgType {
             Self::KvPutOk => 12,
             Self::MicroRegister => 13,
             Self::MicroRegisterOk => 14,
+            Self::MicroHostInvoke => 15,
+            Self::MicroHostInvokeOk => 16,
+            Self::ScalarCall => 17,
+            Self::ScalarCallOk => 18,
             Self::Error => 255,
             Self::Unknown(code) => code,
         }
@@ -387,6 +404,13 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
             },
             Err(error) => error_frame(id, error.to_string()),
         },
+        MsgType::ScalarCall => match decode_scalar_call(&request.body) {
+            Ok((name, version, args)) => match conn.call_scalar_version(&name, version, &args) {
+                Ok(value) => Frame::new(MsgType::ScalarCallOk, id, encode_scalar_call_ok(value)),
+                Err(error) => error_frame(id, error.to_string()),
+            },
+            Err(error) => error_frame(id, error.to_string()),
+        },
         MsgType::HelloOk
         | MsgType::InfoOk
         | MsgType::SchemaGetOk
@@ -394,6 +418,9 @@ pub fn dispatch(conn: &Connection, request: &Frame) -> Frame {
         | MsgType::KvGetOk
         | MsgType::KvPutOk
         | MsgType::MicroRegisterOk
+        | MsgType::MicroHostInvoke
+        | MsgType::MicroHostInvokeOk
+        | MsgType::ScalarCallOk
         | MsgType::Error => error_frame(id, "unexpected client message type"),
         MsgType::Unknown(code) => error_frame(id, format!("unknown msg_type {code}")),
     }
@@ -451,8 +478,200 @@ fn decode_udf_type_tag(tag: u8) -> Result<yydb_udf::UdfType> {
         1 => Ok(yydb_udf::UdfType::Bool),
         2 => Ok(yydb_udf::UdfType::I64),
         3 => Ok(yydb_udf::UdfType::Text),
-        _ => Err(Error::Corrupt("wire micro register has invalid udf type tag")),
+        _ => Err(Error::Corrupt("wire scalar value has invalid type tag")),
     }
+}
+
+fn encode_udf_value(out: &mut Vec<u8>, value: &UdfValue) {
+    match value {
+        UdfValue::Null => out.push(0),
+        UdfValue::Bool(value) => {
+            out.push(1);
+            out.push(if *value { 1 } else { 0 });
+        }
+        UdfValue::I64(value) => {
+            out.push(2);
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        UdfValue::Text(value) => {
+            out.push(3);
+            push_bytes(out, value.as_bytes());
+        }
+    }
+}
+
+fn decode_udf_value(body: &[u8], offset: &mut usize) -> Result<UdfValue> {
+    if *offset >= body.len() {
+        return Err(Error::Corrupt("wire scalar value missing tag"));
+    }
+    let tag = body[*offset];
+    *offset += 1;
+    match tag {
+        0 => Ok(UdfValue::Null),
+        1 => {
+            if *offset >= body.len() {
+                return Err(Error::Corrupt("wire bool value truncated"));
+            }
+            let value = body[*offset] != 0;
+            *offset += 1;
+            Ok(UdfValue::Bool(value))
+        }
+        2 => {
+            if *offset + 8 > body.len() {
+                return Err(Error::Corrupt("wire i64 value truncated"));
+            }
+            let value = i64::from_le_bytes([
+                body[*offset],
+                body[*offset + 1],
+                body[*offset + 2],
+                body[*offset + 3],
+                body[*offset + 4],
+                body[*offset + 5],
+                body[*offset + 6],
+                body[*offset + 7],
+            ]);
+            *offset += 8;
+            Ok(UdfValue::I64(value))
+        }
+        3 => {
+            let len = read_u32(body, offset)?;
+            let bytes = read_bytes(body, offset, len)?;
+            let text = std::str::from_utf8(bytes)
+                .map_err(|_| Error::Corrupt("wire text value is not utf-8"))?
+                .to_owned();
+            Ok(UdfValue::Text(text))
+        }
+        _ => Err(Error::Corrupt("wire scalar value has invalid type tag")),
+    }
+}
+
+fn encode_udf_values(values: &[UdfValue]) -> Vec<u8> {
+    let mut body = Vec::new();
+    assert!(values.len() <= 255, "wire scalar arg count exceeds u8");
+    body.push(values.len() as u8);
+    for value in values {
+        encode_udf_value(&mut body, value);
+    }
+    body
+}
+
+fn decode_udf_values(body: &[u8], offset: &mut usize) -> Result<Vec<UdfValue>> {
+    if *offset >= body.len() {
+        return Err(Error::Corrupt("wire scalar args missing count"));
+    }
+    let count = body[*offset] as usize;
+    *offset += 1;
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        values.push(decode_udf_value(body, offset)?);
+    }
+    Ok(values)
+}
+
+fn udf_value_to_runtime(value: UdfValue) -> Result<Value> {
+    match value {
+        UdfValue::Null => Ok(Value::Null),
+        UdfValue::Bool(value) => Ok(Value::Bool(value)),
+        UdfValue::I64(value) => Ok(Value::I64(value)),
+        UdfValue::Text(value) => Ok(Value::Text(value)),
+    }
+}
+
+fn runtime_value_to_udf(value: &Value) -> Result<UdfValue> {
+    match value {
+        Value::Null => Ok(UdfValue::Null),
+        Value::Bool(value) => Ok(UdfValue::Bool(*value)),
+        Value::I64(value) => Ok(UdfValue::I64(*value)),
+        Value::Text(value) => Ok(UdfValue::Text(value.clone())),
+        _ => Err(Error::Unsupported(
+            "scalar call value type is outside the Phase-1 wire subset",
+        )),
+    }
+}
+
+/// Encode a `MicroHostInvoke` body.
+pub fn encode_micro_host_invoke(handle: &TypeScriptFunctionHandle, args: &[UdfValue]) -> Vec<u8> {
+    let mut body = Vec::new();
+    push_u64(&mut body, handle.host_id);
+    push_u32(&mut body, handle.version);
+    push_bytes(&mut body, handle.function_id.as_bytes());
+    body.extend_from_slice(&encode_udf_values(args));
+    body
+}
+
+/// Decode a `MicroHostInvoke` body.
+pub fn decode_micro_host_invoke(body: &[u8]) -> Result<(TypeScriptFunctionHandle, Vec<UdfValue>)> {
+    let mut offset = 0;
+    let host_id = read_u64(body, &mut offset)?;
+    let handle_version = read_u32(body, &mut offset)?;
+    let function_id_len = read_u32(body, &mut offset)?;
+    let function_id = read_bytes(body, &mut offset, function_id_len)?;
+    let function_id = std::str::from_utf8(function_id)
+        .map_err(|_| Error::Corrupt("micro host invoke function_id is not utf-8"))?
+        .to_owned();
+    let args = decode_udf_values(body, &mut offset)?;
+    Ok((
+        TypeScriptFunctionHandle {
+            host_id,
+            function_id,
+            version: handle_version,
+        },
+        args,
+    ))
+}
+
+/// Encode a `MicroHostInvokeOk` body.
+pub fn encode_micro_host_invoke_ok(value: UdfValue) -> Vec<u8> {
+    let mut body = Vec::new();
+    encode_udf_value(&mut body, &value);
+    body
+}
+
+/// Decode a `MicroHostInvokeOk` body.
+pub fn decode_micro_host_invoke_ok(body: &[u8]) -> Result<UdfValue> {
+    let mut offset = 0;
+    decode_udf_value(body, &mut offset)
+}
+
+/// Encode a `ScalarCall` body.
+pub fn encode_scalar_call(name: &str, version: u32, args: &[Value]) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    push_u32(&mut body, version);
+    push_bytes(&mut body, name.as_bytes());
+    let mut udf_args = Vec::with_capacity(args.len());
+    for value in args {
+        udf_args.push(runtime_value_to_udf(value)?);
+    }
+    body.extend_from_slice(&encode_udf_values(&udf_args));
+    Ok(body)
+}
+
+/// Decode a `ScalarCall` body.
+pub fn decode_scalar_call(body: &[u8]) -> Result<(String, u32, Vec<Value>)> {
+    let mut offset = 0;
+    let version = read_u32(body, &mut offset)?;
+    let name_len = read_u32(body, &mut offset)?;
+    let name = read_bytes(body, &mut offset, name_len)?;
+    let name = std::str::from_utf8(name)
+        .map_err(|_| Error::Corrupt("scalar call name is not utf-8"))?
+        .to_owned();
+    let udf_args = decode_udf_values(body, &mut offset)?;
+    let mut args = Vec::with_capacity(udf_args.len());
+    for value in udf_args {
+        args.push(udf_value_to_runtime(value)?);
+    }
+    Ok((name, version, args))
+}
+
+/// Encode a `ScalarCallOk` body.
+pub fn encode_scalar_call_ok(value: Value) -> Vec<u8> {
+    let udf_value = runtime_value_to_udf(&value).expect("scalar call ok value must be wire-safe");
+    encode_micro_host_invoke_ok(udf_value)
+}
+
+/// Decode a `ScalarCallOk` body.
+pub fn decode_scalar_call_ok(body: &[u8]) -> Result<Value> {
+    udf_value_to_runtime(decode_micro_host_invoke_ok(body)?)
 }
 
 /// Encode a `MicroRegister` body.
@@ -665,6 +884,45 @@ mod tests {
         );
         assert_eq!(response.msg_type, MsgType::MicroRegisterOk);
         assert!(conn.list_scalars().contains(&"text.normalize".to_owned()));
+    }
+
+    #[test]
+    fn micro_host_invoke_roundtrip_codec() {
+        let handle = TypeScriptFunctionHandle {
+            host_id: 9,
+            function_id: "normalize".into(),
+            version: 1,
+        };
+        let args = vec![UdfValue::Text("  Hi  ".into())];
+        let body = encode_micro_host_invoke(&handle, &args);
+        let (decoded_handle, decoded_args) = decode_micro_host_invoke(&body).unwrap();
+        assert_eq!(decoded_handle, handle);
+        assert_eq!(decoded_args, args);
+        let ok = encode_micro_host_invoke_ok(UdfValue::Text("hi".into()));
+        assert_eq!(
+            decode_micro_host_invoke_ok(&ok).unwrap(),
+            UdfValue::Text("hi".into())
+        );
+    }
+
+    #[test]
+    fn dispatch_scalar_call_routes_through_registry() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.create_scalar("double", 1, |args| match args {
+            [Value::I64(n)] => Ok(Value::I64(n * 2)),
+            _ => Err(Error::Udf {
+                name: "double".into(),
+                message: "expected i64".into(),
+            }),
+        })
+        .unwrap();
+        let body = encode_scalar_call("double", 1, &[Value::I64(21)]).unwrap();
+        let response = dispatch(&conn, &Frame::new(MsgType::ScalarCall, 5, body));
+        assert_eq!(response.msg_type, MsgType::ScalarCallOk);
+        assert_eq!(
+            decode_scalar_call_ok(&response.body).unwrap(),
+            Value::I64(42)
+        );
     }
 
     #[test]

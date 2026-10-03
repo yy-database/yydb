@@ -8,17 +8,11 @@ edition = "2021"
 
 [workspace.dependencies]
 blake3 = "1"
-clap = { version = "4", features = ["derive"] }
 sha1 = "0.10"
 base64 = "0.22"
 uuid = { version = "1", features = ["serde", "v4"] }
 serde_json = "1"
 vos = { version = "0.1.0", git = "https://github.com/voml/vos-language.git", rev = "d770d972f5b297674f6dcf3da8f6479519cf507d" }
-oxc_allocator = "0.100.0"
-oxc_ast = "0.100.0"
-oxc_codegen = "0.100.0"
-oxc_span = "0.100.0"
-oxc_syntax = "0.100.0"
 yydb = { path = "projects/crates/yydb" }
 yydb-client = { path = "projects/crates/yydb-client" }
 yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }
