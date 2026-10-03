@@ -9,7 +9,7 @@ import {
     type MicroHandle,
     MicroSessionRegistry,
 } from "./micro.js";
-import { resolveYydbBinary } from "./resolve-bin.js";
+import { resolveYydbCli } from "./resolve-bin.js";
 import type { UdfScalarKind, UdfTypeDescriptor } from "./udf-types.js";
 
 function microFingerprint(name: string, version: number): Uint8Array {
@@ -24,7 +24,9 @@ function microFingerprint(name: string, version: number): Uint8Array {
 export type { SchemaVersion } from "@yydb/yydb-client";
 
 export interface OpenOptions {
-    /** Override engine binary (tests / special installs). */
+    /** Override CLI script path (tests / special installs). */
+    cli?: string;
+    /** @deprecated Use `cli`. */
     binary?: string;
     /** Prefer a specific loopback port; default = ephemeral free port. */
     port?: number;
@@ -88,6 +90,9 @@ export class Database {
         this.client = client;
         this.child = child;
         this.microRegistry = new MicroSessionRegistry();
+        this.client.setMicroHostHandler((payload) =>
+            this.microRegistry.invokeFromWire(payload),
+        );
     }
 
     /**
@@ -97,12 +102,12 @@ export class Database {
         const resolved = path.resolve(dbPath);
         fs.mkdirSync(path.dirname(resolved), { recursive: true });
 
-        const binary = options.binary ?? resolveYydbBinary();
+        const cli = options.cli ?? options.binary ?? resolveYydbCli();
         const port = options.port ?? (await freeLoopbackPort());
         const bind = `127.0.0.1:${port}`;
-        const args = ["serve", resolved, "--bind", bind, ...(options.serveArgs ?? [])];
+        const args = [cli, "serve", resolved, "--bind", bind, ...(options.serveArgs ?? [])];
 
-        const child = spawn(binary, args, {
+        const child = spawn(process.execPath, args, {
             stdio: "pipe",
             windowsHide: true,
         });
@@ -195,6 +200,15 @@ export class Database {
             fingerprint: microFingerprint(definition.name, definition.version),
         });
         return handle;
+    }
+
+    /** Invoke a registered scalar UDF on the private engine. */
+    async callScalar(
+        name: string,
+        version: number,
+        args: readonly (string | number | boolean | null)[],
+    ): Promise<string | number | boolean | null> {
+        return this.client.callScalar(name, version, args);
     }
 
     /** Stop the private engine process. */
