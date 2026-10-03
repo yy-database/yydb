@@ -76,7 +76,32 @@ lands), must be rejected.
 | 10   | `KvGetOk`        | S→C       | `u8 present`; if 1: `u32 val_len` + bytes                           |
 | 11   | `KvPut`          | C→S       | `u32 key_len` + key + `u32 val_len` + bytes                         |
 | 12   | `KvPutOk`        | S→C       | empty                                                               |
+| 13   | `MicroRegister`  | C→S       | session TS micro metadata (see below)                               |
+| 14   | `MicroRegisterOk`| S→C       | empty                                                               |
 | 255  | `Error`          | S→C       | UTF-8 error message                                                 |
+
+### `MicroRegister` body (`0000`)
+
+Registers a **session-local** TypeScript micro contract on the engine. The wire
+carries metadata and opaque host handles only — never a JS closure.
+
+| Field              | Type                                      |
+|--------------------|-------------------------------------------|
+| `host_id`          | `u64` LE                                  |
+| `handle_version`   | `u32` LE                                  |
+| `udf_version`      | `u32` LE                                  |
+| `name`             | `u32 len` + UTF-8                         |
+| `function_id`      | `u32 len` + UTF-8                         |
+| `arg_count`        | `u8`                                      |
+| `args[]`           | `arg_count` × `u8` type tag               |
+| `returns`          | `u8` type tag                             |
+| `fingerprint`      | 32 bytes                                  |
+
+Type tags: `0=null`, `1=bool`, `2=i64`, `3=text`.
+
+Invocation still requires a host adapter in the engine process. Remote `yydb
+serve` peers accept registration metadata in `0000`; callback invocation over
+the same socket is not part of `0000` yet.
 
 Unknown `msg_type` → `Error` with the same `request_id`.
 

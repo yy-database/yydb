@@ -31,8 +31,13 @@ export const MsgType = {
     KvGetOk: 10,
     KvPut: 11,
     KvPutOk: 12,
+    MicroRegister: 13,
+    MicroRegisterOk: 14,
     Error: 255,
 } as const;
+
+/** Phase-1 scalar kinds on the YY wire micro register path. */
+export type WireUdfScalarKind = "null" | "bool" | "i64" | "text";
 
 export type MsgTypeCode = (typeof MsgType)[keyof typeof MsgType];
 
@@ -146,6 +151,61 @@ export function encodeSchemaEnsure(version: number, document: string): Uint8Arra
 export function encodeKvGet(key: string): Uint8Array {
     const out: number[] = [];
     pushBytes(out, new TextEncoder().encode(key));
+    return Uint8Array.from(out);
+}
+
+export interface MicroRegisterPayload {
+    hostId: number;
+    handleVersion: number;
+    udfVersion: number;
+    name: string;
+    functionId: string;
+    args: readonly WireUdfScalarKind[];
+    returns: WireUdfScalarKind;
+    fingerprint: Uint8Array;
+}
+
+function encodeUdfTypeTag(kind: WireUdfScalarKind): number {
+    switch (kind) {
+        case "null":
+            return 0;
+        case "bool":
+            return 1;
+        case "i64":
+            return 2;
+        case "text":
+            return 3;
+        default:
+            throw new Error(`unsupported wire udf type: ${kind}`);
+    }
+}
+
+function pushU64(out: number[], value: number) {
+    const view = new DataView(new ArrayBuffer(8));
+    view.setBigUint64(0, BigInt(value), true);
+    out.push(...new Uint8Array(view.buffer));
+}
+
+/** Encode a `MicroRegister` body. */
+export function encodeMicroRegister(payload: MicroRegisterPayload): Uint8Array {
+    if (payload.fingerprint.byteLength !== 32) {
+        throw new Error("micro register fingerprint must be 32 bytes");
+    }
+    const out: number[] = [];
+    pushU64(out, payload.hostId);
+    pushU32(out, payload.handleVersion);
+    pushU32(out, payload.udfVersion);
+    pushBytes(out, new TextEncoder().encode(payload.name));
+    pushBytes(out, new TextEncoder().encode(payload.functionId));
+    if (payload.args.length > 255) {
+        throw new Error("micro register supports at most 255 args");
+    }
+    out.push(payload.args.length);
+    for (const arg of payload.args) {
+        out.push(encodeUdfTypeTag(arg));
+    }
+    out.push(encodeUdfTypeTag(payload.returns));
+    out.push(...payload.fingerprint);
     return Uint8Array.from(out);
 }
 
