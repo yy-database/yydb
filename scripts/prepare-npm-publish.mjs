@@ -28,11 +28,11 @@ function walkFiles(dir, acc = []) {
     return acc;
 }
 
-function findBinary(binName) {
+function findNativeBinding(fileName) {
     const files = walkFiles(path.join(root, "_engines"));
-    const hit = files.find((f) => path.basename(f) === binName);
+    const hit = files.find((f) => path.basename(f) === fileName);
     if (!hit) {
-        throw new Error(`missing engine artifact ${binName} under _engines/`);
+        throw new Error(`missing native binding ${fileName} under _engines/`);
     }
     return hit;
 }
@@ -73,16 +73,16 @@ function preparePackageJson(pkgDir, { workspaceClientToVersion = false } = {}) {
 }
 
 const platforms = [
-    ["yydb-win32-x64", "yydb.exe"],
-    ["yydb-linux-x64", "yydb"],
-    ["yydb-darwin-x64", "yydb"],
-    ["yydb-darwin-arm64", "yydb"],
+    ["yydb-win32-x64", "yydb.win32-x64.node"],
+    ["yydb-linux-x64", "yydb.linux-x64.node"],
+    ["yydb-darwin-x64", "yydb.darwin-x64.node"],
+    ["yydb-darwin-arm64", "yydb.darwin-arm64.node"],
 ];
 
-for (const [pkg, bin] of platforms) {
+for (const [pkg, binding] of platforms) {
     const destDir = path.join(root, "projects", "packages", pkg);
-    const dest = path.join(destDir, bin);
-    fs.copyFileSync(findBinary(bin), dest);
+    const dest = path.join(destDir, binding);
+    fs.copyFileSync(findNativeBinding(binding), dest);
     try {
         fs.chmodSync(dest, 0o755);
     } catch {

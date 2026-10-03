@@ -32,19 +32,23 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             pkg: yydb-win32-x64
-            bin: yydb.exe
+            node_file: yydb.win32-x64.node
+            lib: yydb_napi.dll
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             pkg: yydb-linux-x64
-            bin: yydb
+            node_file: yydb.linux-x64.node
+            lib: libyydb_napi.so
           - os: macos-latest
             target: x86_64-apple-darwin
             pkg: yydb-darwin-x64
-            bin: yydb
+            node_file: yydb.darwin-x64.node
+            lib: libyydb_napi.dylib
           - os: macos-latest
             target: aarch64-apple-darwin
             pkg: yydb-darwin-arm64
-            bin: yydb
+            node_file: yydb.darwin-arm64.node
+            lib: libyydb_napi.dylib
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -53,21 +57,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - name: Build yydb-tools
-        run: cargo build -p yydb-tools --release --target ${{ matrix.target }}
-      - name: Stage binary
+      - name: Build yydb-napi
+        run: cargo build -p yydb-napi --release --target ${{ matrix.target }}
+      - name: Stage native binding
         shell: bash
         run: |
           set -euo pipefail
-          SRC="target/${{ matrix.target }}/release/${{ matrix.bin }}"
-          DEST="projects/packages/${{ matrix.pkg }}/${{ matrix.bin }}"
+          SRC="target/${{ matrix.target }}/release/${{ matrix.lib }}"
+          DEST="projects/packages/${{ matrix.pkg }}/${{ matrix.node_file }}"
           cp "$SRC" "$DEST"
           chmod +x "$DEST" || true
           ls -la "$DEST"
       - uses: actions/upload-artifact@v7
         with:
           name: engine-${{ matrix.pkg }}
-          path: projects/packages/${{ matrix.pkg }}/${{ matrix.bin }}
+          path: projects/packages/${{ matrix.pkg }}/${{ matrix.node_file }}
           if-no-files-found: error
 
   publish-npm:
@@ -163,14 +167,22 @@ jobs:
           name: engine-yydb-linux-x64
           path: _engine
 
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @yydb/yydb build
+
       - name: Stage image context
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p _docker
+          mkdir -p _docker/dist
           cp docker/yydb/Dockerfile _docker/Dockerfile
-          cp _engine/yydb _docker/yydb
-          chmod +x _docker/yydb
+          cp _engine/yydb.linux-x64.node _docker/yydb.linux-x64.node
+          cp -r projects/packages/yydb/dist/* _docker/dist/
           ls -la _docker
 
       - name: Image tags

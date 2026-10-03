@@ -7,8 +7,8 @@
 | **TS 产品包（推荐）** | `@yydb/yydb`            | **一个依赖**：`Database.open("app.yydb")`，自动管理引擎二进制 |
 | TS 线协议             | `@yydb/yydb-client`     | WebUI / 浏览器 / 高级用法                                     |
 
-TypeScript 应用开发者应依赖 **`@yydb/yydb`**，不要自己下载 `yydb.exe`
-或手写 `serve`。平台二进制通过 `optionalDependencies` 随 npm 安装。
+TypeScript 应用开发者应依赖 **`@yydb/yydb`**，不要自己下载独立引擎二进制
+或手写 `serve`。平台 `.node` 绑定通过 `optionalDependencies` 随 npm 安装，CLI 由 `@yydb/yydb` 提供。
 
 ```ts
 import {Database} from "@yydb/yydb";
