@@ -5,10 +5,10 @@ use yydb::{
 };
 
 fn resolved_user_contract() -> yydb::vos::ResolvedContract {
-    yydb::vos::ResolvedContract {
+    let mut contract = yydb::vos::ResolvedContract {
         format_version: "vos-resolved-contract-v1".into(),
         identity_manifest_version: "vos-identity-manifest-v0".into(),
-        schema_fingerprint: "0".repeat(64),
+        schema_fingerprint: String::new(),
         types: vec![yydb::vos::contract::ResolvedTypeContract {
             type_id: 7,
             canonical_path: vec!["demo".into(), "User".into()],
@@ -24,7 +24,14 @@ fn resolved_user_contract() -> yydb::vos::ResolvedContract {
                 default_value: None,
             }],
         }],
-    }
+    };
+    contract.schema_fingerprint = yydb::vos::contract::resolved_schema_fingerprint(
+        &yydb::vos::contract::ResolvedIdentityProjection {
+            manifest_version: contract.identity_manifest_version.clone(),
+            types: contract.types.clone(),
+        },
+    );
+    contract
 }
 
 #[test]
@@ -38,6 +45,16 @@ fn lowers_resolved_contract_without_reparsing_or_reassigning_identity() {
     assert_eq!(table.fields[0].field_id, 11);
     assert_eq!(table.fields[0].virtual_field, 3);
     assert_eq!(table.fields[0].handle.index(), 3);
+}
+
+#[test]
+fn rejects_a_resolved_contract_with_a_forged_fingerprint() {
+    let mut contract = resolved_user_contract();
+    contract.schema_fingerprint = "0".repeat(64);
+    assert!(matches!(
+        yydb::schema::execution_catalog_from_resolved_contract(&contract),
+        Err(Error::Schema { .. })
+    ));
 }
 
 #[test]
