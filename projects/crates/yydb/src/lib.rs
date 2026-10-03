@@ -52,7 +52,7 @@ mod doctor;
 mod lease;
 mod refs;
 mod ttl;
-mod vos_udf;
+mod udf_bridge;
 
 /// YY wire protocol (`YYDB`|`YYDS` + version digits `0000`…).
 pub mod wire;
@@ -87,7 +87,8 @@ use journal::{
     append_snapshot_frame, ensure_wal_sidecars, remove_wal_sidecars, replay_wal_snapshots,
     shm_path, truncate_wal, wal_frame_count, wal_path,
 };
-use udf::{ClosureUdf, RegisteredUdf, ScalarFn};
+use udf_bridge::UdfSubsystem;
+use udf::{ClosureUdf, ScalarFn};
 
 const MAGIC: &[u8] = b"YYDB\x02";
 const LEGACY_MAGIC: &[u8] = b"YYDB\x01";
@@ -154,7 +155,7 @@ impl Batch {
 pub struct Connection {
     backend: Backend,
     operation_lock: Mutex<()>,
-    udfs: Mutex<BTreeMap<String, RegisteredUdf>>,
+    udfs: Mutex<UdfSubsystem>,
     objects: ObjectStore,
 }
 
@@ -190,7 +191,7 @@ impl Connection {
                 path: path.clone(),
                 journal_mode: Mutex::new(flags.journal_mode),
             },
-            udfs: Mutex::new(BTreeMap::new()),
+            udfs: Mutex::new(UdfSubsystem::default()),
             objects: ObjectStore::open_beside_db(&path)?,
         };
         // Force recovery path once so a leftover WAL is applied.
@@ -211,7 +212,7 @@ impl Connection {
             backend: Backend::Memory {
                 state: Mutex::new(State::default()),
             },
-            udfs: Mutex::new(BTreeMap::new()),
+            udfs: Mutex::new(UdfSubsystem::default()),
             objects: ObjectStore::open_in_memory_root(root)?,
         })
     }
@@ -709,10 +710,10 @@ impl Connection {
 
     /// Register a validated local read-only execution body with its identity and version.
     pub fn register_execution_udf(&self, body: execution::ValidatedUdf) -> Result<()> {
-        let name = body.id().to_owned();
-        let version = body.version();
-        let adapter = udf::ExecutionUdf::new(body)?;
-        self.register_scalar_versioned(&name, version, Arc::new(adapter))
+        self.udfs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .register_execution_udf(body)
     }
 
     /// Parse and register a VOS-authored local scalar UDF.
@@ -726,8 +727,10 @@ impl Connection {
 
     /// Parse and register a versioned VOS-authored local scalar UDF.
     pub fn register_vos_scalar_versioned(&self, source: &str, version: u32) -> Result<()> {
-        let body = vos_udf::lower(source, version)?;
-        self.register_execution_udf(body)
+        self.udfs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .register_vos_scalar(source, version)
     }
 
     /// Register an object-safe [`ScalarUdf`] at an explicit version.
@@ -737,34 +740,18 @@ impl Connection {
         version: u32,
         udf: Arc<dyn ScalarUdf>,
     ) -> Result<()> {
-        if name.is_empty() {
-            return Err(Error::Udf {
-                name: String::new(),
-                message: "UDF name must not be empty".into(),
-            });
-        }
         self.udfs
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(name.to_owned(), RegisteredUdf { udf, version });
-        Ok(())
+            .register_scalar_versioned(name, version, udf)
     }
 
     /// Remove a previously registered scalar UDF.
     pub fn remove_scalar(&self, name: &str) -> Result<()> {
-        let removed = self
-            .udfs
+        self.udfs
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(name)
-            .is_some();
-        if removed {
-            Ok(())
-        } else {
-            Err(Error::UdfNotFound {
-                name: name.to_owned(),
-            })
-        }
+            .remove_scalar(name)
     }
 
     /// Names of scalar UDFs registered on this connection.
@@ -772,9 +759,7 @@ impl Connection {
         self.udfs
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .keys()
-            .cloned()
-            .collect()
+            .list_scalars()
     }
 
     /// Invoke a registered scalar UDF at version `1`.
@@ -784,42 +769,10 @@ impl Connection {
 
     /// Invoke a registered scalar UDF at an explicit version.
     pub fn call_scalar_version(&self, name: &str, version: u32, args: &[Value]) -> Result<Value> {
-        let guard = self
-            .udfs
+        self.udfs
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let entry = guard.get(name).ok_or_else(|| Error::UdfNotFound {
-            name: name.to_owned(),
-        })?;
-        if entry.version != version {
-            return Err(Error::UdfVersionMismatch {
-                name: name.to_owned(),
-                expected: entry.version,
-                got: version,
-            });
-        }
-        if let Some(expected) = entry.udf.arity() {
-            if args.len() != expected {
-                return Err(Error::UdfArity {
-                    name: name.to_owned(),
-                    expected,
-                    got: args.len(),
-                });
-            }
-        }
-        entry.udf.call(args).map_err(|error| match error {
-            Error::Udf { .. }
-            | Error::UdfArity { .. }
-            | Error::UdfNotFound { .. }
-            | Error::UdfVersionMismatch { .. }
-            | Error::ObjectNotFound { .. }
-            | Error::ObjectCorrupt { .. }
-            | Error::Unsupported(_) => error,
-            other => Error::Udf {
-                name: name.to_owned(),
-                message: other.to_string(),
-            },
-        })
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .call_scalar_version(name, version, args)
     }
 
     fn reconcile_leases_on_open(&self) -> Result<()> {
