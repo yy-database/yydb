@@ -49,6 +49,12 @@ fn persists_reorder_rename_and_tombstones_across_reopen() {
     drop(connection);
     let connection = common::reopen(&path);
     let snapshot = connection.catalog_snapshot().unwrap().unwrap();
+    let contract = connection.resolved_contract().unwrap().unwrap();
+    assert_eq!(contract.types[0].type_id, snapshot.types[0].type_id.0);
+    assert_eq!(
+        contract.types[0].fields[1].field_id,
+        snapshot.types[0].fields[1].field_id.0
+    );
     assert_eq!(snapshot.types[0].fields[1].field_id, FieldId(2));
     assert_eq!(snapshot.types[0].fields[1].current_name, "label");
     assert_eq!(snapshot.retired_fields[0].field_id, FieldId(3));
@@ -130,7 +136,7 @@ fn legacy_source_requires_explicit_ledger_initialization() {
         .migrate_schema(REORDERED, &RenameMap::default())
         .is_err());
     connection.ensure_schema(INITIAL).unwrap();
-    assert!(std::fs::read(&path).unwrap().starts_with(b"YYDB\x02"));
+    assert!(std::fs::read(&path).unwrap().starts_with(b"YYDB\x03"));
     drop(connection);
     let connection = common::reopen(&path);
     assert!(connection.catalog_snapshot().unwrap().is_some());
@@ -140,13 +146,42 @@ fn legacy_source_requires_explicit_ledger_initialization() {
 }
 
 #[test]
+fn upgrades_v2_catalog_without_reassigning_identity() {
+    let (connection, path) = common::open_temp_db("catalog-v2-upgrade");
+    connection.ensure_schema(INITIAL).unwrap();
+    let expected = connection.catalog_snapshot().unwrap().unwrap();
+    let resolved = connection.resolved_contract().unwrap().unwrap();
+    drop(connection);
+
+    let mut bytes = std::fs::read(&path).unwrap();
+    let resolved_bytes = serde_json::to_vec(&resolved).unwrap();
+    assert!(bytes.ends_with(&resolved_bytes));
+    bytes.truncate(bytes.len() - resolved_bytes.len() - 5);
+    bytes[4] = 2;
+    std::fs::write(&path, bytes).unwrap();
+
+    let connection = common::reopen(&path);
+    assert!(connection.resolved_contract().unwrap().is_none());
+    connection.ensure_schema(INITIAL).unwrap();
+    assert_eq!(connection.catalog_snapshot().unwrap().unwrap(), expected);
+    assert!(connection.resolved_contract().unwrap().is_some());
+    assert!(std::fs::read(&path).unwrap().starts_with(b"YYDB\x03"));
+    drop(connection);
+    common::cleanup(&path);
+}
+
+#[test]
 fn rejects_persisted_ledger_with_duplicate_identity() {
     let (connection, path) = common::open_temp_db("catalog-corrupt");
     connection.ensure_schema(INITIAL).unwrap();
     let mut snapshot = connection.catalog_snapshot().unwrap().unwrap();
+    let contract = connection.resolved_contract().unwrap().unwrap();
     drop(connection);
     let mut bytes = std::fs::read(&path).unwrap();
     let original = serde_json::to_vec(&snapshot).unwrap();
+    let resolved = serde_json::to_vec(&contract).unwrap();
+    assert!(bytes.ends_with(&resolved));
+    bytes.truncate(bytes.len() - resolved.len() - 5);
     assert!(bytes.ends_with(&original));
     bytes.truncate(bytes.len() - original.len() - 4);
     snapshot.types[0].fields[1].field_id = snapshot.types[0].fields[0].field_id;

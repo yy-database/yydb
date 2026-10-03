@@ -13,6 +13,66 @@ use yydb_types::{Error, Result};
 /// Canonical remote used by this workspace for shared VOS semantics.
 pub const VOS_GIT_DEV: &str = "https://github.com/voml/vos-language.git#branch=dev";
 
+pub(crate) fn resolved_contract_for_catalog(
+    document: &str,
+    catalog: &vos::ast::CatalogSnapshot,
+) -> Result<vos::ResolvedContract> {
+    let projection = vos::parse_oak(document)
+        .map_err(|message| Error::Schema { message })?
+        .project_schema()
+        .map_err(|diagnostics| Error::Schema {
+            message: format!("VOS semantic projection failed: {diagnostics:?}"),
+        })?;
+    let mut identities = Vec::with_capacity(projection.types.len());
+    let mut used_types = std::collections::BTreeSet::new();
+    for projected in &projection.types {
+        let name = projected
+            .canonical_path
+            .last()
+            .ok_or_else(|| Error::Schema {
+                message: "VOS type has an empty canonical path".into(),
+            })?;
+        let entry = catalog
+            .types
+            .iter()
+            .find(|entry| entry.name == *name && used_types.insert(entry.type_id))
+            .ok_or_else(|| Error::Schema {
+                message: format!("catalog identity is missing type `{name}`"),
+            })?;
+        let mut fields = Vec::with_capacity(projected.fields.len());
+        for projected_field in &projected.fields {
+            let field = entry
+                .fields
+                .iter()
+                .find(|field| field.current_name == projected_field.canonical_name)
+                .ok_or_else(|| Error::Schema {
+                    message: format!(
+                        "catalog identity is missing field `{name}.{}`",
+                        projected_field.canonical_name
+                    ),
+                })?;
+            fields.push(vos::contract::FieldIdentity {
+                canonical_name: projected_field.canonical_name.clone(),
+                field_id: field.field_id.0,
+                virtual_field_index: field.virtual_field,
+            });
+        }
+        identities.push(vos::contract::TypeIdentity {
+            canonical_path: projected.canonical_path.clone(),
+            type_id: entry.type_id.0,
+            kind: projected.kind,
+            fields,
+        });
+    }
+    let manifest = vos::contract::IdentityManifest {
+        format_version: vos::contract::IDENTITY_MANIFEST_VERSION.to_owned(),
+        types: identities,
+    };
+    vos::resolve_contract(&projection, &manifest).map_err(|diagnostics| Error::Schema {
+        message: format!("VOS resolved contract failed: {diagnostics:?}"),
+    })
+}
+
 /// Initial execution-facing catalog built from one validated VOS document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionCatalog {
@@ -129,7 +189,10 @@ pub fn execution_catalog_from_resolved_contract(
     contract: &vos::ResolvedContract,
 ) -> Result<ExecutionCatalog> {
     contract.validate().map_err(|error| Error::Schema {
-        message: format!("invalid resolved VOS contract {}: {}", error.code, error.message),
+        message: format!(
+            "invalid resolved VOS contract {}: {}",
+            error.code, error.message
+        ),
     })?;
     let mut types = Vec::with_capacity(contract.types.len());
     for item in &contract.types {
@@ -147,15 +210,11 @@ pub fn execution_catalog_from_resolved_contract(
         let mut fields = Vec::with_capacity(item.fields.len());
         for field in &item.fields {
             let ty = resolved_execution_type(&field.canonical_type)?;
-            let handle = FieldHandle::new(
-                item.type_id,
-                field.field_id,
-                field.virtual_field_index,
-                ty,
-            )
-            .map_err(|_| Error::Schema {
-                message: "resolved VOS contract emitted an invalid field identity".into(),
-            })?;
+            let handle =
+                FieldHandle::new(item.type_id, field.field_id, field.virtual_field_index, ty)
+                    .map_err(|_| Error::Schema {
+                        message: "resolved VOS contract emitted an invalid field identity".into(),
+                    })?;
             fields.push(ExecutionField {
                 field_id: field.field_id,
                 virtual_field: field.virtual_field_index,

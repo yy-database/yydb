@@ -120,13 +120,15 @@ use journal::{
 use udf::{ClosureUdf, ScalarFn};
 use udf_bridge::UdfSubsystem;
 
-const MAGIC: &[u8] = b"YYDB\x02";
+const MAGIC: &[u8] = b"YYDB\x03";
 const LEGACY_MAGIC: &[u8] = b"YYDB\x01";
+const CATALOG_MAGIC: &[u8] = b"YYDB\x02";
 
 #[derive(Debug, Default, Clone)]
 struct State {
     schema: Option<SchemaVersion>,
     catalog: Option<vos::ast::CatalogSnapshot>,
+    resolved_contract: Option<vos::ResolvedContract>,
     records: BTreeMap<String, Vec<u8>>,
 }
 
@@ -351,12 +353,21 @@ impl Connection {
         Ok(self.read_state()?.catalog)
     }
 
+    /// Current validated VOS resolved contract, if the database has one.
+    pub fn resolved_contract(&self) -> Result<Option<vos::ResolvedContract>> {
+        Ok(self.read_state()?.resolved_contract)
+    }
+
     /// Bind local execution handles using persisted identities, never fresh source order.
     pub fn execution_catalog(&self) -> Result<Option<schema::ExecutionCatalog>> {
-        self.catalog_snapshot()?
-            .as_ref()
-            .map(schema::execution_catalog_from_snapshot)
-            .transpose()
+        let state = self.read_state()?;
+        match (state.resolved_contract, state.catalog) {
+            (Some(contract), _) => {
+                schema::execution_catalog_from_resolved_contract(&contract).map(Some)
+            }
+            (None, Some(catalog)) => schema::execution_catalog_from_snapshot(&catalog).map(Some),
+            (None, None) => Ok(None),
+        }
     }
 
     /// Number of stored key/value records.
@@ -395,7 +406,12 @@ impl Connection {
                             .into(),
                 });
             }
-            if state.catalog.is_some() {
+            if let Some(catalog) = &state.catalog {
+                if state.resolved_contract.is_none() {
+                    state.resolved_contract =
+                        Some(schema::resolved_contract_for_catalog(document, catalog)?);
+                    self.write_state(&state)?;
+                }
                 return Ok(());
             }
         }
@@ -408,8 +424,10 @@ impl Connection {
             vos::parser::parse_document(document).map_err(|diagnostics| Error::Schema {
                 message: diagnostics.to_string(),
             })?;
-        state.catalog =
-            Some(vos::catalog_from_document(&parsed).map_err(|message| Error::Schema { message })?);
+        let catalog =
+            vos::catalog_from_document(&parsed).map_err(|message| Error::Schema { message })?;
+        state.resolved_contract = Some(schema::resolved_contract_for_catalog(document, &catalog)?);
+        state.catalog = Some(catalog);
         state.schema = Some(SchemaVersion {
             version,
             document: document.to_owned(),
@@ -444,11 +462,13 @@ impl Connection {
         })?;
         let catalog = vos::evolve_catalog(previous_catalog, &parsed, renames)
             .map_err(|message| Error::Schema { message })?;
+        let resolved_contract = schema::resolved_contract_for_catalog(document, &catalog)?;
         state.schema = Some(SchemaVersion {
             version,
             document: document.to_owned(),
         });
         state.catalog = Some(catalog);
+        state.resolved_contract = Some(resolved_contract);
         self.write_state(&state)
     }
 
@@ -1231,8 +1251,10 @@ fn encode(state: &State) -> Result<Vec<u8>> {
     let legacy = state.schema.is_some() && state.catalog.is_none();
     let mut bytes = if legacy {
         LEGACY_MAGIC.to_vec()
-    } else {
+    } else if state.resolved_contract.is_some() {
         MAGIC.to_vec()
+    } else {
+        CATALOG_MAGIC.to_vec()
     };
     match &state.schema {
         Some(schema) => {
@@ -1259,6 +1281,12 @@ fn encode(state: &State) -> Result<Vec<u8>> {
         }
         None => bytes.push(0),
     }
+    if let Some(contract) = &state.resolved_contract {
+        bytes.push(1);
+        let encoded = serde_json::to_vec(contract)
+            .map_err(|_| Error::Corrupt("resolved contract serialization failed"))?;
+        write_bytes(&mut bytes, &encoded)?;
+    }
     Ok(bytes)
 }
 
@@ -1266,7 +1294,9 @@ fn decode(bytes: &[u8]) -> Result<State> {
     let mut cursor = 0;
     let header = take(bytes, &mut cursor, MAGIC.len())?;
     let legacy = header == LEGACY_MAGIC;
-    if header != MAGIC && !legacy {
+    let has_resolved_contract = header == MAGIC;
+    let has_catalog = header == MAGIC || header == CATALOG_MAGIC;
+    if !legacy && !has_catalog {
         return Err(Error::Corrupt("unknown file header"));
     }
     let schema = match take(bytes, &mut cursor, 1)? {
@@ -1285,7 +1315,7 @@ fn decode(bytes: &[u8]) -> Result<State> {
             .map_err(|_| Error::Corrupt("record key is not UTF-8"))?;
         records.insert(key, read_bytes(bytes, &mut cursor)?);
     }
-    if !legacy {
+    if has_catalog {
         let catalog = match take(bytes, &mut cursor, 1)? {
             [0] => None,
             [1] => Some(
@@ -1294,18 +1324,48 @@ fn decode(bytes: &[u8]) -> Result<State> {
             ),
             _ => return Err(Error::Corrupt("unknown catalog marker")),
         };
+        let resolved_contract = if !has_resolved_contract {
+            None
+        } else {
+            match take(bytes, &mut cursor, 1)? {
+                [0] => None,
+                [1] => Some(
+                    vos::ResolvedContract::from_json(
+                        &String::from_utf8(read_bytes(bytes, &mut cursor)?)
+                            .map_err(|_| Error::Corrupt("resolved contract is not UTF-8"))?,
+                    )
+                    .map_err(|_| Error::Corrupt("resolved contract is invalid"))?,
+                ),
+                _ => return Err(Error::Corrupt("unknown resolved contract marker")),
+            }
+        };
         if cursor != bytes.len() {
             return Err(Error::Corrupt("trailing data"));
         }
         if schema.is_some() != catalog.is_some() {
             return Err(Error::Corrupt("schema and catalog presence differ"));
         }
-        if let (Some(schema), Some(catalog)) = (&schema, &catalog) {
+        if has_resolved_contract && catalog.is_some() != resolved_contract.is_some() {
+            return Err(Error::Corrupt(
+                "resolved contract and catalog presence differ",
+            ));
+        }
+        if let (Some(schema), Some(catalog), Some(contract)) =
+            (&schema, &catalog, &resolved_contract)
+        {
+            let expected = schema::resolved_contract_for_catalog(&schema.document, catalog)?;
+            if &expected != contract {
+                return Err(Error::Corrupt(
+                    "resolved contract does not match schema ledger",
+                ));
+            }
+        } else if let (Some(schema), Some(catalog)) = (&schema, &catalog) {
             schema::validate_snapshot(&schema.document, catalog)?;
         }
         return Ok(State {
             schema,
             catalog,
+            resolved_contract,
             records,
         });
     }
@@ -1315,6 +1375,7 @@ fn decode(bytes: &[u8]) -> Result<State> {
     Ok(State {
         schema,
         catalog: None,
+        resolved_contract: None,
         records,
     })
 }
