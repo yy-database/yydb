@@ -1658,6 +1658,7 @@ dependencies = [
  "windows-sys",
  "yydb-execution",
  "yydb-types",
+ "yydb-udf",
 ]
 
 [[package]]
@@ -1695,6 +1696,15 @@ name = "yydb-types"
 version = "0.1.0"
 dependencies = [
  "uuid",
+]
+
+[[package]]
+name = "yydb-udf"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "vos",
+ "yydb-execution",
 ]
 
 [[package]]
