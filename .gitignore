@@ -1,3 +1,19 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+.cursor/
+.settings/
+.classpath
+.project
+.factorypath
+*.iml
+*.log
+*.txt
+
 # Rust
 target/
 
@@ -12,21 +28,9 @@ target/
 *.war
 *.ear
 
-# IDEs
-.idea/
-.vscode/
-.settings/
-.classpath
-.project
-.factorypath
-*.iml
 
 # Rust — local path patches / registry overrides (never commit)
 .cargo/config.toml
-
-# OS
-.DS_Store
-Thumbs.db
 
 # Temp files
 *.swp
@@ -34,4 +38,8 @@ Thumbs.db
 *.db
 *.db-wal
 *.db-shm
-*.log
+
+# Database
+*.yydb
+*.yydx
+
