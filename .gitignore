@@ -21,9 +21,8 @@ target/
 .factorypath
 *.iml
 
-# Rust
+# Rust — local path patches / registry overrides (never commit)
 .cargo/config.toml
-Cargo.lock
 
 # OS
 .DS_Store
