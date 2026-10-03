@@ -92,3 +92,47 @@ pub fn resolve_field_path(
 
     Ok(Value::Null)
 }
+
+/// Load the row reached by dereferencing `path` from `row` (for nested projections).
+pub fn resolve_row_at_path(
+    path: &[String],
+    row: &QueryRow,
+    table: &str,
+    catalog: &CatalogSnapshot,
+    records: &BTreeMap<String, Vec<u8>>,
+) -> Result<(QueryRow, String)> {
+    if path.is_empty() {
+        return Ok((row.clone(), table.to_string()));
+    }
+
+    let mut current_table = table;
+    let mut owned: Option<QueryRow> = None;
+    let mut current: &QueryRow = row;
+
+    for segment in path {
+        let value = current
+            .get(segment)
+            .cloned()
+            .unwrap_or(Value::Null);
+        let entry = table_entry(catalog, current_table)?;
+        let field = entry
+            .fields
+            .iter()
+            .find(|field| field.current_name == *segment)
+            .ok_or_else(|| {
+                resolve_error(format!(
+                    "unknown field `{segment}` on table `{current_table}`"
+                ))
+            })?;
+        let target_table = reference_target(&field.ty)?;
+        let pk = value_to_pk(&value)?;
+        owned = Some(store::load_row(records, target_table, &pk)?);
+        current = owned.as_ref().expect("loaded referenced row");
+        current_table = target_table;
+    }
+
+    Ok((
+        owned.unwrap_or_else(|| row.clone()),
+        current_table.to_string(),
+    ))
+}
