@@ -1,0 +1,19 @@
+[package]
+name = "yydb-pyo3"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Python bindings for YYDB serve and embedded engine access"
+readme = "readme.md"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+name = "yydb_pyo3"
+
+[dependencies]
+pyo3 = { workspace = true }
+yydb = { workspace = true }
+yydb-server = { workspace = true }
