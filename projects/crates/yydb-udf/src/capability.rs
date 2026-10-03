@@ -81,6 +81,17 @@ impl UdfPolicy {
         }
     }
 
+    /// Returns a pure host policy for TypeScript session micros.
+    pub fn pure_host() -> Self {
+        Self {
+            effect: Effect::Pure,
+            capabilities: CapabilitySet::default(),
+            determinism: Determinism::Deterministic,
+            retryable: false,
+            cacheable: false,
+        }
+    }
+
     /// Returns whether row-at-a-time execution is allowed by default.
     pub fn allows_scalar_row_execution(&self) -> bool {
         matches!(

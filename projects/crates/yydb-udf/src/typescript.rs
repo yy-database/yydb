@@ -35,6 +35,33 @@ pub struct TypeScriptMicroDefinition {
 }
 
 impl TypeScriptMicroDefinition {
+    /// Builds a Phase-1 pure deterministic scalar micro from contract fields.
+    pub fn from_scalar(
+        name: &str,
+        version: u32,
+        args: Vec<crate::contract::UdfType>,
+        returns: crate::contract::UdfType,
+        host_id: u64,
+        function_id: impl Into<String>,
+        handle_version: u32,
+        fingerprint: [u8; 32],
+    ) -> Result<Self> {
+        let identity = UdfIdentity::new("", name, version)?;
+        let signature = Signature::new(args, returns);
+        let function_id = function_id.into();
+        Ok(Self {
+            identity,
+            signature,
+            policy: UdfPolicy::pure_host(),
+            handle: TypeScriptFunctionHandle {
+                host_id,
+                function_id,
+                version: handle_version,
+            },
+            fingerprint,
+        })
+    }
+
     /// Builds session metadata for this host micro.
     ///
     /// TypeScript micros never enter the `.yydb` catalog.
