@@ -1,11 +1,11 @@
-//! TCP-backed [`TypeScriptHostAdapter`] for `yydb serve` wire peers.
+//! TCP-backed [`HostRuntimeAdapter`] for `yydb serve` wire peers.
 
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use yydb_udf::{
-    Result as UdfResult, TypeScriptFunctionHandle, TypeScriptHostAdapter, UdfError, UdfValue,
+    HostFunctionHandle, HostRuntimeAdapter, Result as UdfResult, UdfError, UdfValue,
 };
 
 use crate::wire::{
@@ -13,13 +13,13 @@ use crate::wire::{
     MsgType,
 };
 
-/// Invokes TypeScript micros on the wire peer that owns the host registry.
-pub struct TcpTypeScriptHostAdapter {
+/// Invokes host micros on the wire peer that owns the host registry.
+pub struct TcpWireHostAdapter {
     stream: Mutex<TcpStream>,
     next_id: AtomicU32,
 }
 
-impl TcpTypeScriptHostAdapter {
+impl TcpWireHostAdapter {
     /// Creates an adapter that shares the client TCP connection with the serve loop.
     pub fn new(stream: TcpStream) -> Self {
         Self {
@@ -30,7 +30,7 @@ impl TcpTypeScriptHostAdapter {
 
     fn roundtrip_invoke(
         &self,
-        handle: &TypeScriptFunctionHandle,
+        handle: &HostFunctionHandle,
         args: &[UdfValue],
     ) -> UdfResult<UdfValue> {
         let request_id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -64,10 +64,10 @@ impl TcpTypeScriptHostAdapter {
     }
 }
 
-impl TypeScriptHostAdapter for TcpTypeScriptHostAdapter {
+impl HostRuntimeAdapter for TcpWireHostAdapter {
     fn invoke_scalar(
         &self,
-        handle: &TypeScriptFunctionHandle,
+        handle: &HostFunctionHandle,
         args: &[UdfValue],
     ) -> UdfResult<UdfValue> {
         self.roundtrip_invoke(handle, args)
@@ -75,7 +75,7 @@ impl TypeScriptHostAdapter for TcpTypeScriptHostAdapter {
 
     fn invoke_batch(
         &self,
-        _handle: &TypeScriptFunctionHandle,
+        _handle: &HostFunctionHandle,
         _batches: &[Vec<UdfValue>],
     ) -> UdfResult<Vec<UdfValue>> {
         Err(UdfError::UnsupportedType)
