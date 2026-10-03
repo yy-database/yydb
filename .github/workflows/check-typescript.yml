@@ -1,0 +1,30 @@
+name: Check TypeScript
+
+# pnpm package build/test and Nifty format check. Rust checks: check-rust.yml
+# Publish: release-npm.yml on v*.*.* tags.
+on:
+  push:
+    branches: [master, main, dev]
+  pull_request:
+    branches: [master, main, dev]
+
+jobs:
+  typescript:
+    name: pnpm packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        # version from package.json packageManager (pnpm@10.18.3)
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec nifty format --check
+      - run: pnpm --filter @yydb/yydb-client build
+      - run: pnpm --filter @yydb/yydb-client test
+      - run: pnpm --filter @yydb/yydb build
+      - run: pnpm --filter @yydb/yydb test
+      - run: pnpm --filter @yydb/yydb-webui build
+      - run: pnpm --filter @yydb/yydb-homepage build
