@@ -162,7 +162,8 @@ fn upgrades_v2_catalog_without_reassigning_identity() {
 
     let connection = common::reopen(&path);
     assert!(connection.resolved_contract().unwrap().is_none());
-    connection.ensure_schema(INITIAL).unwrap();
+    let execution = connection.execution_catalog().unwrap().unwrap();
+    assert_eq!(execution.types[0].schema_id, expected.types[0].type_id.0);
     assert_eq!(connection.catalog_snapshot().unwrap().unwrap(), expected);
     assert!(connection.resolved_contract().unwrap().is_some());
     assert!(std::fs::read(&path).unwrap().starts_with(b"YYDB\x03"));
