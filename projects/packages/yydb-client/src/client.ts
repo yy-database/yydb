@@ -1,25 +1,31 @@
 import {
     decodeKvGetOk,
+    decodeScalarCallOk,
     decodeSchemaGetOk,
     encodeKvGet,
     encodeKvPut,
     encodeMicroRegister,
+    encodeScalarCall,
     encodeSchemaEnsure,
     Frame,
     MicroRegisterPayload,
     MsgType,
     SchemaVersion,
+    WireUdfScalarValue,
 } from "./wire.js";
-import type { Transport } from "./transport.js";
+import type { MicroHostHandler, Transport } from "./transport.js";
 import { openWebSocketTransport } from "./ws.js";
 
 export type {
     Frame,
+    MicroHostInvokePayload,
     MicroRegisterPayload,
     MsgTypeCode,
     SchemaVersion,
     WireUdfScalarKind,
+    WireUdfScalarValue,
 } from "./wire.js";
+export type { MicroHostHandler } from "./transport.js";
 export { MsgType, encodeFrame, decodeFrame } from "./wire.js";
 
 export interface ConnectOptions {
@@ -101,6 +107,24 @@ export class Client {
         await this.roundtrip(MsgType.MicroRegister, encodeMicroRegister(payload));
     }
 
+    /** Install the host handler used to answer `MicroHostInvoke` server pushes. */
+    setMicroHostHandler(handler: MicroHostHandler | undefined): void {
+        this.transport.setMicroHostHandler?.(handler);
+    }
+
+    /** Invoke a registered scalar UDF on the remote engine. */
+    async callScalar(
+        name: string,
+        version: number,
+        args: readonly WireUdfScalarValue[],
+    ): Promise<WireUdfScalarValue> {
+        const response = await this.roundtrip(
+            MsgType.ScalarCall,
+            encodeScalarCall(name, version, args),
+        );
+        return decodeScalarCallOk(response.body);
+    }
+
     private async roundtrip(msgType: number, body: Uint8Array): Promise<Frame> {
         const requestId = this.nextId++;
         const response = await this.transport.send({
@@ -123,6 +147,7 @@ export class Client {
             [MsgType.KvGet]: MsgType.KvGetOk,
             [MsgType.KvPut]: MsgType.KvPutOk,
             [MsgType.MicroRegister]: MsgType.MicroRegisterOk,
+            [MsgType.ScalarCall]: MsgType.ScalarCallOk,
         };
         const want = expectedOk[msgType];
         if (want !== undefined && response.msgType !== want) {
