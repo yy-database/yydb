@@ -411,7 +411,7 @@ impl Connection {
                 return Ok(rows);
             }
         }
-        query::execute(source, &state.records)
+        query::execute(source, state.catalog.as_ref(), &state.records)
     }
 
     /// Execute unit-valued VOS write programs (for example `User { … }.insert()`).
