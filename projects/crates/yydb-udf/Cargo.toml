@@ -1,0 +1,18 @@
+[package]
+name = "yydb-udf"
+version.workspace = true
+edition.workspace = true
+license = "MPL-2.0"
+description = "YYDB UDF contract, registry, and host adapters"
+publish = false
+readme = "readme.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+blake3 = { workspace = true }
+vos = { workspace = true }
+yydb-execution = { workspace = true }
+
+[dev-dependencies]

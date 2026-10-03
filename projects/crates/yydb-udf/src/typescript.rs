@@ -1,0 +1,130 @@
+//! TypeScript host UDF handles and adapter boundary.
+
+use crate::capability::{Placement, UdfPolicy};
+use crate::contract::{ImplementationKind, Signature, UdfDefinition};
+use crate::error::{Result, UdfError};
+use crate::identity::UdfIdentity;
+use crate::implementation::UdfImplementation;
+use crate::invocation::{InvocationMode, UdfContext};
+use crate::value::UdfValue;
+
+/// Opaque handle to a process-local TypeScript function.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeScriptFunctionHandle {
+    /// Host runtime instance identifier.
+    pub host_id: u64,
+    /// Function identifier inside the TS registry.
+    pub function_id: String,
+    /// Monotonic implementation version.
+    pub version: u32,
+}
+
+/// Metadata required to register a TS UDF without persisting the JS closure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeScriptUdfDefinition {
+    /// Logical identity.
+    pub identity: UdfIdentity,
+    /// Typed signature.
+    pub signature: Signature,
+    /// Execution policy.
+    pub policy: UdfPolicy,
+    /// Opaque host handle.
+    pub handle: TypeScriptFunctionHandle,
+    /// Registration fingerprint.
+    pub fingerprint: [u8; 32],
+}
+
+impl TypeScriptUdfDefinition {
+    /// Builds catalog metadata for this host UDF.
+    pub fn catalog_definition(&self) -> UdfDefinition {
+        UdfDefinition {
+            identity: self.identity.clone(),
+            signature: self.signature.clone(),
+            policy: self.policy,
+            placement: Placement::Host,
+            implementation_kind: ImplementationKind::TypeScript,
+            fingerprint: self.fingerprint,
+        }
+    }
+
+    /// Validates metadata before host installation.
+    pub fn validate(&self) -> Result<()> {
+        self.catalog_definition().validate()?;
+        if self.handle.function_id.is_empty() {
+            return Err(UdfError::InvalidDefinition);
+        }
+        if self.handle.version == 0 {
+            return Err(UdfError::VersionMismatch);
+        }
+        Ok(())
+    }
+}
+
+/// Host adapter that owns the real JS function registry.
+pub trait TypeScriptHostAdapter: Send + Sync {
+    /// Invokes one scalar call through the host runtime.
+    fn invoke_scalar(
+        &self,
+        handle: &TypeScriptFunctionHandle,
+        args: &[UdfValue],
+    ) -> Result<UdfValue>;
+
+    /// Invokes a bounded batch call through the host runtime.
+    fn invoke_batch(
+        &self,
+        handle: &TypeScriptFunctionHandle,
+        batches: &[Vec<UdfValue>],
+    ) -> Result<Vec<UdfValue>>;
+}
+
+/// Host-side implementation strategy backed by a TS adapter.
+pub struct TypeScriptImplementation {
+    definition: TypeScriptUdfDefinition,
+    adapter: std::sync::Arc<dyn TypeScriptHostAdapter>,
+}
+
+impl TypeScriptImplementation {
+    /// Creates a host implementation from metadata and an adapter.
+    pub fn new(
+        definition: TypeScriptUdfDefinition,
+        adapter: std::sync::Arc<dyn TypeScriptHostAdapter>,
+    ) -> Self {
+        Self { definition, adapter }
+    }
+}
+
+impl UdfImplementation for TypeScriptImplementation {
+    fn identity(&self) -> &UdfIdentity {
+        &self.definition.identity
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.definition.signature
+    }
+
+    fn invoke(&self, context: &mut UdfContext, args: &[UdfValue]) -> Result<UdfValue> {
+        self.definition.signature.ensure_args(&UdfValue::argument_types(args))?;
+        context.check_cancelled()?;
+        context.charge(1)?;
+        self.adapter.invoke_scalar(&self.definition.handle, args)
+    }
+
+    fn invoke_batch(
+        &self,
+        context: &mut UdfContext,
+        batches: &[Vec<UdfValue>],
+    ) -> Result<Vec<UdfValue>> {
+        for batch in batches {
+            self.definition
+                .signature
+                .ensure_args(&UdfValue::argument_types(batch))?;
+        }
+        context.check_cancelled()?;
+        context.charge(batches.len() as u64)?;
+        self.adapter.invoke_batch(&self.definition.handle, batches)
+    }
+
+    fn preferred_mode(&self) -> InvocationMode {
+        InvocationMode::Batch
+    }
+}
