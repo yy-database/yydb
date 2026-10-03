@@ -23,9 +23,7 @@ npx yydb serve app.yydb --bind 127.0.0.1:7700
 | Platform    | Linux x64 with glibc (`linux/x64`) |
 | Binding     | `yydb.linux-x64.node`              |
 
-The same engine is available in the
-[`ghcr.io/yy-database/yydb`](https://github.com/yy-database/yydb.rs/tree/dev/docker/yydb)
-container and in the [release archives](https://github.com/yy-database/yydb.rs/releases).
+The same binding is also available in the [release archives](https://github.com/yy-database/yydb.rs/releases).
 
 [YYDB overview](https://github.com/yy-database/yydb.rs) ·
 [License](https://github.com/yy-database/yydb.rs/blob/dev/License.md)

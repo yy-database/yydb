@@ -64,7 +64,7 @@ arguments forwarded to `yydb serve`). `binary` is a deprecated alias for `cli`.
 |-------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Browser code or a host that already runs `yydb serve` | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client)                                                                                        |
 | In-process Rust access                                | [`yydb`](https://crates.io/crates/yydb)                                                                                                                       |
-| A CLI or container                                    | [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) CLI, [release native bindings](https://github.com/yy-database/yydb.rs/releases), or [`ghcr.io/yy-database/yydb`](https://github.com/yy-database/yydb.rs/tree/dev/docker/yydb) |
+| A CLI                                                 | [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) or [release native bindings](https://github.com/yy-database/yydb.rs/releases) |
 
 For Electron, the main process can use `@yydb/yydb`; renderer code can use
 `@yydb/yydb-client` against the main process endpoint.
