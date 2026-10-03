@@ -102,6 +102,17 @@ fn rejects_unsupported_effects_placements_and_captured_parameters_before_registr
 }
 
 #[test]
+fn lowers_and_evaluates_a_vos_catalog_macro() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.register_vos_macro("macro triple(value: i64) -> i64 { value + value + value }")
+        .unwrap();
+    assert_eq!(
+        conn.call_scalar("triple", &[Value::I64(7)]).unwrap(),
+        Value::I64(21)
+    );
+}
+
+#[test]
 fn lowers_and_evaluates_an_oak_validated_vos_scalar() {
     let conn = Connection::open_in_memory().unwrap();
     conn.register_vos_scalar("micro double(value: i64) -> i64 { value + value }")
