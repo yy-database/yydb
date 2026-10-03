@@ -18,6 +18,10 @@
         "./cli": {
             "types": "./dist/cli.d.ts",
             "import": "./dist/cli.js"
+        },
+        "./generator": {
+            "types": "./dist/generator/index.d.ts",
+            "import": "./dist/generator/index.js"
         }
     },
     "files": [
@@ -26,7 +30,7 @@
     ],
     "scripts": {
         "build": "tsc -p tsconfig.json",
-        "test": "node --experimental-strip-types --test src/**/*.test.ts"
+        "test": "pnpm run build && node --experimental-strip-types --test src/**/*.test.ts"
     },
     "repository": {
         "type": "git",
@@ -48,6 +52,7 @@
         "access": "public"
     },
     "dependencies": {
+        "@vmz/commander": "^0.2.0",
         "@yydb/yydb-client": "workspace:*"
     },
     "devDependencies": {
