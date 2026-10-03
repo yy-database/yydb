@@ -1,11 +1,11 @@
 //! Lower VOS expression pipelines into Phase 1 query ops.
 
-use vos::ast::expr::{BinaryOp, Expr, ProjItem, Stmt};
+use vos::ast::expr::{BinaryOp, Expr, FieldInit, ProjItem, Stmt};
 use vos::ast::{Literal, Program};
 
 use yydb_types::{Error, Result};
 
-use super::ops::{CmpOp, LiteralKind, Pred, ProjectField, QueryOp, SortKey};
+use super::ops::{CmpOp, LiteralKind, Pred, ProjectExpr, ProjectField, QueryOp, SortKey};
 
 fn query_error(message: impl Into<String>) -> Error {
     Error::Schema {
@@ -298,9 +298,12 @@ fn lower_field_lambda(expr: &Expr) -> Result<String> {
 }
 
 fn lower_projection(expr: &Expr) -> Result<Vec<ProjectField>> {
-    let body = match expr {
-        Expr::Lambda(lambda) => lambda.body.as_ref(),
-        other => other,
+    let (body, param) = match expr {
+        Expr::Lambda(lambda) => (
+            lambda.body.as_ref(),
+            lambda.params.first().map(String::as_str),
+        ),
+        other => (other, None),
     };
     match body {
         Expr::StructProj { items, .. } => {
@@ -313,25 +316,7 @@ fn lower_projection(expr: &Expr) -> Result<Vec<ProjectField>> {
                         ));
                     }
                     ProjItem::Field(init) => {
-                        let from = match &init.value {
-                            None => None,
-                            Some(Expr::Name { name, .. }) | Some(Expr::Member { name, .. }) => {
-                                if name == &init.name {
-                                    None
-                                } else {
-                                    Some(name.clone())
-                                }
-                            }
-                            Some(_) => {
-                                return Err(query_error(
-                                    "Phase 1 projection values must be field refs",
-                                ));
-                            }
-                        };
-                        fields.push(ProjectField {
-                            name: init.name.clone(),
-                            from,
-                        });
+                        fields.push(lower_project_field(init, param)?);
                     }
                     _ => return Err(query_error("unsupported projection item")),
                 }
@@ -339,6 +324,49 @@ fn lower_projection(expr: &Expr) -> Result<Vec<ProjectField>> {
             Ok(fields)
         }
         _ => Err(query_error("Phase 1 `.map` expects `x => x.{ ... }`")),
+    }
+}
+
+fn lower_project_field(init: &FieldInit, param: Option<&str>) -> Result<ProjectField> {
+    let expr = match &init.value {
+        None => ProjectExpr::Scalar {
+            path: vec![init.name.clone()],
+        },
+        Some(value) => lower_project_expr(value, param)?,
+    };
+    Ok(ProjectField {
+        name: init.name.clone(),
+        expr,
+    })
+}
+
+fn lower_project_expr(expr: &Expr, param: Option<&str>) -> Result<ProjectExpr> {
+    match expr {
+        Expr::StructProj { receiver, items, .. } => {
+            let path = lower_field_path(receiver.as_ref(), param)?;
+            let mut fields = Vec::new();
+            for item in items {
+                match item {
+                    ProjItem::Star { .. } => {
+                        return Err(query_error(
+                            "Phase 1 nested projection does not expand `*` yet",
+                        ));
+                    }
+                    ProjItem::Field(init) => fields.push(lower_project_field(init, param)?),
+                    _ => return Err(query_error("unsupported nested projection item")),
+                }
+            }
+            Ok(ProjectExpr::Nested { path, fields })
+        }
+        other => {
+            let path = lower_field_path(other, param)?;
+            if path.is_empty() {
+                return Err(query_error(
+                    "Phase 1 projection values must be field paths rooted at the lambda parameter",
+                ));
+            }
+            Ok(ProjectExpr::Scalar { path })
+        }
     }
 }
 

@@ -3,6 +3,9 @@
 //! Applications should normally depend on the [`yydb`](https://docs.rs/yydb)
 //! facade, which re-exports these types.
 
+#![warn(missing_docs)]
+
+use std::collections::BTreeMap;
 use std::{error, fmt, io, result, sync::Arc};
 
 /// Soft recommendation: prefer CAS above this size instead of row-inline bytes.
@@ -417,6 +420,8 @@ pub enum Value {
     Object(ObjectRef),
     /// Chunked logical file.
     File(ChunkManifest),
+    /// Nested row embedded in query projection results (not persisted inline).
+    Row(BTreeMap<String, Value>),
 }
 
 mod hex {

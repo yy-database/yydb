@@ -1,4 +1,4 @@
-//! Phase 1 read query physical ops (backend-neutral, non-SQL).
+﻿//! Phase 1 read query physical ops (backend-neutral, non-SQL).
 
 use std::collections::BTreeMap;
 
@@ -46,11 +46,25 @@ pub enum Pred {
     Or(Box<Pred>, Box<Pred>),
 }
 
+/// One projected value expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectExpr {
+    /// Read a scalar field path from the current row context.
+    Scalar {
+        path: Vec<String>,
+    },
+    /// Project nested fields from a referenced row at `path`.
+    Nested {
+        path: Vec<String>,
+        fields: Vec<ProjectField>,
+    },
+}
+
 /// One projected output field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectField {
     pub name: String,
-    pub from: Option<String>,
+    pub expr: ProjectExpr,
 }
 
 /// Sort key.
