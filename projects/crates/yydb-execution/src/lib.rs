@@ -470,6 +470,11 @@ impl ValidatedUdf {
         &self.metadata.program.inputs
     }
 
+    /// Returns the validated output type.
+    pub fn output_type(&self) -> Type {
+        self.metadata.program.output_type
+    }
+
     /// Returns the declared effect for host capability admission.
     pub fn effect(&self) -> UdfEffect {
         self.metadata.effect
