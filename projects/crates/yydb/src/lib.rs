@@ -226,7 +226,7 @@ impl Connection {
                 journal_mode: Mutex::new(flags.journal_mode),
             },
             udfs: Mutex::new(UdfSubsystem::default()),
-            objects: ObjectStore::open_beside_db(&path)?,
+            objects: ObjectStore::open_ephemeral(),
         };
         // Force recovery path once so a leftover WAL is applied.
         let _ = connection.read_state()?;
@@ -247,7 +247,7 @@ impl Connection {
         })
     }
 
-    /// Content-addressed object store (`<db>.objects/objects/…`).
+    /// Content-addressed object store (in-process for `.yydb`; `.yydx` blob roots later).
     pub fn objects(&self) -> &ObjectStore {
         &self.objects
     }
@@ -268,6 +268,15 @@ impl Connection {
     /// Path of the `-shm` sidecar when file-backed.
     pub fn shm_path(&self) -> Option<PathBuf> {
         self.path().map(shm_path)
+    }
+
+    fn guard_yydb_cas_payload(&self, len: usize) -> Result<()> {
+        if self.path().is_some() && len > INLINE_BYTES_MAX {
+            return Err(Error::Unsupported(
+                "CAS payloads larger than INLINE_BYTES_MAX require a .yydx layout in single-file .yydb mode",
+            ));
+        }
+        Ok(())
     }
 
     /// Current journal mode (`delete` or `wal`). In-memory is always `delete`.
@@ -873,11 +882,13 @@ impl Connection {
 
     /// Store one CAS object at `objects/hash-2/<hash>.bytes`.
     pub fn put_chunk(&self, kind: ObjectKind, bytes: &[u8]) -> Result<ObjectRef> {
+        self.guard_yydb_cas_payload(bytes.len())?;
         self.objects.put_chunk(kind, bytes)
     }
 
     /// Store a vector payload in CAS (`ObjectKind::VectorPayload`).
     pub fn put_vector(&self, vector: &Vector) -> Result<ObjectRef> {
+        self.guard_yydb_cas_payload(vector.to_le_bytes().len())?;
         self.objects.put_vector(vector)
     }
 
@@ -897,6 +908,11 @@ impl Connection {
         reader: impl std::io::Read,
         chunk_size: usize,
     ) -> Result<ChunkManifest> {
+        if self.path().is_some() {
+            return Err(Error::Unsupported(
+                "chunked file objects require a .yydx layout; .yydb single-file mode rejects them",
+            ));
+        }
         self.objects.put_file_chunked(reader, chunk_size)
     }
 

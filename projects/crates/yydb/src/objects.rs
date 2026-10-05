@@ -37,6 +37,8 @@ pub struct ObjectStore {
     hot: Mutex<HashMap<[u8; 32], Arc<[u8]>>>,
     /// Process-local cold tier when no on-disk CAS is available.
     cold: Mutex<HashMap<[u8; 32], Arc<[u8]>>>,
+    /// In-process object index for ephemeral stores (`scan_orphans` / doctor).
+    catalog: Mutex<HashMap<[u8; 32], ObjectRef>>,
     pinned: Mutex<HashSet<[u8; 32]>>,
 }
 
@@ -47,13 +49,15 @@ impl ObjectStore {
             root: ObjectStoreRoot::Ephemeral,
             hot: Mutex::new(HashMap::new()),
             cold: Mutex::new(HashMap::new()),
+            catalog: Mutex::new(HashMap::new()),
             pinned: Mutex::new(HashSet::new()),
         }
     }
 
     /// Open or create the store next to `db_path` (`app.yydb` → `app.yydb.objects`).
     ///
-    /// Prototype layout only. Production `.yydb` must not depend on this sidecar.
+    /// Prototype layout only. `Connection::open` does not call this path.
+    #[deprecated(note = "prototype drift layout; use open_ephemeral for .yydb or .yydx blob roots")]
     pub fn open_beside_db(db_path: &Path) -> Result<Self> {
         let mut os = db_path.as_os_str().to_owned();
         os.push(".objects");
@@ -63,6 +67,7 @@ impl ObjectStore {
             root: ObjectStoreRoot::OnDisk(root),
             hot: Mutex::new(HashMap::new()),
             cold: Mutex::new(HashMap::new()),
+            catalog: Mutex::new(HashMap::new()),
             pinned: Mutex::new(HashSet::new()),
         })
     }
@@ -74,6 +79,7 @@ impl ObjectStore {
             root: ObjectStoreRoot::OnDisk(root),
             hot: Mutex::new(HashMap::new()),
             cold: Mutex::new(HashMap::new()),
+            catalog: Mutex::new(HashMap::new()),
             pinned: Mutex::new(HashSet::new()),
         })
     }
@@ -138,6 +144,12 @@ impl ObjectStore {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .insert(hash_bytes, Arc::<[u8]>::from(bytes.to_vec()));
+        if !self.persist_to_disk() {
+            self.catalog
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(hash_bytes, object.clone());
+        }
         Ok(object)
     }
 
@@ -347,7 +359,14 @@ impl ObjectStore {
     /// Enumerate every object file under `objects/hash-2/`.
     pub fn list_objects(&self) -> Result<Vec<ObjectRef>> {
         if !self.persist_to_disk() {
-            return Ok(Vec::new());
+            return Ok(
+                self.catalog
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .values()
+                    .cloned()
+                    .collect(),
+            );
         }
         let mut objects = Vec::new();
         let hash_root = self.cas_root();
@@ -398,6 +417,10 @@ impl ObjectStore {
             .unwrap_or_else(|p| p.into_inner())
             .remove(&object.hash);
         self.cold
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&object.hash);
+        self.catalog
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(&object.hash);
