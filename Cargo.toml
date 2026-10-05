@@ -27,6 +27,7 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 
 # engine (bottom → mid; depend on yydb facade in apps)
 yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }
+yydb-format = { version = "0.1.0", path = "projects/crates/yydb-format" }
 yydb-execution = { version = "0.1.0", path = "projects/crates/yydb-execution" }
 yydb-udf = { version = "0.1.0", path = "projects/crates/yydb-udf" }
 yydb-query = { version = "0.1.0", path = "projects/crates/yydb-query" }
