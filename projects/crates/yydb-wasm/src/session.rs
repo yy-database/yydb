@@ -1,9 +1,14 @@
 //! Stateful YYDB sessions for browser WASM hosts.
 
+use js_sys::Function;
 use wasm_bindgen::prelude::*;
-use yydb::{Connection, Error};
+use yydb::{wire, Connection, Error};
 
-use crate::core::{execute_result_json, kv_get_json, schema_get_json, unit_result_json};
+use crate::core::{
+    connection_info, execute_result_json, kv_get_json, scalar_call_json, schema_get_json,
+    unit_result_json,
+};
+use crate::host_js::JsHostAdapter;
 use crate::opfs::{open_persistent, OpfsCapabilities, OpfsPersistentVolume};
 
 fn closed_session_error() -> Error {
@@ -29,6 +34,26 @@ fn run_ensure_schema(conn: &Connection, closed: bool, document: &str) -> String 
         return unit_result_json(Err(closed_session_error()));
     }
     unit_result_json(conn.ensure_schema(document))
+}
+
+fn run_register_micro(conn: &Connection, closed: bool, body: &[u8]) -> String {
+    if closed {
+        return unit_result_json(Err(closed_session_error()));
+    }
+    match wire::decode_micro_register(body) {
+        Ok(definition) => unit_result_json(conn.register_host_micro(definition)),
+        Err(error) => unit_result_json(Err(error)),
+    }
+}
+
+fn run_call_scalar(conn: &Connection, closed: bool, body: &[u8]) -> String {
+    if closed {
+        return scalar_call_json(Err(closed_session_error()));
+    }
+    match wire::decode_scalar_call(body) {
+        Ok((name, version, args)) => scalar_call_json(conn.call_scalar_version(&name, version, &args)),
+        Err(error) => scalar_call_json(Err(error)),
+    }
 }
 
 /// Execute a VOS query on a fresh in-memory database (stateless helper).
@@ -101,6 +126,36 @@ impl MemorySession {
             return schema_get_json(Err(closed_session_error()));
         }
         schema_get_json(self.conn.schema())
+    }
+
+    /// Database info text (`path=…\\n…`), matching the YY wire `Info` reply.
+    #[wasm_bindgen]
+    pub fn info(&self) -> String {
+        if self.closed {
+            return String::new();
+        }
+        connection_info(&self.conn, None)
+    }
+
+    /// Install the JS host micro invoker used by [`registerMicro`](Self::register_micro).
+    #[wasm_bindgen(js_name = setMicroHostInvoker)]
+    pub fn set_micro_host_invoker(&self, invoker: Function) {
+        if self.closed {
+            return;
+        }
+        JsHostAdapter::install(&self.conn, invoker);
+    }
+
+    /// Register a session-local host micro from a wire `MicroRegister` body.
+    #[wasm_bindgen(js_name = registerMicro)]
+    pub fn register_micro(&self, body: &[u8]) -> String {
+        run_register_micro(&self.conn, self.closed, body)
+    }
+
+    /// Invoke a scalar UDF from a wire `ScalarCall` body. Returns JSON `{ ok, value, error }`.
+    #[wasm_bindgen(js_name = callScalar)]
+    pub fn call_scalar(&self, body: &[u8]) -> String {
+        run_call_scalar(&self.conn, self.closed, body)
     }
 
     #[wasm_bindgen]
@@ -194,6 +249,36 @@ impl PersistentSession {
             return schema_get_json(Err(closed_session_error()));
         }
         schema_get_json(self.conn.schema())
+    }
+
+    /// Database info text (`path=…\\n…`), matching the YY wire `Info` reply.
+    #[wasm_bindgen]
+    pub fn info(&self) -> String {
+        if self.closed {
+            return String::new();
+        }
+        connection_info(&self.conn, Some(self.volume.path()))
+    }
+
+    /// Install the JS host micro invoker used by [`registerMicro`](Self::register_micro).
+    #[wasm_bindgen(js_name = setMicroHostInvoker)]
+    pub fn set_micro_host_invoker(&self, invoker: Function) {
+        if self.closed {
+            return;
+        }
+        JsHostAdapter::install(&self.conn, invoker);
+    }
+
+    /// Register a session-local host micro from a wire `MicroRegister` body.
+    #[wasm_bindgen(js_name = registerMicro)]
+    pub fn register_micro(&self, body: &[u8]) -> String {
+        run_register_micro(&self.conn, self.closed, body)
+    }
+
+    /// Invoke a scalar UDF from a wire `ScalarCall` body. Returns JSON `{ ok, value, error }`.
+    #[wasm_bindgen(js_name = callScalar)]
+    pub fn call_scalar(&self, body: &[u8]) -> String {
+        run_call_scalar(&self.conn, self.closed, body)
     }
 
     #[wasm_bindgen]
