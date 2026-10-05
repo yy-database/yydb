@@ -15,7 +15,18 @@ export {
     encodeSchemaEnsure,
     encodeKvGet,
     encodeKvPut,
+    encodeMicroRegister,
+    encodeScalarCall,
+    decodeScalarCallOk,
     decodeSchemaGetOk,
     decodeKvGetOk,
 } from './wire.js';
-export type { Frame, MsgTypeCode, ProductMagic, SchemaVersion } from './wire.js';
+export type {
+    Frame,
+    MicroRegisterPayload,
+    MsgTypeCode,
+    ProductMagic,
+    SchemaVersion,
+    WireUdfScalarKind,
+    WireUdfScalarValue,
+} from './wire.js';
