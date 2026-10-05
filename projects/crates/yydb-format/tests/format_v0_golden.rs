@@ -1,4 +1,4 @@
-// gate: format-v0 golden bytes (Living 09)
+// fixture: format_v0.golden
 // fixture: format_v0.*
 
 use std::path::PathBuf;

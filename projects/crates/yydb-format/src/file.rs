@@ -15,6 +15,7 @@ use crate::key::TreeKey;
 use crate::memory::MemoryPager;
 use crate::pager::PageStore;
 use crate::wal::committed_tail_lsn;
+use crate::shm::{shm_sidecar_path, sync_shm_from_wal};
 use crate::wal_append::{read_wal_file, replay_wal_pages, wal_sidecar_path, WalWriter};
 
 /// Persistent page store backed by a single `YDPG` main file.
@@ -111,6 +112,10 @@ impl FilePager {
             if wal_path.exists() {
                 std::fs::remove_file(wal_path)?;
             }
+            let shm_path = shm_sidecar_path(&self.path);
+            if shm_path.exists() {
+                std::fs::remove_file(shm_path)?;
+            }
             self.wal = None;
         }
         Ok(())
@@ -133,6 +138,10 @@ impl FilePager {
         if wal_path.exists() {
             std::fs::remove_file(wal_path)?;
         }
+        let shm_path = shm_sidecar_path(&self.path);
+        if shm_path.exists() {
+            std::fs::remove_file(shm_path)?;
+        }
         self.wal = None;
         self.wal_enabled = false;
         Ok(())
@@ -141,7 +150,9 @@ impl FilePager {
     fn ensure_wal(&mut self) -> Result<()> {
         if self.wal_enabled && self.wal.is_none() {
             let database_id = self.inner.header()?.slot.database_id;
-            self.wal = Some(WalWriter::open(wal_sidecar_path(&self.path), database_id)?);
+            let wal_path = wal_sidecar_path(&self.path);
+            self.wal = Some(WalWriter::open(&wal_path, database_id)?);
+            sync_shm_from_wal(&self.path, &wal_path)?;
         }
         Ok(())
     }
@@ -161,6 +172,7 @@ impl FilePager {
             self.ensure_wal()?;
             if let Some(wal) = self.wal.as_mut() {
                 wal.append_commit(&changed)?;
+                sync_shm_from_wal(&self.path, wal.path())?;
             }
         } else {
             for (page_id, image) in &changed {
@@ -193,6 +205,7 @@ impl FilePager {
         for (page_id, image) in pages {
             self.inner.put_page(page_id, image)?;
         }
+        sync_shm_from_wal(&self.path, &wal_path)?;
         Ok(())
     }
 
