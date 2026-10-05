@@ -2,7 +2,7 @@
 //!
 //! Pure Rust surface for host-testable gates. Actual OPFS I/O is not implemented yet.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 use yydb::{Error, Result};
@@ -265,4 +265,62 @@ impl OpfsBlobPublication {
         dangling.sort();
         dangling
     }
+}
+
+fn durable_snapshots() -> &'static Mutex<HashMap<String, OpfsDurableSnapshot>> {
+    static SNAPSHOTS: OnceLock<Mutex<HashMap<String, OpfsDurableSnapshot>>> = OnceLock::new();
+    SNAPSHOTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Durable committed catalog generation visible after reopen (Living `07` §13 step 4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpfsDurableSnapshot {
+    /// Monotonic committed generation for the logical database path.
+    pub generation: u64,
+    /// Committed catalog bytes (opaque stub payload).
+    pub catalog_body: Vec<u8>,
+    /// Blob hashes referenced by the committed catalog.
+    pub committed_refs: HashSet<String>,
+}
+
+impl OpfsDurableSnapshot {
+    /// Sorted query-visible blob references.
+    pub fn visible_references(&self) -> Vec<String> {
+        let mut refs = self.committed_refs.iter().cloned().collect::<Vec<_>>();
+        refs.sort();
+        refs
+    }
+}
+
+/// Atomically commit `publication` and sync durable catalog state for `path`.
+pub fn opfs_commit_and_sync(
+    path: &str,
+    publication: &mut OpfsBlobPublication,
+    refs: &[&str],
+    catalog_body: &[u8],
+) -> Result<OpfsDurableSnapshot> {
+    publication.commit_catalog(refs)?;
+    let generation = opfs_reopen(path)
+        .map(|snapshot| snapshot.generation + 1)
+        .unwrap_or(1);
+    let snapshot = OpfsDurableSnapshot {
+        generation,
+        catalog_body: catalog_body.to_vec(),
+        committed_refs: refs.iter().map(|hash| (*hash).to_string()).collect(),
+    };
+    durable_snapshots()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(path.to_string(), snapshot.clone());
+    Ok(snapshot)
+}
+
+/// Reopen durable committed state after a crash (Living `08` `G-OPFS-5`).
+pub fn opfs_reopen(path: &str) -> Result<OpfsDurableSnapshot> {
+    durable_snapshots()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(path)
+        .cloned()
+        .ok_or(Error::Unsupported("OPFS durable snapshot not found"))
 }
