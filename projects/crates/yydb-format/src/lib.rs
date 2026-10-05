@@ -23,6 +23,7 @@ pub use btree::RecordTree;
 pub use crc32c::crc32c;
 pub use doctor::diagnose_file;
 pub use file::FilePager;
+pub use file::{main_bytes_from_memory_pager, memory_pager_from_main_bytes};
 pub use header::{
     encode_empty_page0, parse_page0, DatabaseHeader, DatabaseHeaderSlot, PAGE_MAGIC, PAGE_SIZE,
     SLOT_BYTES,

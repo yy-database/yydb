@@ -2,7 +2,9 @@
 
 use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
 
-use yydb_format::{wal_sidecar_path, FilePager, KEY_KIND_USER, PAGE_MAGIC, TREE_RECORD};
+use yydb_format::{
+    wal_sidecar_path, FilePager, MemoryPager, KEY_KIND_USER, PAGE_MAGIC, TREE_RECORD,
+};
 use yydb_types::{Error, Result};
 
 use crate::journal::JournalMode;
@@ -39,6 +41,15 @@ pub fn file_is_ydpg(path: &Path) -> Result<bool> {
 
 /// Load logical [`State`] from a format v1 pager.
 pub fn read_state(pager: &mut FilePager) -> Result<State> {
+    read_state_from_kv(pager)
+}
+
+/// Load logical [`State`] from an in-memory format v1 pager.
+pub fn read_state_from_memory_pager(pager: &mut MemoryPager) -> Result<State> {
+    read_state_from_kv(pager)
+}
+
+fn read_state_from_kv<P: FormatKvPager>(pager: &mut P) -> Result<State> {
     let schema = decode_schema(pager.get_kv(META_SCHEMA)?)?;
     let catalog = decode_catalog(pager.get_kv(META_CATALOG)?)?;
     let resolved_contract = decode_contract(pager.get_kv(META_CONTRACT)?)?;
@@ -64,6 +75,58 @@ pub fn read_state(pager: &mut FilePager) -> Result<State> {
 
 /// Persist logical [`State`] through incremental btree mutations.
 pub fn write_state(pager: &mut FilePager, state: &State) -> Result<()> {
+    write_state_to_kv(pager, state)
+}
+
+/// Persist logical [`State`] into an in-memory format v1 pager.
+pub fn write_state_to_memory_pager(pager: &mut MemoryPager, state: &State) -> Result<()> {
+    write_state_to_kv(pager, state)
+}
+
+trait FormatKvPager {
+    fn get_kv(&mut self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>>;
+    fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()>;
+    fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool>;
+    fn scan_kv(&mut self) -> Result<Vec<(yydb_format::TreeKey, Vec<u8>)>>;
+}
+
+impl FormatKvPager for FilePager {
+    fn get_kv(&mut self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        FilePager::get_kv(self, key)
+    }
+
+    fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()> {
+        FilePager::put_kv(self, key, value)
+    }
+
+    fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
+        FilePager::delete_kv(self, key)
+    }
+
+    fn scan_kv(&mut self) -> Result<Vec<(yydb_format::TreeKey, Vec<u8>)>> {
+        FilePager::scan_kv(self)
+    }
+}
+
+impl FormatKvPager for MemoryPager {
+    fn get_kv(&mut self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        MemoryPager::get_kv(self, key)
+    }
+
+    fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()> {
+        MemoryPager::put_kv(self, key, value)
+    }
+
+    fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
+        MemoryPager::delete_kv(self, key)
+    }
+
+    fn scan_kv(&mut self) -> Result<Vec<(yydb_format::TreeKey, Vec<u8>)>> {
+        MemoryPager::scan_kv(self)
+    }
+}
+
+fn write_state_to_kv<P: FormatKvPager>(pager: &mut P, state: &State) -> Result<()> {
     pager.put_kv(META_SCHEMA, &encode_schema(&state.schema)?)?;
     pager.put_kv(META_CATALOG, &encode_catalog(&state.catalog)?)?;
     pager.put_kv(META_CONTRACT, &encode_contract(&state.resolved_contract)?)?;
