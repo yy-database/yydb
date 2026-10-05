@@ -1,16 +1,16 @@
 # `@yydb/yydb-unknown-wasm32`
 
-Browser WebAssembly artifacts for schema validation and version checks in WASM hosts. **Not a full database runtime** —
-prefer [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client) against `yydb serve` for durable reads and
-writes.
+Low-level wasm-pack artifacts for the YYDB browser core. **App authors should use
+[`@yydb/yydb/wasm`](https://www.npmjs.com/package/@yydb/yydb)** instead of this package.
 
-Pulled when a browser bundle depends on this package directly. Most apps should not import it unless they embed the WASM
-core explicitly.
+Import here only when you need the raw glue or bundled `.wasm` path. For durable reads and writes in production, prefer
+[`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client) against `yydb serve` until wasm persistence
+lands.
 
 ## Example
 
 ```ts
-import {initWasm, checkSchema, yydbVersion} from "@yydb/yydb-unknown-wasm32";
+import {initWasm, checkSchema, yydbVersion} from "@yydb/yydb/wasm";
 
 await initWasm();
 

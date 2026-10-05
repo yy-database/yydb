@@ -1,29 +1,35 @@
 # `@yydb/yydb`
 
-Opens a `.yydb` file in Node.js with one dependency: a private loopback `yydb serve` process starts automatically and
-the package talks to it over the YY wire protocol. For a lightweight client only (browser, renderer, or an app that
-already runs `yydb serve`), use [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client).
+Node all-in-one and browser wasm core from one package. On Node.js, `Database.open` starts a private loopback `yydb serve`
+process and talks over the YY wire protocol. In browsers, `@yydb/yydb/wasm` loads the in-process wasm binding for schema
+checks today and persistent sessions next.
+
+For a wire client only (renderer or an app that already runs `yydb serve`), use
+[`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client).
 
 [![npm](https://img.shields.io/npm/v/@yydb/yydb)](https://www.npmjs.com/package/@yydb/yydb)
 [![Node.js](https://img.shields.io/node/v/@yydb/yydb)](https://www.npmjs.com/package/@yydb/yydb)
 
 ## Exports
 
-| Import           | Role                                     |
-|------------------|------------------------------------------|
-| `@yydb/yydb`     | `Database` API and default entry         |
-| `@yydb/yydb/cli` | CLI (`version`, `init`, `info`, `serve`) |
+| Import | Runtime | Role |
+|--------|---------|------|
+| `@yydb/yydb` | Node (`node` export condition) | `Database.open`, micro helpers |
+| `@yydb/yydb` | Browser / bundler (`default`) | wasm `Database` |
+| `@yydb/yydb/node` | Node (explicit) | Same as Node default |
+| `@yydb/yydb/wasm` | Browser (explicit) | wasm `Database`, `initWasm`, `checkSchema` |
+| `@yydb/yydb/cli` | Node | CLI (`version`, `init`, `info`, `serve`) |
 
-Node.js 18+. The matching platform `.node` binding installs via optional dependencies.
+Node.js 18+. Platform `.node` bindings install via optional dependencies.
 
-Schema truth lives in the `.yydb` file via `ensureSchema` and VOS documents.
+Schema truth lives in the `.yydb` file via `ensureSchema` and VOS documents on Node. Wasm exposes `checkSchema` today.
 
-## Example
+## Node example
 
 ```ts
-import {Database} from "@yydb/yydb";
+import { Database } from '@yydb/yydb';
 
-const db = await Database.open("./data/app.yydb");
+const db = await Database.open('./data/app.yydb');
 
 await db.ensureSchema(
     1,
@@ -34,14 +40,27 @@ await db.ensureSchema(
     }`,
 );
 
-await db.put("theme", "dark");
-console.log(await db.get("theme"));
+await db.put('theme', 'dark');
+console.log(await db.get('theme'));
 await db.close();
 ```
 
 The file is created when missing. Schema version and VOS document persist with the data.
 
-## API
+## Browser example
+
+```ts
+import { Database } from '@yydb/yydb/wasm';
+
+const db = await Database.openInMemory();
+console.log(db.version());
+console.log(db.checkSchema('table Setting { @@id: uuid, key: utf8 }'));
+```
+
+Call `Database.init()` or `openInMemory()` once before semantic methods. Persistent OPFS `Database.open` is planned on
+this entry.
+
+## Node API
 
 ```ts
 const db = await Database.open(path, options?);
@@ -60,14 +79,15 @@ arguments). `binary` is a deprecated alias for `cli`.
 
 ## Related packages
 
-| Need                           | Package                                                                |
-|--------------------------------|------------------------------------------------------------------------|
-| Node all-in-one (this package) | **`@yydb/yydb`**                                                       |
-| Wire client only               | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client) |
-| In-process Rust embed          | [`yydb`](https://crates.io/crates/yydb)                                |
-| Agent skills (wire protocol)   | [`@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills) |
+| Need | Package |
+|------|---------|
+| Node all-in-one (this package) | **`@yydb/yydb`** or `@yydb/yydb/node` |
+| Browser wasm entry | **`@yydb/yydb/wasm`** |
+| Wire client only | [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client) |
+| In-process Rust embed | [`yydb`](https://crates.io/crates/yydb) |
+| Agent skills (wire protocol) | [`@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills) |
 
-Electron: main process can use `@yydb/yydb`; renderer code can use `@yydb/yydb-client` against the main-process
+Electron: main process can use `@yydb/yydb/node`; renderer code can use `@yydb/yydb-client` against the main-process
 endpoint.
 
 The managed engine listens on `127.0.0.1` with no authentication — keep the endpoint private.
