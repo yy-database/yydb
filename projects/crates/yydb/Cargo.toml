@@ -131,6 +131,12 @@ path = "tests/acceptance/format_v0/wal_blob_refs.rs"
 name = "yydb_format_v0_wal_blob_refs_crash"
 path = "tests/acceptance/format_v0/wal_blob_refs_crash.rs"
 [[test]]
+name = "yydb_format_v0_wal_truncate_reopen"
+path = "tests/acceptance/format_v0/wal_truncate_reopen.rs"
+[[test]]
+name = "yydb_format_v0_yydx_wal_pages_before_blob_refs_crash"
+path = "tests/acceptance/format_v0/yydx_wal_pages_before_blob_refs_crash.rs"
+[[test]]
 name = "yydb_format_v0_writer_lock"
 path = "tests/acceptance/format_v0/writer_lock.rs"
 [[test]]
