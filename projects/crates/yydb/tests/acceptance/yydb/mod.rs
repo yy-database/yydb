@@ -8,6 +8,8 @@ mod lease_fencing_reject;
 mod lease_renew_extends;
 mod object_batch_attach;
 mod object_dedup_fingerprint;
+mod orphan_doctor_count;
+mod orphan_reclaim_idempotent;
 mod orphan_reclaim_safe;
 mod orphan_reclaim_skips_pinned;
 mod orphan_reclaim_skips_referenced;
