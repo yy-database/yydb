@@ -51,7 +51,9 @@ fn run_call_scalar(conn: &Connection, closed: bool, body: &[u8]) -> String {
         return scalar_call_json(Err(closed_session_error()));
     }
     match wire::decode_scalar_call(body) {
-        Ok((name, version, args)) => scalar_call_json(conn.call_scalar_version(&name, version, &args)),
+        Ok((name, version, args)) => {
+            scalar_call_json(conn.call_scalar_version(&name, version, &args))
+        }
         Err(error) => scalar_call_json(Err(error)),
     }
 }
@@ -156,6 +158,12 @@ impl MemorySession {
     #[wasm_bindgen(js_name = callScalar)]
     pub fn call_scalar(&self, body: &[u8]) -> String {
         run_call_scalar(&self.conn, self.closed, body)
+    }
+
+    /// Engine version string (wire `HelloOk` parity).
+    #[wasm_bindgen(js_name = serverVersion)]
+    pub fn server_version(&self) -> String {
+        yydb::version().to_string()
     }
 
     #[wasm_bindgen]
@@ -279,6 +287,12 @@ impl PersistentSession {
     #[wasm_bindgen(js_name = callScalar)]
     pub fn call_scalar(&self, body: &[u8]) -> String {
         run_call_scalar(&self.conn, self.closed, body)
+    }
+
+    /// Engine version string (wire `HelloOk` parity).
+    #[wasm_bindgen(js_name = serverVersion)]
+    pub fn server_version(&self) -> String {
+        yydb::version().to_string()
     }
 
     #[wasm_bindgen]
