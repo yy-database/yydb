@@ -1,8 +1,8 @@
 # `@yydb/yydb`
 
 Node all-in-one and browser wasm core from one package. On Node.js, `Database.open` starts a private loopback `yydb serve`
-process and talks over the YY wire protocol. In browsers, `@yydb/yydb/wasm` loads the in-process wasm binding for schema
-checks today and persistent sessions next.
+process and talks over the YY wire protocol. In browsers, `@yydb/yydb/wasm` loads an in-process wasm session with KV,
+schema, and VOS `query` / `execute` on memory or OPFS paths.
 
 For a wire client only (renderer or an app that already runs `yydb serve`), use
 [`@yydb/yydb-client`](https://www.npmjs.com/package/@yydb/yydb-client).
@@ -22,7 +22,8 @@ For a wire client only (renderer or an app that already runs `yydb serve`), use
 
 Node.js 18+. Platform `.node` bindings install via optional dependencies.
 
-Schema truth lives in the `.yydb` file via `ensureSchema` and VOS documents on Node. Wasm exposes `checkSchema` today.
+Schema truth lives in the `.yydb` file via `ensureSchema` and VOS documents. Wasm sessions mirror KV and schema calls
+and add VOS pipelines directly on the embedded core.
 
 ## Node example
 
@@ -53,12 +54,37 @@ The file is created when missing. Schema version and VOS document persist with t
 import { Database } from '@yydb/yydb/wasm';
 
 const db = await Database.openInMemory();
-console.log(db.version());
-console.log(db.checkSchema('table Setting { @@id: uuid, key: utf8 }'));
+
+await db.ensureSchema(
+    1,
+    `table Setting {
+        @@id: uuid,
+        key: utf8,
+        value: utf8,
+    }`,
+);
+
+await db.put('theme', 'dark');
+console.log(await db.get('theme'));
+db.close();
 ```
 
-Call `Database.init()` or `openInMemory()` once before semantic methods. Persistent OPFS `Database.open` is planned on
-this entry.
+Use `Database.open('app.yydb')` for OPFS-backed paths in supported browsers.
+
+## Wasm API
+
+```ts
+const db = await Database.openInMemory();
+// or: const db = await Database.open('app.yydb');
+
+await db.ensureSchema(version, vosDocument);
+await db.getSchema();
+await db.put(key, stringOrBytes);
+await db.get(key);
+db.query('User.filter(x => x.active).collect()');
+db.execute('User { name: "Ada" }.insert()');
+db.close();
+```
 
 ## Node API
 

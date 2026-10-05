@@ -21,6 +21,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm run build:wasm
       - run: pnpm exec nifty format --check
       - run: pnpm --filter @yydb/yydb-client build
       - run: pnpm --filter @yydb/yydb-client test
