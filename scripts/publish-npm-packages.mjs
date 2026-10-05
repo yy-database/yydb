@@ -10,7 +10,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
-const dirs = (process.env.PUBLISH_PACKAGES || 'yydb-win32-x64 yydb-linux-x64 yydb-darwin-x64 yydb-darwin-arm64 yydb-client yydb')
+const dirs = (process.env.PUBLISH_PACKAGES || 'yydb-win32-x64 yydb-linux-x64 yydb-darwin-x64 yydb-darwin-arm64 yydb-client yydb-unknown-wasm32 yydb')
     .trim()
     .split(/\s+/)
     .filter(Boolean);
