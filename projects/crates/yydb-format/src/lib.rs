@@ -5,6 +5,7 @@
 pub mod blob;
 pub mod btree;
 pub mod crc32c;
+pub mod doctor;
 pub mod file;
 pub mod header;
 pub mod internal;
@@ -20,6 +21,7 @@ pub mod wal_append;
 pub use blob::{parse_blob_header, BlobChunkHeader, BLOB_HEADER_BYTES, BLOB_MAGIC};
 pub use btree::RecordTree;
 pub use crc32c::crc32c;
+pub use doctor::diagnose_file;
 pub use file::FilePager;
 pub use header::{
     encode_empty_page0, parse_page0, DatabaseHeader, DatabaseHeaderSlot, PAGE_MAGIC, PAGE_SIZE,
