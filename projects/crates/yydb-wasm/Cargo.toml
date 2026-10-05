@@ -18,9 +18,10 @@ serde_json = { workspace = true }
 vos = { workspace = true }
 yydb = { workspace = true }
 wasm-bindgen = { workspace = true }
-getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 yydb = { workspace = true }
 
 [package.metadata.wasm-pack.profile.release]

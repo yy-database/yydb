@@ -25,7 +25,10 @@ impl MemorySession {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<MemorySession, JsValue> {
         Connection::open_in_memory()
-            .map(|conn| Self { conn, closed: false })
+            .map(|conn| Self {
+                conn,
+                closed: false,
+            })
             .map_err(|err| JsValue::from_str(&err.to_string()))
     }
 

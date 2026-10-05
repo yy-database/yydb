@@ -2,6 +2,8 @@
 //!
 //! TypeScript hosts use `yydb-napi`. Do not import `yydb-types` from Python glue.
 
+#![warn(missing_docs)]
+
 use std::fs;
 use std::path::Path;
 

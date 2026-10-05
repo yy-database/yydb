@@ -381,14 +381,13 @@ impl ObjectStore {
     /// Enumerate every object file under `objects/hash-2/`.
     pub fn list_objects(&self) -> Result<Vec<ObjectRef>> {
         if !self.persist_to_disk() {
-            return Ok(
-                self.catalog
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .values()
-                    .cloned()
-                    .collect(),
-            );
+            return Ok(self
+                .catalog
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .values()
+                .cloned()
+                .collect());
         }
         let mut objects = Vec::new();
         let hash_root = self.cas_root();
