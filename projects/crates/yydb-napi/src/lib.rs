@@ -1,6 +1,6 @@
 //! Thin Node-API binding — delegates to the [`yydb`] facade and [`yydb-server`].
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 
 use std::fs;
 use std::path::Path;

@@ -18,7 +18,7 @@ serde_json = { workspace = true }
 vos = { workspace = true }
 yydb = { workspace = true }
 wasm-bindgen = { workspace = true }
-js-sys = "0.3"
+js-sys = { workspace = true }
 getrandom = { workspace = true }
 
 [dev-dependencies]

@@ -3,7 +3,7 @@
 //! Sits above [`yydb-types`] and below the [`yydb`] facade. Storage hosts pass
 //! their in-memory record map and VOS catalog snapshot into these entry points.
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 
 mod dml;
 mod exec;
