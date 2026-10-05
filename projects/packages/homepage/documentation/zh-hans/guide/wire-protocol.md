@@ -17,4 +17,4 @@ Rust：
 `yydb-serve-protocol`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md)（[
 `@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills)）。
 
-v1：Hello、Info、SchemaGet / SchemaEnsure、KvGet / KvPut。
+当前帧类型：Hello、Info、SchemaGet / SchemaEnsure、KvGet / KvPut（见 skill 中的 `msg_type` 表）。
