@@ -5,7 +5,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
-use yydb::{Error, Result};
+use yydb::{
+    DoctorIssue, DoctorReport, DoctorSeverity, Error, Result,
+};
 
 fn writer_locks() -> &'static Mutex<HashSet<String>> {
     static LOCKS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -200,6 +202,8 @@ impl OpfsCommittedVolume {
 /// Models `.yydx` blob publish then catalog commit (Living `07` §13 steps 2–4).
 #[derive(Debug, Clone)]
 pub struct OpfsBlobPublication {
+    /// Logical `.yydx` path for inventory tracking.
+    path: String,
     /// Blobs published to the object store (immutable once visible on disk).
     published_blobs: HashSet<String>,
     /// Blob hashes referenced by the committed catalog generation.
@@ -208,13 +212,18 @@ pub struct OpfsBlobPublication {
 
 impl OpfsBlobPublication {
     /// Open a logical `.yydx` volume with an initial committed blob set.
-    pub fn new(_path: &str, initial_committed_refs: &[&str]) -> Self {
+    pub fn new(path: &str, initial_committed_refs: &[&str]) -> Self {
         let committed_refs: HashSet<String> = initial_committed_refs
             .iter()
             .map(|s| (*s).to_string())
             .collect();
+        let published_blobs = committed_refs.clone();
+        for hash in &published_blobs {
+            track_blob(path, hash);
+        }
         Self {
-            published_blobs: committed_refs.clone(),
+            path: path.to_string(),
+            published_blobs,
             committed_refs,
         }
     }
@@ -222,6 +231,7 @@ impl OpfsBlobPublication {
     /// Publish a blob chunk (step 2). Does not advance the committed catalog.
     pub fn publish_blob(&mut self, blob_hash: &str) {
         self.published_blobs.insert(blob_hash.to_string());
+        track_blob(&self.path, blob_hash);
     }
 
     /// Commit catalog references (steps 3–4). Refuses unpublished blob hashes.
@@ -323,4 +333,60 @@ pub fn opfs_reopen(path: &str) -> Result<OpfsDurableSnapshot> {
         .get(path)
         .cloned()
         .ok_or(Error::Unsupported("OPFS durable snapshot not found"))
+}
+
+fn blob_inventory() -> &'static Mutex<HashMap<String, HashSet<String>>> {
+    static INVENTORY: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
+    INVENTORY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn track_blob(path: &str, blob_hash: &str) {
+    blob_inventory()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .entry(path.to_string())
+        .or_default()
+        .insert(blob_hash.to_string());
+}
+
+/// Simulate user or browser eviction of a published blob from OPFS storage.
+pub fn opfs_evict_blob(path: &str, blob_hash: &str) {
+    blob_inventory()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .entry(path.to_string())
+        .and_modify(|blobs| {
+            blobs.remove(blob_hash);
+        });
+}
+
+/// Read-only OPFS consistency probe for committed catalog vs blob inventory (Living `08` `G-OPFS-6`).
+pub fn opfs_doctor(path: &str) -> Result<DoctorReport> {
+    let snapshot = opfs_reopen(path)?;
+    let inventory = blob_inventory()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let present = inventory.get(path);
+    let mut issues = Vec::new();
+    for hash in snapshot.visible_references() {
+        let missing = present.is_none_or(|blobs| !blobs.contains(&hash));
+        if missing {
+            issues.push(DoctorIssue {
+                severity: DoctorSeverity::Error,
+                code: "yydb.doctor.missing_blob".into(),
+                message: format!("committed catalog references missing blob `{hash}`"),
+                key_hint: Some(hash),
+            });
+        }
+    }
+    Ok(DoctorReport {
+        file_path: Some(path.to_string()),
+        last_commit_sequence: snapshot.generation,
+        last_checkpoint_sequence: snapshot.generation,
+        checkpoint_lag_records: 0,
+        wal_bytes_uncheckpointed: 0,
+        orphan_object_count: 0,
+        namespaces: Vec::new(),
+        issues,
+    })
 }
