@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parseWasmKvGetResult, parseWasmRowsResult, parseWasmSchemaResult, parseWasmUnitResult } from './wasm-envelope.ts';
+import {
+    parseWasmKvGetResult,
+    parseWasmRowsResult,
+    parseWasmScalarResult,
+    parseWasmSchemaResult,
+    parseWasmUnitResult,
+} from './wasm-envelope.ts';
 
 describe('wasm-envelope', () => {
     it('parseWasmRowsResult accepts ok payloads', () => {
@@ -23,5 +29,9 @@ describe('wasm-envelope', () => {
     it('parseWasmKvGetResult decodes byte arrays', () => {
         const value = parseWasmKvGetResult('{"ok":true,"value":[97,98],"error":null}');
         assert.deepEqual(value, Uint8Array.from([97, 98]));
+    });
+
+    it('parseWasmScalarResult decodes scalar payloads', () => {
+        assert.equal(parseWasmScalarResult('{"ok":true,"value":42,"error":null}'), 42);
     });
 });

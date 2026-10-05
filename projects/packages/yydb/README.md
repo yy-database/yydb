@@ -81,6 +81,8 @@ await db.ensureSchema(version, vosDocument);
 await db.getSchema();
 await db.put(key, stringOrBytes);
 await db.get(key);
+await db.info();
+await db.serverVersion();
 db.query('User.filter(x => x.active).collect()');
 db.execute('User { name: "Ada" }.insert()');
 db.close();
@@ -97,6 +99,8 @@ await db.put(key, stringOrBytes);
 await db.get(key);
 await db.info();
 await db.serverVersion();
+await db.registerMicro(microDefinition);
+await db.callScalar('double', 1, [21]);
 await db.close();
 ```
 

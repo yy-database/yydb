@@ -15,6 +15,13 @@ export type CheckSchemaResult = {
     error?: string;
 };
 
+export type MicroHostInvokePayload = {
+    hostId: number;
+    handleVersion: number;
+    functionId: string;
+    args: readonly unknown[];
+};
+
 /** Stateful wasm session (memory or OPFS-backed). */
 export type WasmSession = {
     ensureSchema(document: string): string;
@@ -23,6 +30,10 @@ export type WasmSession = {
     get(key: string): string;
     put(key: string, value: Uint8Array): string;
     getSchema(): string;
+    info(): string;
+    setMicroHostInvoker(invoker: (payload: MicroHostInvokePayload) => unknown): void;
+    registerMicro(body: Uint8Array): string;
+    callScalar(body: Uint8Array): string;
     close(): void;
     readonly path?: string;
 };
