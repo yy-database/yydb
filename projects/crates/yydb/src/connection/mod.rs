@@ -16,6 +16,7 @@ use yydb_format::{
     main_bytes_from_memory_pager, memory_pager_from_main_bytes, FilePager, MemoryPager,
 };
 
+mod backup;
 mod doctor;
 mod journal;
 mod kv;
