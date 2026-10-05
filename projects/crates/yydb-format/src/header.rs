@@ -130,6 +130,17 @@ pub fn inactive_slot_offset(active_offset: usize) -> usize {
     }
 }
 
+/// Invalidate the checksum of one header slot (crash-injection helper for tests).
+#[doc(hidden)]
+pub fn corrupt_header_slot_checksum(page0: &mut [u8], offset: usize) -> Result<()> {
+    let end = offset + SLOT_BYTES;
+    if page0.len() < end {
+        return Err(Error::Corrupt("header slot truncated"));
+    }
+    page0[offset + 2044..offset + 2048].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
+    Ok(())
+}
+
 /// Recompute and store the CRC32C checksum for one header slot.
 pub fn seal_header_slot(page0: &mut [u8], offset: usize) -> Result<()> {
     let end = offset + SLOT_BYTES;

@@ -29,8 +29,8 @@ pub use doctor::diagnose_file;
 pub use file::FilePager;
 pub use file::{main_bytes_from_memory_pager, memory_pager_from_main_bytes};
 pub use header::{
-    encode_empty_page0, parse_page0, DatabaseHeader, DatabaseHeaderSlot, PAGE_MAGIC, PAGE_SIZE,
-    SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B,
+    encode_empty_page0, inactive_slot_offset, parse_page0, slot_offset_for_kind, DatabaseHeader,
+    DatabaseHeaderSlot, PAGE_MAGIC, PAGE_SIZE, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B,
 };
 pub use internal::{InternalEntry, InternalPage};
 pub use key::{TreeKey, KEY_KIND_USER, TREE_CATALOG, TREE_RECORD};
