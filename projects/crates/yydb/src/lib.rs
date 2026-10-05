@@ -70,6 +70,7 @@ pub mod prelude {
 }
 
 mod doctor;
+mod file_lock;
 mod format_v1;
 mod lease;
 mod refs;
@@ -120,6 +121,7 @@ use journal::{
 };
 use udf::{ClosureUdf, ScalarFn};
 use udf_bridge::UdfSubsystem;
+use file_lock::WriterLock;
 use yydb_format::FilePager;
 
 const MAGIC: &[u8] = b"YYDB\x03";
@@ -137,10 +139,14 @@ struct State {
 enum Backend {
     File {
         path: PathBuf,
+        #[allow(dead_code)]
+        writer_lock: WriterLock,
         journal_mode: Mutex<JournalMode>,
     },
     FormatV1 {
         path: PathBuf,
+        #[allow(dead_code)]
+        writer_lock: WriterLock,
         pager: Mutex<FilePager>,
         journal_mode: Mutex<JournalMode>,
     },
@@ -233,6 +239,7 @@ impl Connection {
             ));
         }
         if use_format_v1 {
+            let writer_lock = WriterLock::acquire(&path)?;
             let enable_wal = flags.journal_mode == JournalMode::Wal;
             let pager = FilePager::open(&path, enable_wal)?;
             let connection = Self {
@@ -240,6 +247,7 @@ impl Connection {
                 txn: Mutex::new(None),
                 backend: Backend::FormatV1 {
                     path: path.clone(),
+                    writer_lock,
                     pager: Mutex::new(pager),
                     journal_mode: Mutex::new(flags.journal_mode),
                 },
@@ -268,11 +276,13 @@ impl Connection {
                 }
             }
         }
+        let writer_lock = WriterLock::acquire(&path)?;
         let connection = Self {
             operation_lock: Mutex::new(()),
             txn: Mutex::new(None),
             backend: Backend::File {
                 path: path.clone(),
+                writer_lock,
                 journal_mode: Mutex::new(flags.journal_mode),
             },
             udfs: Mutex::new(UdfSubsystem::default()),
@@ -354,7 +364,7 @@ impl Connection {
     pub fn set_journal_mode(&self, mode: JournalMode) -> Result<()> {
         match &self.backend {
             Backend::Memory { .. } => return Ok(()),
-            Backend::File { path, journal_mode } => {
+            Backend::File { path, journal_mode, .. } => {
                 let mut slot = journal_mode
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -403,7 +413,7 @@ impl Connection {
             .unwrap_or_else(|p| p.into_inner());
         match &self.backend {
             Backend::Memory { .. } => Ok(()),
-            Backend::File { path, journal_mode } => {
+            Backend::File { path, journal_mode, .. } => {
                 let mode = *journal_mode
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -955,7 +965,14 @@ impl Connection {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let state = self.read_state()?;
-        doctor::diagnose(&state.records, &self.objects, self.path(), self.wal_path())
+        let mut report =
+            doctor::diagnose(&state.records, &self.objects, self.path(), self.wal_path())?;
+        if let Some(path) = self.path() {
+            if format_v1::file_is_ydpg(path)? {
+                report.issues.extend(yydb_format::diagnose_file(path)?);
+            }
+        }
+        Ok(report)
     }
 
     /// Delete orphan objects that are still unreferenced after a fresh scan.
@@ -1263,7 +1280,7 @@ impl Connection {
 
     fn write_state(&self, state: &State) -> Result<()> {
         match &self.backend {
-            Backend::File { path, journal_mode } => {
+            Backend::File { path, journal_mode, .. } => {
                 let mode = *journal_mode
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());

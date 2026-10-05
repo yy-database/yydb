@@ -44,6 +44,7 @@ fn g_yydb_format_v1_connection_wal_checkpoint() {
     assert!(conn.wal_path().unwrap().exists());
     conn.checkpoint().unwrap();
     assert!(!conn.wal_path().unwrap().exists());
+    drop(conn);
 
     let reopened = Connection::open(&path).unwrap();
     assert_eq!(reopened.get("k").unwrap(), Some(b"v".to_vec()));

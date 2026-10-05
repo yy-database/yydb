@@ -98,7 +98,7 @@ fn failed_migrations_leave_schema_and_ledger_unchanged() {
 
 #[test]
 fn recovers_the_same_ledger_from_wal_before_checkpoint() {
-    let (_, path) = common::open_temp_db("catalog-wal");
+    let path = common::temp_db_path("catalog-wal");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     connection.ensure_schema(INITIAL).unwrap();
     connection
@@ -196,7 +196,7 @@ fn rejects_persisted_ledger_with_duplicate_identity() {
 
 #[test]
 fn ignores_an_incomplete_wal_tail_after_the_last_complete_snapshot() {
-    let (_, path) = common::open_temp_db("wal-tail");
+    let path = common::temp_db_path("wal-tail");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     connection.ensure_schema(INITIAL).unwrap();
     connection.put("value", b"complete").unwrap();
@@ -213,7 +213,7 @@ fn ignores_an_incomplete_wal_tail_after_the_last_complete_snapshot() {
 
 #[test]
 fn rejects_a_complete_wal_frame_with_a_bad_checksum() {
-    let (_, path) = common::open_temp_db("wal-checksum");
+    let path = common::temp_db_path("wal-checksum");
     let connection = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     connection.ensure_schema(INITIAL).unwrap();
     drop(connection);
