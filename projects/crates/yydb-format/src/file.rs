@@ -75,6 +75,11 @@ impl FilePager {
         RecordTree::open(&mut self.inner).get(&TreeKey::user_record(key))
     }
 
+    /// Enumerate every record-tree cell.
+    pub fn scan_kv(&mut self) -> Result<Vec<(TreeKey, Vec<u8>)>> {
+        RecordTree::open(&mut self.inner).scan_all()
+    }
+
     /// User KV delete.
     pub fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
         let before = self.inner.pages_snapshot();
@@ -96,6 +101,28 @@ impl FilePager {
             }
             self.wal = None;
         }
+        Ok(())
+    }
+
+    /// Enable `YYWL` v3 journaling for subsequent mutations.
+    pub fn enable_wal(&mut self) -> Result<()> {
+        self.wal_enabled = true;
+        self.ensure_wal()?;
+        Ok(())
+    }
+
+    /// Checkpoint and stop writing WAL frames.
+    pub fn disable_wal(&mut self) -> Result<()> {
+        if !self.wal_enabled {
+            return Ok(());
+        }
+        self.persist_all()?;
+        let wal_path = wal_sidecar_path(&self.path);
+        if wal_path.exists() {
+            std::fs::remove_file(wal_path)?;
+        }
+        self.wal = None;
+        self.wal_enabled = false;
         Ok(())
     }
 

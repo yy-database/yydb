@@ -69,6 +69,17 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
         }
     }
 
+    /// Visit every key/value in the record tree.
+    pub fn scan_all(&mut self) -> Result<Vec<(TreeKey, Vec<u8>)>> {
+        let root = self.pager.header()?.slot.record_root;
+        if root == 0 {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::new();
+        self.scan_page(root, &mut out)?;
+        Ok(out)
+    }
+
     /// Delete a key when present.
     pub fn delete(&mut self, key: &TreeKey) -> Result<bool> {
         let root = self.pager.header()?.slot.record_root;
@@ -184,6 +195,28 @@ impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
             }
             _ => Err(Error::Corrupt("unexpected page type")),
         }
+    }
+
+    fn scan_page(&mut self, page_id: u32, out: &mut Vec<(TreeKey, Vec<u8>)>) -> Result<()> {
+        let page = self
+            .load_page(page_id)?
+            .ok_or(Error::Corrupt("missing tree page"))?;
+        match page.0.page_type {
+            PAGE_TYPE_LEAF => {
+                let leaf = LeafPage::decode(page_id, &page.1)?;
+                for cell in leaf.cells() {
+                    out.push((cell.key.clone(), cell.value.clone()));
+                }
+            }
+            PAGE_TYPE_INTERNAL => {
+                let node = InternalPage::decode(page_id, &page.1)?;
+                for idx in 0..node.entries.len() {
+                    self.scan_page(node.child_page_id(idx), out)?;
+                }
+            }
+            _ => return Err(Error::Corrupt("unexpected page type")),
+        }
+        Ok(())
     }
 
     fn load_page(&mut self, page_id: u32) -> Result<Option<(PageHeader, Vec<u8>)>> {
