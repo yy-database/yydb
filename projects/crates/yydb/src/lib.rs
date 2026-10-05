@@ -109,24 +109,15 @@ pub use vos;
 use std::{
     collections::BTreeMap,
     fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use file_lock::WriterLock;
-use journal::{
-    append_snapshot_frame, ensure_wal_sidecars, remove_wal_sidecars, replay_wal_snapshots,
-    shm_path, truncate_wal, wal_frame_count, wal_path,
-};
+use journal::{shm_path, wal_path};
 use udf::{ClosureUdf, ScalarFn};
 use udf_bridge::UdfSubsystem;
-use yydb_format::FilePager;
-
-const MAGIC: &[u8] = b"YYDB\x03";
-const LEGACY_MAGIC: &[u8] = b"YYDB\x01";
-const CATALOG_MAGIC: &[u8] = b"YYDB\x02";
+use yydb_format::{parse_wal, FilePager, WAL_MAGIC};
 
 #[derive(Debug, Default, Clone)]
 struct State {
@@ -138,12 +129,6 @@ struct State {
 
 enum Backend {
     File {
-        path: PathBuf,
-        #[allow(dead_code)]
-        writer_lock: WriterLock,
-        journal_mode: Mutex<JournalMode>,
-    },
-    FormatV1 {
         path: PathBuf,
         #[allow(dead_code)]
         writer_lock: WriterLock,
@@ -232,57 +217,18 @@ impl Connection {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let use_format_v1 = flags.format_v1 || format_v1::file_is_ydpg(&path)?;
-        if flags.format_v1 && path.exists() && !format_v1::file_is_ydpg(&path)? {
-            return Err(Error::Unsupported(
-                "OpenFlags::format_v1 cannot open a legacy YYDB main file",
-            ));
-        }
-        if use_format_v1 {
-            let writer_lock = WriterLock::acquire(&path)?;
-            let enable_wal = flags.journal_mode == JournalMode::Wal;
-            let pager = FilePager::open(&path, enable_wal)?;
-            let connection = Self {
-                operation_lock: Mutex::new(()),
-                txn: Mutex::new(None),
-                backend: Backend::FormatV1 {
-                    path: path.clone(),
-                    writer_lock,
-                    pager: Mutex::new(pager),
-                    journal_mode: Mutex::new(flags.journal_mode),
-                },
-                udfs: Mutex::new(UdfSubsystem::default()),
-                objects: if is_yydx_main_path(&path) {
-                    ObjectStore::open_yydx_blob_root(ObjectStore::yydx_objects_root(&path))?
-                } else {
-                    ObjectStore::open_ephemeral()
-                },
-            };
-            let _ = connection.read_state()?;
-            connection.reconcile_leases_on_open()?;
-            return Ok(connection);
-        }
-        if !path.exists() {
-            write_main(&path, &State::default())?;
-        }
-        match flags.journal_mode {
-            JournalMode::Wal => ensure_wal_sidecars(&path)?,
-            JournalMode::Delete => {
-                // Leftover sidecars from a prior WAL session: fold then remove.
-                if wal_path(&path).exists() || shm_path(&path).exists() {
-                    let state = load_file_state(&path)?;
-                    write_main(&path, &state)?;
-                    remove_wal_sidecars(&path)?;
-                }
-            }
+        if path.exists() && !format_v1::file_is_ydpg(&path)? {
+            return Err(Error::Corrupt("main file is not YDPG format v1"));
         }
         let writer_lock = WriterLock::acquire(&path)?;
+        let pager = format_v1::open_pager(&path, flags.journal_mode)?;
         let connection = Self {
             operation_lock: Mutex::new(()),
             txn: Mutex::new(None),
             backend: Backend::File {
                 path: path.clone(),
                 writer_lock,
+                pager: Mutex::new(pager),
                 journal_mode: Mutex::new(flags.journal_mode),
             },
             udfs: Mutex::new(UdfSubsystem::default()),
@@ -319,7 +265,7 @@ impl Connection {
     /// Filesystem path for file-backed connections; `None` for in-memory.
     pub fn path(&self) -> Option<&Path> {
         match &self.backend {
-            Backend::File { path, .. } | Backend::FormatV1 { path, .. } => Some(path.as_path()),
+            Backend::File { path, .. } => Some(path.as_path()),
             Backend::Memory { .. } => None,
         }
     }
@@ -350,11 +296,9 @@ impl Connection {
     /// Current journal mode (`delete` or `wal`). In-memory is always `delete`.
     pub fn journal_mode(&self) -> JournalMode {
         match &self.backend {
-            Backend::File { journal_mode, .. } | Backend::FormatV1 { journal_mode, .. } => {
-                *journal_mode
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-            }
+            Backend::File { journal_mode, .. } => *journal_mode
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
             Backend::Memory { .. } => JournalMode::Delete,
         }
     }
@@ -365,27 +309,6 @@ impl Connection {
         match &self.backend {
             Backend::Memory { .. } => return Ok(()),
             Backend::File {
-                path, journal_mode, ..
-            } => {
-                let mut slot = journal_mode
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if *slot == mode {
-                    return Ok(());
-                }
-                match mode {
-                    JournalMode::Wal => {
-                        ensure_wal_sidecars(path)?;
-                    }
-                    JournalMode::Delete => {
-                        let state = load_file_state(path)?;
-                        write_main(path, &state)?;
-                        remove_wal_sidecars(path)?;
-                    }
-                }
-                *slot = mode;
-            }
-            Backend::FormatV1 {
                 pager,
                 journal_mode,
                 ..
@@ -420,21 +343,6 @@ impl Connection {
         match &self.backend {
             Backend::Memory { .. } => Ok(()),
             Backend::File {
-                path, journal_mode, ..
-            } => {
-                let mode = *journal_mode
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if mode != JournalMode::Wal {
-                    return Ok(());
-                }
-                let mut state = load_file_state(path)?;
-                doctor::record_checkpoint(&mut state.records);
-                write_main(path, &state)?;
-                truncate_wal(path)?;
-                Ok(())
-            }
-            Backend::FormatV1 {
                 pager,
                 journal_mode,
                 ..
@@ -460,8 +368,17 @@ impl Connection {
     /// Number of committed frames recorded in `-shm` (0 if absent).
     pub fn wal_frame_count(&self) -> Result<u32> {
         match &self.backend {
-            Backend::File { path, .. } => wal_frame_count(path),
-            Backend::FormatV1 { .. } => Ok(0),
+            Backend::File { path, .. } => {
+                let wal = wal_path(path);
+                if !wal.exists() {
+                    return Ok(0);
+                }
+                let bytes = fs::read(wal)?;
+                if bytes.get(0..5) != Some(WAL_MAGIC.as_slice()) {
+                    return Err(Error::Corrupt("wal magic mismatch"));
+                }
+                Ok(parse_wal(&bytes)?.frames.len() as u32)
+            }
             Backend::Memory { .. } => Ok(0),
         }
     }
@@ -980,9 +897,7 @@ impl Connection {
         let mut report =
             doctor::diagnose(&state.records, &self.objects, self.path(), self.wal_path())?;
         if let Some(path) = self.path() {
-            if format_v1::file_is_ydpg(path)? {
-                report.issues.extend(yydb_format::diagnose_file(path)?);
-            }
+            report.issues.extend(yydb_format::diagnose_file(path)?);
         }
         Ok(report)
     }
@@ -1276,8 +1191,7 @@ impl Connection {
 
     fn read_state(&self) -> Result<State> {
         match &self.backend {
-            Backend::File { path, .. } => load_file_state(path),
-            Backend::FormatV1 { pager, .. } => {
+            Backend::File { pager, .. } => {
                 let mut pager = pager
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1292,21 +1206,7 @@ impl Connection {
 
     fn write_state(&self, state: &State) -> Result<()> {
         match &self.backend {
-            Backend::File {
-                path, journal_mode, ..
-            } => {
-                let mode = *journal_mode
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                match mode {
-                    JournalMode::Delete => write_main(path, state),
-                    JournalMode::Wal => {
-                        let payload = encode(state)?;
-                        append_snapshot_frame(path, &payload)
-                    }
-                }
-            }
-            Backend::FormatV1 { pager, .. } => {
+            Backend::File { pager, .. } => {
                 let mut pager = pager
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1323,251 +1223,4 @@ impl Connection {
 /// Library version string (Cargo package version).
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
-}
-
-fn load_file_state(path: &Path) -> Result<State> {
-    let main = fs::read(path)?;
-    let merged = replay_wal_snapshots(path, main)?;
-    decode(&merged)
-}
-
-fn write_main(path: &Path, state: &State) -> Result<()> {
-    let bytes = encode(state)?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    let temp = path.with_file_name(format!(
-        ".{}.yydb-tmp-{}-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("database"),
-        std::process::id(),
-        nonce
-    ));
-    let result = (|| -> Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        drop(file);
-        replace_main_file(&temp, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
-    }
-    result
-}
-
-#[cfg(not(windows))]
-fn replace_main_file(temp: &Path, destination: &Path) -> Result<()> {
-    fs::rename(temp, destination).map_err(Error::Io)
-}
-
-#[cfg(windows)]
-fn replace_main_file(temp: &Path, destination: &Path) -> Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    fn wide(path: &Path) -> Vec<u16> {
-        path.as_os_str().encode_wide().chain(Some(0)).collect()
-    }
-
-    let temp_wide = wide(temp);
-    let destination_wide = wide(destination);
-    let result = unsafe {
-        if destination.exists() {
-            ReplaceFileW(
-                destination_wide.as_ptr(),
-                temp_wide.as_ptr(),
-                std::ptr::null(),
-                0,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            )
-        } else {
-            MoveFileExW(
-                temp_wide.as_ptr(),
-                destination_wide.as_ptr(),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-        }
-    };
-    if result == 0 {
-        Err(Error::Io(std::io::Error::last_os_error()))
-    } else {
-        Ok(())
-    }
-}
-
-fn encode(state: &State) -> Result<Vec<u8>> {
-    let legacy = state.schema.is_some() && state.catalog.is_none();
-    let mut bytes = if legacy {
-        LEGACY_MAGIC.to_vec()
-    } else if state.resolved_contract.is_some() {
-        MAGIC.to_vec()
-    } else {
-        CATALOG_MAGIC.to_vec()
-    };
-    match &state.schema {
-        Some(schema) => {
-            bytes.push(1);
-            bytes.extend(schema.version.to_le_bytes());
-            write_bytes(&mut bytes, schema.document.as_bytes())?;
-        }
-        None => bytes.push(0),
-    }
-    write_u32(&mut bytes, state.records.len())?;
-    for (key, value) in &state.records {
-        write_bytes(&mut bytes, key.as_bytes())?;
-        write_bytes(&mut bytes, value)?;
-    }
-    if legacy {
-        return Ok(bytes);
-    }
-    match &state.catalog {
-        Some(catalog) => {
-            bytes.push(1);
-            let encoded = serde_json::to_vec(catalog)
-                .map_err(|_| Error::Corrupt("catalog serialization failed"))?;
-            write_bytes(&mut bytes, &encoded)?;
-        }
-        None => bytes.push(0),
-    }
-    if let Some(contract) = &state.resolved_contract {
-        bytes.push(1);
-        let encoded = serde_json::to_vec(contract)
-            .map_err(|_| Error::Corrupt("resolved contract serialization failed"))?;
-        write_bytes(&mut bytes, &encoded)?;
-    }
-    Ok(bytes)
-}
-
-fn decode(bytes: &[u8]) -> Result<State> {
-    let mut cursor = 0;
-    let header = take(bytes, &mut cursor, MAGIC.len())?;
-    let legacy = header == LEGACY_MAGIC;
-    let has_resolved_contract = header == MAGIC;
-    let has_catalog = header == MAGIC || header == CATALOG_MAGIC;
-    if !legacy && !has_catalog {
-        return Err(Error::Corrupt("unknown file header"));
-    }
-    let schema = match take(bytes, &mut cursor, 1)? {
-        [0] => None,
-        [1] => Some(SchemaVersion {
-            version: read_u32(bytes, &mut cursor)?,
-            document: String::from_utf8(read_bytes(bytes, &mut cursor)?)
-                .map_err(|_| Error::Corrupt("schema is not UTF-8"))?,
-        }),
-        _ => return Err(Error::Corrupt("unknown schema marker")),
-    };
-    let count = read_u32(bytes, &mut cursor)?;
-    let mut records = BTreeMap::new();
-    for _ in 0..count {
-        let key = String::from_utf8(read_bytes(bytes, &mut cursor)?)
-            .map_err(|_| Error::Corrupt("record key is not UTF-8"))?;
-        records.insert(key, read_bytes(bytes, &mut cursor)?);
-    }
-    if has_catalog {
-        let catalog = match take(bytes, &mut cursor, 1)? {
-            [0] => None,
-            [1] => Some(
-                serde_json::from_slice(&read_bytes(bytes, &mut cursor)?)
-                    .map_err(|_| Error::Corrupt("catalog is invalid JSON"))?,
-            ),
-            _ => return Err(Error::Corrupt("unknown catalog marker")),
-        };
-        let resolved_contract = if !has_resolved_contract {
-            None
-        } else {
-            match take(bytes, &mut cursor, 1)? {
-                [0] => None,
-                [1] => Some(
-                    vos::ResolvedContract::from_json(
-                        &String::from_utf8(read_bytes(bytes, &mut cursor)?)
-                            .map_err(|_| Error::Corrupt("resolved contract is not UTF-8"))?,
-                    )
-                    .map_err(|_| Error::Corrupt("resolved contract is invalid"))?,
-                ),
-                _ => return Err(Error::Corrupt("unknown resolved contract marker")),
-            }
-        };
-        if cursor != bytes.len() {
-            return Err(Error::Corrupt("trailing data"));
-        }
-        if schema.is_some() != catalog.is_some() {
-            return Err(Error::Corrupt("schema and catalog presence differ"));
-        }
-        if has_resolved_contract && catalog.is_some() != resolved_contract.is_some() {
-            return Err(Error::Corrupt(
-                "resolved contract and catalog presence differ",
-            ));
-        }
-        if let (Some(schema), Some(catalog), Some(contract)) =
-            (&schema, &catalog, &resolved_contract)
-        {
-            let expected = schema::resolved_contract_for_catalog(&schema.document, catalog)?;
-            if &expected != contract {
-                return Err(Error::Corrupt(
-                    "resolved contract does not match schema ledger",
-                ));
-            }
-        } else if let (Some(schema), Some(catalog)) = (&schema, &catalog) {
-            schema::validate_snapshot(&schema.document, catalog)?;
-        }
-        return Ok(State {
-            schema,
-            catalog,
-            resolved_contract,
-            records,
-        });
-    }
-    if cursor != bytes.len() {
-        return Err(Error::Corrupt("trailing data"));
-    }
-    Ok(State {
-        schema,
-        catalog: None,
-        resolved_contract: None,
-        records,
-    })
-}
-
-fn write_u32(bytes: &mut Vec<u8>, value: usize) -> Result<()> {
-    let value = u32::try_from(value).map_err(|_| Error::Corrupt("value exceeds 4 GiB"))?;
-    bytes.extend(value.to_le_bytes());
-    Ok(())
-}
-
-fn write_bytes(bytes: &mut Vec<u8>, value: &[u8]) -> Result<()> {
-    write_u32(bytes, value.len())?;
-    bytes.extend(value);
-    Ok(())
-}
-
-fn read_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32> {
-    let raw = take(bytes, cursor, 4)?;
-    Ok(u32::from_le_bytes(
-        raw.try_into().expect("requested exactly 4 bytes"),
-    ))
-}
-
-fn read_bytes(bytes: &[u8], cursor: &mut usize) -> Result<Vec<u8>> {
-    let length = usize::try_from(read_u32(bytes, cursor)?).expect("u32 fits usize");
-    Ok(take(bytes, cursor, length)?.to_vec())
-}
-
-fn take<'a>(bytes: &'a [u8], cursor: &mut usize, length: usize) -> Result<&'a [u8]> {
-    let end = cursor
-        .checked_add(length)
-        .ok_or(Error::Corrupt("length overflow"))?;
-    let value = bytes
-        .get(*cursor..end)
-        .ok_or(Error::Corrupt("unexpected EOF"))?;
-    *cursor = end;
-    Ok(value)
 }
