@@ -31,7 +31,9 @@ pub use internal::{InternalEntry, InternalPage};
 pub use key::{TreeKey, KEY_KIND_USER, TREE_CATALOG, TREE_RECORD};
 pub use leaf::{LeafCell, LeafPage};
 pub use memory::MemoryPager;
-pub use page::{encode_page, PageHeader, PAGE_HEADER_LEN, PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF};
+pub use page::{
+    encode_page, PageHeader, PAGE_HEADER_LEN, PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF,
+};
 pub use pager::PageStore;
 pub use shm::{encode_empty_shm, parse_shm, ShmBlock, SHM_BYTES, SHM_MAGIC};
 pub use wal::{

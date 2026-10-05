@@ -2,18 +2,18 @@
 
 use std::{
     collections::BTreeMap,
-    fs::{OpenOptions},
+    fs::OpenOptions,
     io::{Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
 use yydb_types::{Error, Result};
 
+use crate::btree::RecordTree;
 use crate::header::{parse_page0, DatabaseHeader, PAGE_MAGIC, PAGE_SIZE};
 use crate::key::TreeKey;
 use crate::memory::MemoryPager;
 use crate::pager::PageStore;
-use crate::btree::RecordTree;
 use crate::wal_append::{read_wal_file, replay_wal_pages, wal_sidecar_path, WalWriter};
 
 /// Persistent page store backed by a single `YDPG` main file.
@@ -129,10 +129,7 @@ impl FilePager {
     fn ensure_wal(&mut self) -> Result<()> {
         if self.wal_enabled && self.wal.is_none() {
             let database_id = self.inner.header()?.slot.database_id;
-            self.wal = Some(WalWriter::open(
-                wal_sidecar_path(&self.path),
-                database_id,
-            )?);
+            self.wal = Some(WalWriter::open(wal_sidecar_path(&self.path), database_id)?);
         }
         Ok(())
     }
@@ -240,5 +237,7 @@ fn load_main_file(path: &Path) -> Result<MemoryPager> {
 }
 
 fn fresh_database_id() -> [u8; 16] {
-    [0xAA, 0xBB, 0xCC, 0xDD, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1]
+    [
+        0xAA, 0xBB, 0xCC, 0xDD, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1,
+    ]
 }

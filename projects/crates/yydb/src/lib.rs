@@ -115,13 +115,13 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use file_lock::WriterLock;
 use journal::{
     append_snapshot_frame, ensure_wal_sidecars, remove_wal_sidecars, replay_wal_snapshots,
     shm_path, truncate_wal, wal_frame_count, wal_path,
 };
 use udf::{ClosureUdf, ScalarFn};
 use udf_bridge::UdfSubsystem;
-use file_lock::WriterLock;
 use yydb_format::FilePager;
 
 const MAGIC: &[u8] = b"YYDB\x03";
@@ -364,7 +364,9 @@ impl Connection {
     pub fn set_journal_mode(&self, mode: JournalMode) -> Result<()> {
         match &self.backend {
             Backend::Memory { .. } => return Ok(()),
-            Backend::File { path, journal_mode, .. } => {
+            Backend::File {
+                path, journal_mode, ..
+            } => {
                 let mut slot = journal_mode
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -383,7 +385,11 @@ impl Connection {
                 }
                 *slot = mode;
             }
-            Backend::FormatV1 { pager, journal_mode, .. } => {
+            Backend::FormatV1 {
+                pager,
+                journal_mode,
+                ..
+            } => {
                 let mut slot = journal_mode
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -413,7 +419,9 @@ impl Connection {
             .unwrap_or_else(|p| p.into_inner());
         match &self.backend {
             Backend::Memory { .. } => Ok(()),
-            Backend::File { path, journal_mode, .. } => {
+            Backend::File {
+                path, journal_mode, ..
+            } => {
                 let mode = *journal_mode
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -426,7 +434,11 @@ impl Connection {
                 truncate_wal(path)?;
                 Ok(())
             }
-            Backend::FormatV1 { pager, journal_mode, .. } => {
+            Backend::FormatV1 {
+                pager,
+                journal_mode,
+                ..
+            } => {
                 let mode = *journal_mode
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1280,7 +1292,9 @@ impl Connection {
 
     fn write_state(&self, state: &State) -> Result<()> {
         match &self.backend {
-            Backend::File { path, journal_mode, .. } => {
+            Backend::File {
+                path, journal_mode, ..
+            } => {
                 let mode = *journal_mode
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());

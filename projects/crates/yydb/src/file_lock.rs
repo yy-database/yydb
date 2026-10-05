@@ -56,7 +56,9 @@ fn lock_exclusive(file: &File) -> Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::Foundation::{GetLastError, ERROR_IO_PENDING, ERROR_LOCK_VIOLATION};
+        use windows_sys::Win32::Foundation::{
+            GetLastError, ERROR_IO_PENDING, ERROR_LOCK_VIOLATION,
+        };
         use windows_sys::Win32::Storage::FileSystem::{
             LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
         };

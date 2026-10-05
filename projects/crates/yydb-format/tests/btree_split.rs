@@ -1,4 +1,6 @@
-use yydb_format::{InternalPage, MemoryPager, PageHeader, TreeKey, PAGE_TYPE_INTERNAL, TREE_RECORD};
+use yydb_format::{
+    InternalPage, MemoryPager, PageHeader, TreeKey, PAGE_TYPE_INTERNAL, TREE_RECORD,
+};
 
 #[test]
 fn memory_pager_kv_leaf_split() {
@@ -64,12 +66,6 @@ fn internal_page_roundtrip() {
     let decoded = InternalPage::decode(2, &bytes).unwrap();
     assert_eq!(decoded.child_page_id(0), 1);
     assert_eq!(decoded.child_page_id(1), 3);
-    assert_eq!(
-        decoded.child_index_for(&TreeKey::user_record("a")),
-        0
-    );
-    assert_eq!(
-        decoded.child_index_for(&TreeKey::user_record("z")),
-        1
-    );
+    assert_eq!(decoded.child_index_for(&TreeKey::user_record("a")), 0);
+    assert_eq!(decoded.child_index_for(&TreeKey::user_record("z")), 1);
 }

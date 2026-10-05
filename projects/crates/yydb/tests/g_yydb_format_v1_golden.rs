@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use yydb_format::{
-    committed_transactions, parse_blob_header, parse_page0, parse_shm, parse_wal, BLOB_HEADER_BYTES,
-    crc32c,
+    committed_transactions, crc32c, parse_blob_header, parse_page0, parse_shm, parse_wal,
+    BLOB_HEADER_BYTES,
 };
 
 fn fixture(name: &str) -> PathBuf {

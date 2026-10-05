@@ -32,11 +32,7 @@ pub(crate) fn read_logical_file(db_path: &str, suffix: &str) -> Result<Option<Ve
 }
 
 /// Atomically publish `body` as the visible logical file (staging → verify → swap).
-pub(crate) fn publish_logical_file_atomic(
-    db_path: &str,
-    suffix: &str,
-    body: &[u8],
-) -> Result<()> {
+pub(crate) fn publish_logical_file_atomic(db_path: &str, suffix: &str, body: &[u8]) -> Result<()> {
     let staging = staging_key(db_path, suffix);
     let visible = logical_key(db_path, suffix);
     let mut store = logical_store().lock().unwrap_or_else(|p| p.into_inner());
@@ -60,9 +56,7 @@ pub(crate) fn sync_logical_root(db_path: &str) -> Result<()> {
 
 /// Blob path under `<stem>-objects/<hash>.blob` for `.yydx` layouts.
 pub(crate) fn yydx_blob_key(db_path: &str, blob_hash: &str) -> String {
-    let stem = db_path
-        .strip_suffix(".yydx")
-        .unwrap_or(db_path);
+    let stem = db_path.strip_suffix(".yydx").unwrap_or(db_path);
     format!("{stem}-objects/{blob_hash}.blob")
 }
 
