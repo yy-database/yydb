@@ -8,16 +8,22 @@ use crate::page::{encode_page, PageHeader, PAGE_PAYLOAD_LEN, PAGE_TYPE_INTERNAL}
 /// One child pointer in an internal page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InternalEntry {
+    /// Separator key routing to the right child.
     pub separator: TreeKey,
+    /// Child page id at this index.
     pub child_page_id: u32,
 }
 
 /// Mutable internal node.
 #[derive(Debug, Clone, Default)]
 pub struct InternalPage {
+    /// Page id for encoding.
     pub page_id: u32,
+    /// Page generation for encoding.
     pub page_generation: u64,
+    /// Tree id stamped in the page header.
     pub tree_id: u8,
+    /// Ordered child pointers.
     pub entries: Vec<InternalEntry>,
 }
 
@@ -125,6 +131,7 @@ impl InternalPage {
         idx
     }
 
+    /// Child page id at `index`.
     pub fn child_page_id(&self, index: usize) -> u32 {
         self.entries[index].child_page_id
     }

@@ -10,15 +10,20 @@ const DIRECTORY_BYTES: usize = 4;
 /// One key/value cell in a leaf page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeafCell {
+    /// Cell key.
     pub key: TreeKey,
+    /// Cell value bytes.
     pub value: Vec<u8>,
 }
 
 /// Mutable slotted leaf representation.
 #[derive(Debug, Clone, Default)]
 pub struct LeafPage {
+    /// Page id for encoding.
     pub page_id: u32,
+    /// Page generation for encoding.
     pub page_generation: u64,
+    /// Tree id stamped in the page header.
     pub tree_id: u8,
     cells: Vec<LeafCell>,
 }
@@ -184,6 +189,7 @@ impl LeafPage {
         }
     }
 
+    /// Number of cells currently stored in this leaf.
     pub fn len(&self) -> usize {
         self.cells.len()
     }

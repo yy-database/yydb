@@ -89,7 +89,7 @@ def main() -> None:
     (OUT / "shm_empty.bin").write_bytes(bytes(shm))
 
     blob = bytearray()
-    blob += b"YBLO\x00"
+    blob += b"YYBB\x00"
     blob.append(0x01)
     blob += bytes(32)
     blob += struct.pack("<QI", 0, 0)

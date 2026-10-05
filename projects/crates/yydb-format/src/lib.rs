@@ -1,6 +1,6 @@
 //! YYDB format v0 parsing, validation, and in-memory page backend.
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 
 pub mod blob;
 pub mod btree;

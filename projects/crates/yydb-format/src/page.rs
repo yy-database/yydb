@@ -10,16 +10,23 @@ pub const PAGE_HEADER_LEN: usize = 16;
 /// Maximum slotted payload bytes.
 pub const PAGE_PAYLOAD_LEN: usize = PAGE_SIZE - PAGE_HEADER_LEN - 4;
 
+/// Slotted leaf page type tag.
 pub const PAGE_TYPE_LEAF: u8 = 0x10;
+/// Slotted internal page type tag.
 pub const PAGE_TYPE_INTERNAL: u8 = 0x11;
 
 /// Parsed data-page header (pages >= 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageHeader {
+    /// Page type tag (`PAGE_TYPE_*`).
     pub page_type: u8,
+    /// Page identifier.
     pub page_id: u32,
+    /// Generation stamped on this page image.
     pub page_generation: u64,
+    /// Slotted payload length.
     pub payload_len: u16,
+    /// Owning B+ tree id.
     pub tree_id: u8,
 }
 

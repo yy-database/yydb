@@ -11,8 +11,11 @@ pub const KEY_KIND_USER: u8 = 0x02;
 /// Sortable database key: `tree_id` + `key_kind` + encoded bytes.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TreeKey {
+    /// B+ tree id owning this key.
     pub tree_id: u8,
+    /// Key kind discriminator.
     pub key_kind: u8,
+    /// Sortable encoded key bytes.
     pub encoded: Vec<u8>,
 }
 

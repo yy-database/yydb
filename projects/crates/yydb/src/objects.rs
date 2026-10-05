@@ -3,7 +3,7 @@
 //! Large logical files are **chunked** manifests; vectors and ANN segments use
 //! the same path layout. Hot/cold tiering is an in-process cache over this CAS.
 //!
-//! Production layout: `.yydx` uses `<app-name>-objects/` with `YBLO` segments.
+//! Production layout: `.yydx` uses `<app-name>-objects/` with `YYBB` segments.
 //! `open_beside_db` (`<db>.objects`) is a prototype drift path. `.yydb` single-
 //! file mode must not rely on persistent sidecars.
 

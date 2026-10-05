@@ -188,7 +188,7 @@ impl Batch {
 ///
 /// Embedded `Connection` handle. DDL and query language are **VOS**.
 /// UDFs are process-local and are **not** persisted in the `.yydb` file.
-/// Binary payloads use [`ObjectStore`] (`YBLO` `.blob` segments).
+/// Binary payloads use [`ObjectStore`] (`YYBB` `.blob` segments).
 pub struct Connection {
     backend: Backend,
     operation_lock: Mutex<()>,
