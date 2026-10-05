@@ -55,6 +55,27 @@ pub(crate) fn diagnose(
     }
 
     let referenced = refs::referenced_hashes(records, "");
+    if objects.persist_to_disk() {
+        for (key, value) in records {
+            if key.starts_with("__yydb/") {
+                continue;
+            }
+            if let Some(hex) = value.strip_prefix(refs::OBJECT_REF_PREFIX) {
+                let hash_hex = std::str::from_utf8(hex).unwrap_or("");
+                if hash_hex.len() == 64 && !objects.path_for_hash(hash_hex).exists() {
+                    issues.push(DoctorIssue {
+                        severity: DoctorSeverity::Error,
+                        code: "yydb.doctor.missing_blob".into(),
+                        message: format!(
+                            "committed reference points to missing blob {}",
+                            hash_hex
+                        ),
+                        key_hint: Some(key.clone()),
+                    });
+                }
+            }
+        }
+    }
     let orphans: Vec<ObjectRef> = objects
         .list_objects()?
         .into_iter()

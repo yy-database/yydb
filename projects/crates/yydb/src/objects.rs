@@ -114,7 +114,7 @@ impl ObjectStore {
         }
     }
 
-    fn persist_to_disk(&self) -> bool {
+    pub(crate) fn persist_to_disk(&self) -> bool {
         matches!(self.root, ObjectStoreRoot::OnDisk(_))
     }
 
