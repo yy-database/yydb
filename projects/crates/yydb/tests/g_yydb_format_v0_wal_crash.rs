@@ -37,7 +37,11 @@ fn g_yydb_format_v0_wal_crash() {
     let wal_bytes = fs::read(&wal).unwrap();
     let parsed = parse_wal(&wal_bytes).unwrap();
     assert_eq!(
-        parsed.frames.iter().filter(|frame| frame.frame_type == 0x04).count(),
+        parsed
+            .frames
+            .iter()
+            .filter(|frame| frame.frame_type == 0x04)
+            .count(),
         1,
         "expected exactly one committed WAL txn before crash injection"
     );

@@ -41,7 +41,10 @@ fn g_yydb_format_v0_blob_publish_orphan() {
         reopened.get("blobs/live").unwrap(),
         Some(format!("yydb:object:{}", live.hash_hex()).into_bytes())
     );
-    assert_eq!(reopened.get_object(&live).unwrap().as_ref(), b"live-payload");
+    assert_eq!(
+        reopened.get_object(&live).unwrap().as_ref(),
+        b"live-payload"
+    );
     assert_eq!(reopened.get("blobs/orphan").unwrap(), None);
 
     let orphans = reopened.scan_orphans("blobs/").unwrap();

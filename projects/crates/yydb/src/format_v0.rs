@@ -7,8 +7,8 @@ use yydb_format::{
 };
 use yydb_types::{Error, Result};
 
+use crate::connection::State;
 use crate::journal::JournalMode;
-use crate::State;
 
 const META_SCHEMA: &[u8] = b"__yydb/meta/schema";
 const META_CATALOG: &[u8] = b"__yydb/meta/catalog";
