@@ -37,7 +37,8 @@ fn main() -> Result<()> {
 ```
 
 `Connection::open` creates the file when needed. Use
-`Connection::open_in_memory()` for tests and short-lived tools.
+`Connection::open_in_memory()` for tests and short-lived tools. The memory
+profile keeps object CAS in-process and does not create filesystem sidecars.
 
 ## Crate layering
 

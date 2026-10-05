@@ -2,6 +2,10 @@
 //!
 //! Large logical files are **chunked** manifests; vectors and ANN segments use
 //! the same path layout. Hot/cold tiering is an in-process cache over this CAS.
+//!
+//! Production layout: `.yydx` uses `<app-name>-objects/` with `.blob` segments.
+//! `open_beside_db` (`<db>.objects`) is a prototype drift path pending `.yydx`
+//! migration. `.yydb` single-file mode must not rely on persistent sidecars.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -10,6 +14,14 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
+
+#[derive(Debug, Clone)]
+enum ObjectStoreRoot {
+    /// Process-local CAS only. No filesystem writes.
+    Ephemeral,
+    /// On-disk CAS rooted at `root/objects/hash-2/*.bytes`.
+    OnDisk(PathBuf),
+}
 
 use yydb_types::{
     ChunkManifest, Error, HashAlgo, ObjectKind, ObjectRef, Result, Tier, Vector,
@@ -21,44 +33,66 @@ pub use yydb_types::INLINE_BYTES_MAX as INLINE_BYTES_SOFT_MAX;
 
 /// Content-addressed object store rooted beside a `.yydb` file.
 pub struct ObjectStore {
-    /// `<db>.objects` directory (contains the `objects/` CAS tree).
-    root: PathBuf,
+    root: ObjectStoreRoot,
     hot: Mutex<HashMap<[u8; 32], Arc<[u8]>>>,
+    /// Process-local cold tier when no on-disk CAS is available.
+    cold: Mutex<HashMap<[u8; 32], Arc<[u8]>>>,
     pinned: Mutex<HashSet<[u8; 32]>>,
 }
 
 impl ObjectStore {
+    /// Process-local CAS for `Connection::open_in_memory` (no filesystem side effects).
+    pub fn open_ephemeral() -> Self {
+        Self {
+            root: ObjectStoreRoot::Ephemeral,
+            hot: Mutex::new(HashMap::new()),
+            cold: Mutex::new(HashMap::new()),
+            pinned: Mutex::new(HashSet::new()),
+        }
+    }
+
     /// Open or create the store next to `db_path` (`app.yydb` → `app.yydb.objects`).
+    ///
+    /// Prototype layout only. Production `.yydb` must not depend on this sidecar.
     pub fn open_beside_db(db_path: &Path) -> Result<Self> {
         let mut os = db_path.as_os_str().to_owned();
         os.push(".objects");
         let root = PathBuf::from(os);
         fs::create_dir_all(root.join("objects"))?;
         Ok(Self {
-            root,
+            root: ObjectStoreRoot::OnDisk(root),
             hot: Mutex::new(HashMap::new()),
+            cold: Mutex::new(HashMap::new()),
             pinned: Mutex::new(HashSet::new()),
         })
     }
 
-    /// In-memory-only store (tests); still uses a temp directory if `root` is set.
+    /// On-disk CAS under `root` (integration tests that need filesystem objects).
     pub fn open_in_memory_root(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(root.join("objects"))?;
         Ok(Self {
-            root,
+            root: ObjectStoreRoot::OnDisk(root),
             hot: Mutex::new(HashMap::new()),
+            cold: Mutex::new(HashMap::new()),
             pinned: Mutex::new(HashSet::new()),
         })
     }
 
-    /// Absolute `<db>.objects` root.
+    /// Absolute store root when on disk; synthetic path for ephemeral stores.
     pub fn root(&self) -> &Path {
-        &self.root
+        match &self.root {
+            ObjectStoreRoot::Ephemeral => Path::new("/yydb-ephemeral"),
+            ObjectStoreRoot::OnDisk(root) => root.as_path(),
+        }
+    }
+
+    fn persist_to_disk(&self) -> bool {
+        matches!(self.root, ObjectStoreRoot::OnDisk(_))
     }
 
     /// Relative CAS directory `…/objects`.
     pub fn cas_root(&self) -> PathBuf {
-        self.root.join("objects")
+        self.root().join("objects")
     }
 
     /// Path for a digest: `objects/<hash-2>/<hash>.bytes`.
@@ -89,14 +123,16 @@ impl ObjectStore {
             size: bytes.len() as u64,
             kind,
         };
-        let path = self.path_for(&object);
-        if !path.exists() {
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
+        if self.persist_to_disk() {
+            let path = self.path_for(&object);
+            if !path.exists() {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let mut file = File::create(&path)?;
+                file.write_all(bytes)?;
+                file.sync_all()?;
             }
-            let mut file = File::create(&path)?;
-            file.write_all(bytes)?;
-            file.sync_all()?;
         }
         self.hot
             .lock()
@@ -113,29 +149,38 @@ impl ObjectStore {
                 return Ok(Arc::clone(bytes));
             }
         }
-        let path = self.path_for(object);
-        if !path.exists() {
-            return Err(Error::ObjectNotFound {
-                hash_hex: object.hash_hex(),
-            });
+        if self.persist_to_disk() {
+            let path = self.path_for(object);
+            if !path.exists() {
+                return Err(Error::ObjectNotFound {
+                    hash_hex: object.hash_hex(),
+                });
+            }
+            let bytes = fs::read(&path)?;
+            if bytes.len() as u64 != object.size {
+                return Err(Error::ObjectCorrupt {
+                    message: format!(
+                        "size mismatch for {}: expected {}, got {}",
+                        object.hash_hex(),
+                        object.size,
+                        bytes.len()
+                    ),
+                });
+            }
+            let arc: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
+            self.hot
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(object.hash, Arc::clone(&arc));
+            return Ok(arc);
         }
-        let bytes = fs::read(&path)?;
-        if bytes.len() as u64 != object.size {
-            return Err(Error::ObjectCorrupt {
-                message: format!(
-                    "size mismatch for {}: expected {}, got {}",
-                    object.hash_hex(),
-                    object.size,
-                    bytes.len()
-                ),
-            });
+        let cold = self.cold.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(bytes) = cold.get(&object.hash) {
+            return Ok(Arc::clone(bytes));
         }
-        let arc: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
-        self.hot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(object.hash, Arc::clone(&arc));
-        Ok(arc)
+        Err(Error::ObjectNotFound {
+            hash_hex: object.hash_hex(),
+        })
     }
 
     /// Pin an object in the hot set (tier hint: [`Tier::Hot`]).
@@ -154,10 +199,15 @@ impl ObjectStore {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(&object.hash);
-        self.hot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&object.hash);
+        let mut hot = self.hot.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(bytes) = hot.remove(&object.hash) {
+            if !self.persist_to_disk() {
+                self.cold
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .insert(object.hash, bytes);
+            }
+        }
         Ok(Tier::Cold)
     }
 
@@ -296,6 +346,9 @@ impl ObjectStore {
 
     /// Enumerate every object file under `objects/hash-2/`.
     pub fn list_objects(&self) -> Result<Vec<ObjectRef>> {
+        if !self.persist_to_disk() {
+            return Ok(Vec::new());
+        }
         let mut objects = Vec::new();
         let hash_root = self.cas_root();
         if !hash_root.exists() {
@@ -334,11 +387,17 @@ impl ObjectStore {
 
     /// Delete a CAS object when it is no longer referenced.
     pub fn remove_object(&self, object: &ObjectRef) -> Result<()> {
-        let path = self.path_for(object);
-        if path.exists() {
-            fs::remove_file(path)?;
+        if self.persist_to_disk() {
+            let path = self.path_for(object);
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
         }
         self.hot
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&object.hash);
+        self.cold
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(&object.hash);
