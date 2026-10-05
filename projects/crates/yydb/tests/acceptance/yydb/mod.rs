@@ -9,6 +9,7 @@ mod lease_renew_extends;
 mod object_batch_attach;
 mod object_dedup_fingerprint;
 mod orphan_reclaim_safe;
+mod orphan_reclaim_skips_pinned;
 mod orphan_reclaim_skips_referenced;
 mod quota_response_evict;
 mod scan_bounded_10k;
