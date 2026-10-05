@@ -61,7 +61,8 @@ pub fn parse_header(bytes: &[u8]) -> Result<(WalHeader, usize)> {
     ))
 }
 
-fn parse_frame(bytes: &[u8], offset: usize) -> Result<(WalFrame, usize)> {
+/// Parse one WAL frame at `offset`; returns the frame and total byte length consumed.
+pub fn parse_frame(bytes: &[u8], offset: usize) -> Result<(WalFrame, usize)> {
     if bytes.len() < offset + 13 {
         return Err(Error::Corrupt("wal frame truncated"));
     }
