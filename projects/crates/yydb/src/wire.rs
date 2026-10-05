@@ -134,7 +134,7 @@ impl MsgType {
 pub struct Frame {
     /// Message type.
     pub msg_type: MsgType,
-    /// Reserved flags (must be 0 in v1).
+    /// Reserved flags (must be 0 in v0).
     pub flags: u16,
     /// Client-chosen request id (echoed on replies).
     pub request_id: u32,
