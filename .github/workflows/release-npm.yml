@@ -30,22 +30,22 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             pkg: yydb-win32-x64
-            node_file: yydb.win32-x64.node
+            node_file: yydb-win32-x64-msvc.node
             lib: yydb_napi.dll
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             pkg: yydb-linux-x64
-            node_file: yydb.linux-x64.node
+            node_file: yydb-linux-x64-gnu.node
             lib: libyydb_napi.so
           - os: macos-latest
             target: x86_64-apple-darwin
             pkg: yydb-darwin-x64
-            node_file: yydb.darwin-x64.node
+            node_file: yydb-darwin-x64.node
             lib: libyydb_napi.dylib
           - os: macos-latest
             target: aarch64-apple-darwin
             pkg: yydb-darwin-arm64
-            node_file: yydb.darwin-arm64.node
+            node_file: yydb-darwin-arm64.node
             lib: libyydb_napi.dylib
     steps:
       - uses: actions/checkout@v7
@@ -62,14 +62,15 @@ jobs:
         run: |
           set -euo pipefail
           SRC="target/${{ matrix.target }}/release/${{ matrix.lib }}"
-          DEST="projects/packages/${{ matrix.pkg }}/${{ matrix.node_file }}"
+          DEST="projects/packages/${{ matrix.pkg }}/lib/${{ matrix.node_file }}"
+          mkdir -p "$(dirname "$DEST")"
           cp "$SRC" "$DEST"
           chmod +x "$DEST" || true
           ls -la "$DEST"
       - uses: actions/upload-artifact@v7
         with:
           name: engine-${{ matrix.pkg }}
-          path: projects/packages/${{ matrix.pkg }}/${{ matrix.node_file }}
+          path: projects/packages/${{ matrix.pkg }}/lib/${{ matrix.node_file }}
           if-no-files-found: error
 
   publish-npm:

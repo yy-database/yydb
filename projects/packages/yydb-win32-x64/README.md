@@ -21,7 +21,7 @@ npx yydb serve app.yydb --bind 127.0.0.1:7700
 |-------------|---------------------------|
 | npm package | `@yydb/yydb-win32-x64`    |
 | Platform    | Windows x64 (`win32/x64`) |
-| Binding     | `yydb.win32-x64.node`     |
+| Binding     | `lib/yydb-win32-x64-msvc.node` |
 
 Other platforms install as `@yydb/yydb-linux-x64`, `@yydb/yydb-darwin-x64`, and `@yydb/yydb-darwin-arm64` via `@yydb/yydb` optionalDependencies.
 

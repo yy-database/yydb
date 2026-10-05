@@ -4,6 +4,11 @@
     "description": "YYDB native binding for Apple Silicon macOS; installed automatically by @yydb/yydb",
     "license": "MPL-2.0",
     "private": true,
+    "type": "module",
+    "main": "./index.js",
+    "exports": {
+        ".": "./index.js"
+    },
     "os": [
         "darwin"
     ],
@@ -11,7 +16,8 @@
         "arm64"
     ],
     "files": [
-        "yydb.darwin-arm64.node",
+        "index.js",
+        "lib",
         "README.md"
     ],
     "repository": {

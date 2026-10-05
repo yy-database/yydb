@@ -21,7 +21,7 @@ npx yydb serve app.yydb --bind 127.0.0.1:7700
 |-------------|------------------------------------|
 | npm package | `@yydb/yydb-linux-x64`             |
 | Platform    | Linux x64 with glibc (`linux/x64`) |
-| Binding     | `yydb.linux-x64.node`              |
+| Binding     | `lib/yydb-linux-x64-gnu.node`              |
 
 Install via `@yydb/yydb` optionalDependencies or add `@yydb/yydb-linux-x64` directly.
 

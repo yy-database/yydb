@@ -21,7 +21,7 @@ npx yydb serve app.yydb --bind 127.0.0.1:7700
 |-------------|-----------------------------|
 | npm package | `@yydb/yydb-darwin-x64`     |
 | Platform    | macOS, Intel (`darwin/x64`) |
-| Binding     | `yydb.darwin-x64.node`      |
+| Binding     | `lib/yydb-darwin-x64.node`      |
 
 For Apple Silicon Macs, use [`@yydb/yydb-darwin-arm64`](https://www.npmjs.com/package/@yydb/yydb-darwin-arm64).
 
