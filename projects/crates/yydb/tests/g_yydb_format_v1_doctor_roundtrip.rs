@@ -24,7 +24,7 @@ fn g_yydb_format_v1_doctor_roundtrip_clean() {
     let path = temp_path("clean");
     let _ = fs::remove_file(&path);
 
-    let conn = Connection::open_with_flags(&path, OpenFlags::format_v1()).unwrap();
+    let conn = Connection::open_with_flags(&path, OpenFlags::new()).unwrap();
     conn.put("gate/key", b"ok").unwrap();
     conn.checkpoint().unwrap();
     drop(conn);

@@ -18,7 +18,7 @@ fn g_yydb_format_v1_connection_put_get_reopen() {
     let path = temp_path("roundtrip");
     let _ = fs::remove_file(&path);
 
-    let conn = Connection::open_with_flags(&path, OpenFlags::format_v1()).unwrap();
+    let conn = Connection::open_with_flags(&path, OpenFlags::new()).unwrap();
     conn.put("alpha", b"one").unwrap();
     conn.put("beta", b"two").unwrap();
     drop(conn);
@@ -39,7 +39,7 @@ fn g_yydb_format_v1_connection_wal_checkpoint() {
     let wal = std::path::PathBuf::from(format!("{}-wal", path.display()));
     let _ = fs::remove_file(&wal);
 
-    let conn = Connection::open_with_flags(&path, OpenFlags::format_v1_wal()).unwrap();
+    let conn = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
     conn.put("k", b"v").unwrap();
     assert!(conn.wal_path().unwrap().exists());
     conn.checkpoint().unwrap();
