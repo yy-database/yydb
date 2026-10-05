@@ -37,6 +37,7 @@ export default defineConfig({
             '@yydb/yydb-darwin-x64',
             '@yydb/yydb-darwin-arm64',
             '@yydb/yydb-client',
+            '@yydb/yydb-unknown-wasm32',
             '@yydb/yydb',
         ],
     },
