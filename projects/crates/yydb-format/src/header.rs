@@ -10,6 +10,10 @@ pub const PAGE_MAGIC: &[u8; 5] = b"YDPG\x00";
 pub const PAGE_SIZE: usize = 4096;
 /// Bytes per header slot on page 0.
 pub const SLOT_BYTES: usize = 2048;
+/// Slot kind marker for header slot A.
+pub const SLOT_KIND_A: u8 = 0x41;
+/// Slot kind marker for header slot B.
+pub const SLOT_KIND_B: u8 = 0x42;
 
 /// Parsed database header slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,10 +112,39 @@ pub fn parse_page0(bytes: &[u8]) -> Result<DatabaseHeader> {
     }
 }
 
+/// Byte offset of a header slot on page 0.
+pub fn slot_offset_for_kind(slot_kind: u8) -> usize {
+    if slot_kind == SLOT_KIND_B {
+        SLOT_BYTES
+    } else {
+        0
+    }
+}
+
+/// Offset of the inactive header slot paired with `active_offset`.
+pub fn inactive_slot_offset(active_offset: usize) -> usize {
+    if active_offset == 0 {
+        SLOT_BYTES
+    } else {
+        0
+    }
+}
+
+/// Recompute and store the CRC32C checksum for one header slot.
+pub fn seal_header_slot(page0: &mut [u8], offset: usize) -> Result<()> {
+    let end = offset + SLOT_BYTES;
+    if page0.len() < end {
+        return Err(Error::Corrupt("header slot truncated"));
+    }
+    let checksum = crc32c(&page0[offset..offset + 2044]);
+    page0[offset + 2044..offset + 2048].copy_from_slice(&checksum.to_le_bytes());
+    Ok(())
+}
+
 /// Build an empty dual-slot page 0 for tests and bootstrap.
 pub fn encode_empty_page0(database_id: [u8; 16], storage_layout: u8) -> Vec<u8> {
     let mut page = vec![0_u8; PAGE_SIZE];
-    for (idx, kind) in [(0, 0x41_u8), (SLOT_BYTES, 0x42_u8)] {
+    for (idx, kind) in [(0, SLOT_KIND_A), (SLOT_BYTES, SLOT_KIND_B)] {
         let slot = &mut page[idx..idx + SLOT_BYTES];
         slot[0..5].copy_from_slice(PAGE_MAGIC);
         slot[5] = kind;

@@ -4,10 +4,13 @@ use std::collections::BTreeMap;
 
 use yydb_types::{Error, Result};
 
-use crate::header::{encode_empty_page0, parse_page0, DatabaseHeader, PAGE_SIZE, SLOT_BYTES};
+use crate::header::{
+    encode_empty_page0, inactive_slot_offset, parse_page0, seal_header_slot,
+    slot_offset_for_kind, DatabaseHeader, PAGE_SIZE, SLOT_BYTES, SLOT_KIND_A, SLOT_KIND_B,
+};
 use crate::key::TreeKey;
 use crate::pager::PageStore;
-use crate::{btree::RecordTree, crc32c::crc32c};
+use crate::btree::RecordTree;
 
 /// Process-local page store used by tests and the memory storage profile.
 #[derive(Debug, Clone, Default)]
@@ -60,37 +63,46 @@ impl MemoryPager {
         self.pages.clone()
     }
 
-    /// Bump header `generation` and set `checkpoint_lsn` in both page 0 slots.
+    /// Bump `generation` and `checkpoint_lsn` by writing the inactive header slot only.
     pub fn bump_checkpoint_slot(&mut self, checkpoint_lsn: u64) -> Result<()> {
         let header = self.header()?;
+        let active_offset = slot_offset_for_kind(header.slot.slot_kind);
+        let inactive_offset = inactive_slot_offset(active_offset);
+        let inactive_kind = if inactive_offset == 0 {
+            SLOT_KIND_A
+        } else {
+            SLOT_KIND_B
+        };
         let next_generation = header.slot.generation.saturating_add(1);
         let page0 = self
             .get_page(0)?
             .ok_or(Error::Corrupt("missing page0"))?
             .clone();
         let mut updated = page0;
-        for offset in [0, SLOT_BYTES] {
-            updated[offset + 6..offset + 14].copy_from_slice(&next_generation.to_le_bytes());
-            updated[offset + 14..offset + 22].copy_from_slice(&checkpoint_lsn.to_le_bytes());
-            let checksum = crc32c(&updated[offset..offset + 2044]);
-            updated[offset + 2044..offset + 2048].copy_from_slice(&checksum.to_le_bytes());
-        }
+        let active_slot = updated[active_offset..active_offset + SLOT_BYTES].to_vec();
+        updated[inactive_offset..inactive_offset + SLOT_BYTES].copy_from_slice(&active_slot);
+        updated[inactive_offset + 5] = inactive_kind;
+        updated[inactive_offset + 6..inactive_offset + 14]
+            .copy_from_slice(&next_generation.to_le_bytes());
+        updated[inactive_offset + 14..inactive_offset + 22]
+            .copy_from_slice(&checkpoint_lsn.to_le_bytes());
+        seal_header_slot(&mut updated, inactive_offset)?;
         self.put_page(0, updated)?;
         Ok(())
     }
 
-    /// Update `record_root` in both header slots on page 0.
+    /// Update `record_root` in the active header slot on page 0.
     pub fn set_record_root(&mut self, page_id: u32) -> Result<()> {
+        let header = self.header()?;
+        let active_offset = slot_offset_for_kind(header.slot.slot_kind);
         let page0 = self
             .get_page(0)?
             .ok_or(Error::Corrupt("missing page0"))?
             .clone();
         let mut updated = page0;
-        for offset in [0, SLOT_BYTES] {
-            updated[offset + 48..offset + 52].copy_from_slice(&page_id.to_le_bytes());
-            let checksum = crc32c(&updated[offset..offset + 2044]);
-            updated[offset + 2044..offset + 2048].copy_from_slice(&checksum.to_le_bytes());
-        }
+        updated[active_offset + 48..active_offset + 52]
+            .copy_from_slice(&page_id.to_le_bytes());
+        seal_header_slot(&mut updated, active_offset)?;
         self.put_page(0, updated)?;
         Ok(())
     }
