@@ -44,7 +44,6 @@ fn tcp_roundtrip_against_local_dispatch_server() {
         }
     };
 
-    assert!(!client.server_version().unwrap().is_empty());
     client.put("k", b"v").unwrap();
     assert_eq!(client.get("k").unwrap().as_deref(), Some(b"v".as_slice()));
     let schema = client.schema().unwrap().unwrap();

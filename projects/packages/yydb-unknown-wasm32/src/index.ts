@@ -11,7 +11,6 @@ export type CheckSchemaResult = {
     ok: boolean;
     tableCount: number;
     schemaFingerprint: string;
-    engineVersion: string;
     error?: string;
 };
 

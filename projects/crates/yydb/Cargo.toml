@@ -35,3 +35,131 @@ windows-sys = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2", default-features = false }
+
+# Acceptance and integration tests (fixture ids, no gate prefixes).
+[[test]]
+name = "catalog_ledger"
+path = "tests/integration/catalog_ledger.rs"
+[[test]]
+name = "connection_smoke"
+path = "tests/integration/connection_smoke.rs"
+[[test]]
+name = "execution_catalog"
+path = "tests/integration/execution_catalog.rs"
+[[test]]
+name = "execution_udf"
+path = "tests/integration/execution_udf.rs"
+[[test]]
+name = "host_micro_udf"
+path = "tests/integration/host_micro_udf.rs"
+[[test]]
+name = "main_snapshot"
+path = "tests/integration/main_snapshot.rs"
+[[test]]
+name = "query_dml"
+path = "tests/integration/query_dml.rs"
+[[test]]
+name = "schema_pragma"
+path = "tests/integration/schema_pragma.rs"
+[[test]]
+name = "vos_execute"
+path = "tests/integration/vos_execute.rs"
+[[test]]
+name = "vos_query"
+path = "tests/integration/vos_query.rs"
+[[test]]
+name = "vos_transaction"
+path = "tests/integration/vos_transaction.rs"
+[[test]]
+name = "wire_dispatch"
+path = "tests/integration/wire_dispatch.rs"
+[[test]]
+name = "yydb_batch_abort_clean"
+path = "tests/acceptance/yydb/batch_abort_clean.rs"
+[[test]]
+name = "yydb_batch_commit_visible"
+path = "tests/acceptance/yydb/batch_commit_visible.rs"
+[[test]]
+name = "yydb_batch_crash_mid_commit"
+path = "tests/acceptance/yydb/batch_crash_mid_commit.rs"
+[[test]]
+name = "yydb_cas_create_if_absent"
+path = "tests/acceptance/yydb/cas_create_if_absent.rs"
+[[test]]
+name = "yydb_cas_race_two_writers"
+path = "tests/acceptance/yydb/cas_race_two_writers.rs"
+[[test]]
+name = "yydb_format_v0_blob_publish_orphan"
+path = "tests/acceptance/format_v0/blob_publish_orphan.rs"
+[[test]]
+name = "yydb_format_v0_checkpoint_header"
+path = "tests/acceptance/format_v0/checkpoint_header.rs"
+[[test]]
+name = "yydb_format_v0_connection_roundtrip"
+path = "tests/acceptance/format_v0/connection_roundtrip.rs"
+[[test]]
+name = "yydb_format_v0_doctor_roundtrip"
+path = "tests/acceptance/format_v0/doctor_roundtrip.rs"
+[[test]]
+name = "yydb_format_v0_file_roundtrip"
+path = "tests/acceptance/format_v0/file_roundtrip.rs"
+[[test]]
+name = "yydb_format_v0_golden"
+path = "tests/acceptance/format_v0/golden.rs"
+[[test]]
+name = "yydb_format_v0_kv_leaf_split"
+path = "tests/acceptance/format_v0/kv_leaf_split.rs"
+[[test]]
+name = "yydb_format_v0_kv_roundtrip"
+path = "tests/acceptance/format_v0/kv_roundtrip.rs"
+[[test]]
+name = "yydb_format_v0_roundtrip"
+path = "tests/acceptance/format_v0/roundtrip.rs"
+[[test]]
+name = "yydb_format_v0_shm_sidecar"
+path = "tests/acceptance/format_v0/shm_sidecar.rs"
+[[test]]
+name = "yydb_format_v0_wal_crash"
+path = "tests/acceptance/format_v0/wal_crash.rs"
+[[test]]
+name = "yydb_format_v0_writer_lock"
+path = "tests/acceptance/format_v0/writer_lock.rs"
+[[test]]
+name = "yydb_lease_claim_reclaim"
+path = "tests/acceptance/yydb/lease_claim_reclaim.rs"
+[[test]]
+name = "yydb_lease_fencing_reject"
+path = "tests/acceptance/yydb/lease_fencing_reject.rs"
+[[test]]
+name = "yydb_lease_renew_extends"
+path = "tests/acceptance/yydb/lease_renew_extends.rs"
+[[test]]
+name = "yydb_object_batch_attach"
+path = "tests/acceptance/yydb/object_batch_attach.rs"
+[[test]]
+name = "yydb_object_dedup_fingerprint"
+path = "tests/acceptance/yydb/object_dedup_fingerprint.rs"
+[[test]]
+name = "yydb_orphan_reclaim_safe"
+path = "tests/acceptance/yydb/orphan_reclaim_safe.rs"
+[[test]]
+name = "yydb_quota_response_evict"
+path = "tests/acceptance/yydb/quota_response_evict.rs"
+[[test]]
+name = "yydb_scan_bounded_10k"
+path = "tests/acceptance/yydb/scan_bounded_10k.rs"
+[[test]]
+name = "yydb_scan_resume_cursor"
+path = "tests/acceptance/yydb/scan_resume_cursor.rs"
+[[test]]
+name = "yydb_ttl_robots_expiry"
+path = "tests/acceptance/yydb/ttl_robots_expiry.rs"
+[[test]]
+name = "yydb_udf_deterministic"
+path = "tests/acceptance/yydb/udf_deterministic.rs"
+[[test]]
+name = "yydb_udf_version_mismatch"
+path = "tests/acceptance/yydb/udf_version_mismatch.rs"
+[[test]]
+name = "yydb_wal_reopen_doctor"
+path = "tests/acceptance/yydb/wal_reopen_doctor.rs"

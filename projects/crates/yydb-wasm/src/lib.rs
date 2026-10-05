@@ -34,7 +34,6 @@ pub struct CheckSchemaResult {
     ok: bool,
     table_count: u32,
     schema_fingerprint: String,
-    engine_version: String,
     error: Option<String>,
 }
 
@@ -44,7 +43,6 @@ impl From<SchemaCheck> for CheckSchemaResult {
             ok: value.ok,
             table_count: value.table_count,
             schema_fingerprint: value.schema_fingerprint,
-            engine_version: value.engine_version,
             error: value.error,
         }
     }
@@ -68,12 +66,6 @@ impl CheckSchemaResult {
     #[wasm_bindgen(getter, js_name = schemaFingerprint)]
     pub fn schema_fingerprint(&self) -> String {
         self.schema_fingerprint.clone()
-    }
-
-    /// Engine build version that performed validation.
-    #[wasm_bindgen(getter, js_name = engineVersion)]
-    pub fn engine_version(&self) -> String {
-        self.engine_version.clone()
     }
 
     /// Validation error message when [`Self::ok`] is false.

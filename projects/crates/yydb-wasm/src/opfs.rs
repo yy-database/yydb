@@ -385,7 +385,7 @@ pub fn opfs_commit_and_sync(
     Ok(snapshot)
 }
 
-/// Reopen durable committed state after a crash (Living `08` `G-OPFS-5`).
+/// Reopen durable committed state after a crash (`yydb.opfs.crash_after_commit`).
 pub fn opfs_reopen(path: &str) -> Result<OpfsDurableSnapshot> {
     durable_snapshots()
         .lock()
@@ -420,7 +420,7 @@ pub fn opfs_evict_blob(path: &str, blob_hash: &str) {
         });
 }
 
-/// Read-only OPFS consistency probe for committed catalog vs blob inventory (Living `08` `G-OPFS-6`).
+/// Read-only OPFS consistency probe for committed catalog vs blob inventory (`yydb.opfs.doctor_missing_blob`).
 pub fn opfs_doctor(path: &str) -> Result<DoctorReport> {
     let snapshot = opfs_reopen(path)?;
     let inventory = blob_inventory().lock().unwrap_or_else(|p| p.into_inner());
