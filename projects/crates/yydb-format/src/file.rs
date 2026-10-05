@@ -1,0 +1,217 @@
+//! `YDPG` file-backed pager with optional `YYWL` v3 sidecar.
+
+use std::{
+    collections::BTreeMap,
+    fs::{OpenOptions},
+    io::{Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+};
+
+use yydb_types::{Error, Result};
+
+use crate::header::{parse_page0, DatabaseHeader, PAGE_MAGIC, PAGE_SIZE};
+use crate::key::TreeKey;
+use crate::memory::MemoryPager;
+use crate::pager::PageStore;
+use crate::btree::RecordTree;
+use crate::wal_append::{read_wal_file, replay_wal_pages, wal_sidecar_path, WalWriter};
+
+/// Persistent page store backed by a single `YDPG` main file.
+pub struct FilePager {
+    path: PathBuf,
+    inner: MemoryPager,
+    wal_enabled: bool,
+    wal: Option<WalWriter>,
+}
+
+impl FilePager {
+    /// Create a new database file or open an existing `YDPG` main file.
+    pub fn open(path: impl AsRef<Path>, enable_wal: bool) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let existed = path.exists();
+        let inner = if existed {
+            load_main_file(&path)?
+        } else {
+            MemoryPager::new_empty(fresh_database_id(), 0x01)
+        };
+        let mut file_pager = Self {
+            path: path.clone(),
+            inner,
+            wal_enabled: enable_wal,
+            wal: None,
+        };
+        if !existed {
+            file_pager.persist_all()?;
+        }
+        if enable_wal {
+            file_pager.ensure_wal()?;
+            file_pager.replay_wal_if_present()?;
+        }
+        Ok(file_pager)
+    }
+
+    /// Main file path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// WAL sidecar path when enabled.
+    pub fn wal_path(&self) -> Option<PathBuf> {
+        self.wal.as_ref().map(|wal| wal.path().to_path_buf())
+    }
+
+    /// User KV put with durability.
+    pub fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()> {
+        let before = self.inner.pages_snapshot();
+        RecordTree::open(&mut self.inner).put(TreeKey::user_record(key), value.to_vec())?;
+        self.publish_delta(&before)
+    }
+
+    /// User KV get.
+    pub fn get_kv(&mut self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        RecordTree::open(&mut self.inner).get(&TreeKey::user_record(key))
+    }
+
+    /// User KV delete.
+    pub fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
+        let before = self.inner.pages_snapshot();
+        let deleted = RecordTree::open(&mut self.inner).delete(&TreeKey::user_record(key))?;
+        if deleted {
+            self.publish_delta(&before)?;
+        }
+        Ok(deleted)
+    }
+
+    /// Fold WAL into the main file and truncate the sidecar.
+    pub fn checkpoint(&mut self) -> Result<()> {
+        self.persist_all()?;
+        if self.wal_enabled {
+            if let Some(wal_path) = self.wal_path() {
+                if wal_path.exists() {
+                    std::fs::remove_file(wal_path)?;
+                }
+            }
+            self.wal = None;
+        }
+        Ok(())
+    }
+
+    fn ensure_wal(&mut self) -> Result<()> {
+        if self.wal_enabled && self.wal.is_none() {
+            let database_id = self.inner.header()?.slot.database_id;
+            self.wal = Some(WalWriter::open(
+                wal_sidecar_path(&self.path),
+                database_id,
+            )?);
+        }
+        Ok(())
+    }
+
+    fn publish_delta(&mut self, before: &BTreeMap<u32, Vec<u8>>) -> Result<()> {
+        let after = self.inner.pages_snapshot();
+        let mut changed = Vec::new();
+        for (page_id, image) in &after {
+            if before.get(page_id) != Some(image) {
+                self.write_page_to_file(*page_id, image)?;
+                changed.push((*page_id, image.clone()));
+            }
+        }
+        if !changed.is_empty() {
+            self.ensure_wal()?;
+            if let Some(wal) = self.wal.as_mut() {
+                wal.append_commit(&changed)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn replay_wal_if_present(&mut self) -> Result<()> {
+        let Some(wal_path) = self.wal_path() else {
+            return Ok(());
+        };
+        if !wal_path.exists() {
+            return Ok(());
+        }
+        let wal = read_wal_file(&wal_path)?;
+        let mut pages = self.inner.pages_snapshot();
+        replay_wal_pages(&wal, &mut pages)?;
+        for (page_id, image) in pages {
+            self.inner.put_page(page_id, image)?;
+        }
+        Ok(())
+    }
+
+    fn persist_all(&self) -> Result<()> {
+        for (page_id, image) in self.inner.pages_snapshot() {
+            self.write_page_to_file(page_id, &image)?;
+        }
+        Ok(())
+    }
+
+    fn write_page_to_file(&self, page_id: u32, image: &[u8]) -> Result<()> {
+        if image.len() != PAGE_SIZE {
+            return Err(Error::Corrupt("page image wrong size"));
+        }
+        let offset = u64::from(page_id) * u64::try_from(PAGE_SIZE).unwrap_or(u64::MAX);
+        let mut file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&self.path)?;
+        let needed = offset + PAGE_SIZE as u64;
+        if file.metadata()?.len() < needed {
+            file.set_len(needed)?;
+        }
+        file.seek(SeekFrom::Start(offset))?;
+        file.write_all(image)?;
+        file.sync_all()?;
+        Ok(())
+    }
+}
+
+impl PageStore for FilePager {
+    fn header(&self) -> Result<DatabaseHeader> {
+        self.inner.header()
+    }
+
+    fn get_page(&self, page_id: u32) -> Result<Option<Vec<u8>>> {
+        self.inner.get_page(page_id)
+    }
+
+    fn put_page(&mut self, page_id: u32, image: Vec<u8>) -> Result<()> {
+        self.inner.put_page(page_id, image)
+    }
+
+    fn alloc_page_id(&mut self) -> Result<u32> {
+        self.inner.alloc_page_id()
+    }
+
+    fn set_record_root(&mut self, page_id: u32) -> Result<()> {
+        self.inner.set_record_root(page_id)
+    }
+}
+
+fn load_main_file(path: &Path) -> Result<MemoryPager> {
+    let bytes = std::fs::read(path)?;
+    if bytes.len() < PAGE_SIZE {
+        return Err(Error::Corrupt("main file too short"));
+    }
+    if bytes.get(0..5) != Some(PAGE_MAGIC.as_slice()) {
+        return Err(Error::Unsupported("main file is not YDPG format v1"));
+    }
+    parse_page0(&bytes[0..PAGE_SIZE])?;
+    let page_count = bytes.len() / PAGE_SIZE;
+    let mut pager = MemoryPager::default();
+    for page_id in 0..page_count as u32 {
+        let start = page_id as usize * PAGE_SIZE;
+        pager.put_page(page_id, bytes[start..start + PAGE_SIZE].to_vec())?;
+    }
+    Ok(pager)
+}
+
+fn fresh_database_id() -> [u8; 16] {
+    [0xAA, 0xBB, 0xCC, 0xDD, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1]
+}

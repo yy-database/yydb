@@ -5,7 +5,7 @@ use yydb_types::{Error, Result};
 use crate::internal::{InternalEntry, InternalPage};
 use crate::key::{TreeKey, TREE_RECORD};
 use crate::leaf::LeafPage;
-use crate::memory::MemoryPager;
+use crate::pager::PageStore;
 use crate::page::{PageHeader, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF};
 
 /// Result of inserting into a leaf that may have split.
@@ -15,13 +15,13 @@ struct LeafInsert {
 }
 
 /// KV operations on the record tree inside a pager.
-pub struct RecordTree<'a> {
-    pager: &'a mut MemoryPager,
+pub struct RecordTree<'a, P: PageStore + ?Sized> {
+    pager: &'a mut P,
 }
 
-impl<'a> RecordTree<'a> {
+impl<'a, P: PageStore + ?Sized> RecordTree<'a, P> {
     /// Bind to a pager's record tree.
-    pub fn open(pager: &'a mut MemoryPager) -> Self {
+    pub fn open(pager: &'a mut P) -> Self {
         Self { pager }
     }
 
