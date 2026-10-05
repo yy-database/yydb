@@ -1,11 +1,9 @@
 // fixture: yydb.lease.claim_reclaim
 
-#[path = "../../fixtures/yydb/mod.rs"]
-mod harness;
 use std::thread;
 use std::time::Duration;
 
-use harness::{cleanup, open_temp_db, reopen};
+use crate::fixtures::yydb::{cleanup, open_temp_db, reopen};
 use yydb::{Batch, Error, LeaseExpectation};
 
 #[test]

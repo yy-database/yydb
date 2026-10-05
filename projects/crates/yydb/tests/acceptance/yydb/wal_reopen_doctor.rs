@@ -1,8 +1,6 @@
 // fixture: yydb.wal.reopen_doctor
 
-#[path = "../../fixtures/yydb/mod.rs"]
-mod harness;
-use harness::{cleanup, reopen, temp_db_path};
+use crate::fixtures::yydb::{cleanup, reopen, temp_db_path};
 use yydb::{journal::wal_path, DoctorSeverity, OpenFlags};
 
 #[test]

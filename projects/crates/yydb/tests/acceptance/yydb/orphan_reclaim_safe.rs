@@ -1,8 +1,6 @@
 // fixture: yydb.orphan.reclaim_safe
 
-#[path = "../../fixtures/yydb/mod.rs"]
-mod harness;
-use harness::{cleanup, open_temp_db};
+use crate::fixtures::yydb::{cleanup, open_temp_db};
 use yydb::{Batch, ObjectKind};
 
 #[test]

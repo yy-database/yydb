@@ -1,10 +1,8 @@
 // fixture: yydb.lease.renew_extends
 
-#[path = "../../fixtures/yydb/mod.rs"]
-mod harness;
 use std::time::Duration;
 
-use harness::{cleanup, open_temp_db};
+use crate::fixtures::yydb::{cleanup, open_temp_db};
 use yydb::LeaseExpectation;
 
 #[test]

@@ -1,9 +1,7 @@
 //! Stateless schema validation and introspection (no build version in payloads).
 
-#[path = "../fixtures/mod.rs"]
-mod harness;
 use serde_json::Value as JsonValue;
-use harness::{parse_json, USER_SCHEMA};
+use crate::fixtures::{parse_json, USER_SCHEMA};
 use yydb_wasm::{check_schema_source, introspect_schema_json};
 #[test]
 fn check_schema_source_counts_tables() {

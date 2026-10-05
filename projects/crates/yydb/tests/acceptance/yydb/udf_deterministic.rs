@@ -1,8 +1,6 @@
 // fixture: yydb.udf.deterministic
 
-#[path = "../../fixtures/yydb/mod.rs"]
-mod harness;
-use harness::{cleanup, open_temp_db, reopen};
+use crate::fixtures::yydb::{cleanup, open_temp_db, reopen};
 use yydb::{Error, Value};
 
 #[test]

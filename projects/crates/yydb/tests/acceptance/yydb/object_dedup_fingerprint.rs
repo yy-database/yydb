@@ -1,8 +1,6 @@
 // fixture: yydb.object.dedup_fingerprint
 
-#[path = "../../fixtures/yydb/mod.rs"]
-mod harness;
-use harness::{cleanup, open_temp_db};
+use crate::fixtures::yydb::{cleanup, open_temp_db};
 use yydb::ObjectKind;
 
 #[test]
