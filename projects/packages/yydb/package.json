@@ -1,7 +1,7 @@
 {
     "name": "@yydb/yydb",
     "version": "0.1.0",
-    "description": "YYDB all-in-one for Node: embedded engine, CLI, and local serve",
+    "description": "YYDB all-in-one: Node embedded engine and CLI, browser wasm core",
     "license": "MPL-2.0",
     "private": true,
     "type": "module",
@@ -13,7 +13,16 @@
     "exports": {
         ".": {
             "types": "./dist/node/index.d.ts",
+            "node": "./dist/node/index.js",
+            "default": "./dist/wasm/index.js"
+        },
+        "./node": {
+            "types": "./dist/node/index.d.ts",
             "import": "./dist/node/index.js"
+        },
+        "./wasm": {
+            "types": "./dist/wasm/index.d.ts",
+            "import": "./dist/wasm/index.js"
         },
         "./cli": {
             "types": "./dist/node/cli.d.ts",
@@ -25,7 +34,7 @@
         "README.md"
     ],
     "scripts": {
-        "build": "tsc -p tsconfig.json",
+        "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.wasm.json",
         "test": "pnpm run build && node --experimental-strip-types --test src/node/**/*.test.ts src/shared/**/*.test.ts"
     },
     "repository": {
@@ -49,7 +58,8 @@
     },
     "dependencies": {
         "@vmz/commander": "^0.2.0",
-        "@yydb/yydb-client": "workspace:*"
+        "@yydb/yydb-client": "workspace:*",
+        "@yydb/yydb-unknown-wasm32": "workspace:*"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",
