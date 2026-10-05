@@ -26,5 +26,8 @@ yydb-udf = { workspace = true }
 yydb-query = { workspace = true }
 serde_json = { workspace = true }
 
+[dev-dependencies]
+yydb-format = { workspace = true }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }

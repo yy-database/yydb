@@ -1462,6 +1462,7 @@ dependencies = [
  "vos",
  "windows-sys",
  "yydb-execution",
+ "yydb-format",
  "yydb-query",
  "yydb-types",
  "yydb-udf",
@@ -1477,6 +1478,13 @@ dependencies = [
 [[package]]
 name = "yydb-execution"
 version = "0.1.0"
+
+[[package]]
+name = "yydb-format"
+version = "0.1.0"
+dependencies = [
+ "yydb-types",
+]
 
 [[package]]
 name = "yydb-napi"
