@@ -1,6 +1,7 @@
 //! OPFS host profile capability probe and persistent-open gate (Living `08`).
 //!
-//! Pure Rust surface for host-testable gates. Actual OPFS I/O is not implemented yet.
+//! Host-testable gates and an in-process logical I/O backend. Browser OPFS sync handles
+//! will replace the default backend without changing error semantics.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -151,10 +152,71 @@ pub fn claim_opfs_writer(path: &str, caps: &OpfsCapabilities) -> Result<OpfsWrit
     })
 }
 
-/// Gate persistent OPFS open on capability contract, then host I/O (not implemented).
-pub fn open_persistent(path: &str, caps: &OpfsCapabilities) -> Result<()> {
-    let _lease = claim_opfs_writer(path, caps)?;
-    Err(Error::Unsupported("OPFS host adapter I/O not implemented"))
+/// Open handle to a logical OPFS-backed database after capability and writer checks.
+#[derive(Debug)]
+pub struct OpfsPersistentVolume {
+    path: String,
+    mode: PersistentStorageMode,
+    #[allow(dead_code)]
+    lease: OpfsWriterLease,
+}
+
+impl OpfsPersistentVolume {
+    /// Logical database path (for example `app.yydb` or `app.yydx`).
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Storage format selected from the path suffix.
+    pub fn mode(&self) -> PersistentStorageMode {
+        self.mode
+    }
+
+    /// Read the committed main-file generation, if any.
+    pub fn read_main(&self) -> Result<Option<Vec<u8>>> {
+        crate::opfs_io::read_logical_file(&self.path, "")
+    }
+
+    /// Atomically publish the next main-file generation and sync the logical root.
+    pub fn publish_main(&self, body: &[u8]) -> Result<()> {
+        crate::opfs_io::publish_logical_file_atomic(&self.path, "", body)?;
+        crate::opfs_io::sync_logical_root(&self.path)?;
+        Ok(())
+    }
+
+    /// Publish one immutable blob chunk (`.yydx` only).
+    pub fn publish_blob(&self, blob_hash: &str, body: &[u8]) -> Result<()> {
+        if self.mode != PersistentStorageMode::Yydx {
+            return Err(Error::Unsupported(
+                "blob publish requires a .yydx logical path",
+            ));
+        }
+        crate::opfs_io::publish_blob_atomic(&self.path, blob_hash, body)?;
+        crate::opfs_io::sync_logical_root(&self.path)?;
+        Ok(())
+    }
+
+    /// Read a published blob chunk (`.yydx` only).
+    pub fn read_blob(&self, blob_hash: &str) -> Result<Option<Vec<u8>>> {
+        if self.mode != PersistentStorageMode::Yydx {
+            return Err(Error::Unsupported(
+                "blob read requires a .yydx logical path",
+            ));
+        }
+        crate::opfs_io::read_blob(&self.path, blob_hash)
+    }
+}
+
+/// Gate persistent OPFS open on capability contract, then attach logical I/O.
+pub fn open_persistent(path: &str, caps: &OpfsCapabilities) -> Result<OpfsPersistentVolume> {
+    let mode = PersistentStorageMode::from_path(path)?;
+    validate_opfs_capabilities(caps, mode)?;
+    let lease = claim_opfs_writer(path, caps)?;
+    Ok(OpfsPersistentVolume {
+        path: path.to_string(),
+        mode,
+        lease,
+    })
 }
 
 /// In-memory committed-generation stub for OPFS gate tests (Living `08` §5).
