@@ -83,6 +83,8 @@ await db.put(key, stringOrBytes);
 await db.get(key);
 await db.info();
 await db.serverVersion();
+await db.registerMicro(microDefinition);
+await db.callScalar('double', 1, [21]);
 db.query('User.filter(x => x.active).collect()');
 db.execute('User { name: "Ada" }.insert()');
 db.close();
