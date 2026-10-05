@@ -95,6 +95,18 @@ pub fn parse_wal(bytes: &[u8]) -> Result<WalFile> {
     Ok(WalFile { header, frames })
 }
 
+/// Byte offsets of each frame start after the WAL header.
+pub fn wal_frame_offsets(bytes: &[u8]) -> Result<Vec<usize>> {
+    let (_, mut offset) = parse_header(bytes)?;
+    let mut offsets = Vec::new();
+    while offset < bytes.len() {
+        offsets.push(offset);
+        let (_, consumed) = parse_frame(bytes, offset)?;
+        offset += consumed;
+    }
+    Ok(offsets)
+}
+
 /// Return committed transaction count (`TxnCommit` frames with valid prefixes).
 pub fn committed_transactions(wal: &WalFile) -> usize {
     wal.frames

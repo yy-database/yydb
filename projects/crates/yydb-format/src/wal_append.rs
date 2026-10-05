@@ -11,7 +11,7 @@ use yydb_types::{Error, Result};
 
 use crate::crc32c::crc32c;
 use crate::header::PAGE_SIZE;
-use crate::wal::{parse_wal, WalFile, WAL_MAGIC};
+use crate::wal::{parse_wal, wal_frame_offsets, WalFile, WAL_MAGIC};
 
 const FRAME_TXN_BEGIN: u8 = 0x01;
 const FRAME_PAGE_IMAGE: u8 = 0x02;
@@ -169,4 +169,21 @@ pub fn wal_sidecar_path(main: &Path) -> PathBuf {
     let mut sidecar = main.as_os_str().to_owned();
     sidecar.push("-wal");
     PathBuf::from(sidecar)
+}
+
+/// Drop the trailing `TxnCommit` frame when present.
+///
+/// Used by crash-injection tests to simulate durability loss between the final
+/// `PageImage` and `TxnCommit`.
+pub fn strip_trailing_txn_commit(bytes: &[u8]) -> Result<Vec<u8>> {
+    let wal = parse_wal(bytes)?;
+    if wal.frames.last().map(|frame| frame.frame_type) != Some(FRAME_TXN_COMMIT) {
+        return Ok(bytes.to_vec());
+    }
+    let offsets = wal_frame_offsets(bytes)?;
+    let last_start = offsets
+        .last()
+        .copied()
+        .ok_or_else(|| Error::Corrupt("wal missing trailing commit frame"))?;
+    Ok(bytes[0..last_start].to_vec())
 }
