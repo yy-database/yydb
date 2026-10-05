@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { connect, type Client } from '@yydb/yydb-client/node';
-import { defineMicro as buildMicro, type DefinedMicro, type MicroHandle, MicroSessionRegistry } from './micro.js';
+import { defineMicro as buildMicro, type DefinedMicro, type MicroHandle, MicroSessionRegistry } from '../shared/micro.js';
 import { resolveYydbCli } from './resolve-bin.js';
-import type { UdfScalarKind, UdfTypeDescriptor } from './udf-types.js';
+import type { UdfScalarKind, UdfTypeDescriptor } from '../shared/udf-types.js';
 
 function microFingerprint(name: string, version: number): Uint8Array {
     const bytes = new Uint8Array(32);
