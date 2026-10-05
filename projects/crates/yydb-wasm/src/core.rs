@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Map, Value as JsonValue};
 use yydb::{
     schema::{self, ExecutionTypeKind},
-    Result, Value,
+    Result, SchemaVersion, Value,
 };
 
 /// Outcome of validating a VOS schema document.
@@ -175,5 +175,79 @@ pub(crate) fn unit_result_json(result: Result<()>) -> String {
     match result {
         Ok(()) => json!({ "ok": true, "rows": [], "error": JsonValue::Null }).to_string(),
         Err(err) => json!({ "ok": false, "rows": [], "error": err.to_string() }).to_string(),
+    }
+}
+
+pub(crate) fn kv_get_json(result: Result<Option<Vec<u8>>>) -> String {
+    match result {
+        Ok(Some(bytes)) => json!({
+            "ok": true,
+            "value": bytes,
+            "error": JsonValue::Null,
+        })
+        .to_string(),
+        Ok(None) => json!({
+            "ok": true,
+            "value": JsonValue::Null,
+            "error": JsonValue::Null,
+        })
+        .to_string(),
+        Err(err) => json!({
+            "ok": false,
+            "value": JsonValue::Null,
+            "error": err.to_string(),
+        })
+        .to_string(),
+    }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+    use yydb::Connection;
+
+    #[test]
+    fn kv_get_json_returns_bytes() {
+        let conn = Connection::open_in_memory().expect("memory");
+        conn.put("theme", b"dark").expect("put");
+        let payload = kv_get_json(conn.get("theme"));
+        let parsed: JsonValue = serde_json::from_str(&payload).expect("json");
+        assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(true)));
+        assert_eq!(parsed.get("value"), Some(&json!([100, 97, 114, 107])));
+    }
+
+    #[test]
+    fn schema_get_json_empty() {
+        let conn = Connection::open_in_memory().expect("memory");
+        let payload = schema_get_json(conn.schema());
+        let parsed: JsonValue = serde_json::from_str(&payload).expect("json");
+        assert_eq!(parsed.get("ok"), Some(&JsonValue::Bool(true)));
+        assert!(parsed.get("schema").unwrap().is_null());
+    }
+}
+
+pub(crate) fn schema_get_json(result: Result<Option<SchemaVersion>>) -> String {
+    match result {
+        Ok(Some(schema)) => json!({
+            "ok": true,
+            "schema": {
+                "version": schema.version,
+                "document": schema.document,
+            },
+            "error": JsonValue::Null,
+        })
+        .to_string(),
+        Ok(None) => json!({
+            "ok": true,
+            "schema": JsonValue::Null,
+            "error": JsonValue::Null,
+        })
+        .to_string(),
+        Err(err) => json!({
+            "ok": false,
+            "schema": JsonValue::Null,
+            "error": err.to_string(),
+        })
+        .to_string(),
     }
 }
