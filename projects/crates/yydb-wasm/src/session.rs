@@ -58,6 +58,69 @@ fn run_call_scalar(conn: &Connection, closed: bool, body: &[u8]) -> String {
     }
 }
 
+fn open_persistent_connection(volume: &OpfsPersistentVolume) -> yydb::Result<Connection> {
+    let conn = Connection::open_in_memory()?;
+    if let Some(bytes) = volume.read_main()? {
+        conn.load_main_snapshot(&bytes)?;
+    }
+    Ok(conn)
+}
+
+fn persist_persistent_connection(
+    conn: &Connection,
+    volume: &OpfsPersistentVolume,
+) -> yydb::Result<()> {
+    let bytes = conn.main_snapshot()?;
+    volume.publish_main(&bytes)?;
+    Ok(())
+}
+
+fn run_ensure_schema_persistent(
+    conn: &Connection,
+    volume: &OpfsPersistentVolume,
+    closed: bool,
+    document: &str,
+) -> String {
+    if closed {
+        return unit_result_json(Err(closed_session_error()));
+    }
+    match conn.ensure_schema(document) {
+        Ok(()) => unit_result_json(persist_persistent_connection(conn, volume)),
+        Err(error) => unit_result_json(Err(error)),
+    }
+}
+
+fn run_execute_persistent(
+    conn: &Connection,
+    volume: &OpfsPersistentVolume,
+    closed: bool,
+    source: &str,
+) -> String {
+    if closed {
+        return unit_result_json(Err(closed_session_error()));
+    }
+    match conn.execute(source) {
+        Ok(()) => unit_result_json(persist_persistent_connection(conn, volume)),
+        Err(error) => unit_result_json(Err(error)),
+    }
+}
+
+fn run_put_persistent(
+    conn: &Connection,
+    volume: &OpfsPersistentVolume,
+    closed: bool,
+    key: &str,
+    value: &[u8],
+) -> String {
+    if closed {
+        return unit_result_json(Err(closed_session_error()));
+    }
+    match conn.put(key, value) {
+        Ok(()) => unit_result_json(persist_persistent_connection(conn, volume)),
+        Err(error) => unit_result_json(Err(error)),
+    }
+}
+
 /// Execute a VOS query on a fresh in-memory database (stateless helper).
 pub fn query_memory(source: &str) -> String {
     match Connection::open_in_memory() {
@@ -178,20 +241,21 @@ pub fn open_persistent_session(
     caps: &OpfsCapabilities,
 ) -> yydb::Result<PersistentSession> {
     let volume = open_persistent(path, caps)?;
+    let conn = open_persistent_connection(&volume)?;
     Ok(PersistentSession {
-        conn: Connection::open_in_memory()?,
-        volume,
+        path: path.to_string(),
+        conn,
+        volume: Some(volume),
         closed: false,
     })
 }
 
-/// Stateful OPFS-backed database session (in-memory engine with logical OPFS volume).
-///
-/// VOS execution uses an in-memory `Connection` until format bytes can be hydrated from OPFS.
+/// Stateful OPFS-backed database session with `YDPG` main-file hydration and publish.
 #[wasm_bindgen]
 pub struct PersistentSession {
+    path: String,
     conn: Connection,
-    volume: OpfsPersistentVolume,
+    volume: Option<OpfsPersistentVolume>,
     closed: bool,
 }
 
@@ -211,13 +275,16 @@ impl PersistentSession {
     /// Logical OPFS database path (for example `app.yydb`).
     #[wasm_bindgen(getter)]
     pub fn path(&self) -> String {
-        self.volume.path().to_string()
+        self.path.clone()
     }
 
     /// Persist the database-truth VOS schema document.
     #[wasm_bindgen(js_name = ensureSchema)]
     pub fn ensure_schema(&self, document: &str) -> String {
-        run_ensure_schema(&self.conn, self.closed, document)
+        match self.volume.as_ref() {
+            Some(volume) => run_ensure_schema_persistent(&self.conn, volume, self.closed, document),
+            None => unit_result_json(Err(closed_session_error())),
+        }
     }
 
     /// VOS read pipeline.
@@ -229,7 +296,10 @@ impl PersistentSession {
     /// Unit-valued VOS write programs.
     #[wasm_bindgen]
     pub fn execute(&self, source: &str) -> String {
-        run_execute(&self.conn, self.closed, source)
+        match self.volume.as_ref() {
+            Some(volume) => run_execute_persistent(&self.conn, volume, self.closed, source),
+            None => unit_result_json(Err(closed_session_error())),
+        }
     }
 
     /// Fetch a raw byte record by key. Returns JSON `{ ok, value, error }`.
@@ -244,10 +314,10 @@ impl PersistentSession {
     /// Insert or replace a raw byte record. Returns JSON `{ ok, rows, error }`.
     #[wasm_bindgen(js_name = put)]
     pub fn put(&self, key: &str, value: &[u8]) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
+        match self.volume.as_ref() {
+            Some(volume) => run_put_persistent(&self.conn, volume, self.closed, key, value),
+            None => unit_result_json(Err(closed_session_error())),
         }
-        unit_result_json(self.conn.put(key, value))
     }
 
     /// Current persisted schema, if any. Returns JSON `{ ok, schema, error }`.
@@ -265,7 +335,7 @@ impl PersistentSession {
         if self.closed {
             return String::new();
         }
-        connection_info(&self.conn, Some(self.volume.path()))
+        connection_info(&self.conn, Some(&self.path))
     }
 
     /// Install the JS host micro invoker used by [`registerMicro`](Self::register_micro).
@@ -280,7 +350,19 @@ impl PersistentSession {
     /// Register a session-local host micro from a wire `MicroRegister` body.
     #[wasm_bindgen(js_name = registerMicro)]
     pub fn register_micro(&self, body: &[u8]) -> String {
-        run_register_micro(&self.conn, self.closed, body)
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        match self.volume.as_ref() {
+            Some(volume) => match wire::decode_micro_register(body) {
+                Ok(definition) => match self.conn.register_host_micro(definition) {
+                    Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
+                    Err(error) => unit_result_json(Err(error)),
+                },
+                Err(error) => unit_result_json(Err(error)),
+            },
+            None => unit_result_json(Err(closed_session_error())),
+        }
     }
 
     /// Invoke a scalar UDF from a wire `ScalarCall` body. Returns JSON `{ ok, value, error }`.
@@ -297,6 +379,11 @@ impl PersistentSession {
 
     #[wasm_bindgen]
     pub fn close(&mut self) {
-        self.closed = true;
+        if !self.closed {
+            if let Some(volume) = self.volume.take() {
+                let _ = persist_persistent_connection(&self.conn, &volume);
+            }
+            self.closed = true;
+        }
     }
 }
