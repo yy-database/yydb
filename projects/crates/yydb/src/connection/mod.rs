@@ -135,7 +135,7 @@ impl Connection {
         })
     }
 
-    /// Serialize the current in-memory database as a `YDPG` main-file byte image.
+    /// Serialize the current database as a checkpointed `YDPG` main-file byte image.
     pub fn main_snapshot(&self) -> Result<Vec<u8>> {
         match &self.backend {
             Backend::Memory { .. } => {
@@ -144,9 +144,10 @@ impl Connection {
                 format_v0::write_state_to_memory_pager(&mut pager, &state)?;
                 main_bytes_from_memory_pager(&pager)
             }
-            Backend::File { .. } => Err(Error::Unsupported(
-                "main_snapshot is only supported on in-memory connections",
-            )),
+            Backend::File { path, .. } => {
+                self.checkpoint()?;
+                Ok(fs::read(path)?)
+            }
         }
     }
 

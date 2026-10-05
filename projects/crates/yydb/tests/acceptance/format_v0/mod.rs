@@ -10,6 +10,7 @@ mod file_roundtrip;
 mod golden;
 mod kv_leaf_split;
 mod kv_roundtrip;
+mod main_snapshot_file;
 mod roundtrip;
 mod shm_sidecar;
 mod wal_blob_refs;
