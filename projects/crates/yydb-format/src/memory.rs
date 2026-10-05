@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use yydb_types::{Error, Result};
 
-use crate::header::{encode_empty_page0, DatabaseHeader, PAGE_SIZE};
+use crate::header::{encode_empty_page0, parse_page0, DatabaseHeader, PAGE_SIZE, SLOT_BYTES};
+use crate::key::TreeKey;
+use crate::{btree::RecordTree, crc32c::crc32c};
 
 /// Process-local page store used by tests and the memory storage profile.
 #[derive(Debug, Clone, Default)]
@@ -26,7 +28,7 @@ impl MemoryPager {
         let page0 = self
             .get_page(0)?
             .ok_or(Error::Corrupt("missing page0"))?;
-        crate::header::parse_page0(&page0)
+        parse_page0(&page0)
     }
 
     /// Read a page by id.
@@ -46,5 +48,42 @@ impl MemoryPager {
     /// Page count including page 0.
     pub fn page_count(&self) -> usize {
         self.pages.len()
+    }
+
+    /// Allocate the next unused page id above the current max.
+    pub fn alloc_page_id(&mut self) -> Result<u32> {
+        let max_id = self.pages.keys().max().copied().unwrap_or(0);
+        Ok(max_id + 1)
+    }
+
+    /// Update `record_root` in both header slots on page 0.
+    pub fn set_record_root(&mut self, page_id: u32) -> Result<()> {
+        let page0 = self
+            .get_page(0)?
+            .ok_or(Error::Corrupt("missing page0"))?
+            .clone();
+        let mut updated = page0;
+        for offset in [0, SLOT_BYTES] {
+            updated[offset + 48..offset + 52].copy_from_slice(&page_id.to_le_bytes());
+            let checksum = crc32c(&updated[offset..offset + 2044]);
+            updated[offset + 2044..offset + 2048].copy_from_slice(&checksum.to_le_bytes());
+        }
+        self.put_page(0, updated)?;
+        Ok(())
+    }
+
+    /// User KV put on the record tree.
+    pub fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()> {
+        RecordTree::open(self).put(TreeKey::user_record(key), value.to_vec())
+    }
+
+    /// User KV get from the record tree.
+    pub fn get_kv(&mut self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        RecordTree::open(self).get(&TreeKey::user_record(key))
+    }
+
+    /// User KV delete from the record tree.
+    pub fn delete_kv(&mut self, key: impl AsRef<[u8]>) -> Result<bool> {
+        RecordTree::open(self).delete(&TreeKey::user_record(key))
     }
 }
