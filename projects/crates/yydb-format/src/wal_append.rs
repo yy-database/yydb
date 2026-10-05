@@ -9,6 +9,7 @@ use std::{
 
 use yydb_types::{Error, Result};
 
+use crate::blob_refs::{commit_digest, encode_blob_refs_body, BlobManifestDelta, FRAME_BLOB_REFS};
 use crate::crc32c::crc32c;
 use crate::header::PAGE_SIZE;
 use crate::wal::{parse_wal, wal_frame_offsets, WalFile, WAL_MAGIC};
@@ -62,8 +63,12 @@ impl WalWriter {
         })
     }
 
-    /// Append one committed transaction that publishes `pages`.
-    pub fn append_commit(&mut self, pages: &[(u32, Vec<u8>)]) -> Result<u64> {
+    /// Append one committed transaction that publishes `pages` and optional blob refs.
+    pub fn append_commit(
+        &mut self,
+        pages: &[(u32, Vec<u8>)],
+        blob_refs: &[BlobManifestDelta],
+    ) -> Result<u64> {
         let txid = self.next_txid;
         self.next_txid += 1;
         let mut file = OpenOptions::new()
@@ -88,13 +93,19 @@ impl WalWriter {
             file.write_all(&encode_frame(FRAME_PAGE_IMAGE, self.next_lsn, &body)?)?;
             self.next_lsn += 1;
         }
+        if !blob_refs.is_empty() {
+            let body = encode_blob_refs_body(txid, blob_refs)?;
+            file.write_all(&encode_frame(FRAME_BLOB_REFS, self.next_lsn, &body)?)?;
+            self.next_lsn += 1;
+        }
         let commit_lsn = self.next_lsn;
-        let mut commit_body = Vec::with_capacity(24);
+        let digest = commit_digest(pages, blob_refs);
+        let mut commit_body = Vec::with_capacity(56);
         commit_body.extend_from_slice(&txid.to_le_bytes());
         commit_body.extend_from_slice(&commit_lsn.to_le_bytes());
         commit_body.extend_from_slice(&(pages.len() as u32).to_le_bytes());
-        commit_body.extend_from_slice(&0_u32.to_le_bytes());
-        commit_body.extend_from_slice(&[0_u8; 32]);
+        commit_body.extend_from_slice(&(blob_refs.len() as u32).to_le_bytes());
+        commit_body.extend_from_slice(&digest);
         file.write_all(&encode_frame(FRAME_TXN_COMMIT, commit_lsn, &commit_body)?)?;
         self.next_lsn += 1;
         file.sync_all()?;
@@ -150,6 +161,9 @@ pub fn replay_wal_pages(wal: &WalFile, pages: &mut BTreeMap<u32, Vec<u8>>) -> Re
                     return Err(Error::Corrupt("wal replay page wrong size"));
                 }
                 pending.push((page_id, image));
+            }
+            FRAME_BLOB_REFS if in_txn => {
+                // Catalog pages carry committed manifest state; blob refs are validated at commit.
             }
             FRAME_TXN_COMMIT => {
                 for (page_id, image) in pending.drain(..) {

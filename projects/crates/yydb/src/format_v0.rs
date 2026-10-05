@@ -1,14 +1,22 @@
 //! `YDPG` format v0 persistence bridge for [`Connection`].
 
-use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs::File,
+    io::Read,
+    path::Path,
+};
 
 use yydb_format::{
-    wal_sidecar_path, FilePager, MemoryPager, KEY_KIND_USER, PAGE_MAGIC, TREE_RECORD,
+    parse_blob_header, wal_sidecar_path, BlobChunkRef, BlobManifestDelta, FilePager, MemoryPager,
+    BLOB_REF_OP_DELETE, BLOB_REF_OP_PUT, KEY_KIND_USER, PAGE_MAGIC, TREE_RECORD,
 };
-use yydb_types::{Error, Result};
+use yydb_types::{Error, ObjectRef, Result};
 
 use crate::connection::State;
 use crate::journal::JournalMode;
+use crate::objects::ObjectStore;
+use crate::refs::OBJECT_REF_PREFIX;
 
 const META_SCHEMA: &[u8] = b"__yydb/meta/schema";
 const META_CATALOG: &[u8] = b"__yydb/meta/catalog";
@@ -75,7 +83,22 @@ fn read_state_from_kv<P: FormatKvPager>(pager: &mut P) -> Result<State> {
 
 /// Persist logical [`State`] through incremental btree mutations.
 pub fn write_state(pager: &mut FilePager, state: &State) -> Result<()> {
-    pager.mutate_with_publish(|inner| write_state_to_kv(inner, state))
+    write_state_with_objects(pager, state, None)
+}
+
+/// Persist logical [`State`], recording `.yydx` blob manifest deltas in WAL when `objects` is set.
+pub fn write_state_with_objects(
+    pager: &mut FilePager,
+    state: &State,
+    objects: Option<&ObjectStore>,
+) -> Result<()> {
+    let before = read_state_from_kv(pager)?;
+    let blob_refs = if let Some(store) = objects {
+        collect_blob_manifest_deltas(&before.records, &state.records, store)?
+    } else {
+        Vec::new()
+    };
+    pager.mutate_with_publish_blob_refs(|inner| write_state_to_kv(inner, state), &blob_refs)
 }
 
 /// Persist logical [`State`] into an in-memory format v0 pager.
@@ -124,6 +147,87 @@ impl FormatKvPager for MemoryPager {
     fn scan_kv(&mut self) -> Result<Vec<(yydb_format::TreeKey, Vec<u8>)>> {
         MemoryPager::scan_kv(self)
     }
+}
+
+fn collect_blob_manifest_deltas(
+    before: &BTreeMap<String, Vec<u8>>,
+    after: &BTreeMap<String, Vec<u8>>,
+    objects: &ObjectStore,
+) -> Result<Vec<BlobManifestDelta>> {
+    let mut deltas = Vec::new();
+    let keys = before
+        .keys()
+        .chain(after.keys())
+        .collect::<BTreeSet<_>>();
+    for key in keys {
+        let before_ref = object_hash_from_record_value(before.get(key));
+        let after_ref = object_hash_from_record_value(after.get(key));
+        if before_ref == after_ref {
+            continue;
+        }
+        if before_ref.is_some() && after_ref.is_none() {
+            deltas.push(BlobManifestDelta {
+                manifest_key: key.clone(),
+                op: BLOB_REF_OP_DELETE,
+                chunks: Vec::new(),
+            });
+        }
+        if let Some(hash) = after_ref {
+            deltas.push(BlobManifestDelta {
+                manifest_key: key.clone(),
+                op: BLOB_REF_OP_PUT,
+                chunks: vec![chunk_ref_for_hash(objects, &hash)?],
+            });
+        }
+    }
+    Ok(deltas)
+}
+
+fn object_hash_from_record_value(value: Option<&Vec<u8>>) -> Option<[u8; 32]> {
+    let value = value?;
+    if !value.starts_with(OBJECT_REF_PREFIX) {
+        return None;
+    }
+    decode_hash_hex(std::str::from_utf8(&value[OBJECT_REF_PREFIX.len()..]).unwrap_or(""))
+}
+
+fn decode_hash_hex(hash_hex: &str) -> Option<[u8; 32]> {
+    if hash_hex.len() != 64 {
+        return None;
+    }
+    let mut hash = [0_u8; 32];
+    for (index, chunk) in hash_hex.as_bytes().chunks(2).enumerate() {
+        let byte = u8::from_str_radix(&String::from_utf8_lossy(chunk), 16).ok()?;
+        hash[index] = byte;
+    }
+    Some(hash)
+}
+
+fn chunk_ref_for_hash(objects: &ObjectStore, hash: &[u8; 32]) -> Result<BlobChunkRef> {
+    let object = ObjectRef {
+        algo: yydb_types::HashAlgo::Blake3,
+        hash: *hash,
+        size: 0,
+        kind: yydb_types::ObjectKind::Blob,
+    };
+    let path = objects.path_for(&object);
+    if !path.exists() {
+        return Err(yydb_types::Error::ObjectNotFound {
+            hash_hex: object.hash_hex(),
+        });
+    }
+    let bytes = std::fs::read(&path)?;
+    let header = parse_blob_header(&bytes).map_err(|error| match error {
+        Error::Corrupt(message) => yydb_types::Error::ObjectCorrupt {
+            message: message.into(),
+        },
+        other => other,
+    })?;
+    Ok(BlobChunkRef {
+        chunk_hash: header.chunk_hash,
+        chunk_len: header.chunk_len,
+        logical_offset: header.logical_offset,
+    })
 }
 
 fn write_state_to_kv<P: FormatKvPager>(pager: &mut P, state: &State) -> Result<()> {

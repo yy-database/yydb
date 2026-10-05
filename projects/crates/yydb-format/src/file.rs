@@ -9,6 +9,7 @@ use std::{
 
 use yydb_types::{Error, Result};
 
+use crate::blob_refs::BlobManifestDelta;
 use crate::btree::RecordTree;
 use crate::header::{
     corrupt_header_slot_checksum, inactive_slot_offset, parse_page0, slot_offset_for_kind,
@@ -73,9 +74,21 @@ impl FilePager {
     where
         F: FnOnce(&mut MemoryPager) -> Result<()>,
     {
+        self.mutate_with_publish_blob_refs(mutate, &[])
+    }
+
+    /// Like [`mutate_with_publish`] but also records `.yydx` blob manifest deltas in WAL.
+    pub fn mutate_with_publish_blob_refs<F>(
+        &mut self,
+        mutate: F,
+        blob_refs: &[BlobManifestDelta],
+    ) -> Result<()>
+    where
+        F: FnOnce(&mut MemoryPager) -> Result<()>,
+    {
         let before = self.inner.pages_snapshot();
         mutate(&mut self.inner)?;
-        self.publish_delta(&before)
+        self.publish_delta(&before, blob_refs)
     }
 
     /// User KV put with durability.
@@ -100,7 +113,7 @@ impl FilePager {
         let before = self.inner.pages_snapshot();
         let deleted = RecordTree::open(&mut self.inner).delete(&TreeKey::user_record(key))?;
         if deleted {
-            self.publish_delta(&before)?;
+            self.publish_delta(&before, &[])?;
         }
         Ok(deleted)
     }
@@ -161,7 +174,11 @@ impl FilePager {
         Ok(())
     }
 
-    fn publish_delta(&mut self, before: &BTreeMap<u32, Vec<u8>>) -> Result<()> {
+    fn publish_delta(
+        &mut self,
+        before: &BTreeMap<u32, Vec<u8>>,
+        blob_refs: &[BlobManifestDelta],
+    ) -> Result<()> {
         let after = self.inner.pages_snapshot();
         let mut changed = Vec::new();
         for (page_id, image) in &after {
@@ -169,13 +186,13 @@ impl FilePager {
                 changed.push((*page_id, image.clone()));
             }
         }
-        if changed.is_empty() {
+        if changed.is_empty() && blob_refs.is_empty() {
             return Ok(());
         }
         if self.wal_enabled {
             self.ensure_wal()?;
             if let Some(wal) = self.wal.as_mut() {
-                wal.append_commit(&changed)?;
+                wal.append_commit(&changed, blob_refs)?;
                 sync_shm_from_wal(&self.path, wal.path())?;
             }
         } else {

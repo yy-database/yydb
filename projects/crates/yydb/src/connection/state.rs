@@ -1,8 +1,9 @@
 use crate::format_v0;
+use crate::journal::JournalMode;
 use crate::lease;
 use crate::Result;
 
-use super::{Backend, Connection, State};
+use super::{is_yydx_main_path, Backend, Connection, State};
 
 impl Connection {
     pub(crate) fn reconcile_leases_on_open(&self) -> Result<()> {
@@ -73,7 +74,14 @@ impl Connection {
                 let mut pager = pager
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                format_v0::write_state(&mut pager, state)
+                let blob_objects = if self.path().is_some_and(is_yydx_main_path)
+                    && self.journal_mode() == JournalMode::Wal
+                {
+                    Some(self.objects())
+                } else {
+                    None
+                };
+                format_v0::write_state_with_objects(&mut pager, state, blob_objects)
             }
             Backend::Memory { state: slot } => {
                 *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = state.clone();
