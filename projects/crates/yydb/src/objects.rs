@@ -74,6 +74,28 @@ impl ObjectStore {
 
     /// On-disk CAS under `root` (integration tests that need filesystem objects).
     pub fn open_in_memory_root(root: PathBuf) -> Result<Self> {
+        Self::open_on_disk_root(root)
+    }
+
+    /// On-disk blob root for `.yydx` layouts (`<app-name>-objects/`).
+    ///
+    /// Segment packing uses the interim `objects/hash-2/*.bytes` tree until the
+    /// `.blob` format contract lands.
+    pub fn open_yydx_blob_root(root: PathBuf) -> Result<Self> {
+        Self::open_on_disk_root(root)
+    }
+
+    /// Resolve `<app-name>-objects/` beside `app.yydx`.
+    pub fn yydx_objects_root(main_path: &Path) -> PathBuf {
+        let parent = main_path.parent().unwrap_or_else(|| Path::new("."));
+        let stem = main_path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("app");
+        parent.join(format!("{stem}-objects"))
+    }
+
+    fn open_on_disk_root(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(root.join("objects"))?;
         Ok(Self {
             root: ObjectStoreRoot::OnDisk(root),
