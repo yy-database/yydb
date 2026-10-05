@@ -6,9 +6,13 @@
 #![deny(clippy::all)]
 
 mod core;
+mod opfs;
 mod session;
 
 pub use core::{check_schema_source, introspect_schema_json, yydb_version, SchemaCheck};
+pub use opfs::{
+    open_persistent, validate_opfs_capabilities, OpfsCapabilities, PersistentStorageMode,
+};
 pub use session::query_memory;
 
 use wasm_bindgen::prelude::*;
