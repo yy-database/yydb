@@ -14,6 +14,7 @@ categories = ["database-implementations"]
 path = "src/lib.rs"
 
 [dependencies]
+blake3 = { workspace = true }
 yydb-types = { workspace = true }
 
 [dev-dependencies]

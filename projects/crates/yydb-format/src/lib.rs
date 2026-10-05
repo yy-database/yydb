@@ -18,7 +18,11 @@ pub mod shm;
 pub mod wal;
 pub mod wal_append;
 
-pub use blob::{parse_blob_header, BlobChunkHeader, BLOB_HEADER_BYTES, BLOB_MAGIC};
+pub use blob::{
+    blob_chunk_hash, blob_payload_hash, encode_blob_chunk, parse_blob_chunk, parse_blob_header,
+    read_blob_payload, BlobChunkHeader, BLOB_CHUNK_DOMAIN, BLOB_CHUNK_KIND_DATA, BLOB_HEADER_BYTES,
+    BLOB_MAGIC,
+};
 pub use btree::RecordTree;
 pub use crc32c::crc32c;
 pub use doctor::diagnose_file;

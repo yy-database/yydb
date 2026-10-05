@@ -1,11 +1,11 @@
-//! Unified content-addressed store: `objects/hash-2/<hash>.bytes`.
+//! Unified content-addressed store: `<store>/<hash-prefix>/<chunk_hash>.blob`.
 //!
 //! Large logical files are **chunked** manifests; vectors and ANN segments use
 //! the same path layout. Hot/cold tiering is an in-process cache over this CAS.
 //!
-//! Production layout: `.yydx` uses `<app-name>-objects/` with `.blob` segments.
-//! `open_beside_db` (`<db>.objects`) is a prototype drift path pending `.yydx`
-//! migration. `.yydb` single-file mode must not rely on persistent sidecars.
+//! Production layout: `.yydx` uses `<app-name>-objects/` with `YBLO` segments.
+//! `open_beside_db` (`<db>.objects`) is a prototype drift path. `.yydb` single-
+//! file mode must not rely on persistent sidecars.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -19,10 +19,11 @@ use std::{
 enum ObjectStoreRoot {
     /// Process-local CAS only. No filesystem writes.
     Ephemeral,
-    /// On-disk CAS rooted at `root/objects/hash-2/*.bytes`.
+    /// On-disk CAS rooted at `root/<hash-prefix>/<chunk_hash>.blob`.
     OnDisk(PathBuf),
 }
 
+use yydb_format::{blob_chunk_hash, encode_blob_chunk, read_blob_payload};
 use yydb_types::{
     ChunkManifest, Error, HashAlgo, ObjectKind, ObjectRef, Result, Tier, Vector,
     DEFAULT_CHUNK_SIZE, INLINE_BYTES_MAX,
@@ -62,7 +63,7 @@ impl ObjectStore {
         let mut os = db_path.as_os_str().to_owned();
         os.push(".objects");
         let root = PathBuf::from(os);
-        fs::create_dir_all(root.join("objects"))?;
+        fs::create_dir_all(&root)?;
         Ok(Self {
             root: ObjectStoreRoot::OnDisk(root),
             hot: Mutex::new(HashMap::new()),
@@ -78,9 +79,6 @@ impl ObjectStore {
     }
 
     /// On-disk blob root for `.yydx` layouts (`<app-name>-objects/`).
-    ///
-    /// Segment packing uses the interim `objects/hash-2/*.bytes` tree until the
-    /// `.blob` format contract lands.
     pub fn open_yydx_blob_root(root: PathBuf) -> Result<Self> {
         Self::open_on_disk_root(root)
     }
@@ -96,7 +94,7 @@ impl ObjectStore {
     }
 
     fn open_on_disk_root(root: PathBuf) -> Result<Self> {
-        fs::create_dir_all(root.join("objects"))?;
+        fs::create_dir_all(&root)?;
         Ok(Self {
             root: ObjectStoreRoot::OnDisk(root),
             hot: Mutex::new(HashMap::new()),
@@ -118,17 +116,17 @@ impl ObjectStore {
         matches!(self.root, ObjectStoreRoot::OnDisk(_))
     }
 
-    /// Relative CAS directory `…/objects`.
+    /// Relative blob store root (`<app-name>-objects/`).
     pub fn cas_root(&self) -> PathBuf {
-        self.root().join("objects")
+        self.root().to_path_buf()
     }
 
-    /// Path for a digest: `objects/<hash-2>/<hash>.bytes`.
+    /// Path for a chunk digest: `<store>/<hash-prefix>/<chunk_hash>.blob`.
     pub fn path_for_hash(&self, hash_hex: &str) -> PathBuf {
         let prefix: String = hash_hex.chars().take(2).collect();
         self.cas_root()
             .join(prefix)
-            .join(format!("{hash_hex}.bytes"))
+            .join(format!("{hash_hex}.blob"))
     }
 
     /// Path for an [`ObjectRef`].
@@ -143,8 +141,7 @@ impl ObjectStore {
 
     /// Write one CAS chunk / object; returns its [`ObjectRef`].
     pub fn put_chunk(&self, kind: ObjectKind, bytes: &[u8]) -> Result<ObjectRef> {
-        let hash = blake3::hash(bytes);
-        let hash_bytes = *hash.as_bytes();
+        let hash_bytes = blob_chunk_hash(bytes);
         let object = ObjectRef {
             algo: HashAlgo::Blake3,
             hash: hash_bytes,
@@ -153,12 +150,23 @@ impl ObjectStore {
         };
         if self.persist_to_disk() {
             let path = self.path_for(&object);
-            if !path.exists() {
+            let encoded = encode_blob_chunk(bytes, 0);
+            if path.exists() {
+                let existing = fs::read(&path)?;
+                if existing != encoded {
+                    return Err(Error::ObjectCorrupt {
+                        message: format!(
+                            "blob chunk hash collision at {}",
+                            object.hash_hex()
+                        ),
+                    });
+                }
+            } else {
                 if let Some(parent) = path.parent() {
                     fs::create_dir_all(parent)?;
                 }
                 let mut file = File::create(&path)?;
-                file.write_all(bytes)?;
+                file.write_all(&encoded)?;
                 file.sync_all()?;
             }
         }
@@ -190,18 +198,24 @@ impl ObjectStore {
                     hash_hex: object.hash_hex(),
                 });
             }
-            let bytes = fs::read(&path)?;
-            if bytes.len() as u64 != object.size {
+            let file_bytes = fs::read(&path)?;
+            let payload = read_blob_payload(&file_bytes).map_err(|error| match error {
+                Error::Corrupt(message) => Error::ObjectCorrupt {
+                    message: message.into(),
+                },
+                other => other,
+            })?;
+            if payload.len() as u64 != object.size {
                 return Err(Error::ObjectCorrupt {
                     message: format!(
                         "size mismatch for {}: expected {}, got {}",
                         object.hash_hex(),
                         object.size,
-                        bytes.len()
+                        payload.len()
                     ),
                 });
             }
-            let arc: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
+            let arc: Arc<[u8]> = Arc::from(payload.into_boxed_slice());
             self.hot
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
@@ -378,7 +392,7 @@ impl ObjectStore {
         Ok(out)
     }
 
-    /// Enumerate every object file under `objects/hash-2/`.
+    /// Enumerate every `.blob` segment under the store root.
     pub fn list_objects(&self) -> Result<Vec<ObjectRef>> {
         if !self.persist_to_disk() {
             return Ok(self
@@ -401,7 +415,7 @@ impl ObjectStore {
             }
             for file_entry in fs::read_dir(prefix_path)? {
                 let path = file_entry?.path();
-                if path.extension().and_then(|ext| ext.to_str()) != Some("bytes") {
+                if path.extension().and_then(|ext| ext.to_str()) != Some("blob") {
                     continue;
                 }
                 let hash_hex = path.file_stem().and_then(|stem| stem.to_str()).ok_or(
@@ -412,12 +426,26 @@ impl ObjectStore {
                 if hash_hex.len() != 64 {
                     continue;
                 }
-                let bytes = fs::read(&path)?;
+                let file_bytes = fs::read(&path)?;
+                let payload = read_blob_payload(&file_bytes).map_err(|error| match error {
+                    Error::Corrupt(message) => Error::ObjectCorrupt {
+                        message: message.into(),
+                    },
+                    other => other,
+                })?;
                 let hash = decode_hash_hex(hash_hex)?;
+                if hash != blob_chunk_hash(&payload) {
+                    return Err(Error::ObjectCorrupt {
+                        message: format!(
+                            "blob file name does not match chunk_hash {}",
+                            hash_hex
+                        ),
+                    });
+                }
                 objects.push(ObjectRef {
                     algo: HashAlgo::Blake3,
                     hash,
-                    size: bytes.len() as u64,
+                    size: payload.len() as u64,
                     kind: ObjectKind::Blob,
                 });
             }
