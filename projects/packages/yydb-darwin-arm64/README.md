@@ -1,30 +1,26 @@
 # `@yydb/yydb-darwin-arm64`
 
-**The YYDB native binding for Apple Silicon Macs.**
+Prebuilt native binding for Apple Silicon macOS (`darwin/arm64`). **Not a public import target.**
 
-This package is selected automatically when you install
-[`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) on `darwin/arm64`. Most applications should install the parent
-package rather than depend on this platform package directly.
+Pulled automatically when installing [`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) on matching hosts. Intel
+Macs use [`@yydb/yydb-darwin-x64`](https://www.npmjs.com/package/@yydb/yydb-darwin-x64).
 
-```bash
-npm install @yydb/yydb
+## Example
+
+Application code imports the main package only:
+
+```ts
+import {Database} from "@yydb/yydb";
+
+const db = await Database.open("app.yydb");
+console.log(await db.info());
+await db.close();
 ```
 
-The TypeScript `yydb` CLI ships from `@yydb/yydb` and loads this `.node` binding:
+The CLI also ships from `@yydb/yydb`:
 
 ```text
-npx yydb --help
 npx yydb serve app.yydb --bind 127.0.0.1:7700
 ```
 
-| Field       | Value                                 |
-|-------------|---------------------------------------|
-| npm package | `@yydb/yydb-darwin-arm64`             |
-| Platform    | macOS, Apple Silicon (`darwin/arm64`) |
-| Binding     | `lib/yydb-darwin-arm64.node`              |
-
-For Intel Macs, use [`@yydb/yydb-darwin-x64`](https://www.npmjs.com/package/@yydb/yydb-darwin-x64).
-
-[YYDB overview](https://github.com/yy-database/yydb.rs) ·
-[`@yydb/yydb`](https://www.npmjs.com/package/@yydb/yydb) ·
-[License](https://github.com/yy-database/yydb.rs/blob/dev/License.md)
+[YYDB overview](https://github.com/yy-database/yydb.rs)

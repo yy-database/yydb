@@ -8,12 +8,13 @@
 
 前端库 **`@yydb/yydb-client`**（以及本站 / WebUI）按协议说话， **不探测**后端是 YYDB 还是 YYDS。包名带 `yydb` 只因为当前仓库提供参考实现。
 
-Rust（本仓库）：
+Rust：
 
-- `projects/crates/yydb`：YYDB 嵌入式门面
-- `projects/crates/yydb-client`：YYDB 远程 TCP 客户端
+- [`yydb`](https://crates.io/crates/yydb)：YYDB 嵌入式门面
+- [`yydb-client`](https://crates.io/crates/yydb-client)：YYDB 远程 TCP 客户端
 
-完整说明（Agent skill）：[`yydb-serve-protocol`](../../../../yydb-skills/skills/yydb-serve-protocol/SKILL.md)（
-`@yydb/yydb-skills`）。
+完整说明（Agent skill）：[
+`yydb-serve-protocol`](https://github.com/yy-database/yydb.rs/tree/dev/projects/packages/yydb-skills/skills/yydb-serve-protocol/SKILL.md)（[
+`@yydb/yydb-skills`](https://www.npmjs.com/package/@yydb/yydb-skills)）。
 
 v1：Hello、Info、SchemaGet / SchemaEnsure、KvGet / KvPut。

@@ -1,7 +1,7 @@
 {
     "name": "@yydb/yydb-skills",
     "version": "0.1.0",
-    "description": "Agent Skills for integrating with YYDB wire protocol, codegen, and storage semantics",
+    "description": "Agent Skills for YYDB wire protocol integration and legacy storage notes",
     "type": "module",
     "license": "MPL-2.0",
     "private": true,

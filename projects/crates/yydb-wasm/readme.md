@@ -1,6 +1,13 @@
-# yydb-wasm
+# `yydb-wasm`
 
-Browser WebAssembly surface for YYDB. Same semantic entry points as `yydb-napi` where
-applicable; no parallel TS parser.
+Browser WebAssembly build of the YYDB core for schema validation. Artifacts ship in [
+`@yydb/yydb-unknown-wasm32`](https://www.npmjs.com/package/@yydb/yydb-unknown-wasm32).
 
-Build artifacts ship in `@yydb/yydb-unknown-wasm32` via `pnpm run build:wasm`.
+```ts
+import {initWasm, checkSchema} from "@yydb/yydb-unknown-wasm32";
+
+await initWasm();
+checkSchema("table Setting { @@id: uuid, key: utf8 }");
+```
+
+[YYDB overview](https://github.com/yy-database/yydb.rs)
