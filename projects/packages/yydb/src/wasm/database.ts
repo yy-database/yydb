@@ -1,11 +1,5 @@
 import { encodeMicroRegister, encodeScalarCall } from '@yydb/yydb-client';
-import {
-    defineMicro as buildMicro,
-    microFingerprint,
-    type DefinedMicro,
-    type MicroHandle,
-    MicroSessionRegistry,
-} from '../shared/micro.js';
+import { defineMicro as buildMicro, microFingerprint, type DefinedMicro, type MicroHandle, MicroSessionRegistry } from '../shared/micro.js';
 import type { UdfScalarKind, UdfTypeDescriptor } from '../shared/udf-types.js';
 import {
     parseWasmKvGetResult,

@@ -3,13 +3,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { connect, type Client } from '@yydb/yydb-client/node';
-import {
-    defineMicro as buildMicro,
-    microFingerprint,
-    type DefinedMicro,
-    type MicroHandle,
-    MicroSessionRegistry,
-} from '../shared/micro.js';
+import { defineMicro as buildMicro, microFingerprint, type DefinedMicro, type MicroHandle, MicroSessionRegistry } from '../shared/micro.js';
 import { resolveYydbCli } from './resolve-bin.js';
 import type { UdfScalarKind, UdfTypeDescriptor } from '../shared/udf-types.js';
 
