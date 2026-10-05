@@ -47,6 +47,8 @@ impl JournalMode {
 pub struct OpenFlags {
     /// Initial journal mode for this connection.
     pub journal_mode: JournalMode,
+    /// Create or require `YDPG` format v1 instead of legacy `YYDB` snapshots.
+    pub format_v1: bool,
 }
 
 impl OpenFlags {
@@ -59,6 +61,23 @@ impl OpenFlags {
     pub fn wal() -> Self {
         Self {
             journal_mode: JournalMode::Wal,
+            format_v1: false,
+        }
+    }
+
+    /// Open or create a `YDPG` format v1 main file.
+    pub fn format_v1() -> Self {
+        Self {
+            journal_mode: JournalMode::Delete,
+            format_v1: true,
+        }
+    }
+
+    /// `YDPG` format v1 with `YYWL` v3 journaling.
+    pub fn format_v1_wal() -> Self {
+        Self {
+            journal_mode: JournalMode::Wal,
+            format_v1: true,
         }
     }
 }
