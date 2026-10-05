@@ -394,9 +394,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi",
  "rand_core",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -709,7 +711,7 @@ dependencies = [
 [[package]]
 name = "oak-core"
 version = "0.0.12"
-source = "git+https://github.com/yggdrasil-language/oaks.git?rev=424dd544c57f2d9e40b248056ab12a1725ae932f#424dd544c57f2d9e40b248056ab12a1725ae932f"
+source = "git+https://github.com/yggdrasil-language/oaks.git?rev=d40b8f60de795d7b0773d0a1e8061bdb423a9507#d40b8f60de795d7b0773d0a1e8061bdb423a9507"
 dependencies = [
  "smallvec",
  "triomphe",
@@ -719,7 +721,7 @@ dependencies = [
 [[package]]
 name = "oak-vos"
 version = "0.0.12"
-source = "git+https://github.com/yggdrasil-language/oaks.git?rev=424dd544c57f2d9e40b248056ab12a1725ae932f#424dd544c57f2d9e40b248056ab12a1725ae932f"
+source = "git+https://github.com/yggdrasil-language/oaks.git?rev=d40b8f60de795d7b0773d0a1e8061bdb423a9507#d40b8f60de795d7b0773d0a1e8061bdb423a9507"
 dependencies = [
  "oak-core",
 ]
@@ -1014,6 +1016,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1289,6 +1302,7 @@ version = "0.1.0"
 dependencies = [
  "uuid",
  "vos-ast",
+ "vos-contract",
  "vos-generator",
  "vos-inspect",
  "vos-parser",
@@ -1299,6 +1313,18 @@ name = "vos-ast"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "vos-contract"
+version = "0.1.0"
+dependencies = [
+ "oak-vos",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1504,6 +1530,18 @@ dependencies = [
  "blake3",
  "vos",
  "yydb-execution",
+]
+
+[[package]]
+name = "yydb-wasm"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "getrandom 0.4.3",
+ "serde_json",
+ "vos",
+ "wasm-bindgen",
+ "yydb",
 ]
 
 [[package]]

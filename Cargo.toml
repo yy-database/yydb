@@ -22,6 +22,7 @@ napi = { version = "2.16", default-features = false, features = ["napi4"] }
 napi-derive = "2.16"
 napi-build = "2.6"
 pyo3 = { version = "0.23", features = ["extension-module"] }
+wasm-bindgen = "0.2"
 
 # engine (bottom → mid; depend on yydb facade in apps)
 yydb-types = { version = "0.1.0", path = "projects/crates/yydb-types" }
