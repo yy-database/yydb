@@ -54,6 +54,16 @@ pub(crate) fn sync_logical_root(db_path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Remove a logical sidecar file when present.
+pub(crate) fn remove_logical_file(db_path: &str, suffix: &str) -> Result<()> {
+    let key = logical_key(db_path, suffix);
+    logical_store()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&key);
+    Ok(())
+}
+
 /// Blob path under `<stem>-objects/<hash>.blob` for `.yydx` layouts.
 pub(crate) fn yydx_blob_key(db_path: &str, blob_hash: &str) -> String {
     let stem = db_path.strip_suffix(".yydx").unwrap_or(db_path);

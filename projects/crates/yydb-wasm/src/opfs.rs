@@ -182,6 +182,40 @@ impl OpfsPersistentVolume {
         Ok(())
     }
 
+    /// Read the `YYWL` sidecar (`{path}-wal`), if present.
+    pub fn read_wal(&self) -> Result<Option<Vec<u8>>> {
+        crate::opfs_io::read_logical_file(&self.path, "-wal")
+    }
+
+    /// Atomically publish the WAL sidecar and sync the logical root.
+    pub fn publish_wal(&self, body: &[u8]) -> Result<()> {
+        crate::opfs_io::publish_logical_file_atomic(&self.path, "-wal", body)?;
+        crate::opfs_io::sync_logical_root(&self.path)?;
+        Ok(())
+    }
+
+    /// Remove the WAL sidecar after checkpoint.
+    pub fn remove_wal(&self) -> Result<()> {
+        crate::opfs_io::remove_logical_file(&self.path, "-wal")
+    }
+
+    /// Read the `YYSH` sidecar (`{path}-shm`), if present.
+    pub fn read_shm(&self) -> Result<Option<Vec<u8>>> {
+        crate::opfs_io::read_logical_file(&self.path, "-shm")
+    }
+
+    /// Atomically publish the SHM sidecar and sync the logical root.
+    pub fn publish_shm(&self, body: &[u8]) -> Result<()> {
+        crate::opfs_io::publish_logical_file_atomic(&self.path, "-shm", body)?;
+        crate::opfs_io::sync_logical_root(&self.path)?;
+        Ok(())
+    }
+
+    /// Remove the SHM sidecar after checkpoint.
+    pub fn remove_shm(&self) -> Result<()> {
+        crate::opfs_io::remove_logical_file(&self.path, "-shm")
+    }
+
     /// Publish one immutable blob chunk (`.yydx` only).
     pub fn publish_blob(&self, blob_hash: &str, body: &[u8]) -> Result<()> {
         if self.mode != PersistentStorageMode::Yydx {
