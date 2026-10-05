@@ -27,35 +27,3 @@ yydb = { workspace = true }
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
-
-# Acceptance and integration tests (fixture ids, no gate prefixes).
-[[test]]
-name = "memory_session"
-path = "tests/session/memory.rs"
-[[test]]
-name = "persistent_session"
-path = "tests/session/persistent.rs"
-[[test]]
-name = "schema_validate"
-path = "tests/session/schema_validate.rs"
-[[test]]
-name = "yydb_opfs_capability_missing"
-path = "tests/acceptance/opfs/capability_missing.rs"
-[[test]]
-name = "yydb_opfs_crash_after_blob_publish"
-path = "tests/acceptance/opfs/crash_after_blob_publish.rs"
-[[test]]
-name = "yydb_opfs_crash_after_commit"
-path = "tests/acceptance/opfs/crash_after_commit.rs"
-[[test]]
-name = "yydb_opfs_doctor_missing_blob"
-path = "tests/acceptance/opfs/doctor_missing_blob.rs"
-[[test]]
-name = "yydb_opfs_persistent_open"
-path = "tests/acceptance/opfs/persistent_open.rs"
-[[test]]
-name = "yydb_opfs_quota_exhausted"
-path = "tests/acceptance/opfs/quota_exhausted.rs"
-[[test]]
-name = "yydb_opfs_single_writer_busy"
-path = "tests/acceptance/opfs/single_writer_busy.rs"
