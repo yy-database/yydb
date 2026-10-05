@@ -2,7 +2,15 @@
 //!
 //! Pure Rust surface for host-testable gates. Actual OPFS I/O is not implemented yet.
 
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
+
 use yydb::{Error, Result};
+
+fn writer_locks() -> &'static Mutex<HashSet<String>> {
+    static LOCKS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    LOCKS.get_or_init(|| Mutex::new(HashSet::new()))
+}
 
 /// Persistent storage format selected for an OPFS open attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,10 +94,7 @@ pub fn validate_opfs_capabilities(
         caps.persistent_open,
         "missing OPFS capability: persistent_open",
     )?;
-    require(
-        caps.single_writer,
-        "missing OPFS capability: single_writer",
-    )?;
+    require(caps.single_writer, "missing OPFS capability: single_writer")?;
     require(
         caps.atomic_publish,
         "missing OPFS capability: atomic_publish",
@@ -99,10 +104,7 @@ pub fn validate_opfs_capabilities(
         "missing OPFS capability: durability_sync",
     )?;
     require(caps.file_lock, "missing OPFS capability: file_lock")?;
-    require(
-        caps.quota_report,
-        "missing OPFS capability: quota_report",
-    )?;
+    require(caps.quota_report, "missing OPFS capability: quota_report")?;
     if mode == PersistentStorageMode::Yydx {
         require(caps.range_read, "missing OPFS capability: range_read")?;
     }
@@ -117,9 +119,38 @@ fn require(present: bool, message: &'static str) -> Result<()> {
     }
 }
 
-/// Gate persistent OPFS open on capability contract, then host I/O (not implemented).
-pub fn open_persistent(path: &str, caps: &OpfsCapabilities) -> Result<()> {
+/// Exclusive writer lease for one logical OPFS database path (Living `08` §4).
+#[derive(Debug)]
+pub struct OpfsWriterLease {
+    path: String,
+}
+
+impl Drop for OpfsWriterLease {
+    fn drop(&mut self) {
+        let mut locks = writer_locks().lock().unwrap_or_else(|p| p.into_inner());
+        locks.remove(&self.path);
+    }
+}
+
+/// Claim the single-writer slot for `path` after capability validation.
+pub fn claim_opfs_writer(path: &str, caps: &OpfsCapabilities) -> Result<OpfsWriterLease> {
     let mode = PersistentStorageMode::from_path(path)?;
     validate_opfs_capabilities(caps, mode)?;
+
+    let mut locks = writer_locks().lock().unwrap_or_else(|p| p.into_inner());
+    if locks.contains(path) {
+        return Err(Error::LeaseUnavailable {
+            key: path.to_string(),
+        });
+    }
+    locks.insert(path.to_string());
+    Ok(OpfsWriterLease {
+        path: path.to_string(),
+    })
+}
+
+/// Gate persistent OPFS open on capability contract, then host I/O (not implemented).
+pub fn open_persistent(path: &str, caps: &OpfsCapabilities) -> Result<()> {
+    let _lease = claim_opfs_writer(path, caps)?;
     Err(Error::Unsupported("OPFS host adapter I/O not implemented"))
 }
