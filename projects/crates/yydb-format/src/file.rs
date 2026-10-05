@@ -63,11 +63,21 @@ impl FilePager {
         self.wal.as_ref().map(|wal| wal.path().to_path_buf())
     }
 
+    /// Apply record-tree mutations and publish them as one WAL transaction or write batch.
+    pub fn mutate_with_publish<F>(&mut self, mutate: F) -> Result<()>
+    where
+        F: FnOnce(&mut MemoryPager) -> Result<()>,
+    {
+        let before = self.inner.pages_snapshot();
+        mutate(&mut self.inner)?;
+        self.publish_delta(&before)
+    }
+
     /// User KV put with durability.
     pub fn put_kv(&mut self, key: impl AsRef<[u8]>, value: &[u8]) -> Result<()> {
-        let before = self.inner.pages_snapshot();
-        RecordTree::open(&mut self.inner).put(TreeKey::user_record(key), value.to_vec())?;
-        self.publish_delta(&before)
+        self.mutate_with_publish(|inner| {
+            RecordTree::open(inner).put(TreeKey::user_record(key), value.to_vec())
+        })
     }
 
     /// User KV get.
@@ -94,10 +104,9 @@ impl FilePager {
     pub fn checkpoint(&mut self) -> Result<()> {
         self.persist_all()?;
         if self.wal_enabled {
-            if let Some(wal_path) = self.wal_path() {
-                if wal_path.exists() {
-                    std::fs::remove_file(wal_path)?;
-                }
+            let wal_path = wal_sidecar_path(&self.path);
+            if wal_path.exists() {
+                std::fs::remove_file(wal_path)?;
             }
             self.wal = None;
         }
@@ -139,14 +148,20 @@ impl FilePager {
         let mut changed = Vec::new();
         for (page_id, image) in &after {
             if before.get(page_id) != Some(image) {
-                self.write_page_to_file(*page_id, image)?;
                 changed.push((*page_id, image.clone()));
             }
         }
-        if !changed.is_empty() {
+        if changed.is_empty() {
+            return Ok(());
+        }
+        if self.wal_enabled {
             self.ensure_wal()?;
             if let Some(wal) = self.wal.as_mut() {
                 wal.append_commit(&changed)?;
+            }
+        } else {
+            for (page_id, image) in &changed {
+                self.write_page_to_file(*page_id, image)?;
             }
         }
         Ok(())

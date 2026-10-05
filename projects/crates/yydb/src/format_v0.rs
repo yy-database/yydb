@@ -75,7 +75,7 @@ fn read_state_from_kv<P: FormatKvPager>(pager: &mut P) -> Result<State> {
 
 /// Persist logical [`State`] through incremental btree mutations.
 pub fn write_state(pager: &mut FilePager, state: &State) -> Result<()> {
-    write_state_to_kv(pager, state)
+    pager.mutate_with_publish(|inner| write_state_to_kv(inner, state))
 }
 
 /// Persist logical [`State`] into an in-memory format v0 pager.
