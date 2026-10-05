@@ -39,7 +39,7 @@ pub use pager::PageStore;
 pub use shm::{encode_empty_shm, parse_shm, ShmBlock, SHM_BYTES, SHM_MAGIC};
 pub use wal_append::strip_trailing_txn_commit;
 pub use wal::{
-    committed_transactions, parse_header, parse_wal, wal_frame_offsets, WalFile, WalFrame,
-    WalHeader, WAL_MAGIC,
+    committed_tail_lsn, committed_transactions, parse_header, parse_wal, parse_wal_recover,
+    wal_frame_offsets, WalFile, WalFrame, WalHeader, WAL_MAGIC,
 };
 pub use wal_append::{read_wal_file, replay_wal_pages, wal_sidecar_path, WalWriter};

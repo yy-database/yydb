@@ -162,7 +162,7 @@ pub fn replay_wal_pages(wal: &WalFile, pages: &mut BTreeMap<u32, Vec<u8>>) -> Re
 }
 
 pub fn read_wal_file(path: &Path) -> Result<WalFile> {
-    parse_wal(&std::fs::read(path)?)
+    crate::wal::parse_wal_recover(&std::fs::read(path)?)
 }
 
 pub fn wal_sidecar_path(main: &Path) -> PathBuf {
