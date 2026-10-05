@@ -103,7 +103,7 @@ pub use udf::{
 /// Result alias for UDF host functions and registry operations.
 pub type UdfResult<T = UdfValue> = yydb_udf::Result<T>;
 pub use yydb_types::{
-    ChunkManifest, CommitSequence, DoctorIssue, DoctorReport, DoctorSeverity, Error, EvictBudget,
+    ChunkManifest, CommitSequence, CompactReport, DoctorIssue, DoctorReport, DoctorSeverity, Error, EvictBudget,
     EvictReport, EvictionPolicy, HashAlgo, LeaseExpectation, LeaseToken, NamespaceQuota,
     NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion, ReleaseOutcome, Result,
     SchemaVersion, Tier, Value, Vector, DEFAULT_CHUNK_SIZE, INLINE_BYTES_MAX,
