@@ -7,7 +7,7 @@ use yydb_types::{Error, Result, Value};
 
 use super::ops::QueryRow;
 
-const ROW_PREFIX: &str = "__yydb/v1/row/";
+const ROW_PREFIX: &str = "__yydb/v0/row/";
 
 /// Build the storage key for one table row.
 pub fn row_key(table: &str, pk: &str) -> String {
