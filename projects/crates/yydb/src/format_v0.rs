@@ -1,4 +1,4 @@
-//! `YDPG` format v1 persistence bridge for [`Connection`].
+//! `YDPG` format v0 persistence bridge for [`Connection`].
 
 use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
 
@@ -14,7 +14,7 @@ const META_SCHEMA: &[u8] = b"__yydb/meta/schema";
 const META_CATALOG: &[u8] = b"__yydb/meta/catalog";
 const META_CONTRACT: &[u8] = b"__yydb/meta/contract";
 
-/// Open a `YDPG` pager, folding any leftover `YYWL` v3 sidecar when not in WAL mode.
+/// Open a `YDPG` pager, folding any leftover `YYWL` v0 sidecar when not in WAL mode.
 pub fn open_pager(path: &Path, journal_mode: JournalMode) -> Result<FilePager> {
     let enable_wal = journal_mode == JournalMode::Wal;
     if path.exists() && wal_sidecar_path(path).exists() {
@@ -39,12 +39,12 @@ pub fn file_is_ydpg(path: &Path) -> Result<bool> {
     Ok(read == PAGE_MAGIC.len() && magic == *PAGE_MAGIC)
 }
 
-/// Load logical [`State`] from a format v1 pager.
+/// Load logical [`State`] from a format v0 pager.
 pub fn read_state(pager: &mut FilePager) -> Result<State> {
     read_state_from_kv(pager)
 }
 
-/// Load logical [`State`] from an in-memory format v1 pager.
+/// Load logical [`State`] from an in-memory format v0 pager.
 pub fn read_state_from_memory_pager(pager: &mut MemoryPager) -> Result<State> {
     read_state_from_kv(pager)
 }
@@ -78,7 +78,7 @@ pub fn write_state(pager: &mut FilePager, state: &State) -> Result<()> {
     write_state_to_kv(pager, state)
 }
 
-/// Persist logical [`State`] into an in-memory format v1 pager.
+/// Persist logical [`State`] into an in-memory format v0 pager.
 pub fn write_state_to_memory_pager(pager: &mut MemoryPager, state: &State) -> Result<()> {
     write_state_to_kv(pager, state)
 }

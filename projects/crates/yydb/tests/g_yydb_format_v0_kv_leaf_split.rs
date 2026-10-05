@@ -1,10 +1,10 @@
-// gate: format-v1 (Living 09)
-// fixture: format_v1.kv_leaf_split
+// gate: format-v0 (Living 09)
+// fixture: format_v0.kv_leaf_split
 
 use yydb_format::{MemoryPager, PageHeader, PAGE_TYPE_INTERNAL};
 
 #[test]
-fn g_yydb_format_v1_kv_leaf_split() {
+fn g_yydb_format_v0_kv_leaf_split() {
     let id = [9, 9, 9, 9, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 1];
     let mut pager = MemoryPager::new_empty(id, 0x01);
     let payload = vec![b'v'; 100];

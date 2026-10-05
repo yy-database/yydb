@@ -71,7 +71,7 @@ pub mod prelude {
 
 mod doctor;
 mod file_lock;
-mod format_v1;
+mod format_v0;
 mod lease;
 mod refs;
 mod ttl;
@@ -220,11 +220,11 @@ impl Connection {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        if path.exists() && !format_v1::file_is_ydpg(&path)? {
-            return Err(Error::Corrupt("main file is not YDPG format v1"));
+        if path.exists() && !format_v0::file_is_ydpg(&path)? {
+            return Err(Error::Corrupt("main file is not YDPG format v0"));
         }
         let writer_lock = WriterLock::acquire(&path)?;
-        let pager = format_v1::open_pager(&path, flags.journal_mode)?;
+        let pager = format_v0::open_pager(&path, flags.journal_mode)?;
         let connection = Self {
             operation_lock: Mutex::new(()),
             txn: Mutex::new(None),
@@ -266,7 +266,7 @@ impl Connection {
             Backend::Memory { .. } => {
                 let state = self.read_state()?;
                 let mut pager = MemoryPager::new_empty(main_snapshot_database_id(), 0x01);
-                format_v1::write_state_to_memory_pager(&mut pager, &state)?;
+                format_v0::write_state_to_memory_pager(&mut pager, &state)?;
                 main_bytes_from_memory_pager(&pager)
             }
             Backend::File { .. } => Err(Error::Unsupported(
@@ -280,7 +280,7 @@ impl Connection {
         match &self.backend {
             Backend::Memory { .. } => {
                 let mut pager = memory_pager_from_main_bytes(bytes)?;
-                let state = format_v1::read_state_from_memory_pager(&mut pager)?;
+                let state = format_v0::read_state_from_memory_pager(&mut pager)?;
                 self.write_state(&state)
             }
             Backend::File { .. } => Err(Error::Unsupported(
@@ -388,9 +388,9 @@ impl Connection {
                 let mut pager = pager
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                let mut state = format_v1::read_state(&mut pager)?;
+                let mut state = format_v0::read_state(&mut pager)?;
                 doctor::record_checkpoint(&mut state.records);
-                format_v1::write_state(&mut pager, &state)?;
+                format_v0::write_state(&mut pager, &state)?;
                 pager.checkpoint()?;
                 Ok(())
             }
@@ -1227,7 +1227,7 @@ impl Connection {
                 let mut pager = pager
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                format_v1::read_state(&mut pager)
+                format_v0::read_state(&mut pager)
             }
             Backend::Memory { state } => Ok(state
                 .lock()
@@ -1242,7 +1242,7 @@ impl Connection {
                 let mut pager = pager
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                format_v1::write_state(&mut pager, state)
+                format_v0::write_state(&mut pager, state)
             }
             Backend::Memory { state: slot } => {
                 *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = state.clone();

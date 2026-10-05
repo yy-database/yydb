@@ -1,4 +1,4 @@
-//! WAL v3 frame encoding and append helper.
+//! WAL v0 frame encoding and append helper.
 
 use std::{
     collections::BTreeMap,
@@ -112,7 +112,7 @@ pub fn encode_wal_header(database_id: [u8; 16], base_checkpoint_lsn: u64) -> Vec
     header.extend_from_slice(WAL_MAGIC);
     header.extend_from_slice(&database_id);
     header.extend_from_slice(&base_checkpoint_lsn.to_le_bytes());
-    header.extend_from_slice(&1_u32.to_le_bytes());
+    header.extend_from_slice(&0_u32.to_le_bytes());
     header.extend_from_slice(&crc32c(&header).to_le_bytes());
     header
 }

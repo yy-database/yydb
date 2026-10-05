@@ -7,7 +7,7 @@ use yydb::{Connection, Error, OpenFlags};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "g-yydb-format-v1-lock-{}-{}.yydb",
+        "g-yydb-format-v0-lock-{}-{}.yydb",
         std::process::id(),
         label
     ))
@@ -18,7 +18,7 @@ fn lock_path(db: &std::path::Path) -> std::path::PathBuf {
 }
 
 #[test]
-fn g_yydb_format_v1_writer_lock_exclusive() {
+fn g_yydb_format_v0_writer_lock_exclusive() {
     let path = temp_path("exclusive");
     let _ = fs::remove_file(&path);
     let _ = fs::remove_file(lock_path(&path));

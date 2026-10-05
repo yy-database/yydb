@@ -4,7 +4,7 @@ use yydb_types::{Error, Result};
 
 use crate::crc32c::crc32c;
 
-pub const PAGE_MAGIC: &[u8; 5] = b"YDPG\x01";
+pub const PAGE_MAGIC: &[u8; 5] = b"YDPG\x00";
 pub const PAGE_SIZE: usize = 4096;
 pub const SLOT_BYTES: usize = 2048;
 
@@ -101,7 +101,7 @@ pub fn encode_empty_page0(database_id: [u8; 16], storage_layout: u8) -> Vec<u8> 
         slot[22..38].copy_from_slice(&database_id);
         slot[38] = storage_layout;
         slot[39] = 12;
-        slot[40..44].copy_from_slice(&1u32.to_le_bytes());
+        slot[40..44].copy_from_slice(&0u32.to_le_bytes());
         let checksum = crc32c(&slot[..2044]);
         slot[2044..2048].copy_from_slice(&checksum.to_le_bytes());
     }

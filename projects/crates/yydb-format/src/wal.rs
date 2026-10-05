@@ -1,10 +1,10 @@
-//! `YYWL` v3 page-image WAL.
+//! `YYWL` v0 page-image WAL.
 
 use yydb_types::{Error, Result};
 
 use crate::crc32c::crc32c;
 
-pub const WAL_MAGIC: &[u8; 5] = b"YYWL\x03";
+pub const WAL_MAGIC: &[u8; 5] = b"YYWL\x00";
 
 /// Parsed WAL file header.
 #[derive(Debug, Clone, PartialEq, Eq)]

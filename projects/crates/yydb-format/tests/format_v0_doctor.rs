@@ -1,4 +1,4 @@
-//! format v1 doctor probes against golden fixtures.
+//! format v0 doctor probes against golden fixtures.
 
 use std::path::PathBuf;
 
@@ -7,12 +7,12 @@ use yydb_types::DoctorSeverity;
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/format-v1")
+        .join("tests/fixtures/format-v0")
         .join(name)
 }
 
 #[test]
-fn format_v1_doctor_page0_empty_clean() {
+fn format_v0_doctor_page0_empty_clean() {
     let path = fixture("page0_empty_dual_slot.bin");
     let issues = diagnose_file(&path).unwrap();
     assert!(
@@ -25,7 +25,7 @@ fn format_v1_doctor_page0_empty_clean() {
 }
 
 #[test]
-fn format_v1_doctor_page0_bad_checksum_warns_slot_a() {
+fn format_v0_doctor_page0_bad_checksum_warns_slot_a() {
     let path = fixture("page0_bad_checksum.bin");
     let issues = diagnose_file(&path).unwrap();
     assert!(

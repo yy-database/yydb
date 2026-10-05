@@ -1,0 +1,45 @@
+# v0 golden bytes — design truth source
+# Contract: ../../09-v0页与WAL字节合同.md
+
+[[case]]
+id = "format_v0.page0_empty"
+file = "page0_empty_dual_slot.bin"
+expect = "parse_ok"
+description = "Dual-slot empty database header on page 0"
+
+[[case]]
+id = "format_v0.page0_bad_checksum"
+file = "page0_bad_checksum.bin"
+expect = "doctor_corrupt_header"
+description = "Slot A checksum deliberately invalid"
+
+[[case]]
+id = "format_v0.wal_header"
+file = "wal_header.bin"
+expect = "wal_header_ok"
+description = "YYWL v0 file header only"
+
+[[case]]
+id = "format_v0.wal_txn_minimal"
+file = "wal_txn_commit_minimal.bin"
+expect = "wal_txn_visible"
+description = "Single committed transaction with one PageImage"
+
+[[case]]
+id = "format_v0.shm_empty"
+file = "shm_empty.bin"
+expect = "shm_parse_ok"
+description = "Empty SHM v0 coordination block"
+
+[[case]]
+id = "format_v0.blob_header_min"
+file = "blob_chunk_header_min.bin"
+expect = "blob_header_ok"
+length = 82
+description = "Zero-length payload blob chunk header"
+
+[[case]]
+id = "format_v0.crc32c_empty"
+file = "crc32c_reference.txt"
+expect = "crc32c_empty_match"
+description = "CRC32C reference for empty input"

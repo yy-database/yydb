@@ -1,4 +1,4 @@
-//! Read-only `YDPG` / `YYWL` v3 consistency probes.
+//! Read-only `YDPG` / `YYWL` v0 consistency probes.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -13,7 +13,7 @@ use crate::page::{PageHeader, PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF};
 use crate::wal::parse_wal;
 use crate::wal_append::wal_sidecar_path;
 
-/// Probe a `YDPG` main file and optional `YYWL` v3 sidecar.
+/// Probe a `YDPG` main file and optional `YYWL` v0 sidecar.
 pub fn diagnose_file(path: &Path) -> Result<Vec<DoctorIssue>> {
     let bytes = std::fs::read(path)?;
     let mut issues = probe_main_bytes(&bytes);

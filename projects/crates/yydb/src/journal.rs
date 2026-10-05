@@ -1,4 +1,4 @@
-//! Journal modes and `{path}-wal` sidecar paths for `YDPG` / `YYWL` v3.
+//! Journal modes and `{path}-wal` sidecar paths for `YDPG` / `YYWL` v0.
 
 use std::{
     fs,
@@ -50,7 +50,7 @@ impl OpenFlags {
         Self::default()
     }
 
-    /// Enable `YYWL` v3 journaling.
+    /// Enable `YYWL` v0 journaling.
     pub fn wal() -> Self {
         Self {
             journal_mode: JournalMode::Wal,
@@ -74,7 +74,7 @@ fn sidecar(db: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(os)
 }
 
-/// Detect WAL sidecar presence and frame count for `YYWL` v3 files.
+/// Detect WAL sidecar presence and frame count for `YYWL` v0 files.
 pub fn sidecar_status(db: &Path) -> Result<(bool, bool, u32)> {
     let wal = wal_path(db);
     let shm = shm_path(db);
