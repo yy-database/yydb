@@ -33,6 +33,12 @@ pub fn open_temp_db(label: &str) -> (Connection, PathBuf) {
     (conn, path)
 }
 
+pub fn open_temp_yydx(label: &str) -> (Connection, PathBuf) {
+    let path = temp_yydx(label);
+    let conn = Connection::open_yydx(&path).unwrap();
+    (conn, path)
+}
+
 pub fn reopen(path: &Path) -> Connection {
     Connection::open(path).unwrap()
 }
