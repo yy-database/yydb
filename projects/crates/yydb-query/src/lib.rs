@@ -6,6 +6,7 @@
 #![deny(missing_docs)]
 
 mod catalog;
+mod constraints;
 mod dml;
 mod exec;
 mod lower;
@@ -42,6 +43,17 @@ pub fn execute_write(
     records: &mut BTreeMap<String, Vec<u8>>,
 ) -> yydb_types::Result<()> {
     dml::execute(source, contract, schema_document, records)
+}
+
+/// Execute writes with host-declared uniqueness rules merged into document rules.
+pub fn execute_write_with_constraints(
+    source: &str,
+    contract: &ResolvedContract,
+    declared: &[yydb_types::TableUniqueConstraint],
+    schema_document: Option<&str>,
+    records: &mut BTreeMap<String, Vec<u8>>,
+) -> yydb_types::Result<()> {
+    dml::execute_with_constraints(source, contract, declared, schema_document, records)
 }
 
 /// Run a single `Type::insert({ … })` program and return the stored row when recognized.

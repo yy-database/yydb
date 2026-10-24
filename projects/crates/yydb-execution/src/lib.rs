@@ -7,6 +7,8 @@
 
 #![deny(missing_docs)]
 
+pub use yydb_types::{Date, Decimal, Time, Timestamp, UniqueConstraint};
+
 /// A node identifier in an execution Program.
 pub type NodeId = u32;
 
@@ -36,6 +38,19 @@ pub enum Type {
     Bytes,
     /// Immutable file or object reference.
     File,
+    /// Calendar date without time or zone.
+    Date,
+    /// Wall-clock time with nanosecond resolution, no zone.
+    Time,
+    /// Absolute UTC instant with microsecond resolution.
+    Timestamp,
+    /// Exact fixed-point decimal with declared precision and scale.
+    Decimal {
+        /// Maximum number of stored digits (`1..=38`).
+        precision: u8,
+        /// Exact number of fractional digits (`0..=precision`).
+        scale: u8,
+    },
     /// Fixed-dimension vector with an explicit metric.
     Vector {
         /// Number of vector components.
@@ -300,6 +315,14 @@ pub enum Value {
     Bytes(Vec<u8>),
     /// Immutable file or object reference.
     File(FileRef),
+    /// Calendar date without time or zone.
+    Date(Date),
+    /// Wall-clock time with nanosecond resolution, no zone.
+    Time(Time),
+    /// Absolute UTC instant with microsecond resolution.
+    Timestamp(Timestamp),
+    /// Exact fixed-point decimal with declared precision and scale.
+    Decimal(Decimal),
     /// Fixed-dimension vector value.
     Vector(VectorValue),
     /// Schema-identified record value.
@@ -316,6 +339,10 @@ impl Value {
             Self::Text(_) => Type::Text,
             Self::Bytes(_) => Type::Bytes,
             Self::File(_) => Type::File,
+            Self::Date(_) => Type::Date,
+            Self::Time(_) => Type::Time,
+            Self::Timestamp(_) => Type::Timestamp,
+            Self::Decimal(value) => Type::Decimal { precision: value.precision(), scale: value.scale() },
             Self::Vector(value) => Type::Vector { dimension: value.dimension(), metric: value.metric },
             Self::Record(value) => Type::Record {
                 schema_id: value.schema_id,
@@ -825,6 +852,10 @@ fn as_i64(value: &Value) -> i64 {
         | Value::Text(_)
         | Value::Bytes(_)
         | Value::File(_)
+        | Value::Date(_)
+        | Value::Time(_)
+        | Value::Timestamp(_)
+        | Value::Decimal(_)
         | Value::Vector(_)
         | Value::Record(_) => unreachable!("validated integer operand"),
     }
@@ -833,7 +864,17 @@ fn as_i64(value: &Value) -> i64 {
 fn as_record(value: &Value) -> &RecordValue {
     match value {
         Value::Record(value) => value,
-        Value::Null | Value::Bool(_) | Value::I64(_) | Value::Text(_) | Value::Bytes(_) | Value::File(_) | Value::Vector(_) => {
+        Value::Null
+        | Value::Bool(_)
+        | Value::I64(_)
+        | Value::Text(_)
+        | Value::Bytes(_)
+        | Value::File(_)
+        | Value::Date(_)
+        | Value::Time(_)
+        | Value::Timestamp(_)
+        | Value::Decimal(_)
+        | Value::Vector(_) => {
             unreachable!("validated record operand")
         }
     }

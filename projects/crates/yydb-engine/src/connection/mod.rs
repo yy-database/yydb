@@ -37,6 +37,7 @@ pub(crate) struct State {
     pub(crate) identity_history: Option<vos::types::IdentityHistory>,
     pub(crate) resolved_contract: Option<vos::ResolvedContract>,
     pub(crate) records: BTreeMap<String, Vec<u8>>,
+    pub(crate) unique_constraints: Vec<yydb_types::TableUniqueConstraint>,
 }
 
 pub(crate) enum Backend {

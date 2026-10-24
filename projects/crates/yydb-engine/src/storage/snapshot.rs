@@ -17,6 +17,7 @@ use crate::{
 const META_SCHEMA: &[u8] = b"__yydb/meta/schema";
 const META_IDENTITY: &[u8] = b"__yydb/meta/identity";
 const META_CONTRACT: &[u8] = b"__yydb/meta/contract";
+const META_UNIQUE: &[u8] = b"__yydb/meta/unique";
 const META_PREFIX: &str = "__yydb/meta/";
 
 /// Decode engine [`State`] from a durable snapshot.
@@ -24,13 +25,14 @@ pub(crate) fn state_from_snapshot(snapshot: &Snapshot) -> Result<State> {
     let schema = decode_schema(snapshot.metadata.get(META_SCHEMA).cloned())?;
     let identity_history = decode_identity(snapshot.metadata.get(META_IDENTITY).cloned())?;
     let resolved_contract = decode_contract(snapshot.metadata.get(META_CONTRACT).cloned())?;
+    let unique_constraints = decode_unique_constraints(snapshot.metadata.get(META_UNIQUE).cloned())?;
     let records = snapshot
         .records
         .iter()
         .filter(|(key, _)| !key.starts_with(META_PREFIX))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    Ok(State { schema, identity_history, resolved_contract, records })
+    Ok(State { schema, identity_history, resolved_contract, records, unique_constraints })
 }
 
 /// Encode engine [`State`] into a durable snapshot.
@@ -39,6 +41,9 @@ pub(crate) fn snapshot_from_state(state: &State) -> Result<Snapshot> {
     metadata.insert(META_SCHEMA.to_vec(), encode_schema(&state.schema)?);
     metadata.insert(META_IDENTITY.to_vec(), encode_identity(&state.identity_history)?);
     metadata.insert(META_CONTRACT.to_vec(), encode_contract(&state.resolved_contract)?);
+    if !state.unique_constraints.is_empty() {
+        metadata.insert(META_UNIQUE.to_vec(), encode_unique_constraints(&state.unique_constraints)?);
+    }
     let mut records = BTreeMap::new();
     for (key, value) in &state.records {
         if key.starts_with(META_PREFIX) {
@@ -211,5 +216,80 @@ fn decode_contract(bytes: Option<Vec<u8>>) -> Result<Option<vos::ResolvedContrac
             ))
         }
         _ => Err(Error::Corrupt("unknown resolved contract meta marker")),
+    }
+}
+
+fn encode_unique_constraints(constraints: &[yydb_types::TableUniqueConstraint]) -> Result<Vec<u8>> {
+    let encoded: Vec<serde_json::Value> = constraints
+        .iter()
+        .map(|declared| {
+            serde_json::json!({
+                "table": declared.table(),
+                "name": declared.constraint().name(),
+                "columns": declared.constraint().columns(),
+                "nullsDistinct": declared.constraint().nulls_distinct(),
+            })
+        })
+        .collect();
+    let encoded = serde_json::to_vec(&encoded).map_err(|_| Error::Corrupt("unique constraint serialization failed"))?;
+    let mut bytes = Vec::with_capacity(1 + 4 + encoded.len());
+    bytes.push(1);
+    bytes.extend((encoded.len() as u32).to_le_bytes());
+    bytes.extend(encoded);
+    Ok(bytes)
+}
+
+fn decode_unique_constraints(bytes: Option<Vec<u8>>) -> Result<Vec<yydb_types::TableUniqueConstraint>> {
+    let Some(bytes) = bytes else {
+        return Ok(Vec::new());
+    };
+    match bytes.first() {
+        None | Some(0) => Ok(Vec::new()),
+        Some(1) => {
+            if bytes.len() < 5 {
+                return Err(Error::Corrupt("unique constraint meta truncated"));
+            }
+            let len = u32::from_le_bytes(bytes[1..5].try_into().unwrap()) as usize;
+            let end = 5 + len;
+            if bytes.len() != end {
+                return Err(Error::Corrupt("unique constraint meta length mismatch"));
+            }
+            let entries: Vec<serde_json::Value> = serde_json::from_slice(&bytes[5..end])
+                .map_err(|_| Error::Corrupt("unique constraint meta is invalid JSON"))?;
+            entries
+                .into_iter()
+                .map(|entry| {
+                    let table = entry
+                        .get("table")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| Error::Corrupt("unique constraint meta is missing `table`"))?;
+                    let name = entry
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| Error::Corrupt("unique constraint meta is missing `name`"))?;
+                    let columns = entry
+                        .get("columns")
+                        .and_then(serde_json::Value::as_array)
+                        .ok_or_else(|| Error::Corrupt("unique constraint meta is missing `columns`"))?
+                        .iter()
+                        .map(|column| {
+                            column
+                                .as_str()
+                                .map(str::to_owned)
+                                .ok_or_else(|| Error::Corrupt("unique constraint column is not a string"))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let nulls_distinct = entry
+                        .get("nullsDistinct")
+                        .and_then(serde_json::Value::as_bool)
+                        .ok_or_else(|| Error::Corrupt("unique constraint meta is missing `nullsDistinct`"))?;
+                    let constraint = yydb_types::UniqueConstraint::new(name, columns, nulls_distinct)
+                        .map_err(|_| Error::Corrupt("unique constraint meta is invalid"))?;
+                    yydb_types::TableUniqueConstraint::new(table, constraint)
+                        .map_err(|_| Error::Corrupt("unique constraint table name is invalid"))
+                })
+                .collect()
+        }
+        _ => Err(Error::Corrupt("unknown unique constraint meta marker")),
     }
 }

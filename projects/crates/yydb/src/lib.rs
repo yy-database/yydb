@@ -120,10 +120,10 @@ pub use udf::{
 pub type UdfResult<T = UdfValue> = yydb_udf::Result<T>;
 
 pub use types::{
-    ChunkManifest, CommitSequence, CompactReport, DEFAULT_CHUNK_SIZE, DoctorIssue, DoctorReport, DoctorSeverity, Error,
-    EvictBudget, EvictReport, EvictionPolicy, HashAlgo, INLINE_BYTES_MAX, LeaseExpectation, LeaseToken, NamespaceQuota,
-    NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion, ReleaseOutcome, Result, SchemaVersion, Tier, Value,
-    Vector,
+    ChunkManifest, CommitSequence, CompactReport, Date, DEFAULT_CHUNK_SIZE, Decimal, DoctorIssue, DoctorReport,
+    DoctorSeverity, Error, EvictBudget, EvictReport, EvictionPolicy, HashAlgo, INLINE_BYTES_MAX, LeaseExpectation,
+    LeaseToken, NamespaceQuota, NamespaceStats, ObjectKind, ObjectRef, ReclaimReport, RecordVersion, ReleaseOutcome,
+    Result, SchemaVersion, TableUniqueConstraint, Tier, Time, Timestamp, UniqueConstraint, Value, Vector,
 };
 
 /// Common embed imports (`use yydb::prelude::*`).
