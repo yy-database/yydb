@@ -6,7 +6,12 @@
 
 mod common;
 
-use sqlite::{SchemaObjectKind, TableLimits, read_schema, validate_database};
+use sqlite::{
+    RecordLimits, RecordValue, SchemaObjectKind, TableLimits, TextEncoding, decode_record, read_named_table, read_schema,
+    validate_database,
+};
+
+use common::ReferenceValue;
 
 fn kind_name(kind: SchemaObjectKind) -> &'static str {
     match kind {
@@ -64,5 +69,102 @@ fn schema_matches_upstream_sqlite_for_both_page_sizes() {
             objects.iter().any(|object| object.kind == SchemaObjectKind::Index && object.sql.is_none()),
             "automatic index SQL is NULL in sqlite_master"
         );
+    }
+}
+
+#[test]
+fn rowid_scans_match_upstream_sqlite_for_both_page_sizes() {
+    for page_size in [1024, 4096] {
+        let Some(fixture) = common::generate(page_size)
+        else {
+            eprintln!("skipping SQLite rowid interop: no python3/python with sqlite3 on this host");
+            return;
+        };
+        let encoding = match common::header_encoding(&fixture.bytes) {
+            "utf8" => TextEncoding::Utf8,
+            "utf16le" => TextEncoding::Utf16Le,
+            "utf16be" => TextEncoding::Utf16Be,
+            other => panic!("unexpected fixture encoding {other}"),
+        };
+        assert_eq!(fixture.manifest.tables.len(), 7);
+        for reference in fixture.manifest.tables.iter().filter(|table| table.name != "affinity") {
+            let rows = read_named_table(&fixture.bytes, &reference.name, TableLimits::default())
+                .unwrap_or_else(|error| panic!("read {} at page size {page_size}: {error}", reference.name));
+            assert_eq!(rows.len(), reference.rows.len(), "row count for {} at {page_size}", reference.name);
+            for (row, expected) in rows.iter().zip(&reference.rows) {
+                assert_eq!(row.rowid, expected.rowid, "rowid for {} at {page_size}", reference.name);
+                let values = decode_record(&row.payload, encoding, RecordLimits::default())
+                    .unwrap_or_else(|error| panic!("decode {} rowid {}: {error}", reference.name, row.rowid));
+                assert_eq!(values.len(), expected.values.len(), "column count for {} rowid {}", reference.name, row.rowid);
+                for (index, (value, expected)) in values.iter().zip(&expected.values).enumerate() {
+                    assert!(
+                        matches_reference(value, expected),
+                        "{} rowid {} column {index}: reader {value:?} vs upstream {expected:?}",
+                        reference.name,
+                        row.rowid
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn real_affinity_projection_is_not_simulated() {
+    for page_size in [1024, 4096] {
+        let Some(fixture) = common::generate(page_size)
+        else {
+            eprintln!("skipping SQLite affinity check: no python3/python with sqlite3 on this host");
+            return;
+        };
+        // `INSERT INTO affinity(v) VALUES(0.0)` is stored with the integer serial type
+        // because SQLite normalizes integral REAL inputs, while `SELECT v` projects it
+        // back as REAL 0.0 through column affinity. The reader exposes disk storage,
+        // so it reports Integer(0). This is a documented boundary, not a bug.
+        let reference = fixture.manifest.tables.iter().find(|table| table.name == "affinity").expect("affinity fixture table");
+        assert_eq!(reference.rows[0].values, [ReferenceValue::Null, ReferenceValue::Real(0)]);
+
+        let rows = read_named_table(&fixture.bytes, "affinity", TableLimits::default()).expect("read affinity");
+        let values = decode_record(&rows[0].payload, TextEncoding::Utf8, RecordLimits::default()).expect("decode affinity");
+        assert_eq!(values, [RecordValue::Null, RecordValue::Integer(0)]);
+    }
+}
+
+#[test]
+fn without_rowid_view_and_missing_table_are_explicit_errors() {
+    for page_size in [1024, 4096] {
+        let Some(fixture) = common::generate(page_size)
+        else {
+            eprintln!("skipping SQLite limitation checks: no python3/python with sqlite3 on this host");
+            return;
+        };
+        let index_error = read_named_table(&fixture.bytes, "wo", TableLimits::default()).unwrap_err().to_string();
+        assert!(index_error.contains("index b-tree scan"), "WITHOUT ROWID must be rejected explicitly: {index_error}");
+
+        let view_error = read_named_table(&fixture.bytes, "v_simple", TableLimits::default()).unwrap_err().to_string();
+        assert!(view_error.contains("view execution"), "views must not be evaluated: {view_error}");
+
+        let missing = read_named_table(&fixture.bytes, "missing_table", TableLimits::default()).unwrap_err().to_string();
+        assert!(missing.contains("not found"), "missing tables must be reported: {missing}");
+
+        let schema = read_schema(&fixture.bytes, TableLimits::default()).expect("read schema");
+        let master = read_named_table(&fixture.bytes, "sqlite_schema", TableLimits::default()).expect("schema alias");
+        assert_eq!(master.len(), schema.len());
+
+        let limit_error = read_named_table(&fixture.bytes, "types", TableLimits { max_rows: 1, ..Default::default() })
+            .unwrap_err()
+            .to_string();
+        assert!(limit_error.contains("row limit"), "scan limits must stay enforced: {limit_error}");
+    }
+}
+
+fn matches_reference(value: &RecordValue<'_>, expected: &ReferenceValue) -> bool {
+    match (value, expected) {
+        (RecordValue::Null, ReferenceValue::Null) => true,
+        (RecordValue::Integer(actual), ReferenceValue::Integer(expected)) => actual == expected,
+        (RecordValue::Real(actual), ReferenceValue::Real(expected)) => actual.to_bits() == *expected,
+        (RecordValue::Text(actual), ReferenceValue::Text(expected)) => actual == expected,
+        (RecordValue::Blob(actual), ReferenceValue::Blob(expected)) => *actual == expected.as_slice(),
+        _ => false,
     }
 }
