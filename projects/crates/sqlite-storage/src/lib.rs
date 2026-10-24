@@ -8,6 +8,9 @@ mod database;
 mod schema;
 mod table;
 
+#[cfg(test)]
+mod tests;
+
 pub use crate::{
     database::{SqliteDatabase, read_existing},
     schema::{SchemaObject, SchemaObjectKind, read_named_table, read_schema},
