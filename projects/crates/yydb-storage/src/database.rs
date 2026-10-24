@@ -62,6 +62,11 @@ impl Database {
         self.journal_mode
     }
 
+    /// Fence epoch held by this writer handle.
+    pub fn writer_fence(&self) -> u64 {
+        self._writer_lock.fence()
+    }
+
     /// Switch journal mode, creating or checkpointing sidecars as needed.
     pub fn set_journal_mode(&mut self, mode: JournalMode) -> Result<()> {
         if self.journal_mode == mode {
