@@ -4,6 +4,7 @@ mod execution_catalog;
 mod execution_udf;
 mod host_micro_udf;
 mod main_snapshot;
+mod scalar_mapping;
 mod schema_metadata;
 mod schema_pragma;
 mod sql_query;

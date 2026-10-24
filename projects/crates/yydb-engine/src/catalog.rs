@@ -482,19 +482,9 @@ pub fn remap_unique_constraints(
 }
 
 fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Type> {
-    use vos::types::{CanonicalScalar, ResolvedCanonicalType};
+    use vos::types::ResolvedCanonicalType;
     match ty {
-        ResolvedCanonicalType::Scalar(CanonicalScalar::I64) => Ok(Type::I64),
-        ResolvedCanonicalType::Scalar(CanonicalScalar::Bool) => Ok(Type::Bool),
-        ResolvedCanonicalType::Scalar(CanonicalScalar::Utf8) => Ok(Type::Text),
-        ResolvedCanonicalType::Scalar(CanonicalScalar::Bytes) => Ok(Type::Bytes),
-        ResolvedCanonicalType::Scalar(CanonicalScalar::Date) => Ok(Type::Date),
-        ResolvedCanonicalType::Scalar(CanonicalScalar::Time) => Ok(Type::Time),
-        ResolvedCanonicalType::Scalar(CanonicalScalar::DateTime) => Ok(Type::Timestamp),
-        ResolvedCanonicalType::Scalar(CanonicalScalar::Decimal) => Ok(Type::Decimal { precision: 38, scale: 0 }),
-        ResolvedCanonicalType::Scalar(scalar) => {
-            Err(Error::Schema { message: format!("VOS scalar `{scalar}` is not in the YYDB execution scalar set") })
-        }
+        ResolvedCanonicalType::Scalar(scalar) => execution_type_for_scalar(*scalar),
         ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => decimal_type_from_arguments(arguments),
         ResolvedCanonicalType::Optional(_)
         | ResolvedCanonicalType::Reference(_)
@@ -503,6 +493,54 @@ fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Typ
         | ResolvedCanonicalType::Generic { .. } => {
             Err(Error::Unsupported("resolved VOS composite type is not in the execution slice"))
         }
+    }
+}
+
+/// Maps a canonical VOS scalar to the exact YYDB execution scalar.
+///
+/// Only scalars whose storage semantics YYDB already owns are accepted. Narrow
+/// integers, floats, `utf16` and `uuid` have no execution type here, so they
+/// return [`Error::Schema`] instead of widening, merging or silently dropping
+/// the declared scalar.
+pub fn execution_type_for_scalar(scalar: vos::types::CanonicalScalar) -> Result<Type> {
+    use vos::types::CanonicalScalar;
+    match scalar {
+        CanonicalScalar::I64 => Ok(Type::I64),
+        CanonicalScalar::Bool => Ok(Type::Bool),
+        CanonicalScalar::Utf8 => Ok(Type::Text),
+        CanonicalScalar::Bytes => Ok(Type::Bytes),
+        CanonicalScalar::Date => Ok(Type::Date),
+        CanonicalScalar::Time => Ok(Type::Time),
+        CanonicalScalar::DateTime => Ok(Type::Timestamp),
+        CanonicalScalar::Decimal => Ok(Type::Decimal { precision: yydb_types::scalar::DECIMAL_MAX_PRECISION, scale: 0 }),
+        other => Err(Error::Schema { message: format!("VOS scalar `{other}` is not in the YYDB execution scalar set") }),
+    }
+}
+
+/// Maps a YYDB execution scalar back to its canonical VOS scalar.
+///
+/// Precision and scale are catalog metadata of [`Type::Decimal`], so the
+/// canonical form is always [`vos::types::CanonicalScalar::Decimal`] and the
+/// declared shape is validated rather than encoded. Composite execution types
+/// (files, vectors, records, null) have no scalar spelling and return
+/// [`Error::Schema`].
+pub fn canonical_scalar_for_execution_type(ty: &Type) -> Result<vos::types::CanonicalScalar> {
+    use vos::types::CanonicalScalar;
+    match ty {
+        Type::I64 => Ok(CanonicalScalar::I64),
+        Type::Bool => Ok(CanonicalScalar::Bool),
+        Type::Text => Ok(CanonicalScalar::Utf8),
+        Type::Bytes => Ok(CanonicalScalar::Bytes),
+        Type::Date => Ok(CanonicalScalar::Date),
+        Type::Time => Ok(CanonicalScalar::Time),
+        Type::Timestamp => Ok(CanonicalScalar::DateTime),
+        Type::Decimal { precision, scale } => {
+            yydb_types::Decimal::new(0, *precision, *scale).map_err(|error| Error::Schema {
+                message: format!("execution decimal shape ({precision}, {scale}) is invalid: {error}"),
+            })?;
+            Ok(CanonicalScalar::Decimal)
+        }
+        other => Err(Error::Schema { message: format!("execution type {other:?} has no canonical VOS scalar") }),
     }
 }
 
