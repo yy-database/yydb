@@ -6,6 +6,12 @@
  *
  *   node scripts/format.mjs           # write
  *   node scripts/format.mjs --check   # check only
+ *
+ * Known upstream defect: the published `@doki-land/nifty` formatter spaces
+ * reserved member names (`delete (key: string)`) and rewrites optional method
+ * signatures (`name?(...): T`) into a ternary, so the JS/TS check stays red on
+ * `projects/packages/**` until a nifty release ships the Oak formatter fix.
+ * The workspace intentionally keeps no exclusion or ignore rule for this.
  */
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
