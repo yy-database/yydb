@@ -46,10 +46,7 @@ table Event {
     };
     assert_eq!(field("happened_on"), serde_json::json!({ "kind": "date" }));
     assert_eq!(field("at_time"), serde_json::json!({ "kind": "time", "unit": "nanosecond", "timezone": "none" }));
-    assert_eq!(
-        field("created_at"),
-        serde_json::json!({ "kind": "timestamp", "unit": "microsecond", "timezone": "utc" })
-    );
+    assert_eq!(field("created_at"), serde_json::json!({ "kind": "timestamp", "unit": "microsecond", "timezone": "utc" }));
     assert_eq!(field("amount"), serde_json::json!({ "kind": "decimal", "precision": 38, "scale": 2 }));
 
     let constraints = table.get("uniqueConstraints").and_then(JsonValue::as_array).expect("uniqueConstraints");

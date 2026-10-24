@@ -36,15 +36,12 @@ pub fn from_contract(contract: &ResolvedContract) -> Result<Vec<TableUniqueConst
 
 /// Combines document-derived rules with host declarations, deduplicated by
 /// `(table, name)` with document rules taking precedence.
-pub fn merge(
-    document: Vec<TableUniqueConstraint>,
-    declared: &[TableUniqueConstraint],
-) -> Vec<TableUniqueConstraint> {
+pub fn merge(document: Vec<TableUniqueConstraint>, declared: &[TableUniqueConstraint]) -> Vec<TableUniqueConstraint> {
     let mut merged = document;
     for candidate in declared {
-        let duplicate = merged
-            .iter()
-            .any(|existing| existing.table() == candidate.table() && existing.constraint().name() == candidate.constraint().name());
+        let duplicate = merged.iter().any(|existing| {
+            existing.table() == candidate.table() && existing.constraint().name() == candidate.constraint().name()
+        });
         if !duplicate {
             merged.push(candidate.clone());
         }
@@ -65,11 +62,8 @@ pub fn check(
     pk_text: &str,
     row: &QueryRow,
 ) -> Result<()> {
-    let applicable: Vec<&UniqueConstraint> = constraints
-        .iter()
-        .filter(|candidate| candidate.table() == table)
-        .map(TableUniqueConstraint::constraint)
-        .collect();
+    let applicable: Vec<&UniqueConstraint> =
+        constraints.iter().filter(|candidate| candidate.table() == table).map(TableUniqueConstraint::constraint).collect();
     if applicable.is_empty() {
         return Ok(());
     }
@@ -81,11 +75,7 @@ pub fn check(
             continue;
         }
         for existing in &existing_rows {
-            let existing_pk = existing
-                .get(pk_field)
-                .map(value_text)
-                .transpose()?
-                .unwrap_or_default();
+            let existing_pk = existing.get(pk_field).map(value_text).transpose()?.unwrap_or_default();
             if existing_pk == pk_text {
                 continue;
             }

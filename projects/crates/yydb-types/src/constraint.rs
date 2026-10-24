@@ -19,11 +19,7 @@ pub struct UniqueConstraint {
 
 impl UniqueConstraint {
     /// Validates and builds a constraint.
-    pub fn new(
-        name: impl Into<String>,
-        columns: Vec<String>,
-        nulls_distinct: bool,
-    ) -> Result<Self, UniqueConstraintError> {
+    pub fn new(name: impl Into<String>, columns: Vec<String>, nulls_distinct: bool) -> Result<Self, UniqueConstraintError> {
         let name = name.into();
         if name.is_empty() {
             return Err(UniqueConstraintError::EmptyName);

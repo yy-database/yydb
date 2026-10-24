@@ -35,10 +35,7 @@ fn date_encoding_is_fixed_width_and_order_preserving() {
         assert_eq!(Date::decode(&date.encode()).unwrap(), date);
     }
     assert!(matches!(Date::decode(&[0, 0, 0]), Err(ScalarError::InvalidLength { expected: 4, got: 3, .. })));
-    assert!(matches!(
-        Date::decode(&[0xff, 0xff, 0xff, 0xff]),
-        Err(ScalarError::OutOfRange { .. })
-    ));
+    assert!(matches!(Date::decode(&[0xff, 0xff, 0xff, 0xff]), Err(ScalarError::OutOfRange { .. })));
 }
 
 #[test]
@@ -63,29 +60,14 @@ fn time_supports_nanoseconds_and_rejects_finer_input() {
 fn timestamp_is_utc_with_microsecond_resolution() {
     let instant = Timestamp::parse_iso("2024-02-29T12:34:56.123456Z").unwrap();
     assert_eq!(instant.to_iso(), "2024-02-29T12:34:56.123456Z");
-    assert_eq!(
-        instant.to_parts(),
-        (Date::parse_iso("2024-02-29").unwrap(), Time::parse_iso("12:34:56.123456").unwrap())
-    );
+    assert_eq!(instant.to_parts(), (Date::parse_iso("2024-02-29").unwrap(), Time::parse_iso("12:34:56.123456").unwrap()));
     assert_eq!(Timestamp::parse_iso("2024-02-29T12:34:56.123456+00:00").unwrap(), instant);
     assert_eq!(Timestamp::MIN.to_iso(), "0001-01-01T00:00:00Z");
     assert_eq!(Timestamp::MAX.to_iso(), "9999-12-31T23:59:59.999999Z");
-    assert!(matches!(
-        Timestamp::parse_iso("2024-02-29T12:34:56+08:00"),
-        Err(ScalarError::UnsupportedUtcOffset { .. })
-    ));
-    assert!(matches!(
-        Timestamp::parse_iso("2024-02-29T12:34:56.123456789Z"),
-        Err(ScalarError::PrecisionLoss { .. })
-    ));
-    assert!(matches!(
-        Timestamp::from_unix_micros(Timestamp::MAX.unix_micros() + 1),
-        Err(ScalarError::OutOfRange { .. })
-    ));
-    assert!(matches!(
-        Timestamp::from_unix_micros(Timestamp::MIN.unix_micros() - 1),
-        Err(ScalarError::OutOfRange { .. })
-    ));
+    assert!(matches!(Timestamp::parse_iso("2024-02-29T12:34:56+08:00"), Err(ScalarError::UnsupportedUtcOffset { .. })));
+    assert!(matches!(Timestamp::parse_iso("2024-02-29T12:34:56.123456789Z"), Err(ScalarError::PrecisionLoss { .. })));
+    assert!(matches!(Timestamp::from_unix_micros(Timestamp::MAX.unix_micros() + 1), Err(ScalarError::OutOfRange { .. })));
+    assert!(matches!(Timestamp::from_unix_micros(Timestamp::MIN.unix_micros() - 1), Err(ScalarError::OutOfRange { .. })));
     for pair in [Timestamp::MIN, instant, Timestamp::MAX].windows(2) {
         assert!(pair[0].encode() < pair[1].encode());
     }
@@ -137,14 +119,8 @@ fn decimal_compares_exactly_across_scales_and_signs() {
     assert_eq!(zero.compare(zero_scaled), Ordering::Equal);
     assert_eq!(negative.compare(zero), Ordering::Less);
     assert_eq!(zero.compare(half), Ordering::Less);
-    assert_eq!(
-        Decimal::parse("1.0", 4, 1).unwrap().compare(Decimal::parse("0.999", 4, 3).unwrap()),
-        Ordering::Greater
-    );
-    assert_eq!(
-        Decimal::parse("-10.0", 4, 1).unwrap().compare(Decimal::parse("-2.00", 4, 2).unwrap()),
-        Ordering::Less
-    );
+    assert_eq!(Decimal::parse("1.0", 4, 1).unwrap().compare(Decimal::parse("0.999", 4, 3).unwrap()), Ordering::Greater);
+    assert_eq!(Decimal::parse("-10.0", 4, 1).unwrap().compare(Decimal::parse("-2.00", 4, 2).unwrap()), Ordering::Less);
 }
 
 #[test]
@@ -165,14 +141,8 @@ fn decimal_encoding_is_fixed_width_order_preserving_and_shape_checked() {
         assert_eq!(Decimal::decode(&value.encode(), 6, 2).unwrap(), value);
     }
     assert_eq!(Decimal::decode(&[0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 4, 2).unwrap().unscaled(), 0);
-    assert!(matches!(
-        Decimal::decode(&[0xff; 16], 2, 0),
-        Err(ScalarError::PrecisionOverflow { .. })
-    ));
-    assert!(matches!(
-        Decimal::decode(&[0; 15], 2, 0),
-        Err(ScalarError::InvalidLength { expected: 16, got: 15, .. })
-    ));
+    assert!(matches!(Decimal::decode(&[0xff; 16], 2, 0), Err(ScalarError::PrecisionOverflow { .. })));
+    assert!(matches!(Decimal::decode(&[0; 15], 2, 0), Err(ScalarError::InvalidLength { expected: 16, got: 15, .. })));
 }
 
 #[test]
@@ -190,10 +160,7 @@ fn tagged_json_roundtrips_without_loss_and_rejects_unknown_tags() {
     }
     assert!(scalar::tagged_value_json(&yydb_types::Value::Null).is_none());
     let document = serde_json::json!({ "$yydb": "decimal", "precision": 2, "scale": 0, "unscaled": "100" });
-    assert!(matches!(
-        scalar::tagged_value_from_json(&document).unwrap(),
-        Err(ScalarError::Malformed { kind: "decimal", .. })
-    ));
+    assert!(matches!(scalar::tagged_value_from_json(&document).unwrap(), Err(ScalarError::Malformed { kind: "decimal", .. })));
     let unknown = serde_json::json!({ "$yydb": "money" });
     assert!(scalar::tagged_value_from_json(&unknown).unwrap().is_err());
     let wrong_type = serde_json::json!({ "$yydb": "timestamp", "utcMicros": 1 });

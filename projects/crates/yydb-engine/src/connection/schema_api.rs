@@ -29,7 +29,8 @@ impl Connection {
             };
             self.ensure_schema(&schema.document)?;
             let state = self.read_state()?;
-            let Some(contract) = state.resolved_contract else {
+            let Some(contract) = state.resolved_contract
+            else {
                 return Ok(None);
             };
             let mut catalog = schema::execution_catalog_from_resolved_contract(&contract)?;
@@ -64,9 +65,10 @@ impl Connection {
         }
         let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut state = self.read_state()?;
-        let contract = state.resolved_contract.as_ref().ok_or_else(|| Error::Schema {
-            message: "declare_unique_constraint requires a resolved schema contract".into(),
-        })?;
+        let contract = state
+            .resolved_contract
+            .as_ref()
+            .ok_or_else(|| Error::Schema { message: "declare_unique_constraint requires a resolved schema contract".into() })?;
         let catalog = schema::execution_catalog_from_resolved_contract(contract)?;
         let entry = catalog
             .types
@@ -89,9 +91,9 @@ impl Connection {
             });
         }
         let declared = yydb_types::TableUniqueConstraint::new(table, constraint).map_err(Error::from)?;
-        state
-            .unique_constraints
-            .retain(|existing| !(existing.table() == declared.table() && existing.constraint().name() == declared.constraint().name()));
+        state.unique_constraints.retain(|existing| {
+            !(existing.table() == declared.table() && existing.constraint().name() == declared.constraint().name())
+        });
         state.unique_constraints.push(declared);
         self.write_state(&state)
     }

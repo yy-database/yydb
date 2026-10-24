@@ -180,8 +180,7 @@ const fn civil_from_days(days: i32) -> (i32, u32, u32) {
     let shifted = days + 719_468;
     let era = if shifted >= 0 { shifted } else { shifted - 146_096 } / 146_097;
     let day_of_era = (shifted - era * 146_097) as u32;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let year = year_of_era as i32 + era * 400;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_prime = (5 * day_of_year + 2) / 153;
@@ -226,16 +225,10 @@ impl Date {
     /// Creates a date from civil year, month, and day.
     pub fn from_ymd(year: i32, month: u32, day: u32) -> Result<Self, ScalarError> {
         if !(1..=9999).contains(&year) {
-            return Err(ScalarError::OutOfRange {
-                kind: "date",
-                detail: format!("year {year} is outside 0001..=9999"),
-            });
+            return Err(ScalarError::OutOfRange { kind: "date", detail: format!("year {year} is outside 0001..=9999") });
         }
         if !(1..=12).contains(&month) {
-            return Err(ScalarError::OutOfRange {
-                kind: "date",
-                detail: format!("month {month} is outside 1..=12"),
-            });
+            return Err(ScalarError::OutOfRange { kind: "date", detail: format!("month {month} is outside 1..=12") });
         }
         let maximum_day = days_in_month(year, month);
         if day == 0 || day > maximum_day {
@@ -297,11 +290,8 @@ impl Date {
 
     /// Decodes a 4-byte encoding produced by [`Self::encode`].
     pub fn decode(bytes: &[u8]) -> Result<Self, ScalarError> {
-        let bytes: [u8; 4] = bytes.try_into().map_err(|_| ScalarError::InvalidLength {
-            kind: "date",
-            expected: 4,
-            got: bytes.len(),
-        })?;
+        let bytes: [u8; 4] =
+            bytes.try_into().map_err(|_| ScalarError::InvalidLength { kind: "date", expected: 4, got: bytes.len() })?;
         Self::from_days((u32::from_be_bytes(bytes) ^ (1_u32 << 31)) as i32)
     }
 }
@@ -416,11 +406,8 @@ impl Time {
 
     /// Decodes an 8-byte encoding produced by [`Self::encode`].
     pub fn decode(bytes: &[u8]) -> Result<Self, ScalarError> {
-        let bytes: [u8; 8] = bytes.try_into().map_err(|_| ScalarError::InvalidLength {
-            kind: "time",
-            expected: 8,
-            got: bytes.len(),
-        })?;
+        let bytes: [u8; 8] =
+            bytes.try_into().map_err(|_| ScalarError::InvalidLength { kind: "time", expected: 8, got: bytes.len() })?;
         Self::from_nanos(decode_i64_ordered(bytes))
     }
 }
@@ -539,11 +526,8 @@ impl Timestamp {
 
     /// Decodes an 8-byte encoding produced by [`Self::encode`].
     pub fn decode(bytes: &[u8]) -> Result<Self, ScalarError> {
-        let bytes: [u8; 8] = bytes.try_into().map_err(|_| ScalarError::InvalidLength {
-            kind: "timestamp",
-            expected: 8,
-            got: bytes.len(),
-        })?;
+        let bytes: [u8; 8] =
+            bytes.try_into().map_err(|_| ScalarError::InvalidLength { kind: "timestamp", expected: 8, got: bytes.len() })?;
         Self::from_unix_micros(decode_i64_ordered(bytes))
     }
 }
@@ -580,10 +564,7 @@ impl Decimal {
         let magnitude = unscaled.unsigned_abs();
         let limit = 10_u128.pow(precision as u32);
         if magnitude >= limit {
-            return Err(ScalarError::PrecisionOverflow {
-                precision,
-                digits: unscaled.to_string(),
-            });
+            return Err(ScalarError::PrecisionOverflow { precision, digits: unscaled.to_string() });
         }
         Ok(Self { unscaled, precision, scale })
     }
@@ -641,10 +622,8 @@ impl Decimal {
         digits.push_str(integer);
         digits.push_str(fraction);
         digits.extend(std::iter::repeat_n('0', scale as usize - fraction.len()));
-        let magnitude = digits.parse::<i128>().map_err(|_| ScalarError::PrecisionOverflow {
-            precision,
-            digits: digits.clone(),
-        })?;
+        let magnitude =
+            digits.parse::<i128>().map_err(|_| ScalarError::PrecisionOverflow { precision, digits: digits.clone() })?;
         let unscaled = if negative { -magnitude } else { magnitude };
         Self::new(unscaled, precision, scale)
     }
@@ -700,12 +679,7 @@ impl Decimal {
         let left = left.trim_start_matches('0');
         let right = right.trim_start_matches('0');
         let ordering = left.len().cmp(&right.len()).then_with(|| left.cmp(right));
-        if negative {
-            ordering.reverse()
-        }
-        else {
-            ordering
-        }
+        if negative { ordering.reverse() } else { ordering }
     }
 
     fn aligned_digits(self, scale: u8) -> String {
@@ -727,11 +701,8 @@ impl Decimal {
 
     /// Decodes 16 bytes using the declared precision and scale.
     pub fn decode(bytes: &[u8], precision: u8, scale: u8) -> Result<Self, ScalarError> {
-        let bytes: [u8; 16] = bytes.try_into().map_err(|_| ScalarError::InvalidLength {
-            kind: "decimal",
-            expected: 16,
-            got: bytes.len(),
-        })?;
+        let bytes: [u8; 16] =
+            bytes.try_into().map_err(|_| ScalarError::InvalidLength { kind: "decimal", expected: 16, got: bytes.len() })?;
         Self::new(flip_sign_bytes_to_u128(bytes) as i128, precision, scale)
     }
 }
@@ -790,7 +761,8 @@ pub fn tagged_value_from_json(json: &serde_json::Value) -> Option<Result<crate::
 
 fn parse_tagged_value(json: &serde_json::Value, tag: &serde_json::Value) -> Result<crate::Value, ScalarError> {
     let malformed = |kind: &'static str| ScalarError::Malformed { kind, input: json.to_string() };
-    let Some(tag) = tag.as_str() else {
+    let Some(tag) = tag.as_str()
+    else {
         return Err(malformed("scalar"));
     };
     let object = json.as_object().ok_or_else(|| malformed("scalar"))?;
@@ -810,9 +782,7 @@ fn parse_tagged_value(json: &serde_json::Value, tag: &serde_json::Value) -> Resu
                 .and_then(serde_json::Value::as_str)
                 .and_then(|text| text.parse::<i64>().ok())
                 .ok_or_else(|| malformed("timestamp"))?;
-            Timestamp::from_unix_micros(micros)
-                .map(crate::Value::Timestamp)
-                .map_err(|error| mismatch("timestamp", error, json))
+            Timestamp::from_unix_micros(micros).map(crate::Value::Timestamp).map_err(|error| mismatch("timestamp", error, json))
         }
         "decimal" => {
             let precision = object
