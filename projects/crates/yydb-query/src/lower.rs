@@ -224,17 +224,7 @@ fn lower_pred_body(expr: &VosExpr, param: Option<&str>, parameters: &[ParameterD
 /// Convert a `Name("__yydb_param_<name>")` Identifier (emitted by our
 /// scan_and_rewrite preprocessor) into a proper `BoundValue::Slot`.
 fn name_to_slot(name: &str, parameters: &[ParameterDescriptor]) -> Result<BoundValue> {
-    const PREFIX: &str = "__yydb_param_";
-    if let Some(param_name) = name.strip_prefix(PREFIX) {
-        let param = parameters
-            .iter()
-            .find(|p| p.name == param_name)
-            .ok_or_else(|| query_error(format!("undeclared parameter `{param_name}` in lowered source")))?;
-        Ok(BoundValue::Slot { index: param.index, expected_ty: param.slot_ty })
-    }
-    else {
-        Err(query_error(format!("expected rewritten parameter Name, got `{name}`")))
-    }
+    super::params::name_to_slot(name, parameters)
 }
 
 fn lower_field_path(expr: &VosExpr, param: Option<&str>) -> Result<Vec<String>> {

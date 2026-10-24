@@ -20,15 +20,28 @@ fn table_prefix(table: &str) -> String {
 
 /// Load all rows for `table` from the record map.
 pub fn load_table(records: &BTreeMap<String, Vec<u8>>, table: &str) -> Result<Vec<QueryRow>> {
+    Ok(load_table_entries(records, table)?.into_iter().map(|(_, row)| row).collect())
+}
+
+/// Load all rows for `table` together with their record-map keys.
+///
+/// Write operators need the key to delete or replace a row in place, so this
+/// variant is the shared primitive and [`load_table`] is the read-only view.
+pub fn load_table_entries(records: &BTreeMap<String, Vec<u8>>, table: &str) -> Result<Vec<(String, QueryRow)>> {
     let prefix = table_prefix(table);
     let mut out = Vec::new();
     for (key, bytes) in records.range(prefix.clone()..) {
         if !key.starts_with(&prefix) {
             break;
         }
-        out.push(decode_row(bytes)?);
+        out.push((key.clone(), decode_row(bytes)?));
     }
     Ok(out)
+}
+
+/// Remove the row stored under `key`. Returns whether a row was present.
+pub fn remove_row(records: &mut BTreeMap<String, Vec<u8>>, key: &str) -> bool {
+    records.remove(key).is_some()
 }
 
 /// Upsert one logical row keyed by `pk`.

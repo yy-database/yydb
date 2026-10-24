@@ -137,7 +137,7 @@ fn project_row(
     out
 }
 
-fn eval_pred(
+pub(crate) fn eval_pred(
     pred: &Pred,
     row: &QueryRow,
     table: &str,
@@ -172,6 +172,7 @@ fn eval_pred(
             eval_pred(left, row, table, contract, records, bound_values)
                 || eval_pred(right, row, table, contract, records, bound_values)
         }
+        Pred::Not(inner) => !eval_pred(inner, row, table, contract, records, bound_values),
     }
 }
 

@@ -19,9 +19,24 @@ use yydb_types::{Error, Result, Value};
 
 use super::{
     exec,
-    ops::{QueryOp, QueryRow, SlotTy},
+    ops::{BoundValue, QueryOp, QueryRow, SlotTy, WriteOp},
+    sql,
+    write::{self, WriteOutcome},
+    lower,
 };
 use vos::syntax::{VosExpr, VosProgram, VosStmt};
+
+/// Authoring language a statement was prepared from.
+///
+/// Both frontends lower into the same physical operators; the dialect is kept
+/// only for diagnostics and for re-preparing against the right parser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Dialect {
+    /// VOS pipeline / write program.
+    Vos,
+    /// SQL statement.
+    Sql,
+}
 
 /// One named parameter extracted during prepare.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -62,9 +77,15 @@ pub struct PreparedStatement {
     /// Unique synthetic ID for this prepared statement (monotonic within a
     /// connection, stable fingerprint otherwise).
     pub statement_id: String,
-    /// Lowered ops where every parameter occurrence is a `BoundValue::Slot`.
+    /// Frontend the statement was prepared from.
+    pub dialect: Dialect,
+    /// Lowered read ops where every parameter occurrence is a
+    /// `BoundValue::Slot`.
     #[serde(skip)]
     pub ops: Vec<QueryOp>,
+    /// Lowered write ops (empty for read statements).
+    #[serde(skip)]
+    pub write_ops: Vec<WriteOp>,
     /// Whether this statement is a read pipeline or a write program.
     pub query_kind: QueryKind,
     /// Parameter descriptors in ascending `index` order.
@@ -101,7 +122,7 @@ pub struct BoundStatement<'a> {
 /// Prefix injected into source identifiers during prepare so that VOS
 /// parser accepts the token as a plain Name node. Oak-vos lexer currently
 /// has no `$` token — `$name` would parse as invalid syntax. Instead we
-/// rewrite each `$name` → `__yydb_param_<name>` (a valid Identifier), then
+/// rewrite each `$name` → `__yydb_param_<index>` (a valid Identifier), then
 /// lower.rs walks the AST and converts `Name("__yydb_param_*")` directly
 /// into `BoundValue::Slot` references.
 pub(crate) const PARAM_PREFIX: &str = "__yydb_param_";
@@ -113,7 +134,7 @@ pub(crate) const PARAM_PREFIX: &str = "__yydb_param_";
 /// Internally this is:
 ///   1. `scan_and_rewrite` — extract `$name` params (lexer-aware, skips
 ///      strings / line comments / block comments) and rewrite each to an
-///      identifier `__yydb_param_<name>`.
+///      identifier `__yydb_param_<index>`.
 ///   2. Fingerprint the *original* source.
 ///   3. `vos::parse_program(&rewritten)` — Oak-vos sees only valid VOS.
 ///   4. `lower::lower_program` — Name("__yydb_param_*") nodes are lowered
@@ -124,7 +145,7 @@ pub(crate) const PARAM_PREFIX: &str = "__yydb_param_";
 /// This pure variant does not know the live schema so `schema_fingerprint`
 /// and `schema_revision` remain empty / zero. The engine path fills them.
 pub fn prepare(source: &str) -> Result<PreparedStatement> {
-    let (parameters, rewritten) = scan_and_rewrite(source)?;
+    let (parameters, rewritten) = scan_and_rewrite(source, Dialect::Vos)?;
     let source_fingerprint = fingerprint(source);
 
     let program = vos::parse_program(&rewritten).map_err(|diagnostics| Error::Schema { message: diagnostics })?;
@@ -139,20 +160,47 @@ pub fn prepare(source: &str) -> Result<PreparedStatement> {
         (Vec::new(), QueryKind::Write, Vec::new(), extract_write_set(&program))
     }
     else {
-        let ops = super::lower::lower_program(&program, &parameters)?;
+        let ops = lower::lower_program(&program, &parameters)?;
         let (kind, reads, writes) = classify_ops(&ops);
         (ops, kind, reads, writes)
     };
 
-    let statement_id = format!("stmt-{source_fingerprint}");
-
     Ok(PreparedStatement {
-        statement_id,
+        statement_id: format!("stmt-{source_fingerprint}"),
+        dialect: Dialect::Vos,
         ops,
+        write_ops: Vec::new(),
         query_kind,
         parameters,
         read_set,
         write_set,
+        source_fingerprint,
+        source: source.to_owned(),
+        schema_fingerprint: String::new(),
+        schema_revision: 0,
+    })
+}
+
+/// Compile a SQL source into a prepared statement.
+///
+/// SQL and VOS differ only in the front half: parameter extraction, parsing and
+/// lowering. The resulting plan is the same operator set, so execution and
+/// schema-drift handling are shared with [`prepare`].
+pub fn prepare_sql(source: &str) -> Result<PreparedStatement> {
+    let (parameters, rewritten) = scan_and_rewrite(source, Dialect::Sql)?;
+    let source_fingerprint = fingerprint(source);
+    let plan = sql::lower(&rewritten, &parameters)?;
+    let query_kind = if plan.write_ops.is_empty() { QueryKind::Read } else { QueryKind::Write };
+
+    Ok(PreparedStatement {
+        statement_id: format!("stmt-{source_fingerprint}"),
+        dialect: Dialect::Sql,
+        ops: plan.read_ops,
+        write_ops: plan.write_ops,
+        query_kind,
+        parameters,
+        read_set: plan.read_set,
+        write_set: plan.write_set,
         source_fingerprint,
         source: source.to_owned(),
         schema_fingerprint: String::new(),
@@ -208,6 +256,32 @@ pub fn bind_named(stmt: &PreparedStatement, named: &BTreeMap<String, Value>) -> 
     Ok(values)
 }
 
+/// Bind a prepared statement to an ordered value slice.
+///
+/// Positional binding is what SQL frontends need (`?` placeholders): values are
+/// matched to parameters in declaration order. Named statements (`$name`,
+/// `:name`) can still bind positionally as long as the caller keeps the
+/// declaration order returned by [`prepare`] / [`prepare_sql`].
+pub fn bind_ordered(stmt: &PreparedStatement, values: &[Value]) -> Result<Vec<Value>> {
+    if values.len() != stmt.parameters.len() {
+        return Err(Error::QueryBind {
+            parameter: format!("{}", stmt.parameters.len()),
+            message: format!("statement expects {} parameters, got {}", stmt.parameters.len(), values.len()),
+        });
+    }
+    let mut bound: Vec<Value> = vec![Value::Null; stmt.parameters.len()];
+    for (value, param) in values.iter().zip(&stmt.parameters) {
+        if !param.slot_ty.matches(value) {
+            return Err(Error::QueryBind {
+                parameter: param.name.clone(),
+                message: format!("parameter `{}` expects `{}`", param.name, param.slot_ty.as_str()),
+            });
+        }
+        bound[param.index as usize] = value.clone();
+    }
+    Ok(bound)
+}
+
 /// Execute a prepared-and-bound statement against stored rows.
 pub fn execute_prepared(
     stmt: &PreparedStatement,
@@ -218,126 +292,264 @@ pub fn execute_prepared(
     exec::execute_ops(&stmt.ops, contract, records, values)
 }
 
+/// Execute a prepared-and-bound write statement against stored rows.
+///
+/// Returns [`Error::Unsupported`] for read statements so callers cannot
+/// accidentally treat a `SELECT` plan as a mutation.
+pub fn execute_write_prepared(
+    stmt: &PreparedStatement,
+    values: &[Value],
+    contract: &vos::types::ResolvedContract,
+    declared: &[yydb_types::TableUniqueConstraint],
+    records: &mut BTreeMap<String, Vec<u8>>,
+) -> Result<WriteOutcome> {
+    if stmt.write_ops.is_empty() {
+        return Err(Error::Unsupported("statement is a read pipeline, not a write program"));
+    }
+    write::execute_ops(&stmt.write_ops, contract, declared, records, values)
+}
+
+/// Convert a `Name("__yydb_param_<index>")` identifier (emitted by the
+/// parameter rewriter) into a proper [`BoundValue::Slot`].
+///
+/// The rewritten identifier carries the *parameter index*, not its name, so
+/// names that are not identifier-safe (`?1`, `:name`, `$name`) all round-trip.
+pub(crate) fn name_to_slot(name: &str, parameters: &[ParameterDescriptor]) -> Result<BoundValue> {
+    let Some(slot) = name.strip_prefix(PARAM_PREFIX)
+    else {
+        return Err(Error::Schema { message: format!("expected rewritten parameter Name, got `{name}`") });
+    };
+    let index: u32 = slot
+        .parse()
+        .map_err(|_| Error::Schema { message: format!("malformed parameter slot `{name}`") })?;
+    let param = parameters
+        .get(index as usize)
+        .ok_or_else(|| Error::Schema { message: format!("parameter slot {index} is not declared") })?;
+    Ok(BoundValue::Slot { index: param.index, expected_ty: param.slot_ty })
+}
+
 // ─── internals ────────────────────────────────────────────────────────────
 
-/// Lexer-aware preprocessor that walks `source` once, extracting every
-/// top-level `$name` parameter while correctly skippting `"..."` strings,
-/// `//` line comments and `/* */` block comments. Each parameter occurrence
-/// is rewritten to `__yydb_param_<name>` — a plain Identifier Oak-vos
-/// parser accepts.
+/// Lexer-aware preprocessor that walks `source` once and extracts every
+/// parameter, rewriting each to `__yydb_param_<name>` — a plain identifier the
+/// frontend parser accepts.
+///
+/// Both frontends share the walker; only the surface syntax differs:
+///
+/// | | VOS | SQL |
+/// |---|---|---|
+/// | strings | `"..."` with `\\` escapes | `'...'` with `''` escapes, plus `"..."` identifiers |
+/// | comments | `//`, `/* */` | `--`, `/* */` |
+/// | parameters | `$name` | `?`, `?NNN`, `$name`, `:name`, `@name` |
 ///
 /// UTF-8 safe: uses `char_indices()` rather than `bytes[i] as char`.
-fn scan_and_rewrite(source: &str) -> Result<(Vec<ParameterDescriptor>, String)> {
+fn scan_and_rewrite(source: &str, dialect: Dialect) -> Result<(Vec<ParameterDescriptor>, String)> {
+    #[derive(Clone, Copy)]
     enum Lex {
         Normal,
-        DoubleQuote,
+        /// Inside a quoted region opened by the stored delimiter.
+        Quoted(char),
+        /// Inside a line comment that ends at a newline.
         LineComment,
         BlockComment,
     }
 
+    fn emit(name: String, parameters: &mut Vec<ParameterDescriptor>, indexes: &mut BTreeMap<String, u32>, out: &mut String) {
+        let index = match indexes.get(&name) {
+            Some(&index) => {
+                parameters.get_mut(index as usize).expect("index always valid").usage_count += 1;
+                index
+            }
+            None => {
+                let index = parameters.len() as u32;
+                indexes.insert(name.clone(), index);
+                parameters.push(ParameterDescriptor {
+                    name,
+                    index,
+                    slot_ty: SlotTy::Any, // narrowing done in lowering
+                    usage_count: 1,
+                });
+                index
+            }
+        };
+        // Slot identifiers are numeric so they stay valid identifiers for every
+        // frontend, including SQL `?` placeholders.
+        out.push_str(PARAM_PREFIX);
+        out.push_str(&index.to_string());
+    }
+
+    fn read_identifier(chars: &mut std::str::CharIndices<'_>) -> String {
+        let mut name = String::new();
+        loop {
+            let mut peek = chars.clone();
+            match peek.next() {
+                Some((_, c)) if c.is_ascii_alphanumeric() || c == '_' => {
+                    name.push(c);
+                    *chars = peek;
+                }
+                _ => break,
+            }
+        }
+        name
+    }
+
+    let is_sql = dialect == Dialect::Sql;
     let mut state = Lex::Normal;
     let mut parameters: Vec<ParameterDescriptor> = Vec::new();
-    let mut name_to_index: BTreeMap<String, u32> = BTreeMap::new();
+    let mut indexes: BTreeMap<String, u32> = BTreeMap::new();
     let mut out = String::with_capacity(source.len());
     let mut chars = source.char_indices();
+    let mut previous: Option<char> = None;
+    let mut next_positional: u32 = 1;
 
     while let Some((_, ch)) = chars.next() {
-        match state {
-            Lex::Normal => {
-                match ch {
-                    '"' => {
-                        state = Lex::DoubleQuote;
-                        out.push(ch);
-                    }
-                    '/' => {
-                        let mut peek = chars.clone();
-                        match peek.next() {
-                            Some((_, '/')) => {
-                                state = Lex::LineComment;
-                                chars = peek; // consume one extra `/`
-                                out.push_str("//");
-                                continue;
-                            }
-                            Some((_, '*')) => {
-                                state = Lex::BlockComment;
-                                chars = peek;
-                                out.push_str("/*");
-                                continue;
-                            }
-                            _ => out.push(ch),
-                        }
-                    }
-                    '$' => {
-                        // Try to read an identifier immediately after `$`.
-                        // `chars` has just yielded `$`, so the next item is the
-                        // first char of the identifier body (or whatever follows).
-                        let mut ident_chars: Vec<char> = Vec::new();
-                        loop {
-                            // Peek the next char without consuming it.
-                            let mut peek = chars.clone();
-                            match peek.next() {
-                                Some((_, c)) if c.is_ascii_alphanumeric() || c == '_' => {
-                                    ident_chars.push(c);
-                                    chars = peek; // now consume that char
-                                }
-                                _ => break, // non-identifier char stays in chars
-                            }
-                        }
-                        if !ident_chars.is_empty() {
-                            let name: String = ident_chars.into_iter().collect();
-                            let name_for_rewrite = name.clone();
-                            let index = match name_to_index.get(&name) {
-                                Some(&idx) => {
-                                    let p = parameters.get_mut(idx as usize).expect("index always valid");
-                                    p.usage_count += 1;
-                                    idx
-                                }
-                                None => {
-                                    let idx = parameters.len() as u32;
-                                    name_to_index.insert(name.clone(), idx);
-                                    parameters.push(ParameterDescriptor {
-                                        name,
-                                        index: idx,
-                                        slot_ty: SlotTy::Any, // narrowing done in lowering
-                                        usage_count: 1,
-                                    });
-                                    idx
-                                }
-                            };
-                            // Rewrite to `__yydb_param_<name>` (identifier-safe) —
-                            // dedup is by name so same name → same identifier.
-                            out.push_str(PARAM_PREFIX);
-                            out.push_str(&name_for_rewrite);
-                        }
-                        else {
-                            // Lone `$` — keep as-is; VOS parser will reject but that's
-                            // a source error, not a parameter.
-                            out.push('$');
-                        }
-                    }
-                    _ => out.push(ch),
+        if let Lex::Normal = state {
+            let handled = match (ch, is_sql) {
+                // VOS strings and SQL identifier quoting: backslash escapes.
+                ('"', false) => {
+                    state = Lex::Quoted('"');
+                    out.push(ch);
+                    true
                 }
+                // SQL string literals use doubled quotes, not backslashes.
+                ('\'', true) => {
+                    state = Lex::Quoted('\'');
+                    out.push(ch);
+                    true
+                }
+                // SQL double quotes are identifiers; parameters never appear inside.
+                ('"', true) => {
+                    state = Lex::Quoted('"');
+                    out.push(ch);
+                    true
+                }
+                ('/', _) => {
+                    let mut peek = chars.clone();
+                    match peek.next() {
+                        Some((_, '*')) => {
+                            chars = peek;
+                            state = Lex::BlockComment;
+                            out.push_str("/*");
+                            true
+                        }
+                        Some((_, '/')) if !is_sql => {
+                            chars = peek;
+                            state = Lex::LineComment;
+                            out.push_str("//");
+                            true
+                        }
+                        _ => false,
+                    }
+                }
+                ('-', true) => {
+                    let mut peek = chars.clone();
+                    if let Some((_, '-')) = peek.next() {
+                        chars = peek;
+                        state = Lex::LineComment;
+                        out.push_str("--");
+                        true
+                    }
+                    else {
+                        false
+                    }
+                }
+                ('$', _) => {
+                    let name = read_identifier(&mut chars);
+                    if name.is_empty() {
+                        false
+                    }
+                    else {
+                        emit(name, &mut parameters, &mut indexes, &mut out);
+                        true
+                    }
+                }
+                ('?', true) => {
+                    let digits = read_identifier(&mut chars);
+                    let digits: String = digits.chars().take_while(char::is_ascii_digit).collect();
+                    let number = if digits.is_empty() {
+                        let number = next_positional;
+                        next_positional += 1;
+                        number
+                    }
+                    else {
+                        let number: u32 = digits
+                            .parse()
+                            .map_err(|_| Error::Schema { message: format!("invalid SQL parameter `?{digits}`") })?;
+                        next_positional = next_positional.max(number + 1);
+                        number
+                    };
+                    emit(format!("?{number}"), &mut parameters, &mut indexes, &mut out);
+                    true
+                }
+                (':', true) if previous != Some(':') => {
+                    let name = read_identifier(&mut chars);
+                    if name.is_empty() {
+                        false
+                    }
+                    else {
+                        emit(name, &mut parameters, &mut indexes, &mut out);
+                        true
+                    }
+                }
+                ('@', true) => {
+                    let name = read_identifier(&mut chars);
+                    if name.is_empty() {
+                        false
+                    }
+                    else {
+                        emit(name, &mut parameters, &mut indexes, &mut out);
+                        true
+                    }
+                }
+                _ => false,
+            };
+            if handled {
+                previous = out.chars().last();
+                continue;
             }
-            Lex::DoubleQuote => {
-                out.push(ch);
-                match ch {
-                    '"' => state = Lex::Normal,
-                    '\\' => {
+            out.push(ch);
+            previous = Some(ch);
+            continue;
+        }
+
+        out.push(ch);
+        match state {
+            Lex::Quoted(delimiter) => {
+                if !is_sql {
+                    // VOS: backslash escapes, plain closing quote.
+                    if ch == '\\' {
                         if let Some((_, escaped)) = chars.next() {
                             out.push(escaped);
                         }
                     }
-                    _ => {}
+                    else if ch == delimiter {
+                        state = Lex::Normal;
+                    }
+                }
+                else if ch == delimiter {
+                    // SQL: a doubled delimiter is an escaped one and keeps the
+                    // region open.
+                    let mut peek = chars.clone();
+                    if let Some((_, next)) = peek.next() {
+                        if next == delimiter {
+                            out.push(delimiter);
+                            chars = peek;
+                        }
+                        else {
+                            state = Lex::Normal;
+                        }
+                    }
+                    else {
+                        state = Lex::Normal;
+                    }
                 }
             }
             Lex::LineComment => {
-                out.push(ch);
                 if ch == '\n' {
                     state = Lex::Normal;
                 }
             }
             Lex::BlockComment => {
-                out.push(ch);
                 if ch == '*' {
                     let mut peek = chars.clone();
                     if let Some((_, '/')) = peek.next() {
@@ -347,7 +559,9 @@ fn scan_and_rewrite(source: &str) -> Result<(Vec<ParameterDescriptor>, String)> 
                     }
                 }
             }
+            Lex::Normal => unreachable!("normal state is handled above"),
         }
+        previous = out.chars().last();
     }
 
     Ok((parameters, out))
@@ -441,7 +655,7 @@ mod tests {
     #[test]
     fn prepare_extracts_dollar_named_parameters_in_order() {
         let source = r#"User.all().take($limit).collect()"#;
-        let (parameters, rewritten) = scan_and_rewrite(source).expect("scan");
+        let (_, rewritten) = scan_and_rewrite(source, Dialect::Vos).expect("scan");
         assert!(vos::parse_program(&rewritten).is_ok(), "rewritten must parse: {}", rewritten);
         let stmt = prepare(source).expect("prepare");
         assert_eq!(stmt.parameters.len(), 1);
@@ -518,27 +732,28 @@ mod tests {
     #[test]
     fn param_inside_double_string_is_not_extracted() {
         // `$limit` inside a string literal must not be treated as a parameter.
-        let (params, _) = scan_and_rewrite("User.all().filter(|u| u.name == \"$limit\").collect()").unwrap();
+        let (params, _) = scan_and_rewrite("User.all().filter(|u| u.name == \"$limit\").collect()", Dialect::Vos).unwrap();
         assert!(params.is_empty(), "string literal `$limit` should not be a param");
     }
 
     #[test]
     fn param_inside_line_comment_is_not_extracted() {
-        let (params, _) = scan_and_rewrite("User.all().take($x).collect() // $y should not count").unwrap();
+        let (params, _) = scan_and_rewrite("User.all().take($x).collect() // $y should not count", Dialect::Vos).unwrap();
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "x");
     }
 
     #[test]
     fn param_inside_block_comment_is_not_extracted() {
-        let (params, _) = scan_and_rewrite("User.all().take($x) /* $y is inside */ .collect()").unwrap();
+        let (params, _) = scan_and_rewrite("User.all().take($x) /* $y is inside */ .collect()", Dialect::Vos).unwrap();
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "x");
     }
 
     #[test]
     fn double_string_with_escape_is_handled() {
-        let (params, _) = scan_and_rewrite("User.all().take($x).filter(|u| u.n == \"has\\\"$y\"\").collect()").unwrap();
+        let (params, _) =
+            scan_and_rewrite("User.all().take($x).filter(|u| u.n == \"has\\\"$y\"\").collect()", Dialect::Vos).unwrap();
         assert_eq!(params.len(), 1, "only `$x` is a param");
         assert_eq!(params[0].name, "x");
     }
@@ -584,3 +799,5 @@ mod tests {
         assert_eq!(stmt.parameters[0].slot_ty, SlotTy::Any);
     }
 }
+
+

@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Phase 1 VOS query and DML executor for YYDB"
+description = "Backend-neutral query planning and DML execution for YYDB"
 readme = "readme.md"
 publish = false
 
@@ -13,6 +13,7 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+oak-sql = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 vos = { workspace = true }

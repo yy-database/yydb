@@ -6,6 +6,7 @@ mod host_micro_udf;
 mod main_snapshot;
 mod schema_metadata;
 mod schema_pragma;
+mod sql_query;
 mod vos_query;
 mod vos_transaction;
 mod wire_dispatch;
