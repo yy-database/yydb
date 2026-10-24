@@ -13,7 +13,7 @@ use crate::{
     blob_refs::{BlobManifestDelta, FRAME_BLOB_REFS, commit_digest, encode_blob_refs_body},
     crc32c::crc32c,
     header::PAGE_SIZE,
-    wal::{WAL_MAGIC, WalFile, WalTail, parse_frame, parse_wal, scan_wal, wal_frame_offsets},
+    wal::{WAL_HEADER_BYTES, WAL_MAGIC, WalFile, WalTail, parse_frame, parse_wal, scan_wal, wal_frame_offsets},
 };
 
 const FRAME_TXN_BEGIN: u8 = 0x01;
@@ -211,6 +211,17 @@ fn encode_commit(
     Ok((bytes, commit_lsn, lsn))
 }
 
+/// Drop every record while keeping the existing file header intact.
+///
+/// The header checksum and format version stay valid, so a crash after this
+/// truncation leaves an openable WAL with no replayable records.
+pub fn truncate_wal_records(path: &Path) -> Result<()> {
+    let file = OpenOptions::new().write(true).open(path)?;
+    file.set_len(WAL_HEADER_BYTES as u64)?;
+    file.sync_all()?;
+    Ok(())
+}
+
 /// Truncate a torn tail from a WAL file and fsync the result.
 ///
 /// Returns the number of dropped bytes. Damaged records (checksum, length, LSN)
@@ -256,15 +267,34 @@ pub fn encode_frame(frame_type: u8, frame_lsn: u64, body: &[u8]) -> Result<Vec<u
 
 /// Apply committed WAL page images onto `pages`, last committed txn wins per page.
 pub fn replay_wal_pages(wal: &WalFile, pages: &mut BTreeMap<u32, Vec<u8>>) -> Result<()> {
+    replay_wal_pages_after(wal, 0, pages)
+}
+
+/// Apply committed WAL page images with `frame_lsn > checkpoint_lsn`.
+///
+/// Every frame at or below the database checkpoint LSN is already in the main
+/// file and must not be replayed after a checkpoint that crashed before its WAL
+/// truncation.
+pub fn replay_wal_pages_after(wal: &WalFile, checkpoint_lsn: u64, pages: &mut BTreeMap<u32, Vec<u8>>) -> Result<()> {
     let mut in_txn = false;
     let mut pending: Vec<(u32, Vec<u8>)> = Vec::new();
     for frame in &wal.frames {
+        if frame.frame_lsn <= checkpoint_lsn {
+            if frame.frame_type == FRAME_TXN_COMMIT {
+                in_txn = false;
+                pending.clear();
+            }
+            continue;
+        }
         match frame.frame_type {
             FRAME_TXN_BEGIN => {
                 in_txn = true;
                 pending.clear();
             }
             FRAME_PAGE_IMAGE if in_txn => {
+                if frame.body.len() < 20 {
+                    return Err(Error::Corrupt("wal replay page body truncated"));
+                }
                 let page_id = u32::from_le_bytes(frame.body[8..12].try_into().unwrap());
                 let image = frame.body[20..].to_vec();
                 if image.len() != PAGE_SIZE {

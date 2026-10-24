@@ -21,7 +21,9 @@ use crate::{
     pager::PageStore,
     shm::{shm_sidecar_path, sync_shm_from_wal},
     wal::committed_tail_lsn,
-    wal_append::{WalWriter, read_wal_file, replay_wal_pages, truncate_wal_torn_tail, wal_sidecar_path},
+    wal_append::{
+        WalWriter, read_wal_file, replay_wal_pages_after, truncate_wal_records, truncate_wal_torn_tail, wal_sidecar_path,
+    },
 };
 
 /// Persistent page store backed by a single `YDPG` main file.
@@ -107,23 +109,39 @@ impl FilePager {
     }
 
     /// Fold WAL into the main file and truncate the sidecar.
+    ///
+    /// Order matters: data pages, then the page 0 header with the new checkpoint
+    /// LSN, then record truncation. A crash before the header commit leaves the
+    /// WAL replayable. A crash after it leaves only records at or below the
+    /// checkpoint LSN, which recovery skips.
     pub fn checkpoint(&mut self) -> Result<()> {
-        let checkpoint_lsn = self.committed_wal_tail_lsn()?;
-        self.persist_data_pages()?;
-        self.inner.bump_checkpoint_slot(checkpoint_lsn)?;
-        self.persist_page0()?;
+        self.commit_checkpoint_pages()?;
         if self.wal_enabled {
+            self.wal = None;
             let wal_path = wal_sidecar_path(&self.path);
             if wal_path.exists() {
-                std::fs::remove_file(wal_path)?;
+                truncate_wal_records(&wal_path)?;
+                std::fs::remove_file(&wal_path)?;
             }
             let shm_path = shm_sidecar_path(&self.path);
             if shm_path.exists() {
                 std::fs::remove_file(shm_path)?;
             }
-            self.wal = None;
         }
         Ok(())
+    }
+
+    /// Persist pages and the page 0 checkpoint slot without truncating the WAL.
+    fn commit_checkpoint_pages(&mut self) -> Result<u64> {
+        let wal_path = wal_sidecar_path(&self.path);
+        if self.wal_enabled && wal_path.exists() {
+            truncate_wal_torn_tail(&wal_path)?;
+        }
+        let checkpoint_lsn = self.committed_wal_tail_lsn()?;
+        self.persist_data_pages()?;
+        self.inner.bump_checkpoint_slot(checkpoint_lsn)?;
+        self.persist_page0()?;
+        Ok(checkpoint_lsn)
     }
 
     /// Enable `YYWL` v0 journaling for subsequent mutations.
@@ -189,14 +207,12 @@ impl FilePager {
     }
 
     fn committed_wal_tail_lsn(&self) -> Result<u64> {
-        let Some(wal_path) = self.wal_path()
-        else {
-            return Ok(0);
-        };
+        let header_lsn = self.inner.header()?.slot.checkpoint_lsn;
+        let wal_path = wal_sidecar_path(&self.path);
         if !wal_path.exists() {
-            return Ok(0);
+            return Ok(header_lsn);
         }
-        Ok(committed_tail_lsn(&read_wal_file(&wal_path)?))
+        Ok(committed_tail_lsn(&read_wal_file(&wal_path)?).max(header_lsn))
     }
 
     fn recover_wal_tail(&self) -> Result<()> {
@@ -213,8 +229,9 @@ impl FilePager {
             return Ok(());
         }
         let wal = read_wal_file(&wal_path)?;
+        let checkpoint_lsn = self.inner.header()?.slot.checkpoint_lsn;
         let mut pages = self.inner.pages_snapshot();
-        replay_wal_pages(&wal, &mut pages)?;
+        replay_wal_pages_after(&wal, checkpoint_lsn, &mut pages)?;
         for (page_id, image) in pages {
             self.inner.put_page(page_id, image)?;
         }
@@ -250,6 +267,13 @@ impl FilePager {
         let checkpoint_lsn = self.committed_wal_tail_lsn()?;
         self.persist_data_pages()?;
         self.inner.bump_checkpoint_slot(checkpoint_lsn)?;
+        Ok(())
+    }
+
+    /// Simulate a crash after the checkpoint header commit but before WAL truncation.
+    #[doc(hidden)]
+    pub fn simulate_checkpoint_crash_after_header_commit(&mut self) -> Result<()> {
+        self.commit_checkpoint_pages()?;
         Ok(())
     }
 
