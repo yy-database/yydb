@@ -33,13 +33,13 @@ impl std::fmt::Display for ScalarTarget {
 }
 
 pub(crate) fn scalar_target(ty: &ResolvedCanonicalType) -> Option<ScalarTarget> {
-    use vos::types::ResolvedCanonicalTypeArgument;
+    use vos::types::{CanonicalScalar, ResolvedCanonicalTypeArgument};
     match ty {
-        ResolvedCanonicalType::Builtin(path) if path == &["date"] => Some(ScalarTarget::Date),
-        ResolvedCanonicalType::Builtin(path) if path == &["time"] => Some(ScalarTarget::Time),
-        ResolvedCanonicalType::Builtin(path) if path == &["datetime"] => Some(ScalarTarget::Timestamp),
-        ResolvedCanonicalType::Builtin(path) if path == &["decimal"] => {
-            Some(ScalarTarget::Decimal { precision: 38, scale: 0 })
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Date) => Some(ScalarTarget::Date),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Time) => Some(ScalarTarget::Time),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::DateTime) => Some(ScalarTarget::Timestamp),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Decimal) => {
+            Some(ScalarTarget::Decimal { precision: yydb_types::scalar::DECIMAL_MAX_PRECISION, scale: 0 })
         }
         ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => {
             let [

@@ -482,18 +482,19 @@ pub fn remap_unique_constraints(
 }
 
 fn resolved_execution_type(ty: &vos::types::ResolvedCanonicalType) -> Result<Type> {
-    use vos::types::ResolvedCanonicalType;
+    use vos::types::{CanonicalScalar, ResolvedCanonicalType};
     match ty {
-        ResolvedCanonicalType::Builtin(path) if path == &["i64"] => Ok(Type::I64),
-        ResolvedCanonicalType::Builtin(path) if path == &["bool"] => Ok(Type::Bool),
-        ResolvedCanonicalType::Builtin(path) if path == &["utf8"] => Ok(Type::Text),
-        ResolvedCanonicalType::Builtin(path) if path == &["bytes"] => Ok(Type::Bytes),
-        ResolvedCanonicalType::Builtin(path) if path == &["file"] => Ok(Type::File),
-        ResolvedCanonicalType::Builtin(path) if path == &["date"] => Ok(Type::Date),
-        ResolvedCanonicalType::Builtin(path) if path == &["time"] => Ok(Type::Time),
-        ResolvedCanonicalType::Builtin(path) if path == &["datetime"] => Ok(Type::Timestamp),
-        ResolvedCanonicalType::Builtin(path) if path == &["decimal"] => Ok(Type::Decimal { precision: 38, scale: 0 }),
-        ResolvedCanonicalType::Builtin(_) => Err(Error::Unsupported("resolved VOS scalar type is not in the execution slice")),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::I64) => Ok(Type::I64),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Bool) => Ok(Type::Bool),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Utf8) => Ok(Type::Text),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Bytes) => Ok(Type::Bytes),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Date) => Ok(Type::Date),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Time) => Ok(Type::Time),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::DateTime) => Ok(Type::Timestamp),
+        ResolvedCanonicalType::Scalar(CanonicalScalar::Decimal) => Ok(Type::Decimal { precision: 38, scale: 0 }),
+        ResolvedCanonicalType::Scalar(scalar) => {
+            Err(Error::Schema { message: format!("VOS scalar `{scalar}` is not in the YYDB execution scalar set") })
+        }
         ResolvedCanonicalType::Generic { path, arguments } if path == &["Decimal"] => decimal_type_from_arguments(arguments),
         ResolvedCanonicalType::Optional(_)
         | ResolvedCanonicalType::Reference(_)
