@@ -3,7 +3,7 @@
 use std::fs;
 
 use yydb::{Connection, OpenFlags, journal::wal_path};
-use yydb_formats::{FilePager, inactive_slot_offset, parse_page0, slot_offset_for_kind};
+use yydb_formats::{FilePager, inactive_slot_offset, parse_page0, slot_offset_for_kind, truncate_wal_records};
 
 fn temp_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("yydb-formats-v0-checkpoint-header-crash-{}-{}.yydb", std::process::id(), label))
@@ -43,6 +43,33 @@ fn yydb_formats_v0_checkpoint_header_crash_before_commit() {
         Some(b"wal".to_vec()),
         "fixture format_v0.checkpoint_header_crash WAL must recover pending key"
     );
+
+    let _ = fs::remove_file(&wal);
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn yydb_formats_v0_checkpoint_header_crash_after_wal_truncation() {
+    let path = temp_path("after-truncate");
+    prepare_wal_pending(&path);
+    let wal = wal_path(&path);
+
+    {
+        let mut pager = FilePager::open(&path, true).unwrap();
+        pager.simulate_checkpoint_crash_after_header_commit().unwrap();
+    }
+    assert!(wal.exists(), "the crash window between truncation and unlink leaves the sidecar");
+    truncate_wal_records(&wal).unwrap();
+
+    let reopened = Connection::open_with_flags(&path, OpenFlags::wal()).unwrap();
+    assert_eq!(reopened.get("baseline").unwrap(), Some(b"ok".to_vec()));
+    assert_eq!(
+        reopened.get("pending").unwrap(),
+        Some(b"wal".to_vec()),
+        "fixture format_v0.checkpoint_header_crash keeps folded data when the WAL was already truncated"
+    );
+    reopened.checkpoint().unwrap();
+    assert!(!wal.exists());
 
     let _ = fs::remove_file(&wal);
     let _ = fs::remove_file(&path);
