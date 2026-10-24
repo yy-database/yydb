@@ -65,7 +65,12 @@ yydb.unsupported              yydb.protocol
 yydb.cas.conflict             yydb.quota.exceeded
 yydb.lease.unavailable        yydb.lease.expired
 yydb.fencing.mismatch         yydb.session.closed
+yydb.scalar.invalid           yydb.unique.violation
 ```
+
+`yydb.unique.violation` carries structured `params`: `table`、`constraint`、`columns`（逗号分隔）。
+`yydb.scalar.invalid` carries `kind`（`date` / `time` / `timestamp` / `decimal`）与展示用 `message`；
+调用方只能依赖 `kind`，不得解析 `message` 或回退为字符串/浮点近似。
 
 ## 3. 内部 JSON
 
@@ -74,6 +79,32 @@ schema identity、catalog 快照等以 JSON 存放在主文件或 WAL 快照中�
 1. 这些 JSON 是 **内部编码**，不是跨产品 ABI，也不是编辑器或第三方工具可以直接依赖的稳定接口。
 2. 需要对外交换的合同必须单独定义，并带自己的版本字段。
 3. 内部编码变化仍然要遵守“整段接受或整段拒绝”，不能靠默认值吞掉缺失字段。
+
+### 3.1 精确标量
+
+`date`、`time`、`timestamp`、`decimal` 在行存储与 JSON 边界上统一使用带 `$yydb` 标签的对象，
+拒绝退化成字符串或浮点：
+
+| 类型 | 形状 | 含义 |
+|------|------|------|
+| `date` | `{"$yydb":"date","days":i32}` | 自 `1970-01-01` 起的天数，范围 `0001-01-01..=9999-12-31` |
+| `time` | `{"$yydb":"time","nanos":i64}` | 自午夜起的纳秒，范围 `0..86_400_000_000_000`，无时区 |
+| `timestamp` | `{"$yydb":"timestamp","utcMicros":"i64 十进制"}` | 自 Unix epoch 起的微秒，恒为 UTC |
+| `decimal` | `{"$yydb":"decimal","precision":u8,"scale":u8,"unscaled":"i128 十进制"}` | 精确定点，`precision ≤ 38`，`scale ≤ precision` |
+
+1. `timestamp` 只接受 `Z` 或 `+00:00` 偏移；其他偏移显式拒绝，不做隐式换算。
+2. `decimal` 超出精度或标度必须报错，禁止截断、四舍五入或用浮点比较。
+3. 二进制编码为定长大端并翻转符号位，比较与字节序一致。
+
+### 3.2 唯一约束元数据
+
+声明式唯一约束持久化在快照元数据键 `__yydb/meta/unique`，编码为 marker `1` + `u32` LE 长度 + JSON 数组，
+元素为 `{"table":…,"name":…,"columns":[…],"nullsDistinct":bool}`。
+
+1. 键缺失等价于空约束集合，旧快照无需迁移即可读取。
+2. `nullsDistinct: true` 表示 NULL 永不冲突（SQL 默认语义）；`false` 表示所有 NULL 视为同一个值。
+3. VOS 字段 `@` 属性只生成单列约束；多列联合约束由宿主显式声明。
+4. 冲突时写入整体不生效，错误必须映射到 `yydb.unique.violation`，不得复用通用 OCC 冲突。
 
 ## 4. 编码的单一来源
 

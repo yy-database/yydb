@@ -98,6 +98,77 @@ export interface CompactReport {
 /** Declared type for a prepared statement parameter slot. */
 export type SlotType = 'any' | 'bool' | 'i64' | 'text' | 'null';
 
+/**
+ * Tagged JSON form of an exact `date` value (days since the Unix epoch,
+ * proleptic Gregorian calendar, UTC-free).
+ */
+export interface DateScalar {
+    readonly $yydb: 'date';
+    readonly days: number;
+}
+
+/** Tagged JSON form of an exact `time` value (nanoseconds since midnight, no zone). */
+export interface TimeScalar {
+    readonly $yydb: 'time';
+    readonly nanos: number;
+}
+
+/**
+ * Tagged JSON form of an exact `timestamp` value (microseconds since the Unix
+ * epoch). Always UTC, encoded as a decimal string to avoid precision loss.
+ */
+export interface TimestampScalar {
+    readonly $yydb: 'timestamp';
+    readonly utcMicros: string;
+}
+
+/**
+ * Tagged JSON form of an exact fixed-point `decimal` value. `unscaled` is the
+ * decimal string of the integer significand scaled by `scale`.
+ */
+export interface DecimalScalar {
+    readonly $yydb: 'decimal';
+    readonly precision: number;
+    readonly scale: number;
+    readonly unscaled: string;
+}
+
+/** Every exact scalar crossing the JSON wire boundary uses this tagged form. */
+export type ScalarValue = DateScalar | TimeScalar | TimestampScalar | DecimalScalar;
+
+/** Declared execution type of a catalog field. */
+export type SchemaFieldType =
+    | { readonly kind: 'null' | 'bool' | 'i64' | 'text' | 'bytes' | 'file' | 'date' }
+    | { readonly kind: 'time'; readonly unit: 'nanosecond'; readonly timezone: 'none' }
+    | { readonly kind: 'timestamp'; readonly unit: 'microsecond'; readonly timezone: 'utc' }
+    | { readonly kind: 'decimal'; readonly precision: number; readonly scale: number }
+    | { readonly kind: 'vector'; readonly dimension: number; readonly metric: 'cosine' | 'euclidean' | 'dot' }
+    | { readonly kind: 'record'; readonly schemaId: number; readonly fieldCount: number };
+
+/** One uniqueness rule published by the catalog. */
+export interface UniqueConstraintDescriptor {
+    readonly name: string;
+    readonly columns: string[];
+    /** `true` means NULLs never collide (SQL default); `false` means one shared NULL. */
+    readonly nullsDistinct: boolean;
+}
+
+/** One field in an introspected table. */
+export interface SchemaFieldDescriptor {
+    readonly name: string;
+    readonly fieldId: number;
+    readonly virtualField: number;
+    readonly type: SchemaFieldType;
+}
+
+/** One introspected table with its declared field types and uniqueness rules. */
+export interface SchemaTableDescriptor {
+    readonly name: string;
+    readonly schemaId: number;
+    readonly fields: SchemaFieldDescriptor[];
+    readonly uniqueConstraints: UniqueConstraintDescriptor[];
+}
+
 /** One named parameter descriptor on a {@link Statement}. */
 export interface ParameterDescriptor {
     /** Canonical parameter name (no leading `$`). */

@@ -21,6 +21,45 @@ fn check_schema_source_rejects_invalid_document() {
 }
 
 #[test]
+fn introspection_reports_exact_scalar_types_and_unique_constraints() {
+    let source = r#"
+table Event {
+    @@event_id: i64,
+    @happened_on: date,
+    at_time: time,
+    created_at: datetime,
+    amount: Decimal<38, 2>,
+}
+"#;
+    let parsed = parse_json(&introspect_schema_json(source));
+    let tables = parsed.get("tables").and_then(JsonValue::as_array).expect("tables");
+    let table = &tables[0];
+    let fields = table.get("fields").and_then(JsonValue::as_array).expect("fields");
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|field| field.get("name") == Some(&JsonValue::String(name.into())))
+            .expect("field present")
+            .get("type")
+            .cloned()
+            .expect("type descriptor")
+    };
+    assert_eq!(field("happened_on"), serde_json::json!({ "kind": "date" }));
+    assert_eq!(field("at_time"), serde_json::json!({ "kind": "time", "unit": "nanosecond", "timezone": "none" }));
+    assert_eq!(
+        field("created_at"),
+        serde_json::json!({ "kind": "timestamp", "unit": "microsecond", "timezone": "utc" })
+    );
+    assert_eq!(field("amount"), serde_json::json!({ "kind": "decimal", "precision": 38, "scale": 2 }));
+
+    let constraints = table.get("uniqueConstraints").and_then(JsonValue::as_array).expect("uniqueConstraints");
+    assert_eq!(constraints.len(), 1);
+    assert_eq!(constraints[0].get("name"), Some(&JsonValue::String("Event_happened_on_key".into())));
+    assert_eq!(constraints[0].get("columns"), Some(&serde_json::json!(["happened_on"])));
+    assert_eq!(constraints[0].get("nullsDistinct"), Some(&JsonValue::Bool(true)));
+}
+
+#[test]
 fn introspect_schema_lists_table_fields() {
     let payload = introspect_schema_json(USER_SCHEMA);
     let parsed = parse_json(&payload);
