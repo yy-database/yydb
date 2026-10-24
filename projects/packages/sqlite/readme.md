@@ -26,7 +26,7 @@ Values are on-disk storage classes, not SQL-projected results. `NULL` and the em
 | Subpath | Use |
 |---------|-----|
 | `@yydb/sqlite` | Types plus `SqliteSnapshot`, `SqliteDatabase`, and `decodeRecord` |
-| `@yydb/sqlite/node` | The same reader surface (requires the `@yydb/yyds` native addon at call time) |
+| `@yydb/sqlite/node` | The same reader surface (requires the `@yydb/yydb` platform addon at call time) |
 
 The `sqlite3` command supports `.tables`, `.schema`, `.dump`, `.ping`, `.encoding`, and `.version` on a file path. It does not run SQL statements.
 
@@ -45,4 +45,4 @@ Each row is `{ rowid: bigint, payload: Buffer }` — storage bytes, not SQL-proj
 
 ## Related packages
 
-- [`@yydb/yyds`](https://github.com/yy-database/yyds/tree/dev/projects/packages/yyds) — hosts the native `SqliteSnapshot` binding
+- [`@yydb/yydb`](https://github.com/yy-database/yydb/tree/dev/projects/packages/yydb) — hosts the native `SqliteSnapshot` binding through its platform addon

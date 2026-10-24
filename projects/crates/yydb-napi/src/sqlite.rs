@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use napi::bindgen_prelude::Buffer;
+use napi::bindgen_prelude::{BigInt, Buffer};
 use napi_derive::napi;
 use sqlite::{
     RecordLimits, RecordValue, SchemaObjectKind, TableLimits, TextEncoding, blank_database, decode_library_version,
@@ -44,7 +44,7 @@ pub struct SqliteSchemaObject {
 /// An undecoded SQLite table record with lossless rowid and binary payload.
 #[napi(object)]
 pub struct SqliteTableRow {
-    pub rowid: i64,
+    pub rowid: BigInt,
     pub payload: Buffer,
 }
 
@@ -52,7 +52,7 @@ pub struct SqliteTableRow {
 #[napi(object)]
 pub struct SqliteRecordValue {
     pub kind: String,
-    pub value_integer: Option<i64>,
+    pub value_integer: Option<BigInt>,
     pub value_real: Option<f64>,
     pub value_text: Option<String>,
     pub value_blob: Option<Buffer>,
@@ -61,7 +61,7 @@ pub struct SqliteRecordValue {
 /// A decoded SQLite row: rowid plus typed column values.
 #[napi(object)]
 pub struct SqliteDecodedRow {
-    pub rowid: i64,
+    pub rowid: BigInt,
     pub columns: Vec<SqliteRecordValue>,
 }
 
@@ -95,7 +95,7 @@ fn record_value(value: RecordValue<'_>) -> SqliteRecordValue {
         }
         RecordValue::Integer(int) => SqliteRecordValue {
             kind: "integer".into(),
-            value_integer: Some(i64::from(int)),
+            value_integer: Some(BigInt::from(i64::from(int))),
             value_real: None,
             value_text: None,
             value_blob: None,
@@ -143,7 +143,7 @@ fn build_decoded_rows(bytes: &[u8], rows: Vec<sqlite::TableRow>, limits: TableLi
         .map(|row| {
             decode_record(&row.payload, encoding, record_limits).map_err(|e| napi::Error::from_reason(e.to_string())).map(
                 |columns| SqliteDecodedRow {
-                    rowid: i64::from(row.rowid),
+                    rowid: BigInt::from(i64::from(row.rowid)),
                     columns: columns.into_iter().map(record_value).collect(),
                 },
             )
@@ -204,7 +204,7 @@ impl SqliteSnapshot {
         read_named_table(&self.bytes, &name, SqliteReadLimits::resolve(limits))
             .map(|rows| {
                 rows.into_iter()
-                    .map(|row| SqliteTableRow { rowid: i64::from(row.rowid), payload: row.payload.into() })
+                    .map(|row| SqliteTableRow { rowid: BigInt::from(i64::from(row.rowid)), payload: row.payload.into() })
                     .collect()
             })
             .map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -339,7 +339,7 @@ impl SqliteDatabase {
         read_named_table(&self.bytes, &name, SqliteReadLimits::resolve(limits))
             .map(|rows| {
                 rows.into_iter()
-                    .map(|row| SqliteTableRow { rowid: i64::from(row.rowid), payload: row.payload.into() })
+                    .map(|row| SqliteTableRow { rowid: BigInt::from(i64::from(row.rowid)), payload: row.payload.into() })
                     .collect()
             })
             .map_err(|e| napi::Error::from_reason(e.to_string()))

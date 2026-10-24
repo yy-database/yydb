@@ -40,7 +40,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 serde = "1"
 serde_json = "1"
 windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Storage_FileSystem", "Win32_System_IO"] }
-napi = { version = "3.14.2", default-features = false, features = ["napi4"] }
+napi = { version = "3.14.2", default-features = false, features = ["napi4", "napi6"] }
 napi-derive = "3.6.12"
 napi-build = "2.6"
 pyo3 = { version = "0.30.1", features = ["extension-module"] }

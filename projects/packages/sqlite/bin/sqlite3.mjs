@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 
 import { SqliteDatabase, SqliteSnapshot } from "../src/node.ts";
 
@@ -106,6 +106,9 @@ function main(args) {
     const command = input.trim();
     if (!command.startsWith(".")) {
         throw new Error("SQL execution is not available; use a dot command");
+    }
+    if (!existsSync(path)) {
+        throw new Error(`database file not found: ${path}`);
     }
     const database = SqliteDatabase.open(path);
     runDotCommand(database, command);

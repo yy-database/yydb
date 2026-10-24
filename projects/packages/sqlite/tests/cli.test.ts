@@ -6,9 +6,10 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { isYydsNativeInstalled } from "@yydb/yyds/node";
+import { referencePython } from "./reference.ts";
 
 const cli = fileURLToPath(new URL("../bin/sqlite3.mjs", import.meta.url));
+const python = referencePython();
 
 function run(...args: string[]) {
     const output = spawnSync(process.execPath, ["--experimental-strip-types", cli, ...args], {
@@ -19,9 +20,7 @@ function run(...args: string[]) {
     return output;
 }
 
-test("SQLite CLI reports the snapshot reader and rejects unsupported input", {
-    skip: !isYydsNativeInstalled(),
-}, () => {
+test("SQLite CLI reports the snapshot reader and rejects unsupported input", () => {
     const version = run("--version");
     assert.equal(version.status, 0, version.stderr);
     assert.match(version.stdout, /^sqlite3 3\.45\.0 \(YYDS pure-Rust format-3 reader\)/);
@@ -32,7 +31,7 @@ test("SQLite CLI reports the snapshot reader and rejects unsupported input", {
 });
 
 test("SQLite CLI lists schema from a reference database file", {
-    skip: !isYydsNativeInstalled() || !process.env.YYDS_SQLITE_REFERENCE_PYTHON,
+    skip: python === undefined ? "no python interpreter with the sqlite3 module" : false,
 }, () => {
     const directory = mkdtempSync(join(tmpdir(), "yyds-sqlite-cli-snapshot-"));
     const path = join(directory, "reference.sqlite");
@@ -43,7 +42,7 @@ with sqlite3.connect(sys.argv[1]) as db:
     db.execute(sys.argv[2])
     db.execute("INSERT INTO samples VALUES (1, 'hello', X'00ff')")
 `;
-    const created = spawnSync(process.env.YYDS_SQLITE_REFERENCE_PYTHON!, ["-c", script, path, sql], {
+    const created = spawnSync(python!, ["-c", script, path, sql], {
         timeout: 10_000,
         encoding: "utf8",
     });
