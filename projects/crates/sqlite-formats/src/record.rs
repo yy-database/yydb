@@ -248,7 +248,20 @@ mod tests {
     #[test]
     fn real_and_blob_classes_preserve_exact_bits() {
         let negative_zero = (-0.0f64).to_bits().to_be_bytes();
-        let payload = record(&[7, 14], &[negative_zero[0], negative_zero[1], negative_zero[2], negative_zero[3], negative_zero[4], negative_zero[5], negative_zero[6], negative_zero[7], 0x00]);
+        let payload = record(
+            &[7, 14],
+            &[
+                negative_zero[0],
+                negative_zero[1],
+                negative_zero[2],
+                negative_zero[3],
+                negative_zero[4],
+                negative_zero[5],
+                negative_zero[6],
+                negative_zero[7],
+                0x00,
+            ],
+        );
         let values = decode(&payload, TextEncoding::Utf8).expect("decode real and blob");
         match &values[0] {
             RecordValue::Real(value) => assert_eq!(value.to_bits(), (-0.0f64).to_bits()),
