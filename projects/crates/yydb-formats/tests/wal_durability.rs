@@ -158,11 +158,11 @@ fn wal_writer_rejects_append_after_torn_tail() {
     bytes.extend_from_slice(&encode_wal_header(DB_ID, 0)[..7]);
     std::fs::write(&path, &bytes).unwrap();
 
-    let error = WalWriter::open(&path, DB_ID).err().unwrap();
+    let error = WalWriter::open(&path, DB_ID, 0).err().unwrap();
     assert!(matches!(error, Error::Corrupt("wal torn tail requires recovery before append")));
 
     assert_eq!(truncate_wal_torn_tail(&path).unwrap(), 7);
-    let writer = WalWriter::open(&path, DB_ID).unwrap();
+    let writer = WalWriter::open(&path, DB_ID, 0).unwrap();
     assert_eq!(writer.database_id(), DB_ID);
 
     let _ = std::fs::remove_file(&path);

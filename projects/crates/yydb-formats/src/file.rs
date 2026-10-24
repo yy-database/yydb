@@ -174,9 +174,9 @@ impl FilePager {
 
     fn ensure_wal(&mut self) -> Result<()> {
         if self.wal_enabled && self.wal.is_none() {
-            let database_id = self.inner.header()?.slot.database_id;
+            let header = self.inner.header()?;
             let wal_path = wal_sidecar_path(&self.path);
-            self.wal = Some(WalWriter::open(&wal_path, database_id)?);
+            self.wal = Some(WalWriter::open(&wal_path, header.slot.database_id, header.slot.checkpoint_lsn)?);
             sync_shm_from_wal(&self.path, &wal_path)?;
         }
         Ok(())

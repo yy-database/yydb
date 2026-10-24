@@ -93,11 +93,15 @@ pub struct WalWriter {
 impl WalWriter {
     /// Open or create a WAL sidecar for `database_id`.
     ///
+    /// `base_checkpoint_lsn` is the database checkpoint LSN the sidecar continues
+    /// from. New records always start above it, so a WAL created after a
+    /// checkpoint cannot reuse LSNs that recovery already treats as folded.
+    ///
     /// A torn tail is rejected here. Callers must truncate the tail through
     /// recovery before appending, otherwise new records would follow garbage.
-    pub fn open(path: impl AsRef<Path>, database_id: [u8; 16]) -> Result<Self> {
+    pub fn open(path: impl AsRef<Path>, database_id: [u8; 16], base_checkpoint_lsn: u64) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-        let mut next_lsn = 1_u64;
+        let mut next_lsn = base_checkpoint_lsn + 1;
         let mut next_txid = 1_u64;
         if path.exists() {
             let bytes = std::fs::read(&path)?;
@@ -105,11 +109,12 @@ impl WalWriter {
             if !matches!(scan.tail, WalTail::Clean) {
                 return Err(Error::Corrupt("wal torn tail requires recovery before append"));
             }
-            next_lsn = scan.frames.iter().map(|frame| frame.frame_lsn).max().unwrap_or(0) + 1;
+            let tail_lsn = scan.frames.iter().map(|frame| frame.frame_lsn).max().unwrap_or(0);
+            next_lsn = tail_lsn.max(base_checkpoint_lsn) + 1;
             next_txid = scan.frames.iter().filter(|frame| frame.frame_type == FRAME_TXN_BEGIN).count() as u64 + 1;
         }
         else {
-            let header = encode_wal_header(database_id, 0);
+            let header = encode_wal_header(database_id, base_checkpoint_lsn);
             let mut file = File::create(&path)?;
             file.write_all(&header)?;
             file.sync_all()?;
