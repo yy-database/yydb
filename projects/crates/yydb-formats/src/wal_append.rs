@@ -49,7 +49,7 @@ pub struct RecoveryReport {
 ///
 /// Production uses [`FileWalSink`]. Tests inject failing sinks to model disk
 /// full, short writes and lost syncs without touching the file format.
-pub trait WalSink {
+pub trait WalSink: Send {
     /// Append the whole buffer or fail. A short write must be reported as an error.
     fn append(&mut self, bytes: &[u8]) -> io::Result<()>;
     /// Durability barrier for every byte appended so far.
