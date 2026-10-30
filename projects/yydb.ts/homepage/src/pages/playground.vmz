@@ -1,0 +1,137 @@
+<template>
+    <SiteHeader />
+    <main class="main" id="main">
+        <div class="playground-page">
+            <header>
+                <p class="page__eyebrow">{{ playgroundEyebrowLabel }}</p>
+                <h1 class="page__title">{{ playgroundTitleLabel }}</h1>
+                <p class="page__lede">{{ playgroundLedeLabel }}</p>
+            </header>
+
+            <section class="playground-panel" aria-labelledby="playground-panel-title">
+                <h2 id="playground-panel-title">{{ playgroundPanelTitleLabel }}</h2>
+
+                <label class="playground-panel__label" for="playground-input">{{ playgroundInputLabel }}</label>
+                <textarea
+                    id="playground-input"
+                    class="playground-panel__input"
+                    rows="6"
+                    spellcheck="false"
+                    :placeholder="playgroundPlaceholderLabel"
+                    :value="source"
+                    @input="onSourceInput"
+                ></textarea>
+
+                <div class="playground-panel__row">
+                    <Button type="button" @click="run">{{ playgroundRunLabel }}</Button>
+                    <Button type="button" variant="secondary" @click="clear">{{ playgroundClearLabel }}</Button>
+                </div>
+
+                <p class="playground-panel__label" id="playground-output-label">{{ playgroundOutputLabel }}</p>
+                <pre
+                    class="playground-panel__output"
+                    aria-labelledby="playground-output-label"
+                    aria-live="polite"
+                >{{ output || playgroundOutputEmptyLabel }}</pre>
+
+                <p class="note">{{ playgroundPreviewNoteLabel }}</p>
+            </section>
+
+            <div class="btn-row playground-page__actions">
+                <a class="btn btn--primary" href="/wire">{{ playgroundWireLinkLabel }}</a>
+                <a class="btn" href="/d/">{{ playgroundDocsLinkLabel }}</a>
+                <a class="btn btn--quiet" href="/install">{{ playgroundInstallLinkLabel }}</a>
+            </div>
+        </div>
+    </main>
+    <SiteFooter />
+</template>
+
+<script client>
+import {
+    playgroundEyebrow,
+    playgroundTitle,
+    playgroundLede,
+    playgroundPanelTitle,
+    playgroundInput,
+    playgroundPlaceholder,
+    playgroundRun,
+    playgroundClear,
+    playgroundOutput,
+    playgroundOutputEmpty,
+    playgroundRunNotice,
+    playgroundPreviewNote,
+    playgroundWireLink,
+    playgroundDocsLink,
+    playgroundInstallLink,
+} from "#locales/common";
+import { readLocaleId, withLocaleHint, watchDocumentLocale } from "../lib/locale-copy.ts";
+
+export default class PlaygroundPage {
+    source = "";
+    output = "";
+    playgroundEyebrowLabel = "";
+    playgroundTitleLabel = "";
+    playgroundLedeLabel = "";
+    playgroundPanelTitleLabel = "";
+    playgroundInputLabel = "";
+    playgroundPlaceholderLabel = "";
+    playgroundRunLabel = "";
+    playgroundClearLabel = "";
+    playgroundOutputLabel = "";
+    playgroundOutputEmptyLabel = "";
+    playgroundRunNoticeLabel = "";
+    playgroundPreviewNoteLabel = "";
+    playgroundWireLinkLabel = "";
+    playgroundDocsLinkLabel = "";
+    playgroundInstallLinkLabel = "";
+    _unwatchLocale = null;
+
+    onMount() {
+        this.applyLocaleCopy();
+        this._unwatchLocale = watchDocumentLocale((id) => this.applyLocaleCopy(id));
+    }
+
+    onDestroy() {
+        if (typeof this._unwatchLocale === "function") {
+            this._unwatchLocale();
+        }
+        this._unwatchLocale = null;
+    }
+
+    refreshCopy() {
+        this.playgroundEyebrowLabel = playgroundEyebrow();
+        this.playgroundTitleLabel = playgroundTitle();
+        this.playgroundLedeLabel = playgroundLede();
+        this.playgroundPanelTitleLabel = playgroundPanelTitle();
+        this.playgroundInputLabel = playgroundInput();
+        this.playgroundPlaceholderLabel = playgroundPlaceholder();
+        this.playgroundRunLabel = playgroundRun();
+        this.playgroundClearLabel = playgroundClear();
+        this.playgroundOutputLabel = playgroundOutput();
+        this.playgroundOutputEmptyLabel = playgroundOutputEmpty();
+        this.playgroundRunNoticeLabel = playgroundRunNotice();
+        this.playgroundPreviewNoteLabel = playgroundPreviewNote();
+        this.playgroundWireLinkLabel = playgroundWireLink();
+        this.playgroundDocsLinkLabel = playgroundDocsLink();
+        this.playgroundInstallLinkLabel = playgroundInstallLink();
+    }
+
+    applyLocaleCopy(preferred) {
+        withLocaleHint(readLocaleId(preferred), () => this.refreshCopy());
+    }
+
+    onSourceInput(event) {
+        this.source = event?.target?.value ?? "";
+    }
+
+    run() {
+        this.output = this.playgroundRunNoticeLabel;
+    }
+
+    clear() {
+        this.source = "";
+        this.output = "";
+    }
+}
+</script>

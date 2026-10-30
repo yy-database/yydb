@@ -2,7 +2,7 @@
    YYDB site styles.
    Layered paper surfaces, generous spacing, one confident accent.
    Radii stay small (6/10/12px); depth comes from soft shadows, not decoration.
-   Layers: 1 tokens  2 base  3 chrome  4 landing  5 install  6 wire  7 welcome
+   Layers: 1 tokens  2 base  3 chrome  4 landing  5 install  6 wire  7 welcome  8 playground
    ========================================================================== */
 
 /* 1. Tokens --------------------------------------------------------------- */
@@ -1311,6 +1311,84 @@ pre {
     color: var(--yd-ink-muted);
 }
 
+/* 9. Playground ----------------------------------------------------------- */
+
+.playground-page {
+    max-width: 66rem;
+    margin: 0 auto;
+    padding: 3rem var(--vmz-layout-gutter) 4rem;
+}
+
+.playground-panel {
+    margin-top: 2.5rem;
+    padding: 2rem 2.25rem;
+    border: 1px solid var(--yd-line);
+    border-radius: var(--yd-radius-panel);
+    background: var(--vmz-surface-paper);
+    box-shadow: var(--yd-shadow-sm);
+}
+
+.playground-panel h2 {
+    font-size: 1.25rem;
+}
+
+.playground-panel__label {
+    display: block;
+    margin: 1.5rem 0 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 550;
+    color: var(--yd-ink-soft);
+}
+
+.playground-panel__input {
+    width: 100%;
+    min-height: 9rem;
+    resize: vertical;
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--yd-line);
+    border-radius: var(--yd-radius-control);
+    background: var(--vmz-surface-mist);
+    color: var(--yd-ink);
+    font-family: var(--vmz-font-mono);
+    font-size: 0.875rem;
+    line-height: 1.7;
+}
+
+.playground-panel__input::placeholder {
+    color: var(--yd-ink-muted);
+}
+
+.playground-panel__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin: 1.25rem 0;
+}
+
+.playground-panel__output {
+    font-family: var(--vmz-font-mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #08131f;
+    color: #dbe4ee;
+    font-size: 0.8125rem;
+    line-height: 1.7;
+    padding: 1rem 1.125rem;
+    border-radius: var(--yd-radius-card);
+    margin: 0;
+    min-height: 4.5rem;
+    max-height: 20rem;
+    overflow: auto;
+}
+
+.playground-panel .note {
+    margin-top: 1.25rem;
+}
+
+.playground-page__actions {
+    margin-top: 2rem;
+}
+
 /* Anatomy card in the hero ------------------------------------------------ */
 
 .file-card {
@@ -1770,8 +1848,13 @@ pre {
     }
 
     .wire-panel,
+    .playground-panel,
     .community {
         padding: 1.5rem;
+    }
+
+    .playground-page {
+        padding: 2.25rem 1.25rem 3rem;
     }
 
     .site-footer__inner {

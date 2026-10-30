@@ -10,8 +10,10 @@
                 <h2>{{ footerProductLabel }}</h2>
                 <ul>
                     <li><a href="/">{{ footerHomeLabel }}</a></li>
-                    <li><a href="/install">{{ footerInstallLabel }}</a></li>
+                    <li><a href="/welcome">{{ footerWelcomeLabel }}</a></li>
+                    <li><a href="/playground">{{ footerPlaygroundLabel }}</a></li>
                     <li><a href="/d/">{{ footerDocsLabel }}</a></li>
+                    <li><a href="/install">{{ footerInstallLabel }}</a></li>
                     <li><a href="/wire">{{ footerWireLabel }}</a></li>
                 </ul>
             </nav>
@@ -48,6 +50,8 @@ import {
     footerResources,
     footerCommunity,
     footerHome,
+    footerWelcome,
+    footerPlayground,
     footerInstall,
     footerOverviewDocs,
     footerWire,
@@ -70,6 +74,8 @@ export default class SiteFooter {
     footerResourcesLabel = "";
     footerCommunityLabel = "";
     footerHomeLabel = "";
+    footerWelcomeLabel = "";
+    footerPlaygroundLabel = "";
     footerInstallLabel = "";
     footerDocsLabel = "";
     footerWireLabel = "";
@@ -107,6 +113,8 @@ export default class SiteFooter {
         this.footerResourcesLabel = footerResources();
         this.footerCommunityLabel = footerCommunity();
         this.footerHomeLabel = footerHome();
+        this.footerWelcomeLabel = footerWelcome();
+        this.footerPlaygroundLabel = footerPlayground();
         this.footerInstallLabel = footerInstall();
         this.footerDocsLabel = footerOverviewDocs();
         this.footerWireLabel = footerWire();

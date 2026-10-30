@@ -2,6 +2,8 @@
   brandShort: 'YYDB',
   brandFull: 'YY Database',
   navHome: 'Overview',
+  navWelcome: 'Welcome',
+  navPlayground: 'Playground',
   navInstall: 'Install',
   navDocs: 'Docs',
   navWire: 'Wire',
@@ -18,6 +20,7 @@
   titleInstall: 'Install · YYDB',
   titleWire: 'Wire protocol · YYDB',
   titleWelcome: 'Welcome · YYDB',
+  titlePlayground: 'Playground · YYDB',
 
   homeEyebrow: 'LOCAL-FIRST · SINGLE FILE · MPL-2.0',
   homeTitle: 'YYDB',
@@ -186,6 +189,8 @@
   footerResources: 'Resources',
   footerCommunity: 'Community',
   footerHome: 'Overview',
+  footerWelcome: 'Welcome',
+  footerPlayground: 'Playground',
   footerInstall: 'Install',
   footerOverviewDocs: 'User documentation',
   footerWire: 'Wire demo',
@@ -302,5 +307,21 @@
   welcomeEnter: 'Enter the site',
   welcomeDocs: 'Read the docs',
   welcomeWire: 'Frame codec demo',
-  welcomeNote: 'No live serve connection by default. Use YYDS when you need auth and audit.'
+  welcomeNote: 'No live serve connection by default. Use YYDS when you need auth and audit.',
+
+  playgroundEyebrow: 'PLAYGROUND',
+  playgroundTitle: 'VOS playground preview',
+  playgroundLede: 'Draft VOS read and write statements here to explore the syntax. In-browser execution is not wired into this site yet, so the playground never fabricates results. For a demo that really runs in your browser, open the wire codec. To execute VOS against a real file, install YYDB.',
+  playgroundPanelTitle: 'Statement editor',
+  playgroundInput: 'VOS statement',
+  playgroundPlaceholder: 'User.all().collect()',
+  playgroundRun: 'Run',
+  playgroundClear: 'Clear',
+  playgroundOutput: 'Output',
+  playgroundOutputEmpty: 'No output yet. This preview does not execute statements.',
+  playgroundRunNotice: 'Nothing was executed and no result was fabricated. In-browser VOS execution is not available in this preview yet. Open the wire demo for a codec that runs entirely in your browser, or install YYDB to execute VOS locally.',
+  playgroundPreviewNote: 'This page is a preview shell. Statements typed here are never sent anywhere, and the output area only shows honest notices.',
+  playgroundWireLink: 'Open the wire demo',
+  playgroundDocsLink: 'Read the docs',
+  playgroundInstallLink: 'Install YYDB'
 }
