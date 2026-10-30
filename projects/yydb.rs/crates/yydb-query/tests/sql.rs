@@ -907,18 +907,44 @@ fn select_with_offset_larger_than_result_returns_empty() {
     let mut records = BTreeMap::new();
     seed(&contract, &mut records);
 
-    // OFFSET must be combined with LIMIT for oak-sql to parse it (the LIMIT
-    // clause wraps both offset and limit). LIMIT 1000 effectively means
-    // "take everything left after skip".
-    let outcome = execute_sql(
-        "SELECT account_id FROM Account ORDER BY account_id LIMIT 1000 OFFSET 99",
-        &[],
-        &contract,
-        &[],
-        &mut records,
-    )
-    .expect("large OFFSET");
+    // A standalone `OFFSET` (no `LIMIT`) is a `LimitClause` whose `limit` is
+    // `None`: it skips rows without capping the result.
+    let outcome =
+        execute_sql("SELECT account_id FROM Account ORDER BY account_id OFFSET 99", &[], &contract, &[], &mut records)
+            .expect("large OFFSET");
     assert!(outcome.rows.is_empty());
+}
+
+#[test]
+fn select_with_standalone_offset_skips_rows_without_limiting() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    // `OFFSET 1` must skip one row and return every remaining row (ids 2 and 3),
+    // not behave like `LIMIT 1`.
+    let outcome = execute_sql("SELECT account_id FROM Account ORDER BY account_id OFFSET 1", &[], &contract, &[], &mut records)
+        .expect("standalone OFFSET");
+    assert_eq!(ids(&outcome.rows), vec![2, 3]);
+}
+
+#[test]
+fn standalone_offset_lowers_to_skip_without_take() {
+    let stmt = prepare_sql("SELECT account_id FROM Account ORDER BY account_id OFFSET 2").expect("prepare");
+    assert!(stmt.ops.iter().any(|op| matches!(op, QueryOp::Skip { .. })), "standalone OFFSET must lower to a Skip");
+    assert!(!stmt.ops.iter().any(|op| matches!(op, QueryOp::Take { .. })), "standalone OFFSET must not lower to a Take");
+}
+
+#[test]
+fn select_with_limit_and_offset_skips_then_takes() {
+    let contract = contract();
+    let mut records = BTreeMap::new();
+    seed(&contract, &mut records);
+
+    let outcome =
+        execute_sql("SELECT account_id FROM Account ORDER BY account_id LIMIT 1 OFFSET 1", &[], &contract, &[], &mut records)
+            .expect("LIMIT with OFFSET");
+    assert_eq!(ids(&outcome.rows), vec![2]);
 }
 
 // ─── ORDER BY multiple columns ─────────────────────────────────────────

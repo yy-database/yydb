@@ -907,7 +907,12 @@ fn lower_limit(
     if let Some(offset) = &limit.offset {
         ops.push(QueryOp::Skip { count: lower_limit_value(offset, parameters, scope)? });
     }
-    ops.push(QueryOp::Take { count: lower_limit_value(&limit.limit, parameters, scope)? });
+    // A standalone `OFFSET n` (no `LIMIT`) has `limit == None`: it skips rows
+    // without capping the result, so no `Take` is pushed. The parser rejects a
+    // clause with neither keyword, so at least one of the two is always present.
+    if let Some(count) = &limit.limit {
+        ops.push(QueryOp::Take { count: lower_limit_value(count, parameters, scope)? });
+    }
     Ok(())
 }
 
