@@ -144,6 +144,67 @@ class Database:
         native = _require_native()
         return _call("query", native.query_vos, self._path, source)
 
+    def put_file(
+        self,
+        payload: bytes,
+        chunk_size: int = 0,
+        name: str | None = None,
+        media_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Publish a logical ``file`` value: chunks first, then the manifest.
+
+        Only ``.yydx`` layouts keep the object tree a descriptor depends on, so
+        a single-file ``.yydb`` handle refuses the call. The returned tagged
+        dict ``{"$yydb": "file", ...}`` can be bound as a VOS write parameter
+        for a ``file`` column; renaming never changes content identity because
+        the digest covers the complete octets.
+        """
+        self._ensure_open()
+        if not isinstance(payload, (bytes, bytearray, memoryview)):
+            raise YydbError(INVALID_ARGUMENT, "payload must be bytes-like")
+        if isinstance(chunk_size, bool) or not isinstance(chunk_size, int):
+            raise YydbError(INVALID_ARGUMENT, "chunk_size must be an int")
+        native = _require_native()
+        return _call(
+            "put_file",
+            native.put_file,
+            self._path,
+            bytes(payload),
+            chunk_size,
+            name,
+            media_type,
+        )
+
+    def read_file(self, descriptor: dict[str, Any]) -> bytes:
+        """Read the complete octets of a ``file`` value and verify its digest.
+
+        A descriptor whose chunks were tampered with fails instead of returning
+        plausible-looking bytes. Accepts the dict returned by :meth:`put_file`
+        or one read back from a ``file`` column.
+        """
+        self._ensure_open()
+        if not isinstance(descriptor, dict):
+            raise YydbError(INVALID_ARGUMENT, "descriptor must be a dict")
+        native = _require_native()
+        return _call("read_file", native.read_file, self._path, descriptor)
+
+    def read_file_window(self, descriptor: dict[str, Any], offset: int, length: int) -> bytes:
+        """Read one VOS window of a ``file`` value.
+
+        An offset at or past end of file yields empty bytes; a request starting
+        before the end is truncated to the remaining octets. Every touched
+        chunk is verified against the manifest.
+        """
+        self._ensure_open()
+        if not isinstance(descriptor, dict):
+            raise YydbError(INVALID_ARGUMENT, "descriptor must be a dict")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise YydbError(INVALID_ARGUMENT, "offset must be a non-negative int")
+        if isinstance(length, bool) or not isinstance(length, int) or length < 0:
+            raise YydbError(INVALID_ARGUMENT, "length must be a non-negative int")
+        native = _require_native()
+        return _call("read_file_window", native.read_file_window, self._path, descriptor, offset, length)
+
     def info(self) -> str:
         """Return multi-line database diagnostics."""
         self._ensure_open()

@@ -50,6 +50,16 @@ export interface BatchChange {
     value: Uint8Array | string | null;
 }
 
+/** Options for {@link Database.putFile}. */
+export interface PutFileOptions {
+    /** Chunk size in octets; `0` selects the engine default. */
+    chunkSize?: number;
+    /** Display name; metadata only — content identity is the digest. */
+    name?: string;
+    /** Media type; metadata only. */
+    mediaType?: string;
+}
+
 /** Options for {@link Database.migrateSchema}. */
 export interface MigrateOptions {
     /** Rename entries — `fromType`/`toType` updates a type name; `type`/`fromField`/`toField` updates one field. */
@@ -549,6 +559,42 @@ export class Database {
     /** Copy main + WAL + SHM without checkpoint; opening `dest` replays the WAL tail. */
     async backupWithWal(dest: string): Promise<void> {
         this.native.backupWithWal(dest);
+    }
+
+    /**
+     * Publish a logical `file` value: chunks first, then the immutable manifest.
+     *
+     * Only `.yydx` layouts keep the object tree a descriptor depends on, so a
+     * single-file `.yydb` handle rejects the call. The returned tagged descriptor
+     * can be bound as a VOS write parameter for a `file` column; renaming never
+     * changes content identity because the digest covers the complete octets.
+     */
+    async putFile(payload: Uint8Array | string, options: PutFileOptions = {}): Promise<FileScalar> {
+        const bytes = typeof payload === 'string' ? new TextEncoder().encode(payload) : payload;
+        const descriptorJson = this.native.putFile(bytes, options.chunkSize ?? 0, options.name ?? null, options.mediaType ?? null);
+        return JSON.parse(descriptorJson) as FileScalar;
+    }
+
+    /**
+     * Read the complete octets of a `file` value and verify its content digest.
+     *
+     * A descriptor whose chunks were tampered with fails instead of returning
+     * plausible-looking bytes. Accepts the descriptor returned by
+     * {@link Database.putFile} or one read back from a `file` column.
+     */
+    async readFile(descriptor: FileScalar): Promise<Uint8Array> {
+        return this.native.readFile(JSON.stringify(descriptor));
+    }
+
+    /**
+     * Read one VOS window of a `file` value.
+     *
+     * An offset at or past end of file yields an empty window; a request
+     * starting before the end is truncated to the remaining octets. Every
+     * touched chunk is verified against the manifest.
+     */
+    async readFileWindow(descriptor: FileScalar, offset: number, length: number): Promise<Uint8Array> {
+        return this.native.readFileWindow(JSON.stringify(descriptor), offset, length);
     }
 
     /** Run read-only consistency probes against the database. */

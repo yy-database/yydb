@@ -6,6 +6,7 @@ the pure import surface still runs everywhere.
 
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 import unittest
@@ -32,6 +33,14 @@ table Blob {
 """
 BYTES_INSERT = "Blob::insert({ blob_id: $id, label: $label, body: $body })"
 BYTES_READ = "Blob.all().collect()"
+FILE_SCHEMA = """
+table Asset {
+    @@asset_id: i64,
+    payload: file,
+}
+"""
+FILE_INSERT = "Asset::insert({ asset_id: $id, payload: $payload })"
+FILE_READ = "Asset.all().collect()"
 INLINE_BYTES_MAX = 4096
 NATIVE_REASON = yydb.native_unavailable_reason() or "yydb_pyo3 is not available"
 
@@ -177,6 +186,77 @@ class NativeTest(unittest.TestCase):
                 self.assertEqual(raised.exception.code, NATIVE_ERROR)
                 self.assertIn("INLINE_BYTES_MAX", raised.exception.message)
                 self.assertEqual(database.query(BYTES_READ), [])
+            finally:
+                database.close()
+
+    def test_file_round_trip_through_the_public_handle(self) -> None:
+        octets = bytes((index * 7) % 256 for index in range(1000))
+        with tempfile.TemporaryDirectory(prefix="yydb-python-file-") as directory:
+            path = Path(directory) / "assets.yydx"
+            database = Database.open(path)
+            try:
+                database.ensure_schema(FILE_SCHEMA)
+                descriptor = database.put_file(octets, 256, name="asset.bin", media_type="application/octet-stream")
+                self.assertEqual(descriptor["$yydb"], "file")
+                self.assertRegex(descriptor["digest"], r"^[0-9a-f]{64}$")
+                self.assertEqual(descriptor["octets"], len(octets))
+                self.assertEqual(descriptor["name"], "asset.bin")
+                self.assertEqual(descriptor["mediaType"], "application/octet-stream")
+
+                # Renaming never changes content identity: same octets, same manifest.
+                renamed = database.put_file(octets, 256, name="other.bin")
+                self.assertEqual(renamed["digest"], descriptor["digest"])
+                self.assertEqual(renamed["manifest"], descriptor["manifest"])
+
+                database.execute(FILE_INSERT, {"id": 1, "payload": descriptor})
+                rows = database.query(FILE_READ)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["payload"], descriptor)
+
+                self.assertEqual(database.read_file(descriptor), octets)
+                self.assertEqual(database.read_file_window(descriptor, 200, 200), octets[200:400])
+                self.assertEqual(database.read_file_window(descriptor, 900, 500), octets[900:])
+                self.assertEqual(database.read_file_window(descriptor, 1000, 10), b"", "end of file is an empty window")
+                self.assertEqual(database.read_file_window(descriptor, 1500, 10), b"", "past end of file is an empty window")
+            finally:
+                database.close()
+
+            reopened = Database.open(path)
+            try:
+                rows = reopened.query(FILE_READ)
+                self.assertEqual(reopened.read_file(rows[0]["payload"]), octets, "reopen must re-read every chunk from disk")
+            finally:
+                reopened.close()
+
+    def test_file_values_are_refused_in_single_file_mode(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-file-") as directory:
+            path = Path(directory) / "assets.yydb"
+            database = Database.open(path)
+            try:
+                with self.assertRaises(YydbError) as raised:
+                    database.put_file(b"payload", 0)
+                self.assertEqual(raised.exception.code, NATIVE_ERROR)
+                self.assertIn(".yydx", raised.exception.message)
+            finally:
+                database.close()
+
+    def test_file_arguments_are_validated_before_the_native_call(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yydb-python-file-") as directory:
+            path = Path(directory) / "assets.yydx"
+            database = Database.open(path)
+            try:
+                with self.assertRaises(YydbError) as raised:
+                    database.put_file("not-bytes")
+                self.assertEqual(raised.exception.code, INVALID_ARGUMENT)
+                with self.assertRaises(YydbError) as raised:
+                    database.read_file_window({"$yydb": "file"}, -1, 10)
+                self.assertEqual(raised.exception.code, INVALID_ARGUMENT)
+                with self.assertRaises(YydbError) as raised:
+                    database.read_file_window({"$yydb": "file"}, 0, -1)
+                self.assertEqual(raised.exception.code, INVALID_ARGUMENT)
+                with self.assertRaises(YydbError) as raised:
+                    database.read_file("not-a-dict")
+                self.assertEqual(raised.exception.code, INVALID_ARGUMENT)
             finally:
                 database.close()
 

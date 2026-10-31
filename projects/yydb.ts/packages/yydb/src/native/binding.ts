@@ -54,6 +54,12 @@ export interface NativeDatabase {
     queryPrepared(statement: NativeStatement, paramsJson?: string | null): string;
     /** Publish a new schema version, optionally with rename map. */
     migrateSchema(document: string, renamesJson?: string | null): void;
+    /** Publish a logical `file` value (`.yydx` layouts only); returns the tagged descriptor JSON `{"$yydb":"file",…}`. */
+    putFile(payload: Uint8Array, chunkSize: number, name: string | null, mediaType: string | null): string;
+    /** Read one VOS window of a `file` value; `descriptorJson` is the tagged form from `putFile` or a `file` column. */
+    readFileWindow(descriptorJson: string, offset: number, length: number): Uint8Array;
+    /** Read the complete octets of a `file` value and verify its content digest. */
+    readFile(descriptorJson: string): Uint8Array;
     /** Checkpoint + copy self-contained `.yydb` main file (no WAL sidecars). */
     backup(dest: string): void;
     /** Copy main + WAL + SHM without checkpoint (opening replays the tail). */

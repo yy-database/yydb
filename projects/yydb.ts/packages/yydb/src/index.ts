@@ -7,6 +7,7 @@ export {
     type FileScalar,
     type OpenOptions,
     type ParameterDescriptor,
+    type PutFileOptions,
     type QueryKind,
     type ScalarValue,
     type SchemaFieldDescriptor,
