@@ -2271,6 +2271,46 @@ fn eval_window_partition(
         return Ok(values);
     }
 
+    // `NTILE` / `LAG` / `LEAD` are positioned in the window order like the
+    // ranking functions, so they never read the frame either.
+    if matches!(field.function, WindowFunction::Ntile | WindowFunction::Lag | WindowFunction::Lead) {
+        let len = order.len() as i128;
+        for (position, &slot) in order.iter().enumerate() {
+            values[slot] = match field.function {
+                WindowFunction::Ntile => {
+                    let buckets = field.buckets.unwrap_or(1) as i128;
+                    Value::I64((position as i128 * buckets / len + 1) as i64)
+                }
+                WindowFunction::Lag | WindowFunction::Lead => {
+                    let offset = field.offset.unwrap_or(1) as i128;
+                    let source = if field.function == WindowFunction::Lag {
+                        position as i128 - offset
+                    }
+                    else {
+                        position as i128 + offset
+                    };
+                    if source < 0 || source >= len {
+                        match &field.absent {
+                            Some(expr) => {
+                                eval_project_expr(expr, &rows[partition[slot]], contract, records, bound_values, outer)?
+                            }
+                            None => Value::Null,
+                        }
+                    }
+                    else {
+                        let expr = field.argument.as_ref().ok_or_else(|| {
+                            query_runtime_error(format!("`{}` requires an argument expression", field.function.as_str()))
+                        })?;
+                        let source = order[source as usize];
+                        eval_project_expr(expr, &rows[partition[source]], contract, records, bound_values, outer)?
+                    }
+                }
+                _ => unreachable!("the branch guard only selects the value functions"),
+            };
+        }
+        return Ok(values);
+    }
+
     for (position, &slot) in order.iter().enumerate() {
         let (start, end) = window_frame_range(field, &keys, &order, position);
         let frame_rows: Vec<QueryRow> = if start <= end {
@@ -2384,8 +2424,13 @@ fn eval_window_aggregate(
         WindowFunction::Min | WindowFunction::Max => {
             return window_extreme(field, argument()?, frame_rows, contract, records, bound_values, outer);
         }
-        WindowFunction::RowNumber | WindowFunction::Rank | WindowFunction::DenseRank => {
-            unreachable!("ranking functions never read the frame")
+        WindowFunction::RowNumber
+        | WindowFunction::Rank
+        | WindowFunction::DenseRank
+        | WindowFunction::Ntile
+        | WindowFunction::Lag
+        | WindowFunction::Lead => {
+            unreachable!("ranking and value functions never read the frame")
         }
     };
     let (_, value) = eval_aggregate(&aggregate, frame_rows, contract, records, bound_values, outer)?;
