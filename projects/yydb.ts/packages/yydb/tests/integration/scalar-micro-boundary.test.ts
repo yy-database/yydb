@@ -400,7 +400,7 @@ test("`registerMicro` returns a session handle and refuses duplicates", async ()
     }
 });
 
-test("`callScalar` reports stable udf codes and the host implementation gap", async () => {
+test("`callScalar` reports stable udf codes and invokes the installed host micro", async () => {
     const directory = mkdtempSync(join(tmpdir(), "yydb-micro-call-"));
     try {
         const database = await Database.open(join(directory, "call.yydb"));
@@ -427,9 +427,19 @@ test("`callScalar` reports stable udf codes and the host implementation gap", as
             const wrongArity = await rejectDiagnostic(() => database.callScalar("demo.double", 1, []));
             assert.equal(wrongArity.code, "yydb.udf.arity");
 
-            const unavailable = await rejectDiagnostic(() => database.callScalar("demo.double", 1, [21]));
-            assert.equal(unavailable.code, "yydb.udf.failed");
-            assert.match(unavailable.message, /udf implementation unavailable/);
+            assert.equal(await database.callScalar("demo.double", 1, [21]), 42);
+
+            const shout = defineMicro({
+                name: "demo.shout",
+                version: 1,
+                args: [v.utf8()],
+                returns: v.utf8(),
+                effect: "pure",
+                deterministic: true,
+                fn: (x) => `${x.toUpperCase()}!`,
+            });
+            await database.registerMicro(shout);
+            assert.equal(await database.callScalar("demo.shout", 1, ["yydb"]), "YYDB!");
         } finally {
             await database.close();
         }

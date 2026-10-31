@@ -454,6 +454,12 @@ export class Database {
         this.path = dbPath;
         this.native = native;
         this.microRegistry = new MicroSessionRegistry();
+        // The engine calls back into JS through this invoker for every host
+        // micro registered under the session's host id. Payload/result JSON
+        // mirrors `MicroSessionRegistry.invokeFromWire`.
+        this.native.installHostInvoker(this.microRegistry.hostId, (payloadJson) =>
+            JSON.stringify(this.microRegistry.invokeFromWire(JSON.parse(payloadJson))),
+        );
     }
 
     /** Open (create when missing) the database at `dbPath`. */

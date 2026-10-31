@@ -79,6 +79,8 @@ export interface NativeDatabase {
         fingerprint: Uint8Array,
     ): void;
     callScalar(name: string, version: number, argsJson: string): string;
+    /** Install the JS callback backing host micro calls for `hostId`; payload and result are JSON strings. */
+    installHostInvoker(hostId: number, invoker: (payloadJson: string) => string): void;
 }
 
 /** A prepared VOS query plan handle exposed by the native binding. */

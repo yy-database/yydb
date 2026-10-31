@@ -14,10 +14,14 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    ffi::c_void,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicPtr, Ordering},
+    },
 };
 
-use napi::bindgen_prelude::{Buffer, Result};
+use napi::bindgen_prelude::{Buffer, Env, FunctionRef, Result};
 use napi_derive::napi;
 
 mod sqlite;
@@ -91,12 +95,94 @@ pub fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> Resu
         .map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
+// ─── Host runtime adapter ─────────────────────────────────────────────────
+
+/// Node-side [`yydb::HostRuntimeAdapter`] that calls back into the JS invoker
+/// installed through [`Database::install_host_invoker`].
+///
+/// The engine only invokes a host micro synchronously from inside a `#[napi]`
+/// call on the thread that installed the invoker, so the raw `napi_env`
+/// captured at install time is still live when [`Self::invoke_scalar`] borrows
+/// the persisted [`FunctionRef`] back into a callable scope.
+struct NapiHostAdapter {
+    /// Raw `napi_env` captured when the JS invoker was installed; null until then.
+    env: AtomicPtr<c_void>,
+    /// One persistent JS callback per host session id.
+    invokers: Mutex<BTreeMap<u64, Arc<FunctionRef<String, String>>>>,
+}
+
+impl NapiHostAdapter {
+    fn new() -> Self {
+        Self { env: AtomicPtr::new(std::ptr::null_mut()), invokers: Mutex::new(BTreeMap::new()) }
+    }
+}
+
+impl yydb::HostRuntimeAdapter for NapiHostAdapter {
+    fn invoke_scalar(&self, handle: &yydb::HostFunctionHandle, args: &[yydb::UdfValue]) -> yydb::UdfResult<yydb::UdfValue> {
+        let invoker = self
+            .invokers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&handle.host_id)
+            .cloned()
+            .ok_or(yydb::UdfError::HostDisconnected)?;
+        let env_raw = self.env.load(Ordering::Acquire);
+        if env_raw.is_null() {
+            return Err(yydb::UdfError::HostDisconnected);
+        }
+        let env = Env::from_raw(env_raw as napi::sys::napi_env);
+        let function = invoker.borrow_back(&env).map_err(|_| yydb::UdfError::HostDisconnected)?;
+        let payload = serde_json::json!({
+            "hostId": handle.host_id,
+            "handleVersion": handle.version,
+            "functionId": handle.function_id,
+            "args": args.iter().map(udf_value_to_json).collect::<Vec<_>>(),
+        });
+        let payload_json = serde_json::to_string(&payload)
+            .map_err(|error| yydb::UdfError::ExecutionFailed { message: format!("encode host invoke payload: {error}") })?;
+        let result_json =
+            function.call(payload_json).map_err(|error| yydb::UdfError::ExecutionFailed { message: error.to_string() })?;
+        let result: serde_json::Value = serde_json::from_str(&result_json).map_err(|_| yydb::UdfError::InvalidReturnValue)?;
+        json_to_udf_value(result)
+    }
+
+    fn invoke_batch(
+        &self,
+        _handle: &yydb::HostFunctionHandle,
+        _batches: &[Vec<yydb::UdfValue>],
+    ) -> yydb::UdfResult<Vec<yydb::UdfValue>> {
+        // Phase-1 host micros are scalar-only; the engine scalar path routes
+        // exclusively through [`Self::invoke_scalar`].
+        Err(yydb::UdfError::UnsupportedType)
+    }
+}
+
+fn udf_value_to_json(value: &yydb::UdfValue) -> serde_json::Value {
+    match value {
+        yydb::UdfValue::Null => serde_json::Value::Null,
+        yydb::UdfValue::Bool(b) => serde_json::Value::Bool(*b),
+        yydb::UdfValue::I64(i) => serde_json::Value::Number((*i).into()),
+        yydb::UdfValue::Text(s) => serde_json::Value::String(s.clone()),
+    }
+}
+
+fn json_to_udf_value(value: serde_json::Value) -> yydb::UdfResult<yydb::UdfValue> {
+    match value {
+        serde_json::Value::Null => Ok(yydb::UdfValue::Null),
+        serde_json::Value::Bool(b) => Ok(yydb::UdfValue::Bool(b)),
+        serde_json::Value::Number(n) => n.as_i64().map(yydb::UdfValue::I64).ok_or(yydb::UdfError::InvalidReturnValue),
+        serde_json::Value::String(s) => Ok(yydb::UdfValue::Text(s)),
+        _ => Err(yydb::UdfError::InvalidReturnValue),
+    }
+}
+
 /// Handle to one open `.yydb` file.
 #[napi]
 pub struct Database {
     /// The connection is released on [`Database::close`] so the host can drop
     /// the file and writer lock without waiting for garbage collection.
     connection: Mutex<Option<Arc<yydb::Connection>>>,
+    host_adapter: Arc<NapiHostAdapter>,
 }
 
 impl Database {
@@ -115,7 +201,10 @@ impl Database {
     #[napi(factory)]
     pub fn open(db_path: String) -> Result<Self> {
         let connection = yydb::Connection::open(&db_path).map_err(reason)?;
-        Ok(Self { connection: Mutex::new(Some(Arc::new(connection))) })
+        let host_adapter = Arc::new(NapiHostAdapter::new());
+        let adapter: Arc<dyn yydb::HostRuntimeAdapter> = host_adapter.clone();
+        connection.set_host_adapter(adapter);
+        Ok(Self { connection: Mutex::new(Some(Arc::new(connection))), host_adapter })
     }
 
     /// Release the file handle and its writer lock.
@@ -528,6 +617,21 @@ impl Database {
         let values: Vec<yydb::Value> = args.into_iter().map(json_to_value).collect::<std::result::Result<Vec<_>, _>>()?;
         let result = self.handle()?.call_scalar_version(&name, version, &values).map_err(reason)?;
         serde_json::to_string(&value_to_json(result)).map_err(|e| napi::Error::from_reason(format!("encode result: {e}")))
+    }
+
+    /// Install the JS callback that executes host micro invocations for `host_id`.
+    ///
+    /// `invoker` receives one JSON payload string
+    /// `{"hostId":…,"handleVersion":…,"functionId":…,"args":[…]}` and must
+    /// return the scalar result as a JSON string. Until an invoker is
+    /// installed for a host id, registered host micros fail as
+    /// `yydb.udf.failed` with a host-disconnected message.
+    #[napi]
+    pub fn install_host_invoker(&self, env: Env, host_id: i64, invoker: FunctionRef<String, String>) -> Result<()> {
+        let host_id = u64::try_from(host_id).map_err(|_| napi::Error::from_reason("host_id must be non-negative"))?;
+        self.host_adapter.env.store(env.raw() as *mut c_void, Ordering::Release);
+        self.host_adapter.invokers.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(host_id, Arc::new(invoker));
+        Ok(())
     }
 }
 
