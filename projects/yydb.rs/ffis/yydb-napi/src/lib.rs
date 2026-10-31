@@ -380,6 +380,25 @@ impl Database {
         self.handle()?.rollback().map_err(reason)
     }
 
+    /// Create a named savepoint inside the open transaction.
+    #[napi]
+    pub fn savepoint(&self, name: String) -> Result<()> {
+        self.handle()?.savepoint(&name).map_err(reason)
+    }
+
+    /// Roll the open transaction back to a previously created savepoint,
+    /// discarding writes made after it and every savepoint nested above.
+    #[napi]
+    pub fn rollback_to_savepoint(&self, name: String) -> Result<()> {
+        self.handle()?.rollback_to_savepoint(&name).map_err(reason)
+    }
+
+    /// Release a named savepoint so it can no longer be rolled back to.
+    #[napi]
+    pub fn release_savepoint(&self, name: String) -> Result<()> {
+        self.handle()?.release_savepoint(&name).map_err(reason)
+    }
+
     /// Execute a VOS read pipeline and return the resulting rows.
     #[napi]
     pub fn query_vos(&self, source: String) -> Result<String> {

@@ -193,6 +193,38 @@ test("nested transactions are refused while one is open", async () => {
     });
 });
 
+test("a savepoint rollback discards only the writes made after it", async () => {
+    await withDatabase(async (database) => {
+        await database.transaction(async (tx) => {
+            await tx.put("sp/kept", "one");
+            await tx.savepoint("sp1");
+            await tx.put("sp/dropped", "two");
+            await tx.rollbackToSavepoint("sp1");
+        });
+        assert.ok(await database.get("sp/kept"));
+        assert.equal(await database.get("sp/dropped"), null);
+    });
+});
+
+test("savepoint errors surface stable diagnostics", async () => {
+    await withDatabase(async (database) => {
+        await database.transaction(async (tx) => {
+            await tx.savepoint("sp1");
+            const duplicate = await rejectDiagnostic(() => tx.savepoint("sp1"));
+            assert.equal(duplicate.code, "yydb.schema.invalid");
+            assert.match(duplicate.message, /savepoint `sp1` already exists/);
+
+            await tx.releaseSavepoint("sp1");
+            const released = await rejectDiagnostic(() => tx.rollbackToSavepoint("sp1"));
+            assert.equal(released.code, "yydb.schema.invalid");
+            assert.match(released.message, /savepoint `sp1` does not exist/);
+
+            const unknown = await rejectDiagnostic(() => tx.rollbackToSavepoint("sp2"));
+            assert.match(unknown.message, /savepoint `sp2` does not exist/);
+        });
+    });
+});
+
 test("the key/value layer covers absent reads, silent deletes and octet-exact roundtrips", async () => {
     await withDatabase(async (database) => {
         assert.equal(await database.get("kv/missing"), null);
