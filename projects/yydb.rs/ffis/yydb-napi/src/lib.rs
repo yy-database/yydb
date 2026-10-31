@@ -695,8 +695,8 @@ impl Statement {
         })
     }
 
-    /// Full statement metadata as JSON — `statement_id`, `query_kind`,
-    /// `parameters`, `read_set`, `write_set`, `source_fingerprint` and
+    /// Full statement metadata as JSON — `statementId`, `queryKind`,
+    /// `parameters`, `readSet`, `writeSet`, `sourceFingerprint` and
     /// `source`. Useful for debug logging and cache-key construction.
     #[napi]
     pub fn info(&self) -> Result<String> {

@@ -544,8 +544,8 @@ impl MemorySession {
     /// Prepare a VOS read pipeline into a reusable query plan.
     ///
     /// Registers the plan in this session's internal registry and returns
-    /// JSON `{ ok, statement_id, parameters, query_kind, source_fingerprint,
-    /// read_set, write_set, source, error }`. No schema binding required —
+    /// JSON `{ ok, statementId, parameters, queryKind, sourceFingerprint,
+    /// readSet, writeSet, source, error }`. No schema binding required —
     /// plan building is pure parse + lower.
     #[wasm_bindgen(js_name = prepareJson)]
     pub fn prepare_json(&mut self, source: &str) -> String {
@@ -559,7 +559,7 @@ impl MemorySession {
                 match serde_json::to_value(&stmt) {
                     Ok(mut val) => {
                         val["ok"] = serde_json::Value::Bool(true);
-                        val["statement_id"] = serde_json::Value::String(id);
+                        val["statementId"] = serde_json::Value::String(id);
                         val.to_string()
                     }
                     Err(error) => serde_json::json!({ "ok": false, "error": format!("encode statement: {error}") }).to_string(),
@@ -988,7 +988,7 @@ impl PersistentSession {
                 match serde_json::to_value(&stmt) {
                     Ok(mut val) => {
                         val["ok"] = serde_json::Value::Bool(true);
-                        val["statement_id"] = serde_json::Value::String(id);
+                        val["statementId"] = serde_json::Value::String(id);
                         val.to_string()
                     }
                     Err(error) => serde_json::json!({ "ok": false, "error": format!("encode statement: {error}") }).to_string(),

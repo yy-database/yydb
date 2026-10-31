@@ -201,12 +201,12 @@ export type QueryKind = 'Read' | 'Write';
 
 /** Metadata about a prepared statement — useful for logging and cache keys. */
 export interface StatementInfo {
-    statement_id: string;
-    query_kind: QueryKind;
+    statementId: string;
+    queryKind: QueryKind;
     parameters: ParameterDescriptor[];
-    read_set: string[];
-    write_set: string[];
-    source_fingerprint: string;
+    readSet: string[];
+    writeSet: string[];
+    sourceFingerprint: string;
     source: string;
 }
 

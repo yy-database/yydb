@@ -297,12 +297,18 @@ export type QueryKind = 'Read' | 'Write';
 /** Metadata about a prepared statement — useful for logging and cache keys. */
 export interface StatementInfo {
     statementId: string;
+    /** Frontend the statement was prepared from. */
+    dialect: 'Vos' | 'Sql';
     queryKind: QueryKind;
     parameters: ParameterDescriptor[];
     readSet: string[];
     writeSet: string[];
     sourceFingerprint: string;
     source: string;
+    /** FNV-1a fingerprint of the schema document captured at prepare time. */
+    schemaFingerprint: string;
+    /** Schema revision captured at prepare time. */
+    schemaRevision: number;
 }
 
 /**
