@@ -727,13 +727,30 @@ fn parse_digits(bytes: &[u8]) -> Option<u32> {
 /// JSON member marking a tagged scalar object on query-row and wire surfaces.
 pub const TAGGED_JSON_KEY: &str = "$yydb";
 
+/// Largest signed integer a JSON host decodes without rounding.
+///
+/// Integers outside [`Self`] cross the host boundary in the tagged `i64` form
+/// so a 64-bit value never degrades to a rounded IEEE-754 double on the way to
+/// the caller. This is the single width truth shared by every host FFI.
+pub const HOST_EXACT_I64_MAX: i64 = 9_007_199_254_740_991;
+/// Smallest signed integer a JSON host decodes without rounding.
+pub const HOST_EXACT_I64_MIN: i64 = -9_007_199_254_740_991;
+/// Largest unsigned integer a JSON host decodes without rounding.
+pub const HOST_EXACT_U64_MAX: u64 = 9_007_199_254_740_991;
+
 /// Tagged JSON form for UUID, temporal, decimal, binary, vector, object, and
 /// file values.
 ///
+/// Integers beyond the host-exact width are tagged as `i64` / `u64` with a
+/// decimal string, so a full 64-bit value survives a JSON round trip.
 /// Returns `None` for every other [`crate::Value`] variant so callers keep
-/// their existing encoding for booleans, integers, and text.
+/// their existing encoding for booleans, in-range integers, and text.
 pub fn tagged_value_json(value: &crate::Value) -> Option<serde_json::Value> {
     match value {
+        crate::Value::I64(i) if *i < HOST_EXACT_I64_MIN || *i > HOST_EXACT_I64_MAX => {
+            Some(serde_json::json!({ "$yydb": "i64", "value": i.to_string() }))
+        }
+        crate::Value::U64(u) if *u > HOST_EXACT_U64_MAX => Some(serde_json::json!({ "$yydb": "u64", "value": u.to_string() })),
         crate::Value::Uuid(id) => Some(serde_json::json!({ "$yydb": "uuid", "value": id.to_string() })),
         crate::Value::Date(date) => Some(serde_json::json!({ "$yydb": "date", "days": date.days() })),
         crate::Value::Time(time) => Some(serde_json::json!({ "$yydb": "time", "nanos": time.nanos() })),
@@ -946,6 +963,14 @@ fn parse_tagged_value(json: &serde_json::Value, tag: &serde_json::Value) -> Resu
                 media_type,
                 manifest: crate::FileManifestRef { hash, size },
             }))
+        }
+        "i64" => {
+            let text = object.get("value").and_then(serde_json::Value::as_str).ok_or_else(|| malformed("i64"))?;
+            text.parse::<i64>().map(crate::Value::I64).map_err(|_| malformed("i64"))
+        }
+        "u64" => {
+            let text = object.get("value").and_then(serde_json::Value::as_str).ok_or_else(|| malformed("u64"))?;
+            text.parse::<u64>().map(crate::Value::U64).map_err(|_| malformed("u64"))
         }
         other => Err(ScalarError::Malformed { kind: "scalar", input: format!("unknown tag `{other}`") }),
     }

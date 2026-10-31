@@ -75,12 +75,31 @@ test("named parameters cross the write boundary with their exact scalar shapes",
             a: true,
             r: 0.1,
         });
-        const rows = await database.query<{ p_id: number; name: string }>("P.all().filter(x => x.p_id == 4).collect()");
-        assert.equal(rows.length, 1);
-        assert.equal(rows[0].name, "汉字🎉");
+        await database.execute("P::insert({ p_id: $id, name: $n, score: $s, active: $a })", {
+            id: 5,
+            n: "wide-negative",
+            s: -9007199254740993n,
+            a: false,
+        });
 
-        // The i64 beyond 2^53 reaches storage verbatim even though the JSON row
-        // decode hands the host a lossy `number`.
+        // Integers beyond the host-exact width cross the row wire tagged as
+        // `{"$yydb":"i64","value":"..."}` and decode to `bigint`, so the full
+        // 64-bit value survives the JSON round trip without rounding.
+        const wideRows = await database.query<{ p_id: number; name: string; score: number | bigint }>(
+            "P.all().collect()",
+        );
+        const wideById = new Map(wideRows.map((row) => [row.p_id, row]));
+        assert.equal(wideById.get(4)?.name, "汉字🎉");
+        assert.equal(wideById.get(4)?.score, 9007199254740993n);
+        assert.equal(wideById.get(5)?.score, -9007199254740993n);
+
+        // In-range integers stay bare JSON numbers and decode as `number`.
+        const seededRow = wideById.get(1);
+        assert.ok(seededRow, "the seeded row must be present");
+        assert.equal(seededRow.score, 30);
+        assert.equal(typeof seededRow.score, "number");
+
+        // The stored row keeps the wide integer verbatim in the KV view.
         const stored = await database.scan({ prefix: "__yydb/v0/row/P/", limit: 100 });
         const row4 = stored.find((row) => Buffer.from(row.value).toString("utf8").includes("汉字"));
         assert.ok(row4, "the seeded row must be reachable through the KV view");
