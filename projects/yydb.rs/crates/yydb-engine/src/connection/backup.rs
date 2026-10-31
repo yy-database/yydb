@@ -2,7 +2,10 @@ use std::path::Path;
 
 use yydb_storage::files::{copy_main, copy_sidecars, copy_tree};
 
-use crate::{Error, Result, objects::ObjectStore};
+use crate::{
+    Error, Result,
+    objects::{ObjectStore, references as refs},
+};
 
 use super::{Connection, is_yydx_main_path};
 
@@ -44,5 +47,33 @@ impl Connection {
         self.checkpoint()?;
         copy_main(src, dest)?;
         copy_tree(&ObjectStore::yydx_objects_root(src), &ObjectStore::yydx_objects_root(dest))
+    }
+
+    /// Open a restored `.yydx` backup and verify every committed `file` value.
+    ///
+    /// Restore is only complete once each distinct file descriptor has been read
+    /// back in full with its exact digest (Living `03` §3.3). A missing object
+    /// or a hash mismatch fails the call closed instead of handing back a
+    /// connection that would surface the gap as corrupt reads later.
+    pub fn restore_yydx(backup: impl AsRef<Path>) -> Result<Self> {
+        let connection = Self::open_yydx(backup)?;
+        connection.verify_file_digests()?;
+        Ok(connection)
+    }
+
+    /// Read every committed `file` value in full and verify its digest.
+    ///
+    /// Returns the number of distinct file values checked. The SHA-256 digest
+    /// covers the complete octets and the manifest is content-addressed, so a
+    /// reordered, truncated, or swapped chunk set fails here instead of reading
+    /// back as plausible-looking bytes.
+    pub fn verify_file_digests(&self) -> Result<usize> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let state = self.read_state()?;
+        let descriptors = refs::file_descriptors(&state.records, "")?;
+        for descriptor in &descriptors {
+            self.objects.read_file(descriptor)?;
+        }
+        Ok(descriptors.len())
     }
 }

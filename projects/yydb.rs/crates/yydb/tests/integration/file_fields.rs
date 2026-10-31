@@ -353,7 +353,8 @@ fn backup_and_restore_read_the_file_through_the_copied_object_tree() {
     conn.backup_yydx_to(&dest).unwrap();
     drop(conn);
 
-    let restored = yydb::Connection::open_yydx(&dest).unwrap();
+    let restored = yydb::Connection::restore_yydx(&dest).unwrap();
+    assert_eq!(restored.verify_file_digests().unwrap(), 1, "restore verified the one committed file value");
     let rows = restored.query_vos("Asset.all().collect()").unwrap();
     let stored = match rows[0].get("payload") {
         Some(Value::File(stored)) => stored.clone(),
@@ -361,6 +362,102 @@ fn backup_and_restore_read_the_file_through_the_copied_object_tree() {
     };
     assert_eq!(stored, file);
     assert_eq!(restored.read_file(&stored).unwrap(), octets, "restore must copy the object tree, not just the main file");
+
+    cleanup(&path);
+    cleanup(&dest);
+}
+
+#[test]
+fn restore_fails_closed_on_missing_or_tampered_objects() {
+    use yydb::ObjectStore;
+
+    let (conn, path) = open_temp_yydx("file-restore-fail");
+    conn.ensure_schema(ASSET_SCHEMA).unwrap();
+    let octets = payload(700);
+    let file = conn.put_file(Cursor::new(octets.clone()), 256, None, None).unwrap();
+    insert_asset(&conn, 1, &file).unwrap();
+
+    let dest = crate::fixtures::yydb::temp_yydx("file-restore-fail-dest");
+    conn.backup_yydx_to(&dest).unwrap();
+    drop(conn);
+
+    let manifest = {
+        let good = yydb::Connection::restore_yydx(&dest).expect("a complete backup restores cleanly");
+        let manifest = good.objects().load_file_manifest(&file).unwrap();
+        drop(good);
+        manifest
+    };
+
+    let victim_path = ObjectStore::yydx_objects_root(&dest)
+        .join(&victim_dir(&manifest.chunks[0]))
+        .join(format!("{}.blob", manifest.chunks[0].hash_hex()));
+    std::fs::remove_file(&victim_path).unwrap();
+    let error = yydb::Connection::restore_yydx(&dest).err().unwrap();
+    assert!(matches!(error, Error::ObjectNotFound { .. }), "a missing chunk must fail the restore: {error:?}");
+
+    std::fs::write(&victim_path, b"swapped content").unwrap();
+    let error = yydb::Connection::restore_yydx(&dest).err().unwrap();
+    assert!(
+        matches!(error, Error::ObjectCorrupt { .. }),
+        "a chunk that does not match its manifest hash must fail the restore: {error:?}"
+    );
+
+    cleanup(&path);
+    cleanup(&dest);
+}
+
+fn victim_dir(chunk: &yydb::ObjectRef) -> String {
+    chunk.hash_hex().chars().take(2).collect()
+}
+
+#[test]
+fn doctor_reports_a_missing_manifest_and_reclaim_refuses() {
+    let (conn, path) = open_temp_yydx("file-doctor-manifest");
+    conn.ensure_schema(ASSET_SCHEMA).unwrap();
+    let file = conn.put_file(Cursor::new(payload(700)), 256, None, None).unwrap();
+    insert_asset(&conn, 1, &file).unwrap();
+
+    let manifest_path = conn.objects().path_for(&file.manifest_object());
+    let manifest_hex = file.manifest_object().hash_hex();
+    drop(conn);
+    std::fs::remove_file(&manifest_path).unwrap();
+
+    let reopened = reopen(&path);
+    let report = reopened.doctor().expect("doctor must report the gap instead of failing");
+    assert!(
+        report.issues.iter().any(|issue| issue.code == "yydb.doctor.missing_blob" && issue.message.contains(&manifest_hex)),
+        "doctor must name the missing manifest, got {:?}",
+        report.issues
+    );
+    let error = reopened.reclaim_orphans(&[]).unwrap_err();
+    assert!(matches!(error, Error::ObjectNotFound { .. }), "reclaim must stay fail-closed: {error:?}");
+
+    cleanup(&path);
+}
+
+#[test]
+fn lifecycle_closed_loop_publish_backup_restore_reclaim() {
+    let (conn, path) = open_temp_yydx("file-lifecycle");
+    conn.ensure_schema(ASSET_SCHEMA).unwrap();
+    let octets = payload(900);
+    let file = conn.put_file(Cursor::new(octets.clone()), 256, Some("asset.bin".into()), None).unwrap();
+    insert_asset(&conn, 1, &file).unwrap();
+
+    assert!(conn.scan_orphans("").unwrap().is_empty(), "a committed row pins every object");
+
+    let dest = crate::fixtures::yydb::temp_yydx("file-lifecycle-dest");
+    conn.backup_yydx_to(&dest).unwrap();
+    let restored = yydb::Connection::restore_yydx(&dest).expect("restore verifies the digest");
+    assert_eq!(restored.read_file(&file).unwrap(), octets, "the backup reads back with the exact digest");
+
+    delete_asset(&conn, 1).unwrap();
+    let orphans = conn.scan_orphans("").unwrap();
+    assert_eq!(orphans.len(), 5, "the row deletion releases the manifest plus the four 256-byte chunks");
+    assert_eq!(conn.reclaim_orphans(&orphans).unwrap().reclaimed_objects, 5);
+    let error = conn.read_file(&file).unwrap_err();
+    assert!(matches!(error, Error::ObjectNotFound { .. }), "reclaimed content must not read: {error:?}");
+
+    assert_eq!(restored.read_file(&file).unwrap(), octets, "the pre-deletion backup is unaffected");
 
     cleanup(&path);
     cleanup(&dest);
