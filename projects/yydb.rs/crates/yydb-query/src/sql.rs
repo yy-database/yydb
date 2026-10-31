@@ -19,8 +19,8 @@ use super::{
     ops::{
         AggregateField, BinaryOp, BoundValue, CmpOp, ConflictAction, ConflictClause, CountExpr, Expr, JoinKind,
         OUTER_ROW_MARKER, Pred, ProjectExpr, ProjectField, QueryOp, ReturningProjection, ScalarFunction, SessionOp, SetOpKind,
-        SortKey, WindowField, WindowFrame, WindowFrameBound, WindowFunction, WindowOrderKey, WindowSpec, WriteAssignment,
-        WriteBinOp, WriteExpr, WriteField, WriteOp,
+        SortKey, WindowField, WindowFrame, WindowFrameBound, WindowFrameUnit, WindowFunction, WindowOrderKey, WindowSpec,
+        WriteAssignment, WriteBinOp, WriteExpr, WriteField, WriteOp,
     },
     params::{PARAM_PREFIX, ParameterDescriptor, name_to_slot},
 };
@@ -826,15 +826,11 @@ fn lower_window_constant(
 /// Lower an `OVER (...)` clause into the shared [`WindowSpec`].
 ///
 /// `PARTITION BY` and `ORDER BY` accept column references only, which is what
-/// the parser already guarantees. An explicit `ROWS` frame lowers into its two
-/// bounds, while `RANGE` is rejected: a range frame compares values instead of
-/// rows, so reading it as a row offset would silently change which rows an
-/// aggregate sees.
+/// the parser already guarantees. An explicit frame lowers into its unit and
+/// two bounds; a `RANGE` frame with a value offset additionally needs exactly
+/// one `ORDER BY` key, which [`lower_window_frame`] checks against the lowered
+/// order.
 fn lower_window_spec(window: &AstWindowSpec, _ctes: &CteScope) -> Result<WindowSpec> {
-    let frame = match &window.frame {
-        Some(frame) => Some(lower_window_frame(frame)?),
-        None => None,
-    };
     let mut partition_by = Vec::with_capacity(window.partition_by.len());
     for column in &window.partition_by {
         partition_by.push(ProjectExpr::Scalar { path: split_identifier(column) });
@@ -847,25 +843,40 @@ fn lower_window_spec(window: &AstWindowSpec, _ctes: &CteScope) -> Result<WindowS
             ascending: !matches!(direction, oak_sql::ast::OrderDirection::Desc),
         });
     }
+    let frame = match &window.frame {
+        Some(frame) => Some(lower_window_frame(frame, &order_by)?),
+        None => None,
+    };
     Ok(WindowSpec { partition_by, order_by, frame })
 }
 
-/// Lower one explicit window frame, which must count rows.
+/// Lower one explicit window frame.
 ///
 /// The single-bound form (`ROWS 2 PRECEDING`) ends at the current row, exactly
-/// like `ROWS BETWEEN 2 PRECEDING AND CURRENT ROW`.
-fn lower_window_frame(frame: &AstWindowFrame) -> Result<WindowFrame> {
-    if matches!(frame.unit, AstWindowFrameUnit::Range) {
-        return Err(sql_error(
-            "`RANGE` window frames are not supported by YYDB: a range frame compares values instead of rows, \
-             so write the frame with `ROWS` between two row offsets",
-        ));
-    }
+/// like `ROWS BETWEEN 2 PRECEDING AND CURRENT ROW`. A `RANGE` offset denotes a
+/// value distance, so it requires exactly one `ORDER BY` key: with no key every
+/// row is a peer and with several keys nothing says which value the offset
+/// moves along. `CURRENT ROW` and the unbounded bounds need no key at all.
+fn lower_window_frame(frame: &AstWindowFrame, order_by: &[WindowOrderKey]) -> Result<WindowFrame> {
+    let unit = match frame.unit {
+        AstWindowFrameUnit::Rows => WindowFrameUnit::Rows,
+        AstWindowFrameUnit::Range => {
+            let has_offset = matches!(&frame.start, AstWindowFrameBound::Preceding(_) | AstWindowFrameBound::Following(_))
+                || matches!(&frame.end, Some(AstWindowFrameBound::Preceding(_) | AstWindowFrameBound::Following(_)));
+            if has_offset && order_by.len() != 1 {
+                return Err(sql_error(
+                    "`RANGE` frame offsets require exactly one `ORDER BY` key: a value offset cannot tell \
+                     which of several keys it moves along",
+                ));
+            }
+            WindowFrameUnit::Range
+        }
+    };
     let end = match &frame.end {
         Some(bound) => lower_window_bound(bound),
         None => WindowFrameBound::CurrentRow,
     };
-    Ok(WindowFrame { start: lower_window_bound(&frame.start), end })
+    Ok(WindowFrame { unit, start: lower_window_bound(&frame.start), end })
 }
 
 /// Map one written frame bound onto the operator's bound vocabulary.

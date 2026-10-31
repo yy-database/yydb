@@ -709,30 +709,45 @@ pub struct WindowOrderKey {
     pub ascending: bool,
 }
 
-/// One bound of an explicit `ROWS` frame.
+/// Unit one explicit frame measures its bounds in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFrameUnit {
+    /// `ROWS`: offsets count rows before or after the current row.
+    Rows,
+    /// `RANGE`: offsets compare values, so they need exactly one `ORDER BY`
+    /// key and a numeric one at execution time.
+    Range,
+}
+
+/// One bound of an explicit frame.
 ///
-/// Offsets count rows, which is why `RANGE` frames are rejected during lowering
-/// instead of being read as a row offset.
+/// A `Preceding` / `Following` offset counts rows in a [`WindowFrameUnit::Rows`]
+/// frame and compares values in a [`WindowFrameUnit::Range`] frame, which is
+/// why the unit lives on the frame instead of being inferred from the bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowFrameBound {
     /// `UNBOUNDED PRECEDING`: the first row of the partition.
     UnboundedPreceding,
-    /// `n PRECEDING`: `n` rows before the current row.
+    /// `n PRECEDING`: `n` rows before the current row, or — in a `RANGE` frame
+    /// — the first row whose `ORDER BY` value is at most `n` below it.
     Preceding(u64),
     /// `CURRENT ROW`: the current row.
     CurrentRow,
-    /// `n FOLLOWING`: `n` rows after the current row.
+    /// `n FOLLOWING`: `n` rows after the current row, or — in a `RANGE` frame
+    /// — the last row whose `ORDER BY` value is at most `n` above it.
     Following(u64),
     /// `UNBOUNDED FOLLOWING`: the last row of the partition.
     UnboundedFollowing,
 }
 
-/// Explicit `ROWS` frame of the current row.
+/// Explicit frame of the current row.
 ///
 /// Both bounds are inclusive. A frame that starts after its end is empty, which
 /// the executor reports as the aggregate's empty-input result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowFrame {
+    /// Whether the bounds count rows or compare values.
+    pub unit: WindowFrameUnit,
     /// Bound the frame starts at.
     pub start: WindowFrameBound,
     /// Bound the frame ends at.
@@ -750,7 +765,7 @@ pub struct WindowSpec {
     pub partition_by: Vec<ProjectExpr>,
     /// `ORDER BY` keys; empty means every partition row is a peer.
     pub order_by: Vec<WindowOrderKey>,
-    /// Explicit `ROWS` frame, absent for the default frame.
+    /// Explicit frame, absent for the default frame.
     pub frame: Option<WindowFrame>,
 }
 
