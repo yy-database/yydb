@@ -33,7 +33,11 @@ fn validate_canonical_type(ty: &ResolvedCanonicalType) -> Result<()> {
 /// Walks every field of every declared type and enforces YYDB product-level
 /// constraints on resolved canonical types. Currently validates `vector<N>`
 /// dimensions against [`MAX_VECTOR_DIM`].
-fn validate_contract_types(contract: &ResolvedContract) -> Result<()> {
+///
+/// This is the single source of truth for YYDB schema-level type limits. Both
+/// the query-side document path and the engine-side contract resolution call
+/// this function instead of re-implementing the bounds.
+pub fn validate_contract_types(contract: &ResolvedContract) -> Result<()> {
     for ty in &contract.types {
         for field in &ty.fields {
             validate_canonical_type(&field.canonical_type)?;

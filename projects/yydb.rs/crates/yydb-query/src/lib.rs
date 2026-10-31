@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use vos::types::ResolvedContract;
 use yydb_types::{TableUniqueConstraint, Value};
 
-pub use catalog::resolved_contract_from_document;
+pub use catalog::{resolved_contract_from_document, validate_contract_types};
 pub use ops::{
     AggregateField, BoundValue, CmpOp, ConflictAction, ConflictClause, JoinKind, Pred, ProjectExpr, ProjectField, QueryOp,
     QueryRow, ReturningProjection, SessionOp, SetOpKind, SlotTy, SortKey, WindowField, WindowFrame, WindowFrameBound,
