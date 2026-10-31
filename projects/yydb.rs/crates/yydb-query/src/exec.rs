@@ -2484,7 +2484,7 @@ fn range_frame_bounds(
         WindowFrameBound::UnboundedPreceding => 0,
         WindowFrameBound::CurrentRow => first_peer,
         WindowFrameBound::UnboundedFollowing => len - 1,
-        bound if null_current => first_peer,
+        _ if null_current => first_peer,
         bound => {
             let threshold = threshold_of(bound)?;
             // Ascending keys grow along the order, so the frame starts at the
@@ -2500,7 +2500,7 @@ fn range_frame_bounds(
         WindowFrameBound::UnboundedFollowing => len - 1,
         WindowFrameBound::CurrentRow => last_peer,
         WindowFrameBound::UnboundedPreceding => 0,
-        bound if null_current => last_peer,
+        _ if null_current => last_peer,
         bound => {
             let threshold = threshold_of(bound)?;
             let mut index = len;
