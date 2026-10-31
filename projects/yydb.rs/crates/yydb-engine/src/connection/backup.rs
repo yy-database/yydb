@@ -49,16 +49,35 @@ impl Connection {
         copy_tree(&ObjectStore::yydx_objects_root(src), &ObjectStore::yydx_objects_root(dest))
     }
 
-    /// Open a restored `.yydx` backup and verify every committed `file` value.
+    /// Open a restored `.yydx` backup and verify every committed object reference.
     ///
-    /// Restore is only complete once each distinct file descriptor has been read
-    /// back in full with its exact digest (Living `03` §3.3). A missing object
-    /// or a hash mismatch fails the call closed instead of handing back a
-    /// connection that would surface the gap as corrupt reads later.
+    /// Restore is only complete once each referenced object is readable through
+    /// its content address and each distinct file descriptor has been read back
+    /// in full with its exact digest. A missing object or a hash mismatch fails
+    /// the call closed instead of handing back a connection that would surface
+    /// the gap as corrupt reads later.
     pub fn restore_yydx(backup: impl AsRef<Path>) -> Result<Self> {
         let connection = Self::open_yydx(backup)?;
+        connection.verify_object_references()?;
         connection.verify_file_digests()?;
         Ok(connection)
+    }
+
+    /// Read every committed object reference back and verify its content address.
+    ///
+    /// Returns the number of distinct referenced objects checked. The closure
+    /// covers raw `yydb:object:` values, tagged row objects (including vectors
+    /// stored outside the inline boundary), and a file descriptor's manifest plus
+    /// every chunk it lists. An unreadable manifest is an error here, not a
+    /// tolerated diagnostic: restore must not hand back a partial object tree.
+    pub fn verify_object_references(&self) -> Result<usize> {
+        let _guard = self.operation_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let state = self.read_state()?;
+        let referenced = refs::referenced_hashes(&state.records, "", &self.objects)?;
+        for hash in &referenced {
+            self.objects.verify_object_hash(hash)?;
+        }
+        Ok(referenced.len())
     }
 
     /// Read every committed `file` value in full and verify its digest.
