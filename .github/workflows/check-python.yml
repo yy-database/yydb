@@ -6,7 +6,13 @@ on:
     branches: [dev]
     paths:
       - "projects/yydb.py/**"
-      - "projects/yydb.rs/ffis/yydb-pyo3/**"
+      - "projects/yydb.rs/yydb-pyo3/**"
+      - "projects/yydb.rs/Cargo.toml"
+      - "projects/yydb.rs/Cargo.lock"
+      - "projects/yydb.rs/rust-toolchain.toml"
+      - "rust-toolchain.toml"
+      - "projects/yydb.rs/.cargo/config.example.toml"
+      - ".cargo/config.example.toml"
       - ".github/workflows/check-python.yml"
       - "package.json"
       - "pnpm-workspace.yaml"
@@ -14,7 +20,13 @@ on:
     branches: [dev]
     paths:
       - "projects/yydb.py/**"
-      - "projects/yydb.rs/ffis/yydb-pyo3/**"
+      - "projects/yydb.rs/yydb-pyo3/**"
+      - "projects/yydb.rs/Cargo.toml"
+      - "projects/yydb.rs/Cargo.lock"
+      - "projects/yydb.rs/rust-toolchain.toml"
+      - "rust-toolchain.toml"
+      - "projects/yydb.rs/.cargo/config.example.toml"
+      - ".cargo/config.example.toml"
       - ".github/workflows/check-python.yml"
       - "package.json"
       - "pnpm-workspace.yaml"
