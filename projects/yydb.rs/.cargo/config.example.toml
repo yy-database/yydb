@@ -2,5 +2,5 @@
 # CI uses pinned git `rev` from `Cargo.toml` only.
 # Patch the facade only — internal crates follow the database.rs workspace graph.
 
-[patch."https://github.com/oovm/database.rs.git"]
+[patch."https://github.com/yy-database/database.rs.git"]
 yydb = { path = "<your-path>/database.rs/projects/facades/yydb" }
