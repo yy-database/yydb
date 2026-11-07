@@ -23,8 +23,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly
           components: rustfmt
+      - run: rustc --version && cargo --version
       - run: cargo fmt --all --check
 
   rust-test:
@@ -40,8 +40,7 @@ jobs:
         with:
           python-version: '3.13'
       - uses: dtolnay/rust-toolchain@nightly
-        with:
-          toolchain: nightly
+      - run: rustc --version && cargo --version
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: projects/yydb.rs
@@ -49,3 +48,9 @@ jobs:
       # Cover it with `cargo build` below; host behaviour is asserted in TypeScript.
       - run: cargo test --workspace --exclude yydb-napi
       - run: cargo build -p yydb-napi --release
+  toolchain-health:
+    name: toolchain health
+    runs-on: ubuntu-latest
+    steps:
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: rustup show active-toolchain && rustc -vV

@@ -30,8 +30,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly
           components: rustfmt
+      - run: rustc --version && cargo --version
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -93,8 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
-        with:
-          toolchain: nightly
+      - run: rustc --version && cargo --version
       - name: Install compilation target
         run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
@@ -144,8 +143,8 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly
           targets: wasm32-unknown-unknown
+      - run: rustc --version && cargo --version
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
       - run: pnpm run build:wasm
