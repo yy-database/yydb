@@ -52,5 +52,6 @@ jobs:
     name: toolchain health
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - run: rustup show active-toolchain && rustc -vV
