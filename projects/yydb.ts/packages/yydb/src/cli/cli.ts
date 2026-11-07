@@ -10,7 +10,6 @@ import { registerInfoCommand } from './info-cmd.js';
 import { registerInitCommand } from './init-cmd.js';
 import { registerRestoreCommand } from './restore-cmd.js';
 import { registerServeCommand } from './serve-cmd.js';
-import { registerExportCommand, registerImportCommand } from './sqlite-etl-cmd.js';
 import { registerVerifyCommand } from './verify-cmd.js';
 import { registerWebuiCommand } from './webui-cmd.js';
 import { registerVersionCommand } from './version-cmd.js';
@@ -28,8 +27,6 @@ function buildYydbCli() {
     registerInfoCommand(cli);
     registerVerifyCommand(cli);
     registerRestoreCommand(cli);
-    registerImportCommand(cli);
-    registerExportCommand(cli);
     registerServeCommand(cli);
     registerWebuiCommand(cli);
 

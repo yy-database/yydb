@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { Database } from "@yydb/yydb";
 
-import { CASE_ROW_SCHEMA, createCaseSqliteFixture } from "@yydb/yydb-fixtures";
+const CASE_ROW_SCHEMA = `table CaseRow {
+    @@id: i64,
+    label: utf8,
+}`;
 
 const SQL_REJECTIONS = [
     "SELECT 1",
@@ -17,6 +20,11 @@ const SQL_REJECTIONS = [
     "DELETE FROM simple WHERE id = 1",
     "UPDATE simple SET name = 'x' WHERE id = 1",
 ] as const;
+
+/** Bytes from a foreign engine that never carry the YYDB `YDPG` header. */
+function foreignBytes(): Buffer {
+    return Buffer.concat([Buffer.from("FOREIGN\x01"), Buffer.alloc(128)]);
+}
 
 test("@yydb/yydb rejects a broad SQL surface area", async () => {
     const directory = mkdtempSync(join(tmpdir(), "yydb-sql-surface-"));
@@ -57,32 +65,29 @@ test("@yydb/yydb rejects YYDS and YYDX byte headers even when the path ends in .
     }
 });
 
-test("@yydb/yydb put/get remains independent from SQLite file paths", async () => {
-    const sqlite = createCaseSqliteFixture();
+test("@yydb/yydb put/get remains independent from external database file paths", async () => {
     const directory = mkdtempSync(join(tmpdir(), "yydb-kv-isolation-"));
     const yydbPath = join(directory, "kv.yydb");
+    const externalPath = join(directory, "external", "catalog.db");
     try {
         const database = await Database.open(yydbPath);
         await database.ensureSchema(CASE_ROW_SCHEMA);
-        await database.put("catalog/source", new TextEncoder().encode(sqlite.path));
-        assert.equal(new TextDecoder().decode(await database.get("catalog/source")!), sqlite.path);
+        await database.put("catalog/source", new TextEncoder().encode(externalPath));
+        assert.equal(new TextDecoder().decode(await database.get("catalog/source")!), externalPath);
         assert.deepEqual(await database.query("CaseRow.all().collect()"), []);
         await database.close();
     } finally {
-        rmSync(sqlite.directory, { recursive: true, force: true });
         rmSync(directory, { recursive: true, force: true });
     }
 });
 
-test("@yydb/yydb disguised SQLite bytes still fail format validation", async () => {
-    const sqlite = createCaseSqliteFixture();
-    const directory = mkdtempSync(join(tmpdir(), "yydb-disguised-sqlite-"));
+test("@yydb/yydb disguised foreign bytes still fail format validation", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "yydb-disguised-external-"));
     const disguised = join(directory, "looks-like-yydb.yydb");
     try {
-        writeFileSync(disguised, readFileSync(sqlite.path));
+        writeFileSync(disguised, foreignBytes());
         await assert.rejects(() => Database.open(disguised), /not YDPG|corrupt/i);
     } finally {
-        rmSync(sqlite.directory, { recursive: true, force: true });
         rmSync(directory, { recursive: true, force: true });
     }
 });

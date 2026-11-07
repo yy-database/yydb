@@ -30,7 +30,7 @@ These guides are written for people using YYDB. They do not discuss internal imp
 
 ## Boundaries
 
-- YYDB exposes no SQL entry point. SQLite files can only be read as read-only snapshots through `@yydb/sqlite`.
+- YYDB exposes no SQL entry point and never reads or writes external database files directly. Cross-database migration belongs to the unified migration layer in `database.rs`.
 - YYDB provides no login, tenancy, roles, audit or clustering. Those belong to YYDS.
 - `yydb serve` binds only `127.0.0.1:7700` by default and performs no authentication.
 - ANN indexes are not released and must not be depended on in production.

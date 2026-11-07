@@ -94,14 +94,13 @@ try {
 - `walPath()` / `wal_path()` 只返回伴生路径，**不保证文件存在**。WAL 可能尚未创建、已折叠，或该会话根本不落 WAL。不要用它的存在性判断提交是否生效，改用 `journalMode()` / `walFrameCount()`，或先 `await db.checkpoint()`。
 - `doctor()` 是只读检查，**不修复损坏页**。它不会重写 WAL、不会回收孤儿对象、不会改写任何字节。孤儿对象回收用 `.yydx` 上的 `compact()`，损坏页只能从备份 `restore()` 或重建文件。
 - `restore()` 在返回句柄前校验 `.yydb` 的页 CRC 或 `.yydx` 的对象闭包。它不修复备份本身：校验失败直接拒绝打开。
-- `yydb import` / `yydb export` 是显式 ETL，不是 SQLite 兼容层。声明子集只有 `records(key TEXT PRIMARY KEY, value BLOB NOT NULL)`。导入拒绝其它列形状、非 `TEXT` 主键、非 `BLOB` 值以及保留命名空间 `__yydb/` 的键，导出跳过 `__yydb/` 键。导入按键覆盖，不保留 SQLite 的类型、索引、约束、触发器或行顺序。
 
 ## 打开失败
 
 | 症状 | 原因 | 处理 |
 |---------|------|------|
 | `ENOENT` 或权限错误 | 父目录不可写 | 改用可写路径，或确认 `mkdir` 未被关闭 |
-| 格式不匹配 | 文件不是 `YDPG` | SQLite 文件不能改后缀当作 `.yydb` |
+| 格式不匹配 | 文件不是 `YDPG` | 外部数据库文件不能改后缀当作 `.yydb` |
 | 写锁冲突 | 另一个进程持有写者锁 | 关闭重复打开的进程 |
 
 ## 找不到原生绑定

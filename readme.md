@@ -163,7 +163,7 @@ have no CLI.
 | Path                 | Contents                                                       |
 |----------------------|----------------------------------------------------------------|
 | `projects/yydb.rs/`  | Rust workspace: crates, ffis, toolchain                         |
-| `projects/yydb.ts/`  | TypeScript: packages, platforms, emulators, homepage            |
+| `projects/yydb.ts/`  | TypeScript: packages, platforms, homepage                       |
 | `projects/examples/` | Runnable examples (if present)                                  |
 | `changelog/`         | Release bodies and commit-author map used by the release flow   |
 

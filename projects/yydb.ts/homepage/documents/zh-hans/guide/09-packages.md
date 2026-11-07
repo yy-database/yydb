@@ -9,7 +9,6 @@
 | `@yydb/yydb-client` | 线协议客户端与帧编解码 | 连接 `serve` 的客户端、WebUI |
 | `@yydb/webui` | 本地数据库浏览界面 | 开发与排查 |
 | `@yydb/yydb-skills` | 面向集成方的 Agent Skills | 代码代理与工具集成 |
-| `@yydb/sqlite` | 只读 SQLite format-3 快照读取器 | 数据迁移与互操作校验 |
 
 ## 平台包
 
@@ -56,4 +55,4 @@ console.log(db.serverVersion());
 - 只在 Node 中使用：装 `@yydb/yydb`。
 - 只在浏览器中使用：装 `@yydb/light-db`。
 - 浏览器还要连本地服务：再加 `@yydb/yydb-client`。
-- 需要读取 SQLite 快照做迁移：加 `@yydb/sqlite`，并注意它不执行 SQL。
+- 需要从其它数据库导入数据：使用 `database.rs` 的统一迁移层，不在 yydb 内做单点适配。

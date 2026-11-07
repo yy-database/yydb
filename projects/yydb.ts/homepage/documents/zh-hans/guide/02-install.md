@@ -60,7 +60,7 @@ const db = await openLightDatabase("app");
 const rows = await db.query("User.all().collect()");
 ```
 
-浏览器入口使用 WASM，不包含 Node 内置模块，也不暴露 SQLite 快照读取器。
+浏览器入口使用 WASM，不包含 Node 内置模块，也不暴露外部数据库文件读取器。
 
 ## 远程客户端
 

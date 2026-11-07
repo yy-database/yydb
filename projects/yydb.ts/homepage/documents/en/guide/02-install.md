@@ -60,7 +60,7 @@ const db = await openLightDatabase("app");
 const rows = await db.query("User.all().collect()");
 ```
 
-The browser entry runs on WASM. It contains no Node built-ins and does not expose the SQLite snapshot reader.
+The browser entry runs on WASM. It contains no Node built-ins and exposes no external database file reader.
 
 ## Remote client
 

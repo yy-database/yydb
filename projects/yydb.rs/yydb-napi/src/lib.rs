@@ -24,8 +24,6 @@ use std::{
 use napi::bindgen_prelude::{Buffer, Env, FunctionRef, Result};
 use napi_derive::napi;
 
-mod sqlite;
-
 /// Upstream diagnostic namespace produced by `database::types::Error::code`.
 const UPSTREAM_CODE_PREFIX: &str = "database.";
 

@@ -9,13 +9,13 @@ export const SIMPLE_SCHEMA = `table Simple {
     note: utf8,
 }`;
 
-/** VOS programs produced by converting an upstream SQLite `案例` table. */
+/** VOS programs produced by converting an external `案例` fixture table. */
 export const CASE_ADOPTION_PROGRAMS = [
     'CaseRow { id: 10, label: "导入-A" }.insert()',
     'CaseRow { id: 11, label: "导入-B" }.insert()',
 ] as const;
 
-/** VOS programs produced from the reference corpus `simple` table. */
+/** VOS programs produced from an external `simple` fixture table. */
 export const SIMPLE_ADOPTION_PROGRAMS = [
     'Simple { id: 1, name: "alpha", note: null }.insert()',
     'Simple { id: 2, name: "00042", note: "" }.insert()',

@@ -13,7 +13,7 @@ import { NATIVE_ARTIFACTS } from './native-artifacts.mjs';
 const root = process.cwd();
 const NATIVE_PKG_NAMES = new Set(NATIVE_ARTIFACTS.map((a) => a.pkg));
 const dirs = (
-    process.env.PUBLISH_PACKAGES || 'yydb-win32-x64 yydb-linux-x64 yydb-darwin-x64 yydb-darwin-arm64 light-db yydb-client yydb-unknown-wasm32 yydb sqlite'
+    process.env.PUBLISH_PACKAGES || 'yydb-win32-x64 yydb-linux-x64 yydb-darwin-x64 yydb-darwin-arm64 light-db yydb-client yydb-unknown-wasm32 yydb'
 )
     .trim()
     .split(/\s+/)
@@ -22,9 +22,6 @@ const dirs = (
 function resolvePackageDir(dirName) {
     if (NATIVE_PKG_NAMES.has(dirName) || dirName === 'yydb-unknown-wasm32') {
         return path.join(root, 'projects', 'yydb.ts', 'platforms', dirName);
-    }
-    if (dirName === 'sqlite') {
-        return path.join(root, 'projects', 'yydb.ts', 'emulators', dirName);
     }
     return path.join(root, 'projects', 'yydb.ts', 'packages', dirName);
 }

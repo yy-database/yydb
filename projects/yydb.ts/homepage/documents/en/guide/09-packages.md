@@ -9,7 +9,6 @@
 | `@yydb/yydb-client` | Wire protocol client and frame codecs | Clients connecting to `serve`, the WebUI |
 | `@yydb/webui` | Local database browsing interface | Development and inspection |
 | `@yydb/yydb-skills` | Agent Skills for integrators | Coding agents and tool integration |
-| `@yydb/sqlite` | Read-only SQLite format-3 snapshot reader | Data migration and interoperability checks |
 
 ## Platform packages
 
@@ -56,4 +55,4 @@ Both print the same engine version string.
 - Node only: install `@yydb/yydb`.
 - Browser only: install `@yydb/light-db`.
 - Browser plus a local service: add `@yydb/yydb-client`.
-- Reading a SQLite snapshot for migration: add `@yydb/sqlite`, and note that it does not execute SQL.
+- To import data from another database, use the unified migration layer in `database.rs` rather than a one-off adapter inside yydb.

@@ -6,8 +6,6 @@
 
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
-mod sqlite_bindings;
-
 use database::types::Value;
 use pyo3::{
     IntoPyObjectExt,
@@ -694,7 +692,5 @@ fn yydb_pyo3(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(backup_db, m)?)?;
     m.add_function(wrap_pyfunction!(compact_db, m)?)?;
     m.add_function(wrap_pyfunction!(restore, m)?)?;
-    m.add_class::<sqlite_bindings::SqliteWriter>()?;
-    m.add_class::<sqlite_bindings::SqliteDatabase>()?;
     Ok(())
 }

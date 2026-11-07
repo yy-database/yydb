@@ -17,7 +17,7 @@ For a wire client only (renderer or an app that already runs `yydb serve`), use
 | Import | Runtime | Role |
 |--------|---------|------|
 | `@yydb/yydb` | Node | `Database.open`, micro helpers, VOS re-exports |
-| `@yydb/yydb/cli` | Node | CLI (`version`, `init`, `info`, `verify`, `restore`, `import`, `export`, `serve`) |
+| `@yydb/yydb/cli` | Node | CLI (`version`, `init`, `info`, `verify`, `restore`, `serve`) |
 
 Node.js 18+.
 
@@ -101,9 +101,6 @@ closure is checked. A failed check refuses to open instead of returning a damage
   `journalMode()` / `walFrameCount()`, or `checkpoint()` first.
 - `doctor()` is read-only. It never repairs a damaged page, rewrites the WAL or reclaims orphans. Damaged pages must be
   restored from a verified backup or the file rebuilt. Orphan reclamation is `compact()` on `.yydx` only.
-- `yydb import` and `yydb export` are explicit ETL, not a SQLite compatibility layer. The declared subset is exactly
-  `records(key TEXT PRIMARY KEY, value BLOB NOT NULL)`. Import refuses other column shapes, non-`TEXT` keys, non-`BLOB`
-  values and keys in the reserved `__yydb/` namespace. Export skips reserved keys.
 - The full code catalog is the guide page `guide/10-errors.md`. Engine codes are minted only by the Rust
   `yydb-types` crate; the TypeScript host adds `yydb.client.*` and `yydb.statement.closed`.
 

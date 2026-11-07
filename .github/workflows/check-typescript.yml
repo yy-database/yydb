@@ -34,8 +34,6 @@ jobs:
       - run: pnpm --filter @yydb/yydb build
       - run: pnpm --filter @yydb/yydb-client test
       - run: pnpm --filter @yydb/yydb test
-      - name: Test SQLite snapshot reader
-        run: pnpm --filter @yydb/sqlite test
       - run: pnpm --filter @yydb/light-db build
       - run: pnpm --filter @yydb/light-db test
       - run: pnpm --filter @yydb/light-db test:browser

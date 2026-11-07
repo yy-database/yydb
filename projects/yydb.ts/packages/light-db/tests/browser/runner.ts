@@ -71,12 +71,9 @@ async function main(): Promise<void> {
         }
     });
 
-    await run("@yydb/light-db does not expose the SQLite snapshot reader", async () => {
-        if ("SqliteDatabase" in lightDb || "SqliteSnapshot" in lightDb) {
-            throw new Error("light-db must not re-export the SQLite reader");
-        }
+    await run("@yydb/light-db does not expose an external storage reader", async () => {
         const proto = Database.prototype as unknown as Record<string, unknown>;
-        for (const method of ["openSqlite", "importSqlite", "readSqlite", "table", "schema"]) {
+        for (const method of ["openExternal", "readExternal", "table", "schema"]) {
             if (method in proto) {
                 throw new Error(`light-db must not implement ${method}`);
             }
@@ -143,7 +140,7 @@ async function main(): Promise<void> {
         }
     });
 
-    await run("reference corpus simple rows reach light-db only through explicit VOS conversion", async () => {
+    await run("external fixture rows reach light-db only through explicit VOS conversion", async () => {
         const database = await Database.open("simple-adoption", { memory: true });
         try {
             await database.ensureSchema(SIMPLE_SCHEMA);
@@ -161,13 +158,13 @@ async function main(): Promise<void> {
         }
     });
 
-    await run("SQLite rows reach @yydb/light-db only through explicit VOS conversion", async () => {
-        const database = await Database.open("sqlite-adoption", { memory: true });
+    await run("External rows reach @yydb/light-db only through explicit VOS conversion", async () => {
+        const database = await Database.open("external-adoption", { memory: true });
         try {
             await database.ensureSchema(CASE_ROW_SCHEMA);
             const before = await database.query("CaseRow.all().collect()");
             if (before.length !== 0) {
-                throw new Error("opening light-db must not auto-import SQLite bytes");
+                throw new Error("opening light-db must not auto-import external database bytes");
             }
 
             for (const program of CASE_ADOPTION_PROGRAMS) {

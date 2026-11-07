@@ -94,14 +94,13 @@ These codes are minted by the TypeScript and Python hosts, not by `yydb-types`, 
 - `walPath()` / `wal_path()` only reports the sidecar path. It **does not guarantee the file exists**: the WAL may not be created yet, may already be folded, or the session may not use one at all. Do not use its presence as a commit signal. Use `journalMode()` / `walFrameCount()`, or `await db.checkpoint()` first.
 - `doctor()` is read-only and **never repairs damaged pages**. It does not rewrite the WAL, reclaim orphans or modify a single byte. Reclaim orphans with `compact()` on `.yydx`. Damaged pages must be restored from a backup with `restore()` or rebuilt.
 - `restore()` verifies page CRCs for `.yydb` or the object closure for `.yydx` before returning a handle. It does not repair the backup: a failed check refuses to open.
-- `yydb import` and `yydb export` are explicit ETL, not a SQLite compatibility layer. The declared subset is exactly `records(key TEXT PRIMARY KEY, value BLOB NOT NULL)`. Import refuses other column shapes, non-`TEXT` primary keys, non-`BLOB` values and keys in the reserved `__yydb/` namespace. Export skips `__yydb/` keys. Import replaces keys and preserves no SQLite types, indexes, constraints, triggers or row order.
 
 ## Open failures
 
 | Symptom | Cause | Action |
 |---------|-------|--------|
 | `ENOENT` or a permission error | Parent directory is not writable | Use a writable path, or confirm `mkdir` was not disabled |
-| Format mismatch | The file is not `YDPG` | A SQLite file cannot be renamed into a `.yydb` |
+| Format mismatch | The file is not `YDPG` | An external database file cannot be renamed into a `.yydb` |
 | Write-lock conflict | Another process holds the writer lock | Close the duplicate process |
 
 ## Native binding not found

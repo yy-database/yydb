@@ -97,6 +97,5 @@ preparePackageJson(path.join(root, 'projects', 'yydb.ts', 'packages', 'light-db'
 preparePackageJson(path.join(root, 'projects', 'yydb.ts', 'packages', 'yydb-client'));
 preparePackageJson(path.join(root, 'projects', 'yydb.ts', 'platforms', 'yydb-unknown-wasm32'));
 preparePackageJson(path.join(root, 'projects', 'yydb.ts', 'packages', 'yydb'));
-preparePackageJson(path.join(root, 'projects', 'yydb.ts', 'emulators', 'sqlite'));
 
 console.log('npm packages prepared', version || '(package.json versions)');
