@@ -147,7 +147,8 @@ jobs:
       - run: rustc --version && cargo --version
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
-      - run: pnpm run build:wasm
+      - name: Build release artifacts
+        run: node scripts/build-release.mjs
 
       - name: Download engine artifacts
         uses: actions/download-artifact@v8
@@ -174,11 +175,6 @@ jobs:
         env:
           INPUT_VERSION: ${{ steps.ver.outputs.version }}
         run: node scripts/prepare-npm-publish.mjs
-
-      # Build client and light-db first so yydb-webui's bundle step can resolve @yydb/yydb-client
-      - run: pnpm --filter @yydb/yydb-client build
-      - run: pnpm --filter @yydb/light-db build
-      - run: pnpm --filter @yydb/yydb build
 
       - name: Strip token-style npmrc (OIDC only)
         shell: bash

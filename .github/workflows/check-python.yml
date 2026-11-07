@@ -14,6 +14,7 @@ on:
       - "projects/yydb.rs/.cargo/config.example.toml"
       - ".cargo/config.example.toml"
       - ".github/workflows/check-python.yml"
+      - ".github/workflows/release-npm.yml"
       - "package.json"
       - "pnpm-workspace.yaml"
   pull_request:
@@ -28,6 +29,7 @@ on:
       - "projects/yydb.rs/.cargo/config.example.toml"
       - ".cargo/config.example.toml"
       - ".github/workflows/check-python.yml"
+      - ".github/workflows/release-npm.yml"
       - "package.json"
       - "pnpm-workspace.yaml"
 

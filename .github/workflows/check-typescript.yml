@@ -28,13 +28,10 @@ jobs:
         run: cargo install wasm-pack --locked
       - name: Build native addon
         run: pnpm run build:napi
-      - run: pnpm run build:wasm
-      - run: pnpm --filter @yydb/yydb-unknown-wasm32 build
-      - run: pnpm --filter @yydb/yydb-client build
-      - run: pnpm --filter @yydb/yydb build
+      - name: Build release artifacts
+        run: node scripts/build-release.mjs
       - run: pnpm --filter @yydb/yydb-client test
       - run: pnpm --filter @yydb/yydb test
-      - run: pnpm --filter @yydb/light-db build
       - run: pnpm --filter @yydb/light-db test
       - run: pnpm --filter @yydb/light-db test:browser
       - run: pnpm --filter @yydb/yydb-webui check
