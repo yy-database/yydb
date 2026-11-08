@@ -851,6 +851,80 @@ impl Client {
     }
 }
 
+/// napi 边界 DTO：单个参数描述符的 JSON 形态。
+///
+/// 核心类型 [`database::query::local::ParameterDescriptor`] 保持 Rust 命名，
+/// JS 侧的 camelCase 拼写只由本 DTO 负责，便于核心层后续去掉 serde 重命名。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ParameterDescriptorJson<'a> {
+    /// 参数名（不含前导 `$`）。
+    name: &'a str,
+    /// 绑定值切片中的位置下标。
+    index: u32,
+    /// 声明的槽位类型。
+    slot_ty: database::query::local::SlotTy,
+    /// 参数在源码中出现的次数。
+    usage_count: u32,
+}
+
+impl<'a> ParameterDescriptorJson<'a> {
+    fn new(descriptor: &'a database::query::local::ParameterDescriptor) -> Self {
+        Self {
+            name: descriptor.name.as_str(),
+            index: descriptor.index,
+            slot_ty: descriptor.slot_ty,
+            usage_count: descriptor.usage_count,
+        }
+    }
+}
+
+/// napi 边界 DTO：预编译语句元数据的 JSON 形态。
+///
+/// 字段集合与顺序对齐 `PreparedStatement` 的公开序列化形态，键名由此处冻结，
+/// 核心层不再承担面向 JS 的重命名。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StatementInfoJson<'a> {
+    /// 语句 id。
+    statement_id: &'a str,
+    /// 前端方言。
+    dialect: database::query::local::Dialect,
+    /// 查询类别。
+    query_kind: database::query::local::QueryKind,
+    /// 参数描述符列表。
+    parameters: Vec<ParameterDescriptorJson<'a>>,
+    /// 读表集合。
+    read_set: &'a [String],
+    /// 写表集合。
+    write_set: &'a [String],
+    /// 源码指纹。
+    source_fingerprint: &'a str,
+    /// 源码文本。
+    source: &'a str,
+    /// schema 指纹。
+    schema_fingerprint: &'a str,
+    /// schema 修订号。
+    schema_revision: u64,
+}
+
+impl<'a> StatementInfoJson<'a> {
+    fn new(statement: &'a database::query::local::PreparedStatement) -> Self {
+        Self {
+            statement_id: statement.statement_id.as_str(),
+            dialect: statement.dialect,
+            query_kind: statement.query_kind,
+            parameters: statement.parameters.iter().map(ParameterDescriptorJson::new).collect(),
+            read_set: statement.read_set.as_slice(),
+            write_set: statement.write_set.as_slice(),
+            source_fingerprint: statement.source_fingerprint.as_str(),
+            source: statement.source.as_str(),
+            schema_fingerprint: statement.schema_fingerprint.as_str(),
+            schema_revision: statement.schema_revision,
+        }
+    }
+}
+
 /// Handle to a prepared VOS query plan.
 ///
 /// Created by [`Database::prepare`]. The actual lowered op tree lives in a
@@ -876,7 +950,9 @@ impl Statement {
     #[napi]
     pub fn parameters_json(&self) -> Result<String> {
         with_stmt(&self.statement_id, |stmt| {
-            serde_json::to_string(&stmt.parameters).map_err(|e| napi::Error::from_reason(format!("encode parameters: {e}")))
+            let descriptors: Vec<ParameterDescriptorJson<'_>> =
+                stmt.parameters.iter().map(ParameterDescriptorJson::new).collect();
+            serde_json::to_string(&descriptors).map_err(|e| napi::Error::from_reason(format!("encode parameters: {e}")))
         })
     }
 
@@ -886,12 +962,8 @@ impl Statement {
     #[napi]
     pub fn info(&self) -> Result<String> {
         with_stmt(&self.statement_id, |stmt| {
-            serde_json::to_value(stmt).map_err(|e| napi::Error::from_reason(format!("encode statement info: {e}"))).and_then(
-                |val| {
-                    serde_json::to_string(&val)
-                        .map_err(|e| napi::Error::from_reason(format!("encode statement info string: {e}")))
-                },
-            )
+            serde_json::to_string(&StatementInfoJson::new(stmt))
+                .map_err(|e| napi::Error::from_reason(format!("encode statement info: {e}")))
         })
     }
 

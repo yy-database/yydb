@@ -19,6 +19,74 @@ fn closed_session_error() -> Error {
     Error::SessionClosed
 }
 
+/// wasm 边界 DTO：单个参数描述符的 JSON 形态。
+///
+/// 核心类型 [`database::query::local::ParameterDescriptor`] 保持 Rust 命名，
+/// JS 侧的 camelCase 拼写只由本 DTO 负责。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ParameterDescriptorJson<'a> {
+    name: &'a str,
+    index: u32,
+    slot_ty: database::query::local::SlotTy,
+    usage_count: u32,
+}
+
+impl<'a> ParameterDescriptorJson<'a> {
+    fn new(descriptor: &'a database::query::local::ParameterDescriptor) -> Self {
+        Self {
+            name: descriptor.name.as_str(),
+            index: descriptor.index,
+            slot_ty: descriptor.slot_ty,
+            usage_count: descriptor.usage_count,
+        }
+    }
+}
+
+/// wasm 边界 DTO：预编译语句元数据的 JSON 形态。
+///
+/// 字段与键名冻结 `PreparedStatement` 的公开序列化形态，核心层不再承担
+/// 面向 JS 的重命名。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StatementInfoJson<'a> {
+    statement_id: &'a str,
+    dialect: database::query::local::Dialect,
+    query_kind: database::query::local::QueryKind,
+    parameters: Vec<ParameterDescriptorJson<'a>>,
+    read_set: &'a [String],
+    write_set: &'a [String],
+    source_fingerprint: &'a str,
+    source: &'a str,
+    schema_fingerprint: &'a str,
+    schema_revision: u64,
+}
+
+impl<'a> StatementInfoJson<'a> {
+    fn new(statement: &'a PreparedStatement) -> Self {
+        Self {
+            statement_id: statement.statement_id.as_str(),
+            dialect: statement.dialect,
+            query_kind: statement.query_kind,
+            parameters: statement.parameters.iter().map(ParameterDescriptorJson::new).collect(),
+            read_set: statement.read_set.as_slice(),
+            write_set: statement.write_set.as_slice(),
+            source_fingerprint: statement.source_fingerprint.as_str(),
+            source: statement.source.as_str(),
+            schema_fingerprint: statement.schema_fingerprint.as_str(),
+            schema_revision: statement.schema_revision,
+        }
+    }
+}
+
+/// 编码 `prepareJson` 的返回体：语句元数据加盖 `ok` 与会话级 `statementId`。
+fn encode_statement_info(statement_id: &str, statement: &PreparedStatement) -> Result<String, serde_json::Error> {
+    let mut value = serde_json::to_value(StatementInfoJson::new(statement))?;
+    value["ok"] = serde_json::Value::Bool(true);
+    value["statementId"] = serde_json::Value::String(statement_id.to_owned());
+    Ok(value.to_string())
+}
+
 /// Parse a write-batch JSON body: `[{ "key": "...", "value": bytes | null }, ...]`.
 fn parse_write_batch(body: &[u8]) -> database::types::Result<Vec<(String, Option<Vec<u8>>)>> {
     let array: serde_json::Value = serde_json::from_slice(body)
@@ -612,12 +680,8 @@ impl MemorySession {
                 }
                 let id = format!("stmt-{}", self.stmts.len() + 1);
                 self.stmts.insert(id.clone(), stmt.clone());
-                match serde_json::to_value(&stmt) {
-                    Ok(mut val) => {
-                        val["ok"] = serde_json::Value::Bool(true);
-                        val["statementId"] = serde_json::Value::String(id);
-                        val.to_string()
-                    }
+                match encode_statement_info(&id, &stmt) {
+                    Ok(json) => json,
                     Err(error) => serde_json::json!({ "ok": false, "error": format!("encode statement: {error}") }).to_string(),
                 }
             }
@@ -1109,12 +1173,8 @@ impl PersistentSession {
                 }
                 let id = format!("stmt-{}", self.stmts.len() + 1);
                 self.stmts.insert(id.clone(), stmt.clone());
-                match serde_json::to_value(&stmt) {
-                    Ok(mut val) => {
-                        val["ok"] = serde_json::Value::Bool(true);
-                        val["statementId"] = serde_json::Value::String(id);
-                        val.to_string()
-                    }
+                match encode_statement_info(&id, &stmt) {
+                    Ok(json) => json,
                     Err(error) => serde_json::json!({ "ok": false, "error": format!("encode statement: {error}") }).to_string(),
                 }
             }
