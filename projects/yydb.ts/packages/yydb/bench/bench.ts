@@ -9,7 +9,14 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Database } from "@yydb/yydb";
+import { Database, loadNative } from "@yydb/yydb";
+
+// Bench stats run in `database.harness` through the napi primitive
+// `harnessBenchSummary` (middle-two median, nearest-rank p95); the formulas
+// match the previous local implementations bit-for-bit.
+const benchNative = loadNative() as {
+  harnessBenchSummary: (samplesMs: number[]) => { medianMs: number; p95Ms: number };
+};
 
 const ROWS = Number(process.env.BENCH_ROWS ?? 20_000);
 const KEYS_PER_TXN = Number(process.env.BENCH_TXN ?? 1_000);
@@ -25,15 +32,11 @@ interface Timing {
 }
 
 function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+  return benchNative.harnessBenchSummary(values).medianMs;
 }
 
 function p95(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1);
-  return sorted[index];
+  return benchNative.harnessBenchSummary(values).p95Ms;
 }
 
 function elapsedMs(start: bigint): number {

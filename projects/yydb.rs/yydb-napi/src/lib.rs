@@ -1073,6 +1073,33 @@ fn parse_file_descriptor(json: &str) -> Result<database::types::FileDescriptor> 
     }
 }
 
+/// 基准统计的 JS 形态。字段名由本 DTO 负责 camelCase，核心 `Stats` 说 Rust。
+#[napi(object)]
+pub struct BenchStatsJson {
+    /// 中位数毫秒（中间两值平均）。
+    pub median_ms: f64,
+    /// p95 毫秒（nearest-rank）。
+    pub p95_ms: f64,
+    /// 最小毫秒。
+    pub min_ms: f64,
+    /// 最大毫秒。
+    pub max_ms: f64,
+    /// 样本轮数。
+    pub rounds: u32,
+}
+
+impl From<database::harness::Stats> for BenchStatsJson {
+    fn from(stats: database::harness::Stats) -> Self {
+        Self { median_ms: stats.median_ms, p95_ms: stats.p95_ms, min_ms: stats.min_ms, max_ms: stats.max_ms, rounds: stats.rounds }
+    }
+}
+
+/// 对一组毫秒样本求 median/p95/极值（中间两值 median、nearest-rank p95，golden vector 钉在 `database.harness`）。
+#[napi]
+pub fn harness_bench_summary(samples_ms: Vec<f64>) -> BenchStatsJson {
+    database::harness::summarize(&samples_ms).into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

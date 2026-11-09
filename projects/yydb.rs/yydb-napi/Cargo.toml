@@ -28,6 +28,7 @@ database = { workspace = true, features = [
     "protocol-yy",
     "client",
     "server",
+    "harness",
 ] }
 vos = { workspace = true }
 
