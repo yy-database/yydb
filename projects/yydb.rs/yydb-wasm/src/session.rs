@@ -37,7 +37,7 @@ impl<'a> ParameterDescriptorJson<'a> {
         Self {
             name: descriptor.name.as_str(),
             index: descriptor.index,
-            slot_ty: descriptor.slot_ty,
+            slot_ty: descriptor.slot_type,
             usage_count: descriptor.usage_count,
         }
     }

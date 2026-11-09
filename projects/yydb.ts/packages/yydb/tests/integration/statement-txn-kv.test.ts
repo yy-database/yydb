@@ -64,9 +64,9 @@ test("a prepared statement exposes its plan metadata and reuses across execution
             assert.deepEqual(statement.parameters, [{ name: "limit", index: 0, slotTy: "any", usageCount: 1 }]);
 
             const info = statement.info as Record<string, unknown>;
-            assert.equal(info.dialect, "Vos");
+            assert.equal(info.dialect, "vos");
             assert.equal(info.source, source);
-            assert.equal(info.queryKind, "Read");
+            assert.equal(info.queryKind, "read");
             assert.deepEqual(info.readSet, ["P"]);
             assert.deepEqual(info.writeSet, []);
             assert.equal(info.statementId, statement.statementId);

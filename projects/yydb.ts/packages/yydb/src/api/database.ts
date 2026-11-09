@@ -307,13 +307,13 @@ export interface ParameterDescriptor {
 }
 
 /** Whether a prepared statement is a read pipeline or a write program. */
-export type QueryKind = 'Read' | 'Write';
+export type QueryKind = 'read' | 'write';
 
 /** Metadata about a prepared statement — useful for logging and cache keys. */
 export interface StatementInfo {
     statementId: string;
     /** Frontend the statement was prepared from. */
-    dialect: 'Vos' | 'Sql';
+    dialect: 'vos' | 'sql';
     queryKind: QueryKind;
     parameters: ParameterDescriptor[];
     readSet: string[];

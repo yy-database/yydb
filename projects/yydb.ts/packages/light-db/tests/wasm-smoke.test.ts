@@ -77,7 +77,7 @@ describe('prepareJson + queryPreparedJson', () => {
         const raw = JSON.parse(sess.prepareJson(filterSql)) as Record<string, unknown>;
         expect(raw.ok).toBe(true);
         expect(raw.statementId).toMatch(/^stmt-\d+$/);
-        expect(raw.queryKind).toBe('Read');
+        expect(raw.queryKind).toBe('read');
         expect(raw.parameters).toEqual([]);
         expect(raw.readSet).toEqual(['User']);
         expect(raw.writeSet).toEqual([]);
