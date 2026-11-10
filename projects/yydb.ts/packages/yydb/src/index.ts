@@ -1,4 +1,34 @@
 export {
+    Yydb,
+    TableQuery,
+    DdlSession,
+    type DdlSessionOptions,
+    type YydbCapabilities,
+    type YydbListener,
+    type YydbLocalState,
+    type YydbOptions,
+    type YydbStorageOptions,
+} from './yydb.js';
+export {
+    YydbClient,
+    type TcpEndpoint,
+    type YydbAuth,
+    type YydbClientAddress,
+    type YydbClientCapabilities,
+    type YydbClientOptions,
+    type YydbClientState,
+    type YydbPoolOptions,
+    type YydbTlsOptions,
+} from './client.js';
+export {
+    DatabaseError,
+    isDatabaseError,
+    type DatabaseErrorExecution,
+    type DatabaseErrorInit,
+    type DatabaseErrorPhase,
+    type DatabaseErrorRetry,
+} from './shared/envelope.js';
+export {
     Database,
     Statement,
     type DateScalar,
