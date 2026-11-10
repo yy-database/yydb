@@ -1096,8 +1096,10 @@ impl From<database::harness::Stats> for BenchStatsJson {
 
 /// 对一组毫秒样本求 median/p95/极值（中间两值 median、nearest-rank p95，golden vector 钉在 `database.harness`）。
 #[napi]
-pub fn harness_bench_summary(samples_ms: Vec<f64>) -> BenchStatsJson {
-    database::harness::summarize(&samples_ms).into()
+pub fn harness_bench_summary(samples_ms: Vec<f64>) -> napi::Result<BenchStatsJson> {
+    database::harness::summarize(&samples_ms)
+        .map(Into::into)
+        .map_err(|problem| napi::Error::from_reason(problem.to_string()))
 }
 
 #[cfg(test)]
