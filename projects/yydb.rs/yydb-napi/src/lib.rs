@@ -1090,16 +1090,20 @@ pub struct BenchStatsJson {
 
 impl From<database::harness::Stats> for BenchStatsJson {
     fn from(stats: database::harness::Stats) -> Self {
-        Self { median_ms: stats.median_ms, p95_ms: stats.p95_ms, min_ms: stats.min_ms, max_ms: stats.max_ms, rounds: stats.rounds }
+        Self {
+            median_ms: stats.median_ms,
+            p95_ms: stats.p95_ms,
+            min_ms: stats.min_ms,
+            max_ms: stats.max_ms,
+            rounds: stats.rounds,
+        }
     }
 }
 
 /// 对一组毫秒样本求 median/p95/极值（中间两值 median、nearest-rank p95，golden vector 钉在 `database.harness`）。
 #[napi]
 pub fn harness_bench_summary(samples_ms: Vec<f64>) -> napi::Result<BenchStatsJson> {
-    database::harness::summarize(&samples_ms)
-        .map(Into::into)
-        .map_err(|problem| napi::Error::from_reason(problem.to_string()))
+    database::harness::summarize(&samples_ms).map(Into::into).map_err(|problem| napi::Error::from_reason(problem.to_string()))
 }
 
 #[cfg(test)]
