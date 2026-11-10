@@ -8,6 +8,7 @@ Run: python bench/bench.py
 
 from __future__ import annotations
 
+import math
 import os
 import pathlib
 import shutil
@@ -37,8 +38,18 @@ def median(values: list[float]) -> float:
 
 
 def p95(values: list[float]) -> float:
+    """Nearest-rank p95, byte-for-byte the same rule as `database.harness`.
+
+    rank = ceil(n * 0.95) computed in integer arithmetic; invalid samples are
+    rejected instead of producing a plausible-looking number.
+    """
+    if not values:
+        raise ValueError("p95 requires at least one sample")
+    if any(not math.isfinite(value) or value < 0 for value in values):
+        raise ValueError("samples must be finite non-negative milliseconds")
     ordered = sorted(values)
-    index = min(len(ordered) - 1, max(0, int(round(len(ordered) * 0.95)) - 1))
+    rank = (len(ordered) * 95 + 99) // 100
+    index = min(len(ordered) - 1, max(0, rank - 1))
     return ordered[index]
 
 
