@@ -10,6 +10,7 @@ pub mod lease;
 pub mod objects;
 pub mod retention;
 pub mod scan;
+pub mod scenario;
 pub mod udf;
 
 use std::path::PathBuf;
