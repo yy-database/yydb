@@ -1,423 +1,358 @@
-//! OPFS host profile capability probe and persistent-open gate (Living `08`).
+//! OPFS host I/O adapter (host glue only).
 //!
-//! Host-testable gates and an in-process logical I/O backend. Browser OPFS sync handles
-//! will replace the default backend without changing error semantics.
+//! The browser hands over `FileSystemSyncAccessHandle` objects for the main
+//! file and its sidecars. This module only moves bytes through those handles.
+//! Publish ordering, image validation, quota accounting and the generation it
+//! advances all live in `database.storage::local_io::volume`.
+//!
+//! A synchronized wasm surface cannot create an OPFS handle by itself: the file
+//! system API is promise based and sync access handles only exist inside a
+//! worker. When the host cannot supply one, every entry point answers
+//! [`Error::NativeCapabilityMissing`] instead of emulating a durable publish in
+//! process memory.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Mutex, OnceLock},
+use std::sync::Mutex;
+
+use database::{
+    storage::local_io::{HostVolumeStore, VolumePublisher},
+    types::{Error, Result},
 };
+use wasm_bindgen::JsValue;
 
-use database::types::{DoctorIssue, DoctorReport, DoctorSeverity, Error, Result};
-
-fn writer_locks() -> &'static Mutex<HashSet<String>> {
-    static LOCKS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    LOCKS.get_or_init(|| Mutex::new(HashSet::new()))
-}
-
-/// Persistent storage format selected for an OPFS open attempt.
+/// Persistent storage layout selected from the logical path suffix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistentStorageMode {
-    /// Single-file `.yydb` layout (Living `07`).
+    /// Single-file `.yydb` layout.
     Yydb,
-    /// Multi-file `.yydx` + blob directory layout (Living `07`).
+    /// Multi-file `.yydx` layout with a sibling blob directory.
     Yydx,
 }
 
 impl PersistentStorageMode {
-    fn from_path(path: &str) -> Result<Self> {
+    /// Infer the layout from `path`.
+    pub fn from_path(path: &str) -> Result<Self> {
         if path.ends_with(".yydx") {
             return Ok(Self::Yydx);
         }
         if path.ends_with(".yydb") {
             return Ok(Self::Yydb);
         }
-        Err(Error::Unsupported("persistent OPFS path must end with .yydb or .yydx"))
+        Err(Error::Unsupported("persistent path must end with .yydb or .yydx"))
     }
 }
 
-/// Structured OPFS host capability snapshot (Living `08` §2).
+/// Primitives an OPFS host must actually provide for a durable volume.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OpfsCapabilities {
-    /// Can open or create `.yydb` / `.yydx` under an OPFS root.
-    pub persistent_open: bool,
-    /// At most one writer per logical database.
-    pub single_writer: bool,
-    /// Staging write, verify, then atomically publish visible root.
-    pub atomic_publish: bool,
-    /// Flush / sync boundary before durable success.
+    /// A `FileSystemSyncAccessHandle` was created for the main file.
+    pub sync_access_handle: bool,
+    /// `read(buffer, { at })` and `write(buffer, { at })` are available.
+    pub range_read_write: bool,
+    /// `flush()` is available as the durability barrier.
     pub durability_sync: bool,
-    /// Cross-context writer fencing (`file_lock` or equivalent).
-    pub file_lock: bool,
-    /// Quota observation and structured exhaustion errors.
-    pub quota_report: bool,
-    /// Range reads for blob segments (required for `.yydx`).
-    pub range_read: bool,
-    /// Host exposes memory only (must not be set for persistent open).
-    pub memory_only: bool,
+    /// The host holds the exclusive handle, so no other context can write.
+    pub exclusive_writer: bool,
 }
 
 impl OpfsCapabilities {
-    /// All capabilities required for persistent `.yydb` on OPFS.
-    pub fn full_yydb_profile() -> Self {
-        Self {
-            persistent_open: true,
-            single_writer: true,
-            atomic_publish: true,
-            durability_sync: true,
-            file_lock: true,
-            quota_report: true,
-            range_read: false,
-            memory_only: false,
-        }
+    /// Profile of a host that already opened every sync handle this build needs.
+    pub fn host_sync_handles() -> Self {
+        Self { sync_access_handle: true, range_read_write: true, durability_sync: true, exclusive_writer: true }
     }
 
-    /// All capabilities required for persistent `.yydx` on OPFS.
-    pub fn full_yydx_profile() -> Self {
-        Self { range_read: true, ..Self::full_yydb_profile() }
+    /// Profile of a host that provided nothing.
+    pub fn unavailable() -> Self {
+        Self::default()
     }
 }
 
-/// Validate capabilities for the requested storage mode without opening I/O.
+/// Reject a volume whose host cannot satisfy the required primitives.
 pub fn validate_opfs_capabilities(caps: &OpfsCapabilities, mode: PersistentStorageMode) -> Result<()> {
-    if caps.memory_only {
-        return Err(Error::Unsupported("persistent OPFS open rejected: host profile is memory_only"));
+    if !caps.sync_access_handle {
+        return Err(Error::NativeCapabilityMissing { capability: "opfs.sync_access_handle" });
     }
-    require(caps.persistent_open, "missing OPFS capability: persistent_open")?;
-    require(caps.single_writer, "missing OPFS capability: single_writer")?;
-    require(caps.atomic_publish, "missing OPFS capability: atomic_publish")?;
-    require(caps.durability_sync, "missing OPFS capability: durability_sync")?;
-    require(caps.file_lock, "missing OPFS capability: file_lock")?;
-    require(caps.quota_report, "missing OPFS capability: quota_report")?;
+    if !caps.range_read_write {
+        return Err(Error::NativeCapabilityMissing { capability: "opfs.range_read_write" });
+    }
+    if !caps.durability_sync {
+        return Err(Error::NativeCapabilityMissing { capability: "opfs.durability_sync" });
+    }
+    if !caps.exclusive_writer {
+        return Err(Error::NativeCapabilityMissing { capability: "opfs.exclusive_writer" });
+    }
     if mode == PersistentStorageMode::Yydx {
-        require(caps.range_read, "missing OPFS capability: range_read")?;
+        // Enumerating and unlinking blobs needs the directory API, which is
+        // asynchronous. Sync handles alone cannot serve a `.yydx` volume.
+        return Err(Error::NativeCapabilityMissing { capability: "opfs.blob_directory" });
     }
     Ok(())
 }
 
-fn require(present: bool, message: &'static str) -> Result<()> {
-    if present { Ok(()) } else { Err(Error::Unsupported(message)) }
+/// The upstream publisher bound to a host byte store, behind one worker-local lock.
+pub struct PersistentVolume {
+    inner: Mutex<VolumePublisher<Box<dyn HostVolumeStore>>>,
 }
 
-/// Exclusive writer lease for one logical OPFS database path (Living `08` §4).
-#[derive(Debug)]
-pub struct OpfsWriterLease {
-    path: String,
-}
-
-impl Drop for OpfsWriterLease {
-    fn drop(&mut self) {
-        let mut locks = writer_locks().lock().unwrap_or_else(|p| p.into_inner());
-        locks.remove(&self.path);
-    }
-}
-
-/// Claim the single-writer slot for `path` after capability validation.
-pub fn claim_opfs_writer(path: &str, caps: &OpfsCapabilities) -> Result<OpfsWriterLease> {
-    let mode = PersistentStorageMode::from_path(path)?;
-    validate_opfs_capabilities(caps, mode)?;
-
-    let mut locks = writer_locks().lock().unwrap_or_else(|p| p.into_inner());
-    if locks.contains(path) {
-        return Err(Error::LeaseUnavailable { key: path.to_string() });
-    }
-    locks.insert(path.to_string());
-    Ok(OpfsWriterLease { path: path.to_string() })
-}
-
-/// Open handle to a logical OPFS-backed database after capability and writer checks.
-#[derive(Debug)]
-pub struct OpfsPersistentVolume {
-    path: String,
-    mode: PersistentStorageMode,
-    #[allow(dead_code)]
-    lease: OpfsWriterLease,
-}
-
-impl OpfsPersistentVolume {
-    /// Logical database path (for example `app.yydb` or `app.yydx`).
-    pub fn path(&self) -> &str {
-        &self.path
+impl PersistentVolume {
+    /// Bind `path` to a host byte store. The store owns every read and write.
+    pub fn open(path: &str, store: Box<dyn HostVolumeStore>) -> Result<Self> {
+        Ok(Self { inner: Mutex::new(VolumePublisher::open(path, store)?) })
     }
 
-    /// Storage format selected from the path suffix.
-    pub fn mode(&self) -> PersistentStorageMode {
-        self.mode
+    /// Logical database path.
+    pub fn path(&self) -> String {
+        self.publisher().path().to_owned()
     }
 
-    /// Read the committed main-file generation, if any.
+    /// Generation of the last durable main-file publication.
+    pub fn generation(&self) -> u64 {
+        self.publisher().generation()
+    }
+
+    /// Durable main-file image, when the host already published one.
     pub fn read_main(&self) -> Result<Option<Vec<u8>>> {
-        crate::opfs_io::read_logical_file(&self.path, "")
+        self.publisher().read_main()
     }
 
-    /// Atomically publish the next main-file generation and sync the logical root.
+    /// Publish a complete `YDPG` main-file image through the upstream contract.
     pub fn publish_main(&self, body: &[u8]) -> Result<()> {
-        crate::opfs_io::publish_logical_file_atomic(&self.path, "", body)?;
-        crate::opfs_io::sync_logical_root(&self.path)?;
-        Ok(())
+        self.publisher().publish_main(body).map(|_| ())
     }
 
-    /// Read the `YYWL` sidecar (`{path}-wal`), if present.
+    /// Read back the `YYWL` sidecar, when the host published one.
     pub fn read_wal(&self) -> Result<Option<Vec<u8>>> {
-        crate::opfs_io::read_logical_file(&self.path, "-wal")
+        self.publisher().read_wal()
     }
 
-    /// Atomically publish the WAL sidecar and sync the logical root.
+    /// Publish the `YYWL` sidecar behind the host durability barrier.
     pub fn publish_wal(&self, body: &[u8]) -> Result<()> {
-        crate::opfs_io::publish_logical_file_atomic(&self.path, "-wal", body)?;
-        crate::opfs_io::sync_logical_root(&self.path)?;
-        Ok(())
+        self.publisher().publish_wal(body)
     }
 
-    /// Remove the WAL sidecar after checkpoint.
+    /// Remove the `YYWL` sidecar.
     pub fn remove_wal(&self) -> Result<()> {
-        crate::opfs_io::remove_logical_file(&self.path, "-wal")
+        self.publisher().remove_wal()
     }
 
-    /// Read the `YYSH` sidecar (`{path}-shm`), if present.
+    /// Read back the `YYSH` sidecar, when the host published one.
     pub fn read_shm(&self) -> Result<Option<Vec<u8>>> {
-        crate::opfs_io::read_logical_file(&self.path, "-shm")
+        self.publisher().read_shm()
     }
 
-    /// Atomically publish the SHM sidecar and sync the logical root.
+    /// Publish the `YYSH` sidecar behind the host durability barrier.
     pub fn publish_shm(&self, body: &[u8]) -> Result<()> {
-        crate::opfs_io::publish_logical_file_atomic(&self.path, "-shm", body)?;
-        crate::opfs_io::sync_logical_root(&self.path)?;
-        Ok(())
+        self.publisher().publish_shm(body)
     }
 
-    /// Remove the SHM sidecar after checkpoint.
+    /// Remove the `YYSH` sidecar.
     pub fn remove_shm(&self) -> Result<()> {
-        crate::opfs_io::remove_logical_file(&self.path, "-shm")
+        self.publisher().remove_shm()
     }
 
-    /// Publish one immutable blob chunk (`.yydx` only).
-    pub fn publish_blob(&self, blob_hash: &str, body: &[u8]) -> Result<()> {
-        if self.mode != PersistentStorageMode::Yydx {
-            return Err(Error::Unsupported("blob publish requires a .yydx logical path"));
-        }
-        crate::opfs_io::publish_blob_atomic(&self.path, blob_hash, body)?;
-        crate::opfs_io::sync_logical_root(&self.path)?;
-        Ok(())
-    }
-
-    /// Read a published blob chunk (`.yydx` only).
-    pub fn read_blob(&self, blob_hash: &str) -> Result<Option<Vec<u8>>> {
-        if self.mode != PersistentStorageMode::Yydx {
-            return Err(Error::Unsupported("blob read requires a .yydx logical path"));
-        }
-        crate::opfs_io::read_blob(&self.path, blob_hash)
+    fn publisher(&self) -> std::sync::MutexGuard<'_, VolumePublisher<Box<dyn HostVolumeStore>>> {
+        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
-/// Gate persistent OPFS open on capability contract, then attach logical I/O.
-pub fn open_persistent(path: &str, caps: &OpfsCapabilities) -> Result<OpfsPersistentVolume> {
-    let mode = PersistentStorageMode::from_path(path)?;
-    validate_opfs_capabilities(caps, mode)?;
-    let lease = claim_opfs_writer(path, caps)?;
-    Ok(OpfsPersistentVolume { path: path.to_string(), mode, lease })
-}
-
-/// In-memory committed-generation stub for OPFS gate tests (Living `08` §5).
+/// Build a volume from host-supplied OPFS objects (`{ main, wal?, shm? }`).
 ///
-/// Models atomic publish with quota accounting. Production OPFS I/O will replace this
-/// surface without changing error semantics.
-#[derive(Debug, Clone)]
-pub struct OpfsCommittedVolume {
-    path: String,
-    committed: Vec<u8>,
-    quota_limit: u64,
-    quota_used: u64,
+/// The capability profile is derived from the objects the host actually handed
+/// over, so a handle missing `flush` reports `opfs.durability_sync` instead of
+/// opening a volume that cannot make a durability promise.
+pub fn open_volume_from_handles(path: &str, handles: JsValue) -> Result<PersistentVolume> {
+    let mode = PersistentStorageMode::from_path(path)?;
+    let (store, capabilities) = host_store::from_handles(handles)?;
+    validate_opfs_capabilities(&capabilities, mode)?;
+    PersistentVolume::open(path, store)
 }
 
-impl OpfsCommittedVolume {
-    /// Open a logical OPFS volume with an initial committed generation and byte quota.
-    pub fn new(path: &str, initial_generation: &[u8], quota_limit: u64) -> Self {
-        Self {
-            path: path.to_string(),
-            committed: initial_generation.to_vec(),
-            quota_limit,
-            quota_used: initial_generation.len() as u64,
+#[cfg(target_arch = "wasm32")]
+mod host_store {
+    use js_sys::{Function, Object, Reflect, Uint8Array};
+    use wasm_bindgen::JsValue;
+
+    use database::{
+        storage::local_io::{HostVolumeStore, VolumeFile},
+        types::{Error, Result},
+    };
+
+    use super::OpfsCapabilities;
+
+    /// Members the volume contract needs: sized range reads and writes plus a
+    /// durability barrier. `FileSystemSyncAccessHandle` provides all of them.
+    const RANGE_METHODS: [&str; 4] = ["getSize", "read", "write", "truncate"];
+    const DURABILITY_METHOD: &str = "flush";
+
+    struct SyncHandle {
+        value: JsValue,
+    }
+
+    impl SyncHandle {
+        fn new(value: JsValue) -> Result<Self> {
+            if value.is_null() || value.is_undefined() {
+                return Err(Error::NativeCapabilityMissing { capability: "opfs.sync_access_handle" });
+            }
+            Ok(Self { value })
+        }
+
+        fn has(&self, name: &str) -> Result<bool> {
+            let member = Reflect::get(&self.value, &JsValue::from_str(name)).map_err(js_error)?;
+            Ok(member.is_function())
+        }
+
+        /// Report which primitives this specific host object actually exposes.
+        ///
+        /// A sync access handle is exclusive by specification, so holding one
+        /// is what rules out a concurrent writer.
+        fn capabilities(&self) -> Result<OpfsCapabilities> {
+            let mut range_read_write = true;
+            for name in RANGE_METHODS {
+                range_read_write &= self.has(name)?;
+            }
+            Ok(OpfsCapabilities {
+                sync_access_handle: true,
+                range_read_write,
+                durability_sync: self.has(DURABILITY_METHOD)?,
+                exclusive_writer: true,
+            })
+        }
+
+        fn call(&self, name: &str, args: &[JsValue]) -> Result<JsValue> {
+            let function: Function = Reflect::get(&self.value, &JsValue::from_str(name)).map_err(js_error)?.into();
+            let list = js_sys::Array::new();
+            for arg in args {
+                list.push(arg);
+            }
+            function.apply(&self.value, &list).map_err(js_error)
+        }
+
+        fn size(&self) -> Result<u64> {
+            let size = self.call("getSize", &[])?;
+            let size = size.as_f64().ok_or(Error::NativeCapabilityMissing { capability: "opfs.sync_access_handle" })?;
+            Ok(size.max(0.0) as u64)
+        }
+
+        fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+            let view = Uint8Array::new_with_length(buf.len() as u32);
+            let read = self.call("read", &[JsValue::from(view.clone()), at_object(offset)?])?;
+            let read = read.as_f64().unwrap_or(0.0).max(0.0) as usize;
+            let read = read.min(buf.len());
+            view.subarray(0, read as u32).copy_to(&mut buf[..read]);
+            Ok(read)
+        }
+
+        fn write_at(&self, offset: u64, body: &[u8]) -> Result<()> {
+            let view = Uint8Array::new_with_length(body.len() as u32);
+            view.copy_from(body);
+            let written = self.call("write", &[JsValue::from(view), at_object(offset)?])?;
+            let written = written.as_f64().unwrap_or(0.0).max(0.0) as usize;
+            if written != body.len() {
+                return Err(Error::Io(std::io::Error::other(format!(
+                    "OPFS short write at {offset}: {written} of {} bytes",
+                    body.len()
+                ))));
+            }
+            Ok(())
+        }
+
+        fn truncate(&self, len: u64) -> Result<()> {
+            self.call("truncate", &[JsValue::from_f64(len as f64)]).map(|_| ())
+        }
+
+        fn flush(&self) -> Result<()> {
+            self.call("flush", &[]).map(|_| ())
         }
     }
 
-    /// Read the last successfully published generation.
-    pub fn read_committed(&self) -> &[u8] {
-        &self.committed
+    fn at_object(offset: u64) -> Result<JsValue> {
+        let options = Object::new();
+        Reflect::set(&options, &JsValue::from_str("at"), &JsValue::from_f64(offset as f64)).map_err(js_error)?;
+        Ok(options.into())
     }
 
-    /// Atomically publish `body` as the next generation, or abort without mutation.
-    pub fn publish_generation(&mut self, body: &[u8]) -> Result<()> {
-        let next_used = self.quota_used + body.len() as u64;
-        if next_used > self.quota_limit {
-            return Err(Error::QuotaExceeded { namespace: format!("opfs:{path}", path = self.path) });
+    fn js_error(value: JsValue) -> Error {
+        Error::Io(std::io::Error::other(format!("OPFS host call failed: {value:?}")))
+    }
+
+    /// OPFS byte store: one sync handle per logical file, no process state.
+    pub(crate) struct OpfsVolumeStore {
+        main: SyncHandle,
+        wal: Option<SyncHandle>,
+        shm: Option<SyncHandle>,
+    }
+
+    pub(crate) fn from_handles(handles: JsValue) -> Result<(Box<dyn HostVolumeStore>, OpfsCapabilities)> {
+        if handles.is_null() || handles.is_undefined() {
+            return Err(Error::NativeCapabilityMissing { capability: "opfs.sync_access_handle" });
         }
-        self.quota_used = next_used;
-        self.committed = body.to_vec();
-        Ok(())
+        let main = SyncHandle::new(Reflect::get(&handles, &JsValue::from_str("main")).map_err(js_error)?)?;
+        let wal = optional_handle(&handles, "wal")?;
+        let shm = optional_handle(&handles, "shm")?;
+        let capabilities = main.capabilities()?;
+        Ok((Box::new(OpfsVolumeStore { main, wal, shm }), capabilities))
     }
-}
 
-/// Models `.yydx` blob publish then catalog commit (Living `07` §13 steps 2–4).
-#[derive(Debug, Clone)]
-pub struct OpfsBlobPublication {
-    /// Logical `.yydx` path for inventory tracking.
-    path: String,
-    /// Blobs published to the object store (immutable once visible on disk).
-    published_blobs: HashSet<String>,
-    /// Blob hashes referenced by the committed catalog generation.
-    committed_refs: HashSet<String>,
-}
-
-impl OpfsBlobPublication {
-    /// Open a logical `.yydx` volume with an initial committed blob set.
-    pub fn new(path: &str, initial_committed_refs: &[&str]) -> Self {
-        let committed_refs: HashSet<String> = initial_committed_refs.iter().map(|s| (*s).to_string()).collect();
-        let published_blobs = committed_refs.clone();
-        for hash in &published_blobs {
-            track_blob(path, hash);
+    fn optional_handle(handles: &JsValue, key: &str) -> Result<Option<SyncHandle>> {
+        let value = Reflect::get(handles, &JsValue::from_str(key)).map_err(js_error)?;
+        if value.is_null() || value.is_undefined() {
+            return Ok(None);
         }
-        Self { path: path.to_string(), published_blobs, committed_refs }
+        SyncHandle::new(value).map(Some)
     }
 
-    /// Publish a blob chunk (step 2). Does not advance the committed catalog.
-    pub fn publish_blob(&mut self, blob_hash: &str) {
-        self.published_blobs.insert(blob_hash.to_string());
-        track_blob(&self.path, blob_hash);
-    }
-
-    /// Commit catalog references (steps 3–4). Refuses unpublished blob hashes.
-    pub fn commit_catalog(&mut self, refs: &[&str]) -> Result<()> {
-        for hash in refs {
-            if !self.published_blobs.contains(*hash) {
-                return Err(Error::ObjectNotFound { hash_hex: (*hash).to_string() });
+    impl OpfsVolumeStore {
+        fn handle(&self, file: &VolumeFile) -> Result<&SyncHandle> {
+            match file {
+                VolumeFile::Main => Ok(&self.main),
+                VolumeFile::Wal => self.wal.as_ref().ok_or(Error::NativeCapabilityMissing { capability: "opfs.wal_sidecar" }),
+                VolumeFile::Shm => self.shm.as_ref().ok_or(Error::NativeCapabilityMissing { capability: "opfs.shm_sidecar" }),
+                VolumeFile::Blob(_) => Err(Error::NativeCapabilityMissing { capability: "opfs.blob_directory" }),
             }
         }
-        self.committed_refs = refs.iter().map(|s| (*s).to_string()).collect();
-        Ok(())
     }
 
-    /// Query-visible references (committed catalog only).
-    pub fn visible_references(&self) -> Vec<String> {
-        let mut refs = self.committed_refs.iter().cloned().collect::<Vec<_>>();
-        refs.sort();
-        refs
-    }
+    impl HostVolumeStore for OpfsVolumeStore {
+        fn len(&mut self, file: &VolumeFile) -> Result<Option<u64>> {
+            let size = self.handle(file)?.size()?;
+            Ok((size > 0).then_some(size))
+        }
 
-    /// Published blobs not yet referenced by the committed catalog (orphans after crash).
-    pub fn orphan_blobs(&self) -> Vec<String> {
-        let mut orphans = self.published_blobs.difference(&self.committed_refs).cloned().collect::<Vec<_>>();
-        orphans.sort();
-        orphans
-    }
+        fn read_at(&mut self, file: &VolumeFile, offset: u64, buf: &mut [u8]) -> Result<usize> {
+            self.handle(file)?.read_at(offset, buf)
+        }
 
-    /// Committed references without a published blob (forbidden dangling state).
-    pub fn dangling_references(&self) -> Vec<String> {
-        let mut dangling = self.committed_refs.difference(&self.published_blobs).cloned().collect::<Vec<_>>();
-        dangling.sort();
-        dangling
-    }
-}
+        fn write_at(&mut self, file: &VolumeFile, offset: u64, body: &[u8]) -> Result<()> {
+            self.handle(file)?.write_at(offset, body)
+        }
 
-fn durable_snapshots() -> &'static Mutex<HashMap<String, OpfsDurableSnapshot>> {
-    static SNAPSHOTS: OnceLock<Mutex<HashMap<String, OpfsDurableSnapshot>>> = OnceLock::new();
-    SNAPSHOTS.get_or_init(|| Mutex::new(HashMap::new()))
-}
+        fn truncate(&mut self, file: &VolumeFile, len: u64) -> Result<()> {
+            self.handle(file)?.truncate(len)
+        }
 
-/// Durable committed catalog generation visible after reopen (Living `07` §13 step 4).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpfsDurableSnapshot {
-    /// Monotonic committed generation for the logical database path.
-    pub generation: u64,
-    /// Committed catalog bytes (opaque stub payload).
-    pub catalog_body: Vec<u8>,
-    /// Blob hashes referenced by the committed catalog.
-    pub committed_refs: HashSet<String>,
-}
+        fn sync(&mut self, file: &VolumeFile) -> Result<()> {
+            self.handle(file)?.flush()
+        }
 
-impl OpfsDurableSnapshot {
-    /// Sorted query-visible blob references.
-    pub fn visible_references(&self) -> Vec<String> {
-        let mut refs = self.committed_refs.iter().cloned().collect::<Vec<_>>();
-        refs.sort();
-        refs
-    }
-}
-
-/// Atomically commit `publication` and sync durable catalog state for `path`.
-pub fn opfs_commit_and_sync(
-    path: &str,
-    publication: &mut OpfsBlobPublication,
-    refs: &[&str],
-    catalog_body: &[u8],
-) -> Result<OpfsDurableSnapshot> {
-    publication.commit_catalog(refs)?;
-    let generation = opfs_reopen(path).map(|snapshot| snapshot.generation + 1).unwrap_or(1);
-    let snapshot = OpfsDurableSnapshot {
-        generation,
-        catalog_body: catalog_body.to_vec(),
-        committed_refs: refs.iter().map(|hash| (*hash).to_string()).collect(),
-    };
-    durable_snapshots().lock().unwrap_or_else(|p| p.into_inner()).insert(path.to_string(), snapshot.clone());
-    Ok(snapshot)
-}
-
-/// Reopen durable committed state after a crash (`yydb.opfs.crash_after_commit`).
-pub fn opfs_reopen(path: &str) -> Result<OpfsDurableSnapshot> {
-    durable_snapshots()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .get(path)
-        .cloned()
-        .ok_or(Error::Unsupported("OPFS durable snapshot not found"))
-}
-
-fn blob_inventory() -> &'static Mutex<HashMap<String, HashSet<String>>> {
-    static INVENTORY: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
-    INVENTORY.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn track_blob(path: &str, blob_hash: &str) {
-    blob_inventory()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .entry(path.to_string())
-        .or_default()
-        .insert(blob_hash.to_string());
-}
-
-/// Simulate user or browser eviction of a published blob from OPFS storage.
-pub fn opfs_evict_blob(path: &str, blob_hash: &str) {
-    blob_inventory().lock().unwrap_or_else(|p| p.into_inner()).entry(path.to_string()).and_modify(|blobs| {
-        blobs.remove(blob_hash);
-    });
-}
-
-/// Read-only OPFS consistency probe for committed catalog vs blob inventory (`yydb.opfs.doctor_missing_blob`).
-pub fn opfs_doctor(path: &str) -> Result<DoctorReport> {
-    let snapshot = opfs_reopen(path)?;
-    let inventory = blob_inventory().lock().unwrap_or_else(|p| p.into_inner());
-    let present = inventory.get(path);
-    let mut issues = Vec::new();
-    for hash in snapshot.visible_references() {
-        let missing = present.is_none_or(|blobs| !blobs.contains(&hash));
-        if missing {
-            issues.push(DoctorIssue {
-                severity: DoctorSeverity::Error,
-                code: "yydb.doctor.missing_blob".into(),
-                message: format!("committed catalog references missing blob `{hash}`"),
-                key_hint: Some(hash),
-            });
+        fn remove(&mut self, file: &VolumeFile) -> Result<()> {
+            // A sync access handle cannot unlink. Truncating to zero makes the
+            // file read as absent, which is the same observable volume state.
+            self.handle(file)?.truncate(0)
         }
     }
-    Ok(DoctorReport {
-        file_path: Some(path.to_string()),
-        last_commit_sequence: snapshot.generation,
-        last_checkpoint_sequence: snapshot.generation,
-        checkpoint_lag_records: 0,
-        wal_bytes_uncheckpointed: 0,
-        orphan_object_count: 0,
-        namespaces: Vec::new(),
-        issues,
-    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod host_store {
+    use wasm_bindgen::JsValue;
+
+    use database::{
+        storage::local_io::HostVolumeStore,
+        types::{Error, Result},
+    };
+
+    use super::OpfsCapabilities;
+
+    pub(crate) fn from_handles(_handles: JsValue) -> Result<(Box<dyn HostVolumeStore>, OpfsCapabilities)> {
+        Err(Error::NativeCapabilityMissing { capability: "opfs.sync_access_handle" })
+    }
 }

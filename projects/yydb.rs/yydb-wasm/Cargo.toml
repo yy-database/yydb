@@ -21,6 +21,7 @@ database = { workspace = true, features = [
     "query",
     "execution",
     "udf",
+    "storage",
     "protocol-yy",
 ] }
 wasm-bindgen = { workspace = true }
@@ -34,6 +35,7 @@ database = { workspace = true, features = [
     "query",
     "execution",
     "udf",
+    "storage",
     "protocol-yy",
 ] }
 

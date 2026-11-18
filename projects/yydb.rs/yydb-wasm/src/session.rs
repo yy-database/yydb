@@ -2,7 +2,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use database::{execution::engine::Connection, protocol::yy as wire, query::local::PreparedStatement, types::Error};
+use database::{
+    execution::engine::Connection, protocol::yy as wire, query::local::PreparedStatement, storage::local_io::HostVolumeStore,
+    types::Error,
+};
 use js_sys::Function;
 use wasm_bindgen::prelude::*;
 
@@ -12,7 +15,7 @@ use crate::{
         schema_get_json, unit_result_json,
     },
     host_js::JsHostAdapter,
-    opfs::{OpfsCapabilities, OpfsPersistentVolume, open_persistent},
+    opfs::{PersistentVolume, open_volume_from_handles},
 };
 
 fn closed_session_error() -> Error {
@@ -347,7 +350,7 @@ fn run_call_scalar_json(conn: &Connection, closed: bool, json: &str) -> String {
     }
 }
 
-fn open_persistent_connection(volume: &OpfsPersistentVolume) -> database::types::Result<Connection> {
+fn open_persistent_connection(volume: &PersistentVolume) -> database::types::Result<Connection> {
     let conn = Connection::open_in_memory()?;
     if let Some(bytes) = volume.read_main()? {
         conn.load_main_snapshot(&bytes)?;
@@ -355,7 +358,7 @@ fn open_persistent_connection(volume: &OpfsPersistentVolume) -> database::types:
     Ok(conn)
 }
 
-fn persist_persistent_connection(conn: &Connection, volume: &OpfsPersistentVolume) -> database::types::Result<()> {
+fn persist_persistent_connection(conn: &Connection, volume: &PersistentVolume) -> database::types::Result<()> {
     let bytes = conn.main_snapshot()?;
     volume.publish_main(&bytes)?;
     Ok(())
@@ -370,7 +373,7 @@ fn validate_snapshot(bytes: &[u8]) -> database::types::Result<()> {
     probe.doctor().map(|_| ())
 }
 
-fn run_ensure_schema_persistent(conn: &Connection, volume: &OpfsPersistentVolume, closed: bool, document: &str) -> String {
+fn run_ensure_schema_persistent(conn: &Connection, volume: &PersistentVolume, closed: bool, document: &str) -> String {
     if closed {
         return unit_result_json(Err(closed_session_error()));
     }
@@ -380,7 +383,7 @@ fn run_ensure_schema_persistent(conn: &Connection, volume: &OpfsPersistentVolume
     }
 }
 
-fn run_put_persistent(conn: &Connection, volume: &OpfsPersistentVolume, closed: bool, key: &str, value: &[u8]) -> String {
+fn run_put_persistent(conn: &Connection, volume: &PersistentVolume, closed: bool, key: &str, value: &[u8]) -> String {
     if closed {
         return unit_result_json(Err(closed_session_error()));
     }
@@ -790,9 +793,26 @@ fn value_to_json(v: database::types::Value) -> serde_json::Value {
     }
 }
 
-/// Open a persistent OPFS-backed session with the supplied capability profile.
-pub fn open_persistent_session(path: &str, caps: &OpfsCapabilities) -> database::types::Result<PersistentSession> {
-    let volume = open_persistent(path, caps)?;
+/// Open a persistent session over a host byte store.
+///
+/// The store owns every read, write and durability barrier; this entry only
+/// binds it to the upstream publish contract and hydrates a `Connection`.
+pub fn open_persistent_session_with_store(
+    path: &str,
+    store: Box<dyn HostVolumeStore>,
+) -> database::types::Result<PersistentSession> {
+    let mode = crate::opfs::PersistentStorageMode::from_path(path)?;
+    // The session publishes whole main-file images; blob segments need the
+    // asynchronous directory API, which a synchronized call cannot drive.
+    crate::opfs::validate_opfs_capabilities(&crate::opfs::OpfsCapabilities::host_sync_handles(), mode)?;
+    let volume = PersistentVolume::open(path, store)?;
+    let conn = open_persistent_connection(&volume)?;
+    Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
+}
+
+/// Open a persistent session over host-supplied OPFS sync access handles.
+pub fn open_persistent_session_with_handles(path: &str, handles: JsValue) -> database::types::Result<PersistentSession> {
+    let volume = open_volume_from_handles(path, handles)?;
     let conn = open_persistent_connection(&volume)?;
     Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
 }
@@ -802,19 +822,35 @@ pub fn open_persistent_session(path: &str, caps: &OpfsCapabilities) -> database:
 pub struct PersistentSession {
     path: String,
     conn: Connection,
-    volume: Option<OpfsPersistentVolume>,
+    volume: Option<PersistentVolume>,
     closed: bool,
     stmts: HashMap<String, PreparedStatement>,
 }
 
 #[wasm_bindgen]
 impl PersistentSession {
-    /// Open `path` using the full capability profile inferred from its suffix.
+    /// A path alone cannot open a durable volume.
+    ///
+    /// OPFS files are reached through promise based APIs and sync access handles
+    /// only exist inside a worker, so this build cannot create one from inside a
+    /// wasm call. Hosts that hold the handles must call
+    /// [`Self::open_with_handles`] instead.
     #[wasm_bindgen(constructor)]
     pub fn new(path: &str) -> std::result::Result<PersistentSession, JsValue> {
-        let caps =
-            if path.ends_with(".yydx") { OpfsCapabilities::full_yydx_profile() } else { OpfsCapabilities::full_yydb_profile() };
-        open_persistent_session(path, &caps).map_err(|err| JsValue::from_str(&err.to_string()))
+        let error = crate::opfs::PersistentStorageMode::from_path(path)
+            .and_then(|mode| crate::opfs::validate_opfs_capabilities(&crate::opfs::OpfsCapabilities::unavailable(), mode))
+            .err()
+            .unwrap_or(Error::NativeCapabilityMissing { capability: "opfs.sync_access_handle" });
+        Err(JsValue::from_str(&crate::core::error_json_text(&error)))
+    }
+
+    /// Open `path` over host-supplied OPFS sync access handles.
+    ///
+    /// `handles` is `{ main, wal?, shm? }` where each value is a
+    /// `FileSystemSyncAccessHandle` the host opened inside a worker.
+    #[wasm_bindgen(js_name = openWithHandles)]
+    pub fn open_with_handles(path: &str, handles: JsValue) -> std::result::Result<PersistentSession, JsValue> {
+        open_persistent_session_with_handles(path, handles).map_err(|err| JsValue::from_str(&err.to_string()))
     }
 
     /// Logical OPFS database path (for example `app.yydb`).
@@ -823,18 +859,21 @@ impl PersistentSession {
         self.path.clone()
     }
 
+    /// Generation of the last durable main-file publication.
+    #[wasm_bindgen(getter, js_name = generation)]
+    pub fn generation(&self) -> f64 {
+        self.volume.as_ref().map(|volume| volume.generation() as f64).unwrap_or(0.0)
+    }
+
     /// Replace `path` with a verified main-file snapshot and open a session.
     ///
     /// The snapshot is validated (page CRC32C plus a doctor pass) before it is
     /// published, so a damaged backup can never overwrite a live database.
-    /// The caller must match the layout: a `.yydb` snapshot restores into a
-    /// `.yydb` path, a `.yydx` main file into a `.yydx` path.
+    /// The host must supply the sync access handles for `path`.
     #[wasm_bindgen(js_name = restoreBackup)]
-    pub fn restore_backup(path: &str, bytes: &[u8]) -> std::result::Result<PersistentSession, JsValue> {
+    pub fn restore_backup(path: &str, bytes: &[u8], handles: JsValue) -> std::result::Result<PersistentSession, JsValue> {
         validate_snapshot(bytes).map_err(|err| JsValue::from_str(&err.to_string()))?;
-        let caps =
-            if path.ends_with(".yydx") { OpfsCapabilities::full_yydx_profile() } else { OpfsCapabilities::full_yydb_profile() };
-        let volume = open_persistent(path, &caps).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        let volume = open_volume_from_handles(path, handles).map_err(|err| JsValue::from_str(&err.to_string()))?;
         volume.publish_main(bytes).map_err(|err| JsValue::from_str(&err.to_string()))?;
         let conn = open_persistent_connection(&volume).map_err(|err| JsValue::from_str(&err.to_string()))?;
         Ok(Self { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })

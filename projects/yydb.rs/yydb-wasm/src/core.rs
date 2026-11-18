@@ -49,6 +49,12 @@ fn err_diag(err: &Error) -> JsonValue {
     retag_error_code(err.to_json())
 }
 
+/// Diagnostic JSON text for host boundaries that throw instead of returning an
+/// outcome envelope (constructors). Keeps the `yydb.` code spelling.
+pub(crate) fn error_json_text(err: &Error) -> String {
+    err_diag(err).to_string()
+}
+
 /// Outcome of validating a VOS schema document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaCheck {

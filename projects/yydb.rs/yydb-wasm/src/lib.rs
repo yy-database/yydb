@@ -8,16 +8,13 @@
 mod core;
 mod host_js;
 mod opfs;
-mod opfs_io;
 mod session;
 
 pub use core::{SchemaCheck, check_schema_source, introspect_schema_json, yydb_version};
 pub use opfs::{
-    OpfsBlobPublication, OpfsCapabilities, OpfsCommittedVolume, OpfsDurableSnapshot, OpfsPersistentVolume, OpfsWriterLease,
-    PersistentStorageMode, claim_opfs_writer, open_persistent, opfs_commit_and_sync, opfs_doctor, opfs_evict_blob, opfs_reopen,
-    validate_opfs_capabilities,
+    OpfsCapabilities, PersistentStorageMode, PersistentVolume, open_volume_from_handles, validate_opfs_capabilities,
 };
-pub use session::open_persistent_session;
+pub use session::{open_persistent_session_with_handles, open_persistent_session_with_store};
 
 use wasm_bindgen::prelude::*;
 
