@@ -6,15 +6,15 @@
 
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
-use database::types::Value;
 use pyo3::{
     IntoPyObjectExt,
     exceptions::{PyRuntimeError, PyTypeError},
     prelude::*,
     types::{PyBool, PyBytes, PyDict, PyString},
 };
+use yydb::types::Value;
 
-/// Upstream diagnostic namespace produced by `database::types::Error::code`.
+/// Upstream diagnostic namespace produced by `yydb::types::Error::code`.
 const UPSTREAM_CODE_PREFIX: &str = "database.";
 
 /// Host-facing diagnostic namespace for the same errors.
@@ -34,15 +34,15 @@ const HOST_TAGGED_JSON_KEY: &str = "$yydb";
 
 /// Rewrites a host tagged object to the canonical `database` key.
 ///
-/// `database::types::scalar::tagged_value_from_json` reads only
+/// `yydb::types::scalar::tagged_value_from_json` reads only
 /// `TAGGED_JSON_KEY`; the `$yydb` spelling stays accepted as a compatibility
 /// input, while `$database` wins when both keys are present.
 fn retag_host_to_database(json: serde_json::Value) -> serde_json::Value {
     match json {
         serde_json::Value::Object(mut map) => {
-            if !map.contains_key(database::types::scalar::TAGGED_JSON_KEY) {
+            if !map.contains_key(yydb::types::scalar::TAGGED_JSON_KEY) {
                 if let Some(tag) = map.remove(HOST_TAGGED_JSON_KEY) {
-                    map.insert(database::types::scalar::TAGGED_JSON_KEY.to_owned(), tag);
+                    map.insert(yydb::types::scalar::TAGGED_JSON_KEY.to_owned(), tag);
                 }
             }
             serde_json::Value::Object(map)
@@ -55,7 +55,7 @@ fn retag_host_to_database(json: serde_json::Value) -> serde_json::Value {
 /// contract requires. Only the key name changes; the value structure is kept.
 fn retag_database_to_host(mut json: serde_json::Value) -> serde_json::Value {
     if let serde_json::Value::Object(map) = &mut json {
-        if let Some(tag) = map.remove(database::types::scalar::TAGGED_JSON_KEY) {
+        if let Some(tag) = map.remove(yydb::types::scalar::TAGGED_JSON_KEY) {
             map.insert(HOST_TAGGED_JSON_KEY.to_owned(), tag);
         }
     }
@@ -64,7 +64,7 @@ fn retag_database_to_host(mut json: serde_json::Value) -> serde_json::Value {
 
 /// Whether `dict` carries either tagged spelling.
 fn carries_tagged_value(dict: &Bound<'_, PyDict>) -> PyResult<bool> {
-    Ok(dict.contains(database::types::scalar::TAGGED_JSON_KEY)? || dict.contains(HOST_TAGGED_JSON_KEY)?)
+    Ok(dict.contains(yydb::types::scalar::TAGGED_JSON_KEY)? || dict.contains(HOST_TAGGED_JSON_KEY)?)
 }
 
 /// Host value accepted by [`execute_vos_write_with_params`].
@@ -73,7 +73,7 @@ fn carries_tagged_value(dict: &Bound<'_, PyDict>) -> PyResult<bool> {
 /// never re-encoded, so a payload that no text spelling can carry survives the
 /// host boundary unchanged. A tagged dict carrying `"$yydb"` (or the canonical
 /// `"$database"`) is decoded into the matching scalar, including
-/// [`database::types::Value::File`] descriptors so VOS `file` columns can be
+/// [`yydb::types::Value::File`] descriptors so VOS `file` columns can be
 /// round-tripped through the Python host.
 fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_none() {
@@ -88,7 +88,7 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(dict) = value.cast::<PyDict>() {
         if carries_tagged_value(dict)? {
             let json = retag_host_to_database(dict_to_json(dict)?);
-            if let Some(result) = database::types::scalar::tagged_value_from_json(&json) {
+            if let Some(result) = yydb::types::scalar::tagged_value_from_json(&json) {
                 return result.map_err(|error| PyRuntimeError::new_err(error.to_string()));
             }
         }
@@ -147,7 +147,7 @@ fn value_to_py(py: Python<'_>, value: Value) -> PyResult<Py<PyAny>> {
             // Tagged scalar forms (uuid, date, time, timestamp, decimal,
             // vector, wide integers, file descriptors) cross as tagged dicts
             // exactly like the TypeScript host.
-            match database::types::scalar::tagged_value_json(&other) {
+            match yydb::types::scalar::tagged_value_json(&other) {
                 Some(json) => json_to_py(py, &retag_database_to_host(json)),
                 None => Err(PyTypeError::new_err(format!("unsupported result value `{}`", other.kind()))),
             }
@@ -191,14 +191,14 @@ fn json_to_py(py: Python<'_>, json: &serde_json::Value) -> PyResult<Py<PyAny>> {
 /// Embedded `yydb` engine version string.
 #[pyfunction]
 fn version() -> String {
-    database::execution::engine::version().to_string()
+    yydb::execution::engine::version().to_string()
 }
 
 /// Run the YYDB serve loop on `bind` for the database at `db_path`.
 #[pyfunction]
 #[pyo3(signature = (db_path, bind, insecure_bind=None))]
 fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> PyResult<()> {
-    database::server::yydb::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false)).map_err(map_err)?;
+    yydb::server::yydb::run_serve(Path::new(&db_path), &bind, insecure_bind.unwrap_or(false)).map_err(map_err)?;
     Ok(())
 }
 
@@ -209,7 +209,7 @@ fn serve(db_path: String, bind: String, insecure_bind: Option<bool>) -> PyResult
 #[pyfunction]
 #[pyo3(signature = (db_path, schema_document=None))]
 fn init_db(db_path: String, schema_document: Option<String>) -> PyResult<()> {
-    let conn = database::execution::engine::Connection::open(&db_path).map_err(map_err)?;
+    let conn = yydb::execution::engine::Connection::open(&db_path).map_err(map_err)?;
     conn.schema().map_err(map_err)?;
     if let Some(document) = schema_document {
         conn.ensure_schema(&document).map_err(map_err)?;
@@ -220,7 +220,7 @@ fn init_db(db_path: String, schema_document: Option<String>) -> PyResult<()> {
 /// Return multi-line database diagnostics for `db_path`.
 #[pyfunction]
 fn info_text(db_path: String) -> PyResult<String> {
-    let conn = database::execution::engine::Connection::open(&db_path).map_err(map_err)?;
+    let conn = yydb::execution::engine::Connection::open(&db_path).map_err(map_err)?;
     let path_display = conn.path().map(|path| path.display().to_string()).unwrap_or_else(|| "<memory>".to_owned());
     let mut lines = vec![format!("path={path_display}")];
     match conn.schema().map_err(map_err)? {
@@ -234,7 +234,7 @@ fn info_text(db_path: String) -> PyResult<String> {
     lines.push(format!("journal_mode={}", conn.journal_mode().as_str()));
     if let (Some(wal), Some(shm)) = (conn.wal_path(), conn.shm_path()) {
         let (wal_on, shm_on, frames) =
-            database::execution::engine::journal::sidecar_status(conn.path().expect("file-backed")).map_err(map_err)?;
+            yydb::execution::engine::journal::sidecar_status(conn.path().expect("file-backed")).map_err(map_err)?;
         lines.push(format!("wal={} exists={wal_on}", wal.display()));
         lines.push(format!("shm={} exists={shm_on}", shm.display()));
         lines.push(format!("wal_frames={frames}"));
@@ -255,7 +255,7 @@ fn read_schema_file(schema_path: String) -> PyResult<String> {
 /// survives the boundary unchanged.
 #[pyfunction]
 fn query_vos(py: Python<'_>, db_path: String, source: String) -> PyResult<Vec<Py<PyAny>>> {
-    let conn = database::execution::engine::Connection::open(&db_path).map_err(map_err)?;
+    let conn = yydb::execution::engine::Connection::open(&db_path).map_err(map_err)?;
     let rows = conn.query_vos(&source).map_err(map_err)?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
@@ -276,7 +276,7 @@ fn query_vos(py: Python<'_>, db_path: String, source: String) -> PyResult<Vec<Py
 /// `Value::File` descriptors for VOS `file` columns.
 #[pyfunction]
 fn execute_vos_write(db_path: String, source: String, params: &Bound<'_, PyDict>) -> PyResult<()> {
-    let conn = database::execution::engine::Connection::open(&db_path).map_err(map_err)?;
+    let conn = yydb::execution::engine::Connection::open(&db_path).map_err(map_err)?;
     let mut named = BTreeMap::new();
     for (key, value) in params.iter() {
         named.insert(key.extract::<String>()?, py_to_value(&value)?);
@@ -295,7 +295,7 @@ fn execute_vos_transaction(db_path: String, statements: Vec<(String, Bound<'_, P
     if statements.is_empty() {
         return Err(PyTypeError::new_err("transaction batch must not be empty"));
     }
-    let conn = database::execution::engine::Connection::open(&db_path).map_err(map_err)?;
+    let conn = yydb::execution::engine::Connection::open(&db_path).map_err(map_err)?;
     conn.begin().map_err(map_err)?;
     for (source, params) in &statements {
         let mut named = BTreeMap::new();
@@ -310,9 +310,9 @@ fn execute_vos_transaction(db_path: String, statements: Vec<(String, Bound<'_, P
     conn.commit().map_err(map_err)
 }
 
-fn decode_descriptor_dict(dict: &Bound<'_, PyDict>) -> PyResult<database::types::FileDescriptor> {
+fn decode_descriptor_dict(dict: &Bound<'_, PyDict>) -> PyResult<yydb::types::FileDescriptor> {
     let json = retag_host_to_database(dict_to_json(dict)?);
-    let decoded = database::types::scalar::tagged_value_from_json(&json)
+    let decoded = yydb::types::scalar::tagged_value_from_json(&json)
         .ok_or_else(|| PyRuntimeError::new_err("dict does not carry a tagged scalar value"))?
         .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
     match decoded {
@@ -339,12 +339,12 @@ fn put_file(
     name: Option<String>,
     media_type: Option<String>,
 ) -> PyResult<Py<PyAny>> {
-    let conn = database::execution::engine::Connection::open(&db_path).map_err(map_err)?;
+    let conn = yydb::execution::engine::Connection::open(&db_path).map_err(map_err)?;
     let chunk_size =
         usize::try_from(chunk_size).map_err(|_| PyRuntimeError::new_err("chunk_size exceeds platform pointer width"))?;
     let descriptor = conn.put_file(std::io::Cursor::new(payload), chunk_size, name, media_type).map_err(map_err)?;
     let json =
-        database::types::scalar::tagged_value_json(&Value::File(descriptor)).expect("`Value::File` always has a tagged form");
+        yydb::types::scalar::tagged_value_json(&Value::File(descriptor)).expect("`Value::File` always has a tagged form");
     json_to_py(py, &retag_database_to_host(json))
 }
 
@@ -362,11 +362,11 @@ fn read_file_window(
     offset: i64,
     length: i64,
 ) -> PyResult<Py<PyBytes>> {
-    let conn = database::execution::engine::Connection::open(&db_path).map_err(map_err)?;
+    let conn = yydb::execution::engine::Connection::open(&db_path).map_err(map_err)?;
     let descriptor = decode_descriptor_dict(descriptor)?;
     let offset = u64::try_from(offset).map_err(|_| PyRuntimeError::new_err("offset must be non-negative"))?;
     let length = u64::try_from(length).map_err(|_| PyRuntimeError::new_err("length must be non-negative"))?;
-    let octets = conn.read_file_window(&descriptor, vos::types::FileReadWindow::new(offset, length)).map_err(map_err)?;
+    let octets = conn.read_file_window(&descriptor, yydb::schema::FileReadWindow::new(offset, length)).map_err(map_err)?;
     Ok(PyBytes::new(py, &octets).into())
 }
 
@@ -374,7 +374,7 @@ fn read_file_window(
 /// content digest.
 #[pyfunction]
 fn read_file(py: Python<'_>, db_path: String, descriptor: &Bound<'_, PyDict>) -> PyResult<Py<PyBytes>> {
-    let conn = database::execution::engine::Connection::open(&db_path).map_err(map_err)?;
+    let conn = yydb::execution::engine::Connection::open(&db_path).map_err(map_err)?;
     let descriptor = decode_descriptor_dict(descriptor)?;
     let octets = conn.read_file(&descriptor).map_err(map_err)?;
     Ok(PyBytes::new(py, &octets).into())
@@ -387,20 +387,20 @@ fn read_file(py: Python<'_>, db_path: String, descriptor: &Bound<'_, PyDict>) ->
 /// a savepoint or a rollback must share one open handle.
 #[pyclass(name = "Connection")]
 pub struct PyConnection {
-    conn: Arc<database::execution::engine::Connection>,
+    conn: Arc<yydb::execution::engine::Connection>,
 }
 
 impl PyConnection {
-    fn from_conn(conn: database::execution::engine::Connection) -> Self {
+    fn from_conn(conn: yydb::execution::engine::Connection) -> Self {
         Self { conn: Arc::new(conn) }
     }
 
     fn restore_handle(backup: &str) -> PyResult<Self> {
         let conn = if backup.ends_with(".yydx") {
-            database::execution::engine::Connection::restore_yydx(backup)
+            yydb::execution::engine::Connection::restore_yydx(backup)
         }
         else {
-            database::execution::engine::Connection::restore_yydb(backup)
+            yydb::execution::engine::Connection::restore_yydb(backup)
         };
         Ok(Self::from_conn(conn.map_err(map_err)?))
     }
@@ -417,27 +417,26 @@ impl PyConnection {
     #[new]
     #[pyo3(signature = (path, wal = true))]
     fn new(path: &str, wal: bool) -> PyResult<Self> {
-        let flags =
-            if wal { database::execution::engine::OpenFlags::wal() } else { database::execution::engine::OpenFlags::new() };
-        Ok(Self::from_conn(database::execution::engine::Connection::open_with_flags(path, flags).map_err(map_err)?))
+        let flags = if wal { yydb::execution::engine::OpenFlags::wal() } else { yydb::execution::engine::OpenFlags::new() };
+        Ok(Self::from_conn(yydb::execution::engine::Connection::open_with_flags(path, flags).map_err(map_err)?))
     }
 
     /// Open `path` with the default (delete) journal.
     #[staticmethod]
     fn open(path: &str) -> PyResult<Self> {
-        Ok(Self::from_conn(database::execution::engine::Connection::open(path).map_err(map_err)?))
+        Ok(Self::from_conn(yydb::execution::engine::Connection::open(path).map_err(map_err)?))
     }
 
     /// Open a `.yydx` database with the sibling object tree.
     #[staticmethod]
     fn open_yydx(path: &str) -> PyResult<Self> {
-        Ok(Self::from_conn(database::execution::engine::Connection::open_yydx(path).map_err(map_err)?))
+        Ok(Self::from_conn(yydb::execution::engine::Connection::open_yydx(path).map_err(map_err)?))
     }
 
     /// Open an in-memory database.
     #[staticmethod]
     fn open_in_memory() -> PyResult<Self> {
-        Ok(Self::from_conn(database::execution::engine::Connection::open_in_memory().map_err(map_err)?))
+        Ok(Self::from_conn(yydb::execution::engine::Connection::open_in_memory().map_err(map_err)?))
     }
 
     /// Open a verified backup copy: `.yydb` checks page integrity, `.yydx`

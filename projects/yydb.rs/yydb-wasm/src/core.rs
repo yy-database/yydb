@@ -225,6 +225,8 @@ fn execution_type_json(ty: Type) -> JsonValue {
         Type::Date => json!({ "kind": "date" }),
         Type::Time => json!({ "kind": "time", "unit": "nanosecond", "timezone": "none" }),
         Type::Timestamp => json!({ "kind": "timestamp", "unit": "microsecond", "timezone": "utc" }),
+        Type::Uuid => json!({ "kind": "uuid" }),
+        Type::List => json!({ "kind": "list" }),
         Type::Decimal { precision, scale } => json!({ "kind": "decimal", "precision": precision, "scale": scale }),
         Type::Vector { dimension } => json!({ "kind": "vector", "dimension": dimension }),
         Type::Record { schema_id, field_count } => {
