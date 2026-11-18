@@ -1,4 +1,3 @@
-import * as lightDb from "@yydb/light-db";
 import { Database } from "@yydb/light-db";
 import { initWasm } from "@yydb/yydb-unknown-wasm32";
 
@@ -8,7 +7,7 @@ import {
     SIMPLE_ADOPTION_PROGRAMS,
     SIMPLE_SCHEMA,
     SQL_SAMPLES,
-} from "./fixtures/schema.ts";
+} from "./fixtures/schema";
 
 export interface BrowserTestResult {
     name: string;

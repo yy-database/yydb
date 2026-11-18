@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     const { server, url } = await createStaticServer();
     const browser = await chromium.launch({
         headless: true,
-        channel: process.env.YYDB_BROWSER_CHANNEL ?? "chrome",
+        channel: process.env['YYDB_BROWSER_CHANNEL'] ?? "chrome",
     });
     try {
         const page = await browser.newPage();

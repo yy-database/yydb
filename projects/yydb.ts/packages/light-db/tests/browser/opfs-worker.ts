@@ -71,8 +71,8 @@ function envelope(raw: string): Record<string, unknown> {
 
 function assertOk(raw: string, operation: string): Record<string, unknown> {
     const parsed = envelope(raw);
-    if (parsed.ok !== true) {
-        throw new Error(`${operation} failed: ${JSON.stringify(parsed.error)}`);
+    if (parsed['ok'] !== true) {
+        throw new Error(`${operation} failed: ${JSON.stringify(parsed['error'])}`);
     }
     return parsed;
 }
@@ -99,10 +99,10 @@ async function run(): Promise<void> {
         const opened = await handlesFor(YYDB);
         const session = openPersistentSessionWithHandles(YYDB, opened.handles);
         const raw = envelope(session.get("theme"));
-        if (raw.ok !== true) {
+        if (raw['ok'] !== true) {
             throw new Error(`a committed row must survive the reopen: ${JSON.stringify(raw)}`);
         }
-        const value = new Uint8Array(raw.value as number[] | ArrayLike<number>);
+        const value = new Uint8Array(raw['value'] as number[] | ArrayLike<number>);
         if (new TextDecoder().decode(value) !== "dark") {
             throw new Error(`unexpected persisted value: ${new TextDecoder().decode(value)}`);
         }

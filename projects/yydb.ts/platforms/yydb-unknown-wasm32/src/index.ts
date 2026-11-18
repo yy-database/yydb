@@ -29,6 +29,15 @@ export type PersistentHandles = {
     wal?: unknown;
     /** `FileSystemSyncAccessHandle` for `<path>-shm`. */
     shm?: unknown;
+    /**
+     * Synchronous facade the host builds from `FileSystemDirectoryHandle.values()`
+     * and `removeEntry()`. Required for `.yydx` volumes, which publish blobs as
+     * sibling files; without it the core refuses with `opfs.blob_directory`.
+     */
+    directory?: {
+        list(): string[];
+        remove(name: string): void;
+    };
 };
 
 /** Tagged JSON form of an exact `date` value (days since the Unix epoch). */
@@ -153,6 +162,11 @@ export type WasmSession = {
     readonly path?: string;
 };
 
+/** Durable session: adds the generation of the last main-file publication. */
+export type PersistentWasmSession = WasmSession & {
+    readonly generation: number;
+};
+
 const glueApi = glue as {
     yydbVersion?: () => string;
     checkSchema?: (source: string) => CheckSchemaResult;
@@ -161,8 +175,12 @@ const glueApi = glue as {
         restoreFromSnapshot?: (bytes: Uint8Array) => WasmSession;
     };
     PersistentSession?: (new (path: string) => WasmSession) & {
-        openWithHandles?: (path: string, handles: PersistentHandles) => WasmSession;
-        restoreBackup?: (path: string, bytes: Uint8Array, handles: PersistentHandles) => WasmSession;
+        openWithHandles?: (path: string, handles: PersistentHandles) => PersistentWasmSession;
+        restoreBackup?: (
+            path: string,
+            bytes: Uint8Array,
+            handles: PersistentHandles,
+        ) => PersistentWasmSession;
     };
 };
 
@@ -264,7 +282,11 @@ export function restoreMemorySession(bytes: Uint8Array): WasmSession {
  * overwrites a live database. The host must pass the sync access handles it
  * opened for `path`.
  */
-export function restorePersistentSession(path: string, bytes: Uint8Array, handles: PersistentHandles): WasmSession {
+export function restorePersistentSession(
+    path: string,
+    bytes: Uint8Array,
+    handles: PersistentHandles,
+): PersistentWasmSession {
     assertReady();
     const restore = glueApi.PersistentSession?.restoreBackup;
     if (!restore) {
@@ -279,7 +301,7 @@ export function restorePersistentSession(path: string, bytes: Uint8Array, handle
  * The host opens `<path>`, `<path>-wal` and `<path>-shm` inside a worker,
  * creates a `FileSystemSyncAccessHandle` for each and hands them over.
  */
-export function openPersistentSessionWithHandles(path: string, handles: PersistentHandles): WasmSession {
+export function openPersistentSessionWithHandles(path: string, handles: PersistentHandles): PersistentWasmSession {
     assertReady();
     const open = glueApi.PersistentSession?.openWithHandles;
     if (!open) {

@@ -46,9 +46,9 @@ afterAll(() => {
 describe('doctorJson', () => {
     it('returns ok with the expected DoctorReport keys on a fresh store', () => {
         const raw = JSON.parse(sess.doctorJson()) as Record<string, unknown>;
-        expect(raw.ok).toBe(true);
+        expect(raw['ok']).toBe(true);
         expect(raw).toHaveProperty('report');
-        const report = raw.report as Record<string, unknown>;
+        const report = raw['report'] as Record<string, unknown>;
         expect(report).toHaveProperty('last_commit_sequence');
         expect(report).toHaveProperty('last_checkpoint_sequence');
         expect(report).toHaveProperty('checkpoint_lag_records');
@@ -75,14 +75,14 @@ describe('prepareJson + queryPreparedJson', () => {
 
     it('prepareJson returns StatementInfo with the expected keys', () => {
         const raw = JSON.parse(sess.prepareJson(filterSql)) as Record<string, unknown>;
-        expect(raw.ok).toBe(true);
-        expect(raw.statementId).toMatch(/^stmt-\d+$/);
-        expect(raw.queryKind).toBe('read');
-        expect(raw.parameters).toEqual([]);
-        expect(raw.readSet).toEqual(['User']);
-        expect(raw.writeSet).toEqual([]);
-        expect(raw.sourceFingerprint).toBeTruthy();
-        expect(raw.source).toContain('User');
+        expect(raw['ok']).toBe(true);
+        expect(raw['statementId']).toMatch(/^stmt-\d+$/);
+        expect(raw['queryKind']).toBe('read');
+        expect(raw['parameters']).toEqual([]);
+        expect(raw['readSet']).toEqual(['User']);
+        expect(raw['writeSet']).toEqual([]);
+        expect(raw['sourceFingerprint']).toBeTruthy();
+        expect(raw['source']).toContain('User');
     });
 
     it('queryPreparedJson executes the cached plan and returns typed rows', () => {
@@ -95,9 +95,9 @@ describe('prepareJson + queryPreparedJson', () => {
         expect(raw.rows).toBeInstanceOf(Array);
         expect(raw.rows.length).toBeGreaterThanOrEqual(1);
         const first = raw.rows[0] as Record<string, unknown>;
-        expect(first.user_name).toBe('ada');
-        expect(first.active).toBe(true);
-        expect(first.user_id).toBeTruthy();
+        expect(first['user_name']).toBe('ada');
+        expect(first['active']).toBe(true);
+        expect(first['user_id']).toBeTruthy();
     });
 
     it('closeStatement releases the plan; subsequent queries refuse', () => {
@@ -131,16 +131,16 @@ describe('savepoints', () => {
             expect(JSON.parse(session.rollbackTo('outer'))).toMatchObject({ ok: true });
 
             const dropped = JSON.parse(session.get('dropped')) as Record<string, unknown>;
-            expect(dropped.ok).toBe(true);
-            expect(dropped.value).toBeNull();
+            expect(dropped['ok']).toBe(true);
+            expect(dropped['value']).toBeNull();
 
             expect(JSON.parse(session.savepoint('probe'))).toMatchObject({ ok: true });
             expect(JSON.parse(session.release('probe'))).toMatchObject({ ok: true });
             expect(JSON.parse(session.commit())).toMatchObject({ ok: true });
 
             const kept = JSON.parse(session.get('kept')) as Record<string, unknown>;
-            expect(kept.ok).toBe(true);
-            expect(Array.from(kept.value as number[])).toEqual([111, 110, 101]);
+            expect(kept['ok']).toBe(true);
+            expect(Array.from(kept['value'] as number[])).toEqual([111, 110, 101]);
         } finally {
             session.close();
         }
