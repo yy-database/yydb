@@ -1,6 +1,7 @@
 mod capability_missing;
 mod crash_after_blob_publish;
 mod crash_after_commit;
+mod cross_instance;
 mod doctor_missing_blob;
 mod fault_injection;
 mod persistent_open;
