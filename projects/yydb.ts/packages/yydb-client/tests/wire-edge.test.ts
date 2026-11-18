@@ -189,7 +189,7 @@ test("micro host invoke decodes full payloads and refuses truncated ones", () =>
 test("error bodies carry arbitrary unicode codes and messages", () => {
     const body = encodeErrorBody({ code: "yydb.schema.invalid", message: "VOS schema：字段“名字”重复" });
     assert.deepEqual(decodeErrorBody(body), { code: "yydb.schema.invalid", message: "VOS schema：字段“名字”重复" });
-    assert.throws(() => decodeErrorBody(Uint8Array.from([4, 0, 0, 0, 1])), /body truncated bytes/);
+    assert.throws(() => decodeErrorBody(Uint8Array.from([4, 0, 0, 0, 1])), /not valid JSON/);
 });
 
 test("little-endian primitives write u32 and length-prefixed bytes verbatim", () => {

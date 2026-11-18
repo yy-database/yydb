@@ -422,28 +422,44 @@ export function decodeKvGetOk(body: Uint8Array): Uint8Array | null {
     return readBytesAt(body, offset, valLen);
 }
 
-/** Structured `Error` frame body: stable code plus display message. */
+/** Structured `Error` frame body — mirrors the Rust `DiagnosticEnvelope`. */
 export interface WireErrorBody {
-    /** Stable error code (`yydb.schema.invalid`, …). */
+    /** Stable dotted code (`yydb.schema.invalid`, …). */
     code: string;
+    /** Operation category (`io`, `schema`, `udf`, …). */
+    operation?: string;
+    /** Whether the caller may retry with the same arguments. */
+    retryable?: boolean;
     /** Display message; hosts must not branch on this text. */
     message: string;
+    /** Structured parameters for catalog templating. */
+    params?: Readonly<Record<string, string>>;
 }
 
-/** Encode an `Error` frame body. */
+/** Encode an `Error` frame body as the shared diagnostic JSON. */
 export function encodeErrorBody(error: WireErrorBody): Uint8Array {
-    const out: number[] = [];
-    pushBytes(out, new TextEncoder().encode(error.code));
-    pushBytes(out, new TextEncoder().encode(error.message));
-    return Uint8Array.from(out);
+    return new TextEncoder().encode(JSON.stringify(error));
 }
 
-/** Decode an `Error` frame body. */
+/** Decode an `Error` frame body; rejects bodies that are not diagnostic JSON. */
 export function decodeErrorBody(body: Uint8Array): WireErrorBody {
-    const offset = { n: 0 };
-    const codeLen = readU32At(body, offset);
-    const code = new TextDecoder().decode(readBytesAt(body, offset, codeLen));
-    const messageLen = readU32At(body, offset);
-    const message = new TextDecoder().decode(readBytesAt(body, offset, messageLen));
-    return { code, message };
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(new TextDecoder().decode(body));
+    } catch {
+        throw new Error('wire error body is not valid JSON');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('wire error body is not a diagnostic object');
+    }
+    const diag = parsed as Record<string, unknown>;
+    if (typeof diag['code'] !== 'string') throw new Error('wire error body missing code');
+    if (typeof diag['message'] !== 'string') throw new Error('wire error body missing message');
+    const decoded: WireErrorBody = { code: diag['code'], message: diag['message'] };
+    if (typeof diag['operation'] === 'string') decoded.operation = diag['operation'];
+    if (typeof diag['retryable'] === 'boolean') decoded.retryable = diag['retryable'];
+    if (diag['params'] && typeof diag['params'] === 'object') {
+        decoded.params = diag['params'] as Record<string, string>;
+    }
+    return decoded;
 }

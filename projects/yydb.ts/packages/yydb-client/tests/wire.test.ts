@@ -99,6 +99,6 @@ test('error body roundtrip keeps code and message', () => {
     });
 });
 
-test('error body decode rejects a truncated frame', () => {
+test('error body decode rejects a body that is not diagnostic JSON', () => {
     assert.throws(() => decodeErrorBody(Uint8Array.from([9, 0, 0, 0, 121])));
 });
