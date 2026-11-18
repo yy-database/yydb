@@ -106,6 +106,33 @@ pub struct PersistentVolume {
     inner: Mutex<VolumePublisher<Box<dyn HostVolumeStore>>>,
 }
 
+/// Outcome of the host's exclusive acquire attempt for one volume path.
+///
+/// OPFS guarantees a single `FileSystemSyncAccessHandle` per file, so the host
+/// is the only party that can tell a held lease from a busy one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriterLease {
+    /// The host holds the only sync access handle for the path.
+    Held,
+    /// Another context still holds the handle, so the host must retry later.
+    Busy,
+    /// The host cannot assert an exclusive handle at all.
+    Absent,
+}
+
+/// Reject a volume whose writer lease cannot be established.
+///
+/// A busy lease is retryable and therefore [`Error::Busy`], while a host that
+/// never provides exclusivity is a [`Error::NativeCapabilityMissing`] — the
+/// binding must not pretend to hold a writer lease it was never given.
+pub fn validate_writer_lease(path: &str, lease: WriterLease) -> Result<()> {
+    match lease {
+        WriterLease::Held => Ok(()),
+        WriterLease::Busy => Err(Error::Busy { path: path.to_owned(), mode: "writer" }),
+        WriterLease::Absent => Err(Error::NativeCapabilityMissing { capability: "opfs.exclusive_writer" }),
+    }
+}
+
 impl PersistentVolume {
     /// Bind `path` to a host byte store. The store owns every read and write.
     pub fn open(path: &str, store: Box<dyn HostVolumeStore>) -> Result<Self> {
@@ -212,6 +239,7 @@ impl PersistentVolume {
 /// opening a volume that cannot make a durability promise.
 pub fn open_volume_from_handles(path: &str, handles: JsValue) -> Result<PersistentVolume> {
     let mode = PersistentStorageMode::from_path(path)?;
+    host_store::validate_lease(path, &handles)?;
     let (store, capabilities, directory) = host_store::from_handles(handles)?;
     validate_opfs_capabilities(&capabilities, mode)?;
     match directory {
@@ -232,7 +260,20 @@ mod host_store {
         types::{Error, Result},
     };
 
-    use super::OpfsCapabilities;
+    use super::{OpfsCapabilities, WriterLease, validate_writer_lease};
+
+    /// Read the host's exclusive acquire outcome before any byte is touched.
+    pub(crate) fn validate_lease(path: &str, handles: &JsValue) -> Result<()> {
+        if handles.is_null() || handles.is_undefined() {
+            return validate_writer_lease(path, WriterLease::Absent);
+        }
+        if Reflect::get(handles, &JsValue::from_str("busy")).map_err(js_error)?.is_truthy() {
+            return validate_writer_lease(path, WriterLease::Busy);
+        }
+        let main = Reflect::get(handles, &JsValue::from_str("main")).map_err(js_error)?;
+        let lease = if main.is_null() || main.is_undefined() { WriterLease::Absent } else { WriterLease::Held };
+        validate_writer_lease(path, lease)
+    }
 
     /// Members the volume contract needs: sized range reads and writes plus a
     /// durability barrier. `FileSystemSyncAccessHandle` provides all of them.
@@ -508,6 +549,12 @@ mod host_store {
     };
 
     use super::OpfsCapabilities;
+
+    pub(crate) fn validate_lease(_path: &str, _handles: &JsValue) -> Result<()> {
+        // Native builds never receive OPFS handles, so the lease question is
+        // answered by the missing capability rather than by an emulated lock.
+        Err(Error::NativeCapabilityMissing { capability: "opfs.sync_access_handle" })
+    }
 
     pub(crate) fn from_handles(
         _handles: JsValue,
