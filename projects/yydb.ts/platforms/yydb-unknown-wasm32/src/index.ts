@@ -14,6 +14,23 @@ export type CheckSchemaResult = {
     error?: string;
 };
 
+/**
+ * OPFS files the host opened on behalf of the WASM core.
+ *
+ * Each value is a `FileSystemSyncAccessHandle` obtained inside a worker. The
+ * core cannot create one itself: opfs is promise based and sync access handles
+ * are worker only, so a durable session always starts from handles the host
+ * already holds.
+ */
+export type PersistentHandles = {
+    /** `FileSystemSyncAccessHandle` for `<path>`. */
+    main: unknown;
+    /** `FileSystemSyncAccessHandle` for `<path>-wal`. */
+    wal?: unknown;
+    /** `FileSystemSyncAccessHandle` for `<path>-shm`. */
+    shm?: unknown;
+};
+
 /** Tagged JSON form of an exact `date` value (days since the Unix epoch). */
 export type DateScalar = { readonly $yydb: 'date'; readonly days: number };
 
@@ -96,7 +113,7 @@ export type WasmSession = {
     ensureSchema(document: string): string;
     get(key: string): string;
     put(key: string, value: Uint8Array): string;
-    delete(key: string): string;
+    delete (key: string): string;
     scanPrefix(prefix: string, after: string | null | undefined, limit: number): string;
     writeBatch(body: Uint8Array): string;
     compareExchange(key: string, expected?: Uint8Array | null, replacement?: Uint8Array | null): string;
@@ -144,7 +161,8 @@ const glueApi = glue as {
         restoreFromSnapshot?: (bytes: Uint8Array) => WasmSession;
     };
     PersistentSession?: (new (path: string) => WasmSession) & {
-        restoreBackup?: (path: string, bytes: Uint8Array) => WasmSession;
+        openWithHandles?: (path: string, handles: PersistentHandles) => WasmSession;
+        restoreBackup?: (path: string, bytes: Uint8Array, handles: PersistentHandles) => WasmSession;
     };
 };
 
@@ -243,19 +261,41 @@ export function restoreMemorySession(bytes: Uint8Array): WasmSession {
  * Replace the OPFS database at `path` with a verified snapshot and open it.
  *
  * The snapshot is validated before it is published, so a damaged backup never
- * overwrites a live database. The snapshot layout must match `path` (`.yydb`
- * main file into a `.yydb` path, `.yydx` into a `.yydx` path).
+ * overwrites a live database. The host must pass the sync access handles it
+ * opened for `path`.
  */
-export function restorePersistentSession(path: string, bytes: Uint8Array): WasmSession {
+export function restorePersistentSession(path: string, bytes: Uint8Array, handles: PersistentHandles): WasmSession {
     assertReady();
     const restore = glueApi.PersistentSession?.restoreBackup;
     if (!restore) {
         throw new Error('@yydb/yydb-unknown-wasm32: PersistentSession.restoreBackup missing, rebuild wasm artifacts');
     }
-    return restore(path, bytes);
+    return restore(path, bytes, handles);
 }
 
-/** Open a stateful OPFS-backed session at `path`. */
+/**
+ * Open a stateful OPFS-backed session at `path` over host sync handles.
+ *
+ * The host opens `<path>`, `<path>-wal` and `<path>-shm` inside a worker,
+ * creates a `FileSystemSyncAccessHandle` for each and hands them over.
+ */
+export function openPersistentSessionWithHandles(path: string, handles: PersistentHandles): WasmSession {
+    assertReady();
+    const open = glueApi.PersistentSession?.openWithHandles;
+    if (!open) {
+        throw new Error('@yydb/yydb-unknown-wasm32: PersistentSession.openWithHandles missing, rebuild wasm artifacts');
+    }
+    return open(path, handles);
+}
+
+/**
+ * Open a stateful OPFS-backed session at `path`.
+ *
+ * A path alone is not enough for a durable browser volume: OPFS access is
+ * asynchronous and sync access handles are worker only. This entry therefore
+ * throws the structured `yydb.native_capability_missing` error. Use
+ * {@link openPersistentSessionWithHandles} with handles opened by the host.
+ */
 export function openPersistentSession(path: string): WasmSession {
     assertReady();
     if (!glueApi.PersistentSession) {

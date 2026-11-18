@@ -3,9 +3,12 @@
  *
  * These are the stable contract for `@yydb/light-db`:
  * - Binary values are always `Uint8Array` — never `Buffer`.
- * - No local file paths, file handles, or Node-exclusive types leak through.
+ * - No Node-exclusive types leak through. OPFS sync access handles are the only
+ *   host objects crossing the boundary, and the host opens them itself.
  * - Aligned with the Node-side `@yydb/yydb` method names and return semantics.
  */
+
+import type { PersistentHandles } from '@yydb/yydb-unknown-wasm32';
 
 /** Schema version and document (aligned with `@yydb/yydb`). */
 export interface SchemaVersion {
@@ -48,6 +51,11 @@ export interface MigrateOptions {
 export interface OpenOptions {
     /** Use an in-memory session (test only; default is OPFS persistent). */
     memory?: boolean;
+    /**
+     * OPFS sync access handles the host opened inside a worker. Required for a
+     * persistent session: the WASM core cannot create them itself.
+     */
+    handles?: PersistentHandles;
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +256,7 @@ export interface LightDatabase {
     put(key: string, value: Uint8Array | string): Promise<void>;
 
     /** Delete one record. Silently succeeds when absent. */
-    delete(key: string): Promise<void>;
+    delete (key: string): Promise<void>;
 
     /** Fold the WAL into the main storage. */
     checkpoint(): Promise<void>;

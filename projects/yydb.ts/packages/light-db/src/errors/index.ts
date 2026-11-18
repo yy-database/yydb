@@ -19,6 +19,8 @@ export const LightDbErrorCodes = {
     schemaInvalid: 'yydb.schema.invalid',
     /** 宿主不支持该能力 */
     unsupported: 'yydb.unsupported',
+    /** 宿主未提供该能力所需的原语（例如 OPFS 同步句柄） */
+    nativeCapabilityMissing: 'yydb.native_capability_missing',
     /** 会话或数据库已关闭 */
     sessionClosed: 'yydb.session.closed',
     /** 单写者租约不可用（例如缺少 Web Locks） */

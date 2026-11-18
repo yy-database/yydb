@@ -13,21 +13,23 @@
  *
  * // Browser
  * import { Database } from '@yydb/light-db';
- * const db = await Database.open('app');
+ * const db = await Database.open('app', { handles });
  * ```
  */
 
 import {
     initWasm,
     openPersistentSession,
+    openPersistentSessionWithHandles,
     createMemorySession,
     restoreMemorySession,
     restorePersistentSession,
     yydbVersion,
+    type PersistentHandles,
     type WasmSession,
 } from '@yydb/yydb-unknown-wasm32';
 import { emitSource, type EmittableItem } from '@voml/vos';
-import { LightDbError } from '../errors/index.js';
+import { LightDbError, LightDbErrorCodes } from '../errors/index.js';
 import {
     MicroSessionRegistry,
     defineMicro as buildMicro,
@@ -64,6 +66,23 @@ interface WasmResult {
     report?: unknown;
     error?: unknown;
     code?: unknown;
+}
+
+/**
+ * A durable browser volume always starts from host-owned OPFS sync handles.
+ *
+ * Opening the file system is asynchronous and sync access handles only exist
+ * inside a worker, so the WASM core cannot create one itself.
+ */
+function requireHandles(handles: PersistentHandles | undefined, operation: string): PersistentHandles {
+    if (handles === undefined) {
+        throw new LightDbError(
+            LightDbErrorCodes.nativeCapabilityMissing,
+            'a persistent session needs the OPFS sync access handles opened by the host',
+            { operation, params: { capability: 'opfs.sync_access_handle' } },
+        );
+    }
+    return handles;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +193,9 @@ export class Database implements LightDatabase {
      * Initialize WASM and open a session (in-memory or OPFS persistent).
      *
      * @param name Database name. Persistent sessions use it as the OPFS path.
-     * @param options Open options — pass `{ memory: true }` for a transient session.
+     * @param options Open options — pass `{ memory: true }` for a transient
+     * session, or `{ handles }` with the sync access handles the host opened
+     * inside a worker for a durable one.
      */
     public static async open(name: string, options: OpenOptions = {}): Promise<Database> {
         if (!name || name.length === 0) {
@@ -185,7 +206,9 @@ export class Database implements LightDatabase {
 
         const session: WasmSession = options.memory
             ? createMemorySession()
-            : openPersistentSession(name);
+            : options.handles
+                ? openPersistentSessionWithHandles(name, options.handles)
+                : openPersistentSession(name);
 
         return new Database(name, session);
     }
@@ -201,7 +224,8 @@ export class Database implements LightDatabase {
      *
      * @param name Database name (OPFS path when persistent).
      * @param backup Main-file snapshot bytes from a backup or export step.
-     * @param options Open options — pass `{ memory: true }` for a transient session.
+     * @param options Open options — a persistent restore requires `{ handles }`
+     * for the host-owned OPFS sync access handles.
      */
     public static async restore(name: string, backup: Uint8Array, options: OpenOptions = {}): Promise<Database> {
         if (!name || name.length === 0) {
@@ -215,7 +239,7 @@ export class Database implements LightDatabase {
 
         const session: WasmSession = options.memory
             ? restoreMemorySession(backup)
-            : restorePersistentSession(name, backup);
+            : restorePersistentSession(name, backup, requireHandles(options.handles, 'restore'));
 
         return new Database(name, session);
     }
