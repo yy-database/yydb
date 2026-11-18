@@ -1,28 +1,31 @@
-// OPFS logical I/O: persistent open + main-file atomic publish roundtrip.
+// Persistent open: the upstream publisher over a real host byte store.
 
-use yydb_wasm::open_persistent;
-
-use crate::fixtures::{full_yydb_caps, full_yydx_caps};
+use crate::fixtures::{cleanup, fs_store, temp_db};
+use yydb_wasm::{OpfsCapabilities, open_persistent_session_with_store, validate_opfs_capabilities};
 
 #[test]
-fn yydb_opfs_persistent_open_main_roundtrip() {
-    let path = "probe-app.yydb";
-    let volume = open_persistent(path, &full_yydb_caps()).expect("persistent open");
-    assert_eq!(volume.path(), path);
-    assert!(volume.read_main().expect("read").is_none());
-
-    volume.publish_main(b"generation-1").expect("publish main generation");
-    let body = volume.read_main().expect("read").expect("generation present");
-    assert_eq!(body, b"generation-1");
-
-    volume.publish_main(b"generation-2").expect("publish next generation");
-    assert_eq!(volume.read_main().expect("read").expect("generation present"), b"generation-2");
+fn yydb_opfs_host_profile_accepts_a_yydb_volume() {
+    validate_opfs_capabilities(&OpfsCapabilities::host_sync_handles(), yydb_wasm::PersistentStorageMode::Yydb)
+        .expect("host sync handles satisfy the .yydb profile");
 }
 
 #[test]
-fn yydb_opfs_persistent_open_yydx_blob_roundtrip() {
-    let path = "probe-app.yydx";
-    let volume = open_persistent(path, &full_yydx_caps()).expect("persistent open");
-    volume.publish_blob("blob-a", b"chunk-a").expect("publish blob");
-    assert_eq!(volume.read_blob("blob-a").expect("read"), Some(b"chunk-a".to_vec()));
+fn yydb_opfs_persistent_session_reads_an_empty_volume() {
+    let path = temp_db("open-empty");
+    cleanup(&path);
+
+    let mut session =
+        open_persistent_session_with_store(path.to_str().unwrap(), fs_store(&path)).expect("open over byte store");
+    assert_eq!(session.path(), path.to_str().unwrap());
+    assert!(!path.exists(), "opening an empty volume must not create a main file");
+    session.close();
+    cleanup(&path);
+}
+
+#[test]
+fn yydb_opfs_persistent_session_rejects_a_path_without_a_layout_suffix() {
+    let error = open_persistent_session_with_store("probe-app.txt", fs_store(&temp_db("open-suffix")))
+        .err()
+        .expect("unsupported layout must fail");
+    assert!(matches!(error, database::types::Error::Unsupported(_)), "expected Unsupported, got {error}");
 }

@@ -1,21 +1,28 @@
-// fixture: yydb.opfs.single_writer_busy
+// Single writer: the exclusive handle is what makes concurrent writers impossible.
+//
+// OPFS guarantees one `FileSystemSyncAccessHandle` per file, so exclusivity is a
+// host property rather than something the wasm binding can lease itself. When a
+// host cannot assert it, the binding refuses the volume with an explicit
+// capability error instead of pretending to hold a writer lease.
 
 use database::types::Error;
-use yydb_wasm::{OpfsCapabilities, claim_opfs_writer};
+use yydb_wasm::{OpfsCapabilities, PersistentStorageMode, validate_opfs_capabilities};
 
-#[test]
-fn yydb_opfs_single_writer_busy() {
-    let caps = OpfsCapabilities::full_yydb_profile();
-    let first = claim_opfs_writer("single-writer-busy.yydb", &caps).expect("first writer");
-    let busy = claim_opfs_writer("single-writer-busy.yydb", &caps).unwrap_err();
-    assert!(matches!(busy, Error::LeaseUnavailable { .. }), "expected LeaseUnavailable, got {busy}");
-    drop(first);
-    claim_opfs_writer("single-writer-busy.yydb", &caps).expect("writer after release");
+fn capability_of(result: Result<(), Error>) -> String {
+    match result {
+        Err(Error::NativeCapabilityMissing { capability }) => capability.to_owned(),
+        other => panic!("expected NativeCapabilityMissing, got {other:?}"),
+    }
 }
 
 #[test]
-fn yydb_opfs_single_writer_busy_different_paths() {
-    let caps = OpfsCapabilities::full_yydb_profile();
-    let _a = claim_opfs_writer("alpha.yydb", &caps).expect("alpha");
-    let _b = claim_opfs_writer("beta.yydb", &caps).expect("beta");
+fn yydb_opfs_single_writer_requires_an_exclusive_handle() {
+    let caps = OpfsCapabilities { exclusive_writer: false, ..OpfsCapabilities::host_sync_handles() };
+    assert_eq!(capability_of(validate_opfs_capabilities(&caps, PersistentStorageMode::Yydb)), "opfs.exclusive_writer");
+}
+
+#[test]
+fn yydb_opfs_single_writer_accepts_a_full_host_profile() {
+    validate_opfs_capabilities(&OpfsCapabilities::host_sync_handles(), PersistentStorageMode::Yydb)
+        .expect("an exclusive sync handle satisfies the single-writer contract");
 }

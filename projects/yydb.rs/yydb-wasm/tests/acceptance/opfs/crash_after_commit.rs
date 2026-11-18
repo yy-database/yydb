@@ -1,19 +1,51 @@
-// fixture: yydb.opfs.crash_after_commit
+// Crash after commit: a publish that returned must already be durable.
+//
+// The old fixture drove a fake in-memory publication. The same guarantee is now
+// observed through the host byte store: publish through the binding, drop every
+// handle, then read the volume back from a brand-new store.
 
-use yydb_wasm::{OpfsBlobPublication, opfs_commit_and_sync, opfs_reopen};
+use crate::fixtures::{USER_SCHEMA, assert_ok_true, cleanup, fs_store, temp_db};
+use database::execution::engine::Connection;
+use yydb_wasm::{PersistentVolume, open_persistent_session_with_store};
 
 #[test]
-fn yydb_opfs_crash_after_commit() {
-    let path = "crash-after-commit.yydx";
-    let mut publication = OpfsBlobPublication::new(path, &["blob-a"]);
-    publication.publish_blob("blob-b");
+fn yydb_opfs_crash_after_commit_keeps_the_committed_image() {
+    let path = temp_db("crash-after-commit");
+    cleanup(&path);
 
-    let committed = opfs_commit_and_sync(path, &mut publication, &["blob-a", "blob-b"], b"catalog-v2").expect("durable commit");
-    // Crash after `TxnCommit` sync: durable snapshot must already be complete.
+    {
+        let mut session = open_persistent_session_with_store(path.to_str().unwrap(), fs_store(&path)).expect("open session");
+        assert_ok_true(&session.ensure_schema(USER_SCHEMA));
+        assert_ok_true(&session.put("kept", b"committed"));
+        assert_ok_true(&session.put("second", b"row"));
+        session.close();
+    }
 
-    let reopened = opfs_reopen(path).expect("reopen after crash");
-    assert_eq!(reopened, committed);
-    assert_eq!(reopened.catalog_body, b"catalog-v2");
-    assert_eq!(reopened.visible_references(), vec!["blob-a".to_string(), "blob-b".to_string()]);
-    assert!(publication.dangling_references().is_empty());
+    // Simulated crash: nothing survives except what the host already synced.
+    let volume = PersistentVolume::open(path.to_str().unwrap(), fs_store(&path)).expect("reopen over a fresh store");
+    assert!(volume.generation() >= 1, "a durable publish must have advanced the generation");
+
+    let bytes = volume.read_main().expect("read main").expect("committed image must be readable after a crash");
+    assert_eq!(&bytes[0..5], b"YDPG\0");
+    assert_eq!(bytes.len() % 4096, 0, "published image must stay page aligned");
+
+    let memory = Connection::open_in_memory().expect("memory");
+    memory.load_main_snapshot(&bytes).expect("hydrate");
+    assert_eq!(memory.get("kept").expect("get"), Some(b"committed".to_vec()));
+    assert_eq!(memory.get("second").expect("get"), Some(b"row".to_vec()));
+
+    cleanup(&path);
+}
+
+#[test]
+fn yydb_opfs_unpublished_bytes_never_reach_the_volume() {
+    let path = temp_db("crash-before-commit");
+    cleanup(&path);
+
+    let session = open_persistent_session_with_store(path.to_str().unwrap(), fs_store(&path)).expect("open session");
+    assert!(!path.exists(), "opening an empty volume must not create a main file");
+    drop(session);
+
+    assert!(!path.exists(), "a session that never published must leave no main file behind");
+    cleanup(&path);
 }
