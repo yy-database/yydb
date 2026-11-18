@@ -14,7 +14,7 @@
 use std::sync::Mutex;
 
 use database::{
-    storage::local_io::{HostVolumeStore, VolumePublisher},
+    storage::local_io::{HostBlobDirectory, HostVolumeStore, VolumePublisher},
     types::{Error, Result},
 };
 use wasm_bindgen::JsValue;
@@ -52,12 +52,25 @@ pub struct OpfsCapabilities {
     pub durability_sync: bool,
     /// The host holds the exclusive handle, so no other context can write.
     pub exclusive_writer: bool,
+    /// The host resolved the `.yydx` blob directory facade.
+    pub blob_directory: bool,
 }
 
 impl OpfsCapabilities {
-    /// Profile of a host that already opened every sync handle this build needs.
+    /// Profile of a host that already opened every sync handle a `.yydb` needs.
     pub fn host_sync_handles() -> Self {
-        Self { sync_access_handle: true, range_read_write: true, durability_sync: true, exclusive_writer: true }
+        Self {
+            sync_access_handle: true,
+            range_read_write: true,
+            durability_sync: true,
+            exclusive_writer: true,
+            blob_directory: false,
+        }
+    }
+
+    /// Profile of a host that also resolved the `.yydx` blob directory facade.
+    pub fn host_sync_handles_with_directory() -> Self {
+        Self { blob_directory: true, ..Self::host_sync_handles() }
     }
 
     /// Profile of a host that provided nothing.
@@ -80,7 +93,7 @@ pub fn validate_opfs_capabilities(caps: &OpfsCapabilities, mode: PersistentStora
     if !caps.exclusive_writer {
         return Err(Error::NativeCapabilityMissing { capability: "opfs.exclusive_writer" });
     }
-    if mode == PersistentStorageMode::Yydx {
+    if mode == PersistentStorageMode::Yydx && !caps.blob_directory {
         // Enumerating and unlinking blobs needs the directory API, which is
         // asynchronous. Sync handles alone cannot serve a `.yydx` volume.
         return Err(Error::NativeCapabilityMissing { capability: "opfs.blob_directory" });
@@ -97,6 +110,16 @@ impl PersistentVolume {
     /// Bind `path` to a host byte store. The store owns every read and write.
     pub fn open(path: &str, store: Box<dyn HostVolumeStore>) -> Result<Self> {
         Ok(Self { inner: Mutex::new(VolumePublisher::open(path, store)?) })
+    }
+
+    /// Bind `path` to a host byte store and a `.yydx` blob directory port.
+    pub fn open_with_directory(
+        path: &str,
+        store: Box<dyn HostVolumeStore>,
+        directory: Box<dyn HostBlobDirectory>,
+    ) -> Result<Self> {
+        let publisher = VolumePublisher::open(path, store)?.with_blob_directory(directory);
+        Ok(Self { inner: Mutex::new(publisher) })
     }
 
     /// Logical database path.
@@ -149,30 +172,63 @@ impl PersistentVolume {
         self.publisher().remove_shm()
     }
 
+    /// Hashes of the blob segments the host directory currently holds.
+    pub fn list_blobs(&self) -> Result<Vec<String>> {
+        self.publisher().list_blobs()
+    }
+
+    /// Read one blob segment from the host store.
+    pub fn read_blob(&self, hash: &str) -> Result<Option<Vec<u8>>> {
+        self.publisher().read_blob(hash)
+    }
+
+    /// Publish one immutable blob segment through the host store.
+    pub fn publish_blob(&self, hash: &str, body: &[u8]) -> Result<()> {
+        self.publisher().publish_blob(hash, body)
+    }
+
+    /// Delete one blob segment through the host directory (or the byte store).
+    pub fn remove_blob(&self, hash: &str) -> Result<()> {
+        self.publisher().remove_blob(hash)
+    }
+
     fn publisher(&self) -> std::sync::MutexGuard<'_, VolumePublisher<Box<dyn HostVolumeStore>>> {
         self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
-/// Build a volume from host-supplied OPFS objects (`{ main, wal?, shm? }`).
+/// Build a volume from host-supplied OPFS objects.
+///
+/// `handles` is `{ main, wal?, shm?, blobs?, directory? }`:
+/// - `main`/`wal`/`shm` are `FileSystemSyncAccessHandle`s the host opened in a
+///   worker.
+/// - `blobs` maps a known blob hash to its sync handle.
+/// - `directory` is the synchronous facade the host built from the
+///   asynchronous `FileSystemDirectoryHandle` pair `values()` / `removeEntry()`,
+///   with `list(): string[]` and `remove(hash: string)`.
 ///
 /// The capability profile is derived from the objects the host actually handed
 /// over, so a handle missing `flush` reports `opfs.durability_sync` instead of
 /// opening a volume that cannot make a durability promise.
 pub fn open_volume_from_handles(path: &str, handles: JsValue) -> Result<PersistentVolume> {
     let mode = PersistentStorageMode::from_path(path)?;
-    let (store, capabilities) = host_store::from_handles(handles)?;
+    let (store, capabilities, directory) = host_store::from_handles(handles)?;
     validate_opfs_capabilities(&capabilities, mode)?;
-    PersistentVolume::open(path, store)
+    match directory {
+        Some(directory) => PersistentVolume::open_with_directory(path, store, directory),
+        None => PersistentVolume::open(path, store),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 mod host_store {
-    use js_sys::{Function, Object, Reflect, Uint8Array};
-    use wasm_bindgen::JsValue;
+    use std::collections::BTreeMap;
+
+    use js_sys::{Array, Function, Object, Reflect, Uint8Array};
+    use wasm_bindgen::{JsCast, JsValue};
 
     use database::{
-        storage::local_io::{HostVolumeStore, VolumeFile},
+        storage::local_io::{HostBlobDirectory, HostVolumeStore, VolumeFile},
         types::{Error, Result},
     };
 
@@ -214,6 +270,7 @@ mod host_store {
                 range_read_write,
                 durability_sync: self.has(DURABILITY_METHOD)?,
                 exclusive_writer: true,
+                blob_directory: false,
             })
         }
 
@@ -279,17 +336,23 @@ mod host_store {
         main: SyncHandle,
         wal: Option<SyncHandle>,
         shm: Option<SyncHandle>,
+        blobs: BTreeMap<String, SyncHandle>,
     }
 
-    pub(crate) fn from_handles(handles: JsValue) -> Result<(Box<dyn HostVolumeStore>, OpfsCapabilities)> {
+    pub(crate) fn from_handles(
+        handles: JsValue,
+    ) -> Result<(Box<dyn HostVolumeStore>, OpfsCapabilities, Option<Box<dyn HostBlobDirectory>>)> {
         if handles.is_null() || handles.is_undefined() {
             return Err(Error::NativeCapabilityMissing { capability: "opfs.sync_access_handle" });
         }
         let main = SyncHandle::new(Reflect::get(&handles, &JsValue::from_str("main")).map_err(js_error)?)?;
         let wal = optional_handle(&handles, "wal")?;
         let shm = optional_handle(&handles, "shm")?;
-        let capabilities = main.capabilities()?;
-        Ok((Box::new(OpfsVolumeStore { main, wal, shm }), capabilities))
+        let blobs = blob_handles(&handles)?;
+        let directory = blob_directory(&handles)?;
+        let mut capabilities = main.capabilities()?;
+        capabilities.blob_directory = directory.is_some();
+        Ok((Box::new(OpfsVolumeStore { main, wal, shm, blobs }), capabilities, directory))
     }
 
     fn optional_handle(handles: &JsValue, key: &str) -> Result<Option<SyncHandle>> {
@@ -300,13 +363,107 @@ mod host_store {
         SyncHandle::new(value).map(Some)
     }
 
+    /// Sync handles the host already opened for blob segments it knows about.
+    fn blob_handles(handles: &JsValue) -> Result<BTreeMap<String, SyncHandle>> {
+        let value = Reflect::get(handles, &JsValue::from_str("blobs")).map_err(js_error)?;
+        let mut out = BTreeMap::new();
+        if value.is_null() || value.is_undefined() {
+            return Ok(out);
+        }
+        if !value.is_object() {
+            return Err(Error::NativeCapabilityMissing { capability: "opfs.blob_directory" });
+        }
+        for key in Object::keys(&Object::from(value.clone())).iter() {
+            let Some(name) = key.as_string()
+            else {
+                continue;
+            };
+            let handle = Reflect::get(&value, &key).map_err(js_error)?;
+            out.insert(name, SyncHandle::new(handle)?);
+        }
+        Ok(out)
+    }
+
+    /// The `.yydx` blob directory facade the host handed over.
+    ///
+    /// `FileSystemDirectoryHandle.values()` and `removeEntry()` return promises,
+    /// so a synchronized wasm call cannot drive them directly. The host awaits
+    /// them in JS and exposes the resolved pair as `list()` / `remove()`, which
+    /// this adapter calls through `Reflect`.
+    fn blob_directory(handles: &JsValue) -> Result<Option<Box<dyn HostBlobDirectory>>> {
+        let value = Reflect::get(handles, &JsValue::from_str("directory")).map_err(js_error)?;
+        if value.is_null() || value.is_undefined() {
+            return Ok(None);
+        }
+        BlobDirectoryHandle::new(value).map(|handle| Some(Box::new(handle) as Box<dyn HostBlobDirectory>))
+    }
+
+    /// Synchronous facade over the host's asynchronous directory operations.
+    pub(crate) struct BlobDirectoryHandle {
+        value: JsValue,
+    }
+
+    impl BlobDirectoryHandle {
+        fn new(value: JsValue) -> Result<Self> {
+            if !value.is_object() {
+                return Err(Error::NativeCapabilityMissing { capability: "opfs.blob_directory" });
+            }
+            let handle = Self { value };
+            // A raw `FileSystemDirectoryHandle` only exposes the asynchronous
+            // pair. Accepting it would mean pretending an unresolved promise
+            // answered the listing.
+            if !handle.has("list")? || !handle.has("remove")? {
+                return Err(Error::NativeCapabilityMissing { capability: "opfs.blob_directory" });
+            }
+            Ok(handle)
+        }
+
+        fn has(&self, name: &str) -> Result<bool> {
+            let member = Reflect::get(&self.value, &JsValue::from_str(name)).map_err(js_error)?;
+            Ok(member.is_function())
+        }
+
+        fn call(&self, name: &str, args: &[JsValue]) -> Result<JsValue> {
+            let function: Function = Reflect::get(&self.value, &JsValue::from_str(name)).map_err(js_error)?.into();
+            let list = Array::new();
+            for arg in args {
+                list.push(arg);
+            }
+            function.apply(&self.value, &list).map_err(js_error)
+        }
+    }
+
+    impl HostBlobDirectory for BlobDirectoryHandle {
+        fn list(&mut self) -> Result<Vec<String>> {
+            let value = self.call("list", &[])?;
+            let entries: Array = value
+                .dyn_into()
+                .map_err(|_| Error::Io(std::io::Error::other("blob directory list() must return an array")))?;
+            let mut out = Vec::with_capacity(entries.length() as usize);
+            for entry in entries.iter() {
+                let Some(hash) = entry.as_string()
+                else {
+                    return Err(Error::Io(std::io::Error::other("blob directory list() entries must be strings")));
+                };
+                out.push(hash);
+            }
+            Ok(out)
+        }
+
+        fn remove(&mut self, hash: &str) -> Result<()> {
+            self.call("remove", &[JsValue::from_str(hash)]).map(|_| ())
+        }
+    }
+
     impl OpfsVolumeStore {
         fn handle(&self, file: &VolumeFile) -> Result<&SyncHandle> {
             match file {
                 VolumeFile::Main => Ok(&self.main),
                 VolumeFile::Wal => self.wal.as_ref().ok_or(Error::NativeCapabilityMissing { capability: "opfs.wal_sidecar" }),
                 VolumeFile::Shm => self.shm.as_ref().ok_or(Error::NativeCapabilityMissing { capability: "opfs.shm_sidecar" }),
-                VolumeFile::Blob(_) => Err(Error::NativeCapabilityMissing { capability: "opfs.blob_directory" }),
+                VolumeFile::Blob(hash) => {
+                    self.blobs.get(hash).ok_or(Error::NativeCapabilityMissing { capability: "opfs.blob_directory" })
+                }
             }
         }
     }
@@ -346,13 +503,15 @@ mod host_store {
     use wasm_bindgen::JsValue;
 
     use database::{
-        storage::local_io::HostVolumeStore,
+        storage::local_io::{HostBlobDirectory, HostVolumeStore},
         types::{Error, Result},
     };
 
     use super::OpfsCapabilities;
 
-    pub(crate) fn from_handles(_handles: JsValue) -> Result<(Box<dyn HostVolumeStore>, OpfsCapabilities)> {
+    pub(crate) fn from_handles(
+        _handles: JsValue,
+    ) -> Result<(Box<dyn HostVolumeStore>, OpfsCapabilities, Option<Box<dyn HostBlobDirectory>>)> {
         Err(Error::NativeCapabilityMissing { capability: "opfs.sync_access_handle" })
     }
 }

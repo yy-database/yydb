@@ -14,7 +14,9 @@ pub use core::{SchemaCheck, check_schema_source, introspect_schema_json, yydb_ve
 pub use opfs::{
     OpfsCapabilities, PersistentStorageMode, PersistentVolume, open_volume_from_handles, validate_opfs_capabilities,
 };
-pub use session::{open_persistent_session_with_handles, open_persistent_session_with_store};
+pub use session::{
+    open_persistent_session_with_handles, open_persistent_session_with_store, open_persistent_session_with_store_and_directory,
+};
 
 use wasm_bindgen::prelude::*;
 

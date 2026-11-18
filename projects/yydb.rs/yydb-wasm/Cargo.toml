@@ -28,6 +28,13 @@ wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 getrandom = { workspace = true }
 
+# `database.execution` reaches `getrandom 0.2` through `boost-crypto` -> `rsa`
+# -> `rand`. That major version refuses to build for `wasm32-unknown-unknown`
+# unless its `js` backend is selected, so the binding picks it here instead of
+# leaving the wasm target unbuildable.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom_v02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
 [dev-dependencies]
 serde_json = { workspace = true }
 database = { workspace = true, features = [

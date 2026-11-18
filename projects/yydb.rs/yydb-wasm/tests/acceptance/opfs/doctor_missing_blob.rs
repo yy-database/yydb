@@ -1,17 +1,23 @@
-// Doctor coverage for a missing blob segment.
+// Doctor coverage for blob volumes.
 //
-// The `yydb.doctor.missing_blob` issue is produced by blob volumes. This build
-// refuses `.yydx` because the directory API is asynchronous (see
-// `crash_after_blob_publish`), so a blob volume can never be opened here and the
-// issue is unreachable through this binding. The case is kept explicit so the
-// gap is recorded instead of silently dropped: doctor over blobs is covered
-// upstream, where a blob directory exists.
+// `database.doctor.missing_blob` is produced by the engine's object store. A
+// browser session hydrates an in-memory `Connection` from the published main
+// image, so its CAS objects stay embedded in that image and the engine never
+// consults a blob directory. Two consequences are recorded here instead of
+// being silently dropped:
+//
+// - `.yydx` needs the directory port; without it the binding refuses the
+//   volume with `opfs.blob_directory`.
+// - A segment that disappears from the directory is reported by the port
+//   itself (`list_blobs` / `read_blob`), not by a fabricated engine-side check.
 
 use database::types::Error;
-use yydb_wasm::{OpfsCapabilities, PersistentStorageMode, validate_opfs_capabilities};
+use yydb_wasm::{
+    OpfsCapabilities, PersistentStorageMode, PersistentVolume, open_persistent_session_with_store_and_directory,
+    validate_opfs_capabilities,
+};
 
-use crate::fixtures::{USER_SCHEMA, assert_ok_true, cleanup, fs_store, temp_db};
-use yydb_wasm::open_persistent_session_with_store;
+use crate::fixtures::{USER_SCHEMA, assert_ok_true, cleanup, fs_blob_directory, fs_store, temp_yydx};
 
 #[test]
 fn yydb_opfs_doctor_missing_blob_needs_a_blob_directory() {
@@ -22,17 +28,43 @@ fn yydb_opfs_doctor_missing_blob_needs_a_blob_directory() {
 }
 
 #[test]
-fn yydb_opfs_doctor_reports_a_clean_single_file_volume() {
-    let path = temp_db("doctor-clean");
+fn yydb_opfs_doctor_reports_a_clean_yydx_volume() {
+    let path = temp_yydx("doctor-yydx");
     cleanup(&path);
 
-    let mut session = open_persistent_session_with_store(path.to_str().unwrap(), fs_store(&path)).expect("open");
+    let mut session =
+        open_persistent_session_with_store_and_directory(path.to_str().unwrap(), fs_store(&path), fs_blob_directory(&path))
+            .expect("open");
     assert_ok_true(&session.ensure_schema(USER_SCHEMA));
     assert_ok_true(&session.put("clean", b"value"));
 
     let report = session.doctor_json();
     assert!(report.contains("\"ok\":true"), "doctor over a healthy volume must succeed: {report}");
+    assert!(!report.contains("missing_blob"), "a healthy volume must not report a missing blob: {report}");
     session.close();
 
+    cleanup(&path);
+}
+
+#[test]
+fn yydb_opfs_a_missing_segment_is_reported_by_the_directory_port() {
+    let path = temp_yydx("doctor-missing-segment");
+    cleanup(&path);
+
+    {
+        let volume =
+            PersistentVolume::open_with_directory(path.to_str().unwrap(), fs_store(&path), fs_blob_directory(&path)).expect("open");
+        volume.publish_blob("dddd0004", b"segment").expect("publish");
+        assert_eq!(volume.list_blobs().expect("list"), vec!["dddd0004".to_owned()]);
+    }
+
+    // Out-of-band loss: the host directory no longer holds the segment.
+    let root = database::storage::local_io::FsVolumeStore::open(&path).blob_root();
+    std::fs::remove_file(root.join("dd").join("dddd0004.blob")).expect("drop the segment behind the volume's back");
+
+    let reopened =
+        PersistentVolume::open_with_directory(path.to_str().unwrap(), fs_store(&path), fs_blob_directory(&path)).expect("reopen");
+    assert_eq!(reopened.list_blobs().expect("list"), Vec::<String>::new(), "the directory must not invent a segment");
+    assert_eq!(reopened.read_blob("dddd0004").expect("read"), None, "a missing segment must read as absent");
     cleanup(&path);
 }

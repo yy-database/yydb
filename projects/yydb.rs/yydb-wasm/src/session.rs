@@ -3,7 +3,10 @@
 use std::collections::{BTreeMap, HashMap};
 
 use database::{
-    execution::engine::Connection, protocol::yy as wire, query::local::PreparedStatement, storage::local_io::HostVolumeStore,
+    execution::engine::Connection,
+    protocol::yy as wire,
+    query::local::PreparedStatement,
+    storage::local_io::{HostBlobDirectory, HostVolumeStore},
     types::Error,
 };
 use js_sys::Function;
@@ -803,9 +806,25 @@ pub fn open_persistent_session_with_store(
 ) -> database::types::Result<PersistentSession> {
     let mode = crate::opfs::PersistentStorageMode::from_path(path)?;
     // The session publishes whole main-file images; blob segments need the
-    // asynchronous directory API, which a synchronized call cannot drive.
+    // directory port, so a `.yydx` path must take the directory entry below.
     crate::opfs::validate_opfs_capabilities(&crate::opfs::OpfsCapabilities::host_sync_handles(), mode)?;
     let volume = PersistentVolume::open(path, store)?;
+    let conn = open_persistent_connection(&volume)?;
+    Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
+}
+
+/// Open a persistent session over a host byte store and a `.yydx` blob directory.
+///
+/// The directory port answers which blob segments exist and deletes them; the
+/// store keeps the main file and sidecars.
+pub fn open_persistent_session_with_store_and_directory(
+    path: &str,
+    store: Box<dyn HostVolumeStore>,
+    directory: Box<dyn HostBlobDirectory>,
+) -> database::types::Result<PersistentSession> {
+    let mode = crate::opfs::PersistentStorageMode::from_path(path)?;
+    crate::opfs::validate_opfs_capabilities(&crate::opfs::OpfsCapabilities::host_sync_handles_with_directory(), mode)?;
+    let volume = PersistentVolume::open_with_directory(path, store, directory)?;
     let conn = open_persistent_connection(&volume)?;
     Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
 }
