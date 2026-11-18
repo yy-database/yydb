@@ -185,6 +185,29 @@ async function main(): Promise<void> {
         }
     });
 
+    await run("OPFS survives a worker reopen and gates `.yydx` on a blob directory", async () => {
+        const worker = new Worker(new URL("./opfs-worker.ts", import.meta.url), { type: "module" });
+        try {
+            const result = await new Promise<BrowserTestResult>((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error("the OPFS worker timed out")), 60_000);
+                worker.onmessage = (event: MessageEvent<BrowserTestResult>) => {
+                    clearTimeout(timer);
+                    resolve(event.data);
+                };
+                worker.onerror = (event) => {
+                    clearTimeout(timer);
+                    reject(new Error(event.message));
+                };
+                worker.postMessage("start");
+            });
+            if (!result.ok) {
+                throw new Error(result.error ?? "the OPFS worker reported a failure");
+            }
+        } finally {
+            worker.terminate();
+        }
+    });
+
     window.__yydbLightDbResults = results;
 }
 

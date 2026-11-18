@@ -23,6 +23,11 @@ export default defineConfig({
             input: join(root, "index.html"),
         },
     },
+    // OPFS sync access handles only exist in a worker, so the acceptance case
+    // runs in a module worker chunk.
+    worker: {
+        format: "es",
+    },
     publicDir: wasmRoot,
     server: {
         fs: {
