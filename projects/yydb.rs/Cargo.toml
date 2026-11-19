@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "yydb-conformance",
     "yydb-napi",
     "yydb-pyo3",
     "yydb-wasm",

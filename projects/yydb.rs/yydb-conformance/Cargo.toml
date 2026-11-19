@@ -1,0 +1,15 @@
+[package]
+name = "yydb-conformance"
+description = "YYDB detailed auth, authorization and bind-policy matrix migrated from the upstream gateway tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dev-dependencies]
+database-client = { git = "https://github.com/oovm/boost.rs.git", rev = "59f0667fbffa421db601f50cfa2d646c4d8e3dba" }
+database-execution = { git = "https://github.com/oovm/boost.rs.git", rev = "59f0667fbffa421db601f50cfa2d646c4d8e3dba" }
+database-protocol-yy = { git = "https://github.com/oovm/boost.rs.git", rev = "59f0667fbffa421db601f50cfa2d646c4d8e3dba" }
+database-server = { git = "https://github.com/oovm/boost.rs.git", rev = "59f0667fbffa421db601f50cfa2d646c4d8e3dba" }
+database-types = { git = "https://github.com/oovm/boost.rs.git", rev = "59f0667fbffa421db601f50cfa2d646c4d8e3dba" }
+serde_json = { workspace = true }
