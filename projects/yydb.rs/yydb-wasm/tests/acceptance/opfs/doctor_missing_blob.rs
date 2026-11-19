@@ -41,7 +41,7 @@ fn yydb_opfs_doctor_reports_a_clean_yydx_volume() {
     let report = session.doctor_json();
     assert!(report.contains("\"ok\":true"), "doctor over a healthy volume must succeed: {report}");
     assert!(!report.contains("missing_blob"), "a healthy volume must not report a missing blob: {report}");
-    session.close();
+    session.close().expect("close");
 
     cleanup(&path);
 }

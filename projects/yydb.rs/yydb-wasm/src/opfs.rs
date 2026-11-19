@@ -224,6 +224,25 @@ impl PersistentVolume {
     }
 }
 
+/// Publication slot for the shared upstream `DurableSession` state machine.
+///
+/// The volume only moves bytes through the host handles; ordering, image
+/// validation and the generation advance stay in
+/// `database.storage::local_io::volume`.
+impl database::execution::engine::durable::MainImagePublisher for PersistentVolume {
+    fn read_main(&mut self) -> Result<Option<Vec<u8>>> {
+        PersistentVolume::read_main(self)
+    }
+
+    fn publish_main(&mut self, image: &[u8]) -> Result<()> {
+        PersistentVolume::publish_main(self, image)
+    }
+
+    fn generation(&mut self) -> u64 {
+        PersistentVolume::generation(self)
+    }
+}
+
 /// Build a volume from host-supplied OPFS objects.
 ///
 /// `handles` is `{ main, wal?, shm?, blobs?, directory? }`:

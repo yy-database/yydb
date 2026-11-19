@@ -18,7 +18,7 @@ const HOST_CODE_PREFIX: &str = "yydb.";
 
 /// Rewrites the canonical tagged key to the `$yydb` spelling the browser host
 /// contract requires. Only the key name changes.
-fn retag_database_to_host(json: JsonValue) -> JsonValue {
+pub(crate) fn retag_database_to_host(json: JsonValue) -> JsonValue {
     match json {
         JsonValue::Object(mut map) => {
             if let Some(tag) = map.remove(database::types::scalar::TAGGED_JSON_KEY) {

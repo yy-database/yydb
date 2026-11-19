@@ -63,7 +63,7 @@ fn yydb_opfs_yydx_session_opens_with_a_directory() {
     )
     .expect("a directory port opens the blob volume");
     assert!(!path.exists(), "opening an empty volume must not create a main file");
-    session.close();
+    session.close().expect("close");
     cleanup(&path);
 }
 

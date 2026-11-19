@@ -13,7 +13,7 @@ fn yydb_opfs_persistent_session_publishes_ydpg_main() {
     assert_ok_true(&session.put("theme", b"dark"));
     let generation = session.generation();
     assert!(generation >= 1.0, "a publish must advance the generation, got {generation}");
-    session.close();
+    session.close().expect("close");
 
     let bytes = std::fs::read(&path).expect("main file must be on the host store");
     assert_eq!(&bytes[0..5], b"YDPG\0");
@@ -46,7 +46,7 @@ fn yydb_opfs_persistent_session_keeps_values_across_reopen() {
 
     let mut first = open_persistent_session_with_store(path.to_str().unwrap(), fs_store(&path)).expect("open");
     assert_ok_true(&first.put("theme", b"light"));
-    first.close();
+    first.close().expect("close");
 
     let second = open_persistent_session_with_store(path.to_str().unwrap(), fs_store(&path)).expect("reopen");
     let parsed = parse_json(&second.get("theme"));

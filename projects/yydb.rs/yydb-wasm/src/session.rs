@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use database::{
-    execution::engine::Connection,
+    execution::engine::{durable::DurableSession, Connection},
     protocol::yy as wire,
     query::local::PreparedStatement,
     storage::local_io::{HostBlobDirectory, HostVolumeStore},
@@ -170,16 +170,13 @@ fn parse_rename_map(json: Option<&str>) -> database::types::Result<database::exe
     Ok(renames)
 }
 
-fn run_ensure_schema(conn: &Connection, closed: bool, document: &str) -> String {
-    if closed {
-        return unit_result_json(Err(closed_session_error()));
-    }
+fn run_ensure_schema(conn: &Connection, document: &str) -> String {
     unit_result_json(conn.ensure_schema(document))
 }
 
 /// Parse a JSON MicroRegister request:
 /// `{ name, version, argTypes: ["i64"|"bool"|"text"|"null"], returnType, hostId, functionId, handleVersion, fingerprint: [32 u8s] }`.
-fn parse_micro_register_json(json: &str) -> database::types::Result<database::udf::HostMicroDefinition> {
+pub(crate) fn parse_micro_register_json(json: &str) -> database::types::Result<database::udf::HostMicroDefinition> {
     let obj: serde_json::Value = serde_json::from_str(json)
         .map_err(|_| Error::Protocol { message: "registerMicroJson must be a JSON object".to_string() })?;
     let name = obj
@@ -256,7 +253,7 @@ fn parse_micro_register_json(json: &str) -> database::types::Result<database::ud
 
 /// Parse a JSON ScalarCall request:
 /// `{ name, version, args: [42, "text", true, null] }`.
-fn parse_scalar_call_json(json: &str) -> database::types::Result<(String, u32, Vec<database::types::Value>)> {
+pub(crate) fn parse_scalar_call_json(json: &str) -> database::types::Result<(String, u32, Vec<database::types::Value>)> {
     let obj: serde_json::Value = serde_json::from_str(json)
         .map_err(|_| Error::Protocol { message: "callScalarJson must be a JSON object".to_string() })?;
     let name = obj
@@ -313,58 +310,32 @@ fn parse_udf_type_tag(s: &str) -> database::types::Result<database::udf::UdfType
     }
 }
 
-fn run_register_micro(conn: &Connection, closed: bool, body: &[u8]) -> String {
-    if closed {
-        return unit_result_json(Err(closed_session_error()));
-    }
+fn run_register_micro(conn: &Connection, body: &[u8]) -> String {
     match wire::decode_micro_register(body) {
         Ok(definition) => unit_result_json(conn.register_host_micro(definition)),
         Err(error) => unit_result_json(Err(error)),
     }
 }
 
-fn run_register_micro_json(conn: &Connection, closed: bool, json: &str) -> String {
-    if closed {
-        return unit_result_json(Err(closed_session_error()));
-    }
+fn run_register_micro_json(conn: &Connection, json: &str) -> String {
     match parse_micro_register_json(json) {
         Ok(definition) => unit_result_json(conn.register_host_micro(definition)),
         Err(error) => unit_result_json(Err(error)),
     }
 }
 
-fn run_call_scalar(conn: &Connection, closed: bool, body: &[u8]) -> String {
-    if closed {
-        return scalar_call_json(Err(closed_session_error()));
-    }
+fn run_call_scalar(conn: &Connection, body: &[u8]) -> String {
     match wire::decode_scalar_call(body) {
         Ok((name, version, args)) => scalar_call_json(conn.call_scalar_version(&name, version, &args)),
         Err(error) => scalar_call_json(Err(error)),
     }
 }
 
-fn run_call_scalar_json(conn: &Connection, closed: bool, json: &str) -> String {
-    if closed {
-        return scalar_call_json(Err(closed_session_error()));
-    }
+fn run_call_scalar_json(conn: &Connection, json: &str) -> String {
     match parse_scalar_call_json(json) {
         Ok((name, version, args)) => scalar_call_json(conn.call_scalar_version(&name, version, &args)),
         Err(error) => scalar_call_json(Err(error)),
     }
-}
-
-fn open_persistent_connection(volume: &PersistentVolume) -> database::types::Result<Connection> {
-    let conn = Connection::open_in_memory()?;
-    if let Some(bytes) = volume.read_main()? {
-        conn.load_main_snapshot(&bytes)?;
-    }
-    Ok(conn)
-}
-
-fn persist_persistent_connection(conn: &Connection, volume: &PersistentVolume) -> database::types::Result<()> {
-    let bytes = conn.main_snapshot()?;
-    volume.publish_main(&bytes)?;
-    Ok(())
 }
 
 /// Check a main-file snapshot the way a restore entry must: load it into a
@@ -374,26 +345,6 @@ fn validate_snapshot(bytes: &[u8]) -> database::types::Result<()> {
     let probe = Connection::open_in_memory()?;
     probe.load_main_snapshot(bytes)?;
     probe.doctor().map(|_| ())
-}
-
-fn run_ensure_schema_persistent(conn: &Connection, volume: &PersistentVolume, closed: bool, document: &str) -> String {
-    if closed {
-        return unit_result_json(Err(closed_session_error()));
-    }
-    match conn.ensure_schema(document) {
-        Ok(()) => unit_result_json(persist_persistent_connection(conn, volume)),
-        Err(error) => unit_result_json(Err(error)),
-    }
-}
-
-fn run_put_persistent(conn: &Connection, volume: &PersistentVolume, closed: bool, key: &str, value: &[u8]) -> String {
-    if closed {
-        return unit_result_json(Err(closed_session_error()));
-    }
-    match conn.put(key, value) {
-        Ok(()) => unit_result_json(persist_persistent_connection(conn, volume)),
-        Err(error) => unit_result_json(Err(error)),
-    }
 }
 
 /// Stateful in-memory database session.
@@ -430,7 +381,10 @@ impl MemorySession {
     /// Persist the database-truth VOS schema document.
     #[wasm_bindgen(js_name = ensureSchema)]
     pub fn ensure_schema(&self, document: &str) -> String {
-        run_ensure_schema(&self.conn, self.closed, document)
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        run_ensure_schema(&self.conn, document)
     }
 
     /// Fetch a raw byte record by key. Returns JSON `{ ok, value, error }`.
@@ -622,13 +576,19 @@ impl MemorySession {
     /// Register a session-local host micro from a wire `MicroRegister` body.
     #[wasm_bindgen(js_name = registerMicro)]
     pub fn register_micro(&self, body: &[u8]) -> String {
-        run_register_micro(&self.conn, self.closed, body)
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        run_register_micro(&self.conn, body)
     }
 
     /// Invoke a scalar UDF from a wire `ScalarCall` body. Returns JSON `{ ok, value, error }`.
     #[wasm_bindgen(js_name = callScalar)]
     pub fn call_scalar(&self, body: &[u8]) -> String {
-        run_call_scalar(&self.conn, self.closed, body)
+        if self.closed {
+            return scalar_call_json(Err(closed_session_error()));
+        }
+        run_call_scalar(&self.conn, body)
     }
 
     /// Register a session-local host micro from a JSON descriptor.
@@ -638,7 +598,10 @@ impl MemorySession {
     /// Returns JSON `{ ok, error }`.
     #[wasm_bindgen(js_name = registerMicroJson)]
     pub fn register_micro_json(&self, json: &str) -> String {
-        run_register_micro_json(&self.conn, self.closed, json)
+        if self.closed {
+            return unit_result_json(Err(closed_session_error()));
+        }
+        run_register_micro_json(&self.conn, json)
     }
 
     /// Invoke a scalar UDF from JSON args.
@@ -647,7 +610,10 @@ impl MemorySession {
     /// `ScalarCall` body when the caller is JS. Returns JSON `{ ok, value, error }`.
     #[wasm_bindgen(js_name = callScalarJson)]
     pub fn call_scalar_json(&self, json: &str) -> String {
-        run_call_scalar_json(&self.conn, self.closed, json)
+        if self.closed {
+            return scalar_call_json(Err(closed_session_error()));
+        }
+        run_call_scalar_json(&self.conn, json)
     }
 
     /// Read-only consistency probes against the database.
@@ -705,63 +671,7 @@ impl MemorySession {
         if self.closed {
             return serde_json::json!({ "ok": false, "error": closed_session_error().to_string() }).to_string();
         }
-        let obj: serde_json::Value = match serde_json::from_str(json) {
-            Ok(v) => v,
-            Err(error) => {
-                return serde_json::json!({ "ok": false, "error": format!("invalid queryPrepared body: {error}") }).to_string();
-            }
-        };
-        let id = match obj.get("statementId").and_then(|v| v.as_str()) {
-            Some(s) => s.to_owned(),
-            None => {
-                return serde_json::json!({ "ok": false, "error": "queryPrepared: missing string `statementId`" }).to_string();
-            }
-        };
-        let stmt = match self.stmts.get(&id) {
-            Some(s) => s,
-            None => {
-                return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string();
-            }
-        };
-        let named: BTreeMap<String, database::types::Value> = match obj.get("params") {
-            None | Some(serde_json::Value::Null) => BTreeMap::new(),
-            Some(val) => {
-                let obj = match val.as_object() {
-                    Some(o) => o,
-                    None => {
-                        return serde_json::json!({ "ok": false, "error": "queryPrepared: params must be an object or null" })
-                            .to_string();
-                    }
-                };
-                let mut out = BTreeMap::new();
-                for (k, v) in obj {
-                    out.insert(
-                        k.clone(),
-                        match json_value_to_runtime(v) {
-                            Ok(val) => val,
-                            Err(error) => return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
-                        },
-                    );
-                }
-                out
-            }
-        };
-        match self.conn.query_prepared(stmt, &named) {
-            Ok(rows) => {
-                let mapped: Vec<serde_json::Map<String, serde_json::Value>> = rows
-                    .into_iter()
-                    .map(|row| {
-                        let mut map = serde_json::Map::new();
-                        for (k, v) in row {
-                            map.insert(k, value_to_json(v));
-                        }
-                        map
-                    })
-                    .collect();
-                serde_json::json!({ "ok": true, "rows": mapped }).to_string()
-            }
-            Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
-        }
+        run_query_prepared_json(&self.conn, &self.stmts, json)
     }
 
     /// Release a prepared statement's plan from the session registry. Idempotent.
@@ -778,28 +688,117 @@ impl MemorySession {
     }
 }
 
-/// Serialize a VOS runtime Value to JSON.
-fn value_to_json(v: database::types::Value) -> serde_json::Value {
+/// Shared `queryPreparedJson` body for both session kinds.
+///
+/// A row value the bridge cannot represent yields a structured `{ ok: false,
+/// error }` envelope instead of a silently nulled cell.
+fn run_query_prepared_json(conn: &Connection, stmts: &HashMap<String, PreparedStatement>, json: &str) -> String {
+    let obj: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(error) => {
+            return serde_json::json!({ "ok": false, "error": format!("invalid queryPrepared body: {error}") }).to_string();
+        }
+    };
+    let id = match obj.get("statementId").and_then(|v| v.as_str()) {
+        Some(s) => s.to_owned(),
+        None => {
+            return serde_json::json!({ "ok": false, "error": "queryPrepared: missing string `statementId`" }).to_string();
+        }
+    };
+    let stmt = match stmts.get(&id) {
+        Some(s) => s,
+        None => {
+            return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string();
+        }
+    };
+    let named: BTreeMap<String, database::types::Value> = match obj.get("params") {
+        None | Some(serde_json::Value::Null) => BTreeMap::new(),
+        Some(val) => {
+            let obj = match val.as_object() {
+                Some(o) => o,
+                None => {
+                    return serde_json::json!({ "ok": false, "error": "queryPrepared: params must be an object or null" })
+                        .to_string();
+                }
+            };
+            let mut out = BTreeMap::new();
+            for (k, v) in obj {
+                out.insert(
+                    k.clone(),
+                    match json_value_to_runtime(v) {
+                        Ok(val) => val,
+                        Err(error) => return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+                    },
+                );
+            }
+            out
+        }
+    };
+    match conn.query_prepared(stmt, &named) {
+        Ok(rows) => {
+            let mapped: database::types::Result<Vec<serde_json::Map<String, serde_json::Value>>> = rows
+                .into_iter()
+                .map(|row| {
+                    let mut map = serde_json::Map::new();
+                    for (k, v) in row {
+                        map.insert(k, value_to_json(v)?);
+                    }
+                    Ok(map)
+                })
+                .collect();
+            match mapped {
+                Ok(mapped) => serde_json::json!({ "ok": true, "rows": mapped }).to_string(),
+                Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+            }
+        }
+        Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+    }
+}
+
+/// Serialize a VOS runtime Value to JSON without silent loss.
+///
+/// Values the tagged form covers (bytes, out-of-range integers, non-finite
+/// doubles, temporal, decimal, vector, object, file) cross as host-tagged
+/// objects; plain scalars stay native JSON; rows and lists recurse. Anything
+/// left over is a structured error, never a silent `null`.
+pub(crate) fn value_to_json(v: database::types::Value) -> database::types::Result<serde_json::Value> {
     use database::types::Value;
+    if let Some(tagged) = database::types::scalar::tagged_value_json(&v) {
+        return Ok(crate::core::retag_database_to_host(tagged));
+    }
     match v {
-        Value::Null => serde_json::Value::Null,
-        Value::Bool(b) => serde_json::Value::Bool(b),
-        Value::Text(s) => serde_json::Value::String(s),
-        Value::I64(i) => serde_json::Value::Number(serde_json::Number::from(i)),
-        Value::U64(u) => serde_json::Value::Number(serde_json::Number::from(u)),
-        Value::F64(f) => serde_json::Number::from_f64(f).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
-        Value::Bytes(b) => serde_json::Value::Array(
-            b.into_iter().map(|x| serde_json::Value::Number(serde_json::Number::from(x as u8))).collect(),
-        ),
-        Value::Uuid(u) => serde_json::Value::String(u.to_string()),
-        _ => serde_json::Value::Null, // Vector, Object, File, Row — WASM JSON bridge skips for now
+        Value::Null => Ok(serde_json::Value::Null),
+        Value::Bool(b) => Ok(serde_json::Value::Bool(b)),
+        Value::Text(s) => Ok(serde_json::Value::String(s)),
+        Value::I64(i) => Ok(serde_json::Value::Number(serde_json::Number::from(i))),
+        Value::U64(u) => Ok(serde_json::Value::Number(serde_json::Number::from(u))),
+        Value::F64(f) => serde_json::Number::from_f64(f)
+            .map(serde_json::Value::Number)
+            .ok_or_else(|| Error::Protocol { message: "prepared row carries a non-finite double".to_string() }),
+        Value::Uuid(u) => Ok(serde_json::Value::String(u.to_string())),
+        Value::Row(fields) => {
+            let mut map = serde_json::Map::new();
+            for (k, item) in fields {
+                map.insert(k, value_to_json(item)?);
+            }
+            Ok(serde_json::Value::Object(map))
+        }
+        Value::List(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(value_to_json(item)?);
+            }
+            Ok(serde_json::Value::Array(out))
+        }
+        other => Err(Error::Protocol { message: format!("prepared rows cannot carry `{other:?}`") }),
     }
 }
 
 /// Open a persistent session over a host byte store.
 ///
 /// The store owns every read, write and durability barrier; this entry only
-/// binds it to the upstream publish contract and hydrates a `Connection`.
+/// binds it to the upstream [`DurableSession`] publication state machine and
+/// hydrates a `Connection`.
 pub fn open_persistent_session_with_store(
     path: &str,
     store: Box<dyn HostVolumeStore>,
@@ -809,8 +808,7 @@ pub fn open_persistent_session_with_store(
     // directory port, so a `.yydx` path must take the directory entry below.
     crate::opfs::validate_opfs_capabilities(&crate::opfs::OpfsCapabilities::host_sync_handles(), mode)?;
     let volume = PersistentVolume::open(path, store)?;
-    let conn = open_persistent_connection(&volume)?;
-    Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
+    PersistentSession::from_volume(path, volume)
 }
 
 /// Open a persistent session over a host byte store and a `.yydx` blob directory.
@@ -825,24 +823,26 @@ pub fn open_persistent_session_with_store_and_directory(
     let mode = crate::opfs::PersistentStorageMode::from_path(path)?;
     crate::opfs::validate_opfs_capabilities(&crate::opfs::OpfsCapabilities::host_sync_handles_with_directory(), mode)?;
     let volume = PersistentVolume::open_with_directory(path, store, directory)?;
-    let conn = open_persistent_connection(&volume)?;
-    Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
+    PersistentSession::from_volume(path, volume)
 }
 
 /// Open a persistent session over host-supplied OPFS sync access handles.
 pub fn open_persistent_session_with_handles(path: &str, handles: JsValue) -> database::types::Result<PersistentSession> {
     let volume = open_volume_from_handles(path, handles)?;
-    let conn = open_persistent_connection(&volume)?;
-    Ok(PersistentSession { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
+    PersistentSession::from_volume(path, volume)
 }
 
 /// Stateful OPFS-backed database session with `YDPG` main-file hydration and publish.
+///
+/// The publication state machine is the shared upstream
+/// [`DurableSession`]: every successful write publishes the main image, a
+/// failed publication leaves the session open and dirty for retry, and
+/// [`Self::close`] publishes before it closes. This type only maps those
+/// outcomes onto the JSON envelopes and throwing bindings the host expects.
 #[wasm_bindgen]
 pub struct PersistentSession {
     path: String,
-    conn: Connection,
-    volume: Option<PersistentVolume>,
-    closed: bool,
+    session: DurableSession,
     stmts: HashMap<String, PreparedStatement>,
 }
 
@@ -878,10 +878,16 @@ impl PersistentSession {
         self.path.clone()
     }
 
+    /// Build a session over a volume, hydrating from its stored image.
+    fn from_volume(path: &str, volume: PersistentVolume) -> database::types::Result<Self> {
+        let session = DurableSession::open(Box::new(volume))?;
+        Ok(Self { path: path.to_string(), session, stmts: HashMap::new() })
+    }
+
     /// Generation of the last durable main-file publication.
     #[wasm_bindgen(getter, js_name = generation)]
-    pub fn generation(&self) -> f64 {
-        self.volume.as_ref().map(|volume| volume.generation() as f64).unwrap_or(0.0)
+    pub fn generation(&mut self) -> f64 {
+        self.session.generation() as f64
     }
 
     /// Replace `path` with a verified main-file snapshot and open a session.
@@ -893,312 +899,197 @@ impl PersistentSession {
     pub fn restore_backup(path: &str, bytes: &[u8], handles: JsValue) -> std::result::Result<PersistentSession, JsValue> {
         validate_snapshot(bytes).map_err(|err| JsValue::from_str(&err.to_string()))?;
         let volume = open_volume_from_handles(path, handles).map_err(|err| JsValue::from_str(&err.to_string()))?;
-        volume.publish_main(bytes).map_err(|err| JsValue::from_str(&err.to_string()))?;
-        let conn = open_persistent_connection(&volume).map_err(|err| JsValue::from_str(&err.to_string()))?;
-        Ok(Self { path: path.to_string(), conn, volume: Some(volume), closed: false, stmts: HashMap::new() })
+        let session = DurableSession::restore(Box::new(volume), bytes).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        Ok(Self { path: path.to_string(), session, stmts: HashMap::new() })
     }
 
     /// Persist the database-truth VOS schema document.
     #[wasm_bindgen(js_name = ensureSchema)]
-    pub fn ensure_schema(&self, document: &str) -> String {
-        match self.volume.as_ref() {
-            Some(volume) => run_ensure_schema_persistent(&self.conn, volume, self.closed, document),
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn ensure_schema(&mut self, document: &str) -> String {
+        unit_result_json(self.session.write(|conn| conn.ensure_schema(document)))
     }
 
     /// Fetch a raw byte record by key. Returns JSON `{ ok, value, error }`.
     #[wasm_bindgen(js_name = get)]
     pub fn get(&self, key: &str) -> String {
-        if self.closed {
-            return kv_get_json(Err(closed_session_error()));
+        match self.session.connection() {
+            Ok(conn) => kv_get_json(conn.get(key)),
+            Err(error) => kv_get_json(Err(error)),
         }
-        kv_get_json(self.conn.get(key))
     }
 
-    /// Insert or replace a raw byte record. Returns JSON `{ ok, rows, error }`.
+    /// Insert or replace a raw byte record, publishing the new image.
+    /// Returns JSON `{ ok, rows, error }`.
     #[wasm_bindgen(js_name = put)]
-    pub fn put(&self, key: &str, value: &[u8]) -> String {
-        match self.volume.as_ref() {
-            Some(volume) => run_put_persistent(&self.conn, volume, self.closed, key, value),
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn put(&mut self, key: &str, value: &[u8]) -> String {
+        unit_result_json(self.session.write(|conn| conn.put(key, value)))
     }
 
-    /// Remove a record by key, then persist the snapshot.
+    /// Remove a record by key, publishing the new image.
     #[wasm_bindgen(js_name = delete)]
-    pub fn delete(&self, key: &str) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.volume.as_ref() {
-            Some(volume) => match self.conn.write_batch(&[(key.to_owned(), None)]) {
-                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn delete(&mut self, key: &str) -> String {
+        unit_result_json(self.session.write(|conn| conn.write_batch(&[(key.to_owned(), None)])))
     }
 
-    /// Scan keys in lexical order; no persistence needed (read-only).
+    /// Scan keys in lexical order; read-only.
     #[wasm_bindgen(js_name = scanPrefix)]
     pub fn scan_prefix(&self, prefix: &str, after: Option<String>, limit: u32) -> String {
-        if self.closed {
-            return scan_prefix_json(Err(closed_session_error()));
+        match self.session.connection() {
+            Ok(conn) => scan_prefix_json(conn.scan_prefix(prefix, after.as_deref(), limit as usize)),
+            Err(error) => scan_prefix_json(Err(error)),
         }
-        scan_prefix_json(self.conn.scan_prefix(prefix, after.as_deref(), limit as usize))
     }
 
-    /// Commit a batch atomically, then persist the snapshot.
+    /// Commit a batch atomically, publishing the new image.
     #[wasm_bindgen(js_name = writeBatch)]
-    pub fn write_batch(&self, body: &[u8]) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
+    pub fn write_batch(&mut self, body: &[u8]) -> String {
         let changes = match parse_write_batch(body) {
             Ok(c) => c,
             Err(err) => return unit_result_json(Err(err)),
         };
-        match self.volume.as_ref() {
-            Some(volume) => match self.conn.write_batch(&changes) {
-                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+        unit_result_json(self.session.write(|conn| conn.write_batch(&changes)))
     }
 
-    /// Compare-and-swap, then persist the snapshot when the CAS succeeds.
+    /// Compare-and-swap a single key; the image is published only when the
+    /// exchange applied. Returns JSON `{ ok, applied, error }`.
     #[wasm_bindgen(js_name = compareExchange)]
-    pub fn compare_exchange(&self, key: &str, expected: Option<Vec<u8>>, replacement: Option<Vec<u8>>) -> String {
-        if self.closed {
-            return compare_exchange_json(Err(closed_session_error()));
-        }
-        match self.conn.compare_exchange(key, expected.as_deref(), replacement.as_deref()) {
-            Ok(true) => match self.volume.as_ref() {
-                Some(volume) => compare_exchange_json(persist_persistent_connection(&self.conn, volume).map(|_| true)),
-                None => compare_exchange_json(Err(closed_session_error())),
-            },
-            Ok(false) => compare_exchange_json(Ok(false)),
-            Err(err) => compare_exchange_json(Err(err)),
-        }
+    pub fn compare_exchange(&mut self, key: &str, expected: Option<Vec<u8>>, replacement: Option<Vec<u8>>) -> String {
+        compare_exchange_json(
+            self.session.conditional_write(|conn| conn.compare_exchange(key, expected.as_deref(), replacement.as_deref())),
+        )
     }
 
-    /// Execute a VOS read pipeline; read-only, no persistence needed.
+    /// Execute a VOS read pipeline; read-only.
     #[wasm_bindgen(js_name = queryVos)]
     pub fn query_vos(&self, source: &str) -> String {
-        if self.closed {
-            return query_rows_json(Err(closed_session_error()));
+        match self.session.connection() {
+            Ok(conn) => query_rows_json(conn.query_vos(source)),
+            Err(error) => query_rows_json(Err(error)),
         }
-        query_rows_json(self.conn.query_vos(source))
     }
 
-    /// Execute a VOS write program, then persist the snapshot on success.
+    /// Execute a VOS write program, publishing the new image.
     #[wasm_bindgen(js_name = executeVosWrite)]
-    pub fn execute_vos_write(&self, source: &str) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.volume.as_ref() {
-            Some(volume) => match self.conn.execute_vos_write(source) {
-                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn execute_vos_write(&mut self, source: &str) -> String {
+        unit_result_json(self.session.write(|conn| conn.execute_vos_write(source)))
     }
 
-    /// Publish a new schema version with an optional rename map, then persist.
+    /// Publish a new schema version with an optional rename map.
     #[wasm_bindgen(js_name = migrateSchema)]
-    pub fn migrate_schema(&self, document: &str, renames_json: Option<String>) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        let Ok(renames) = parse_rename_map(renames_json.as_deref())
-        else {
-            return unit_result_json(Err(Error::Protocol { message: "invalid renames JSON".to_string() }));
+    pub fn migrate_schema(&mut self, document: &str, renames_json: Option<String>) -> String {
+        let renames = match parse_rename_map(renames_json.as_deref()) {
+            Ok(renames) => renames,
+            Err(error) => return unit_result_json(Err(error)),
         };
-        match self.volume.as_ref() {
-            Some(volume) => match self.conn.migrate_schema(document, &renames) {
-                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+        unit_result_json(self.session.write(|conn| conn.migrate_schema(document, &renames)))
     }
 
-    /// Begin an explicit transaction (in-memory only, no persistence needed).
+    /// Begin an explicit transaction; the image is unchanged until commit or
+    /// rollback, so no publication happens here.
     #[wasm_bindgen(js_name = begin)]
     pub fn begin(&self) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
+        match self.session.connection() {
+            Ok(conn) => unit_result_json(conn.begin()),
+            Err(error) => unit_result_json(Err(error)),
         }
-        unit_result_json(self.conn.begin())
     }
 
-    /// Commit the current transaction and persist the snapshot.
+    /// Commit the current transaction and publish the resulting image.
     #[wasm_bindgen(js_name = commit)]
-    pub fn commit(&self) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.volume.as_ref() {
-            Some(volume) => match self.conn.commit() {
-                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn commit(&mut self) -> String {
+        unit_result_json(self.session.write(|conn| conn.commit()))
     }
 
-    /// Roll back the current transaction and persist the rolled-back snapshot.
+    /// Roll back the current transaction and publish the rolled-back image.
     #[wasm_bindgen(js_name = rollback)]
-    pub fn rollback(&self) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.volume.as_ref() {
-            Some(volume) => match self.conn.rollback() {
-                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn rollback(&mut self) -> String {
+        unit_result_json(self.session.write(|conn| conn.rollback()))
     }
 
-    /// Create a named savepoint inside the open transaction, then persist.
+    /// Create a named savepoint inside the open transaction, then publish.
     #[wasm_bindgen(js_name = savepoint)]
-    pub fn savepoint(&self, name: &str) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.volume.as_ref() {
-            Some(volume) => match self.conn.savepoint(name) {
-                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn savepoint(&mut self, name: &str) -> String {
+        unit_result_json(self.session.write(|conn| conn.savepoint(name)))
     }
 
-    /// Roll back to a savepoint, then persist the rolled-back snapshot.
+    /// Roll back to a savepoint, then publish the rolled-back image.
     #[wasm_bindgen(js_name = rollbackTo)]
-    pub fn rollback_to(&self, name: &str) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.volume.as_ref() {
-            Some(volume) => match self.conn.rollback_to_savepoint(name) {
-                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn rollback_to(&mut self, name: &str) -> String {
+        unit_result_json(self.session.write(|conn| conn.rollback_to_savepoint(name)))
     }
 
-    /// Release a savepoint, then persist.
+    /// Release a savepoint, then publish.
     #[wasm_bindgen(js_name = release)]
-    pub fn release(&self, name: &str) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.volume.as_ref() {
-            Some(volume) => match self.conn.release_savepoint(name) {
-                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn release(&mut self, name: &str) -> String {
+        unit_result_json(self.session.write(|conn| conn.release_savepoint(name)))
     }
 
-    /// Run checkpoint (WAL fold) and persist the resulting snapshot.
+    /// Run checkpoint (WAL fold) and publish the resulting image.
     #[wasm_bindgen(js_name = checkpoint)]
-    pub fn checkpoint(&self) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.volume.as_ref() {
-            Some(volume) => match self.conn.checkpoint() {
-                Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn checkpoint(&mut self) -> String {
+        unit_result_json(self.session.write(|conn| conn.checkpoint()))
     }
 
     /// Current persisted schema, if any. Returns JSON `{ ok, schema, error }`.
     #[wasm_bindgen(js_name = getSchema)]
     pub fn get_schema(&self) -> String {
-        if self.closed {
-            return schema_get_json(Err(closed_session_error()));
+        match self.session.connection() {
+            Ok(conn) => schema_get_json(conn.schema()),
+            Err(error) => schema_get_json(Err(error)),
         }
-        schema_get_json(self.conn.schema())
     }
 
     /// Database info text (`path=…\\n…`), matching the YY wire `Info` reply.
     #[wasm_bindgen]
     pub fn info(&self) -> String {
-        if self.closed {
-            return String::new();
+        match self.session.connection() {
+            Ok(conn) => connection_info(conn, Some(&self.path)),
+            Err(_) => String::new(),
         }
-        connection_info(&self.conn, Some(&self.path))
     }
 
     /// Install the JS host micro invoker used by [`registerMicro`](Self::register_micro).
     #[wasm_bindgen(js_name = setMicroHostInvoker)]
     pub fn set_micro_host_invoker(&self, invoker: Function) {
-        if self.closed {
-            return;
+        if let Ok(conn) = self.session.connection() {
+            JsHostAdapter::install(conn, invoker);
         }
-        JsHostAdapter::install(&self.conn, invoker);
     }
 
     /// Register a session-local host micro from a wire `MicroRegister` body.
     #[wasm_bindgen(js_name = registerMicro)]
-    pub fn register_micro(&self, body: &[u8]) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.volume.as_ref() {
-            Some(volume) => match wire::decode_micro_register(body) {
-                Ok(definition) => match self.conn.register_host_micro(definition) {
-                    Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                    Err(error) => unit_result_json(Err(error)),
-                },
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn register_micro(&mut self, body: &[u8]) -> String {
+        unit_result_json(self.session.write(|conn| match wire::decode_micro_register(body) {
+            Ok(definition) => conn.register_host_micro(definition),
+            Err(error) => Err(error),
+        }))
     }
 
     /// Invoke a scalar UDF from a wire `ScalarCall` body. Returns JSON `{ ok, value, error }`.
     #[wasm_bindgen(js_name = callScalar)]
     pub fn call_scalar(&self, body: &[u8]) -> String {
-        run_call_scalar(&self.conn, self.closed, body)
+        match self.session.connection() {
+            Ok(conn) => run_call_scalar(conn, body),
+            Err(error) => scalar_call_json(Err(error)),
+        }
     }
 
     /// Register a session-local host micro from a JSON descriptor (Persistent session variant).
     #[wasm_bindgen(js_name = registerMicroJson)]
-    pub fn register_micro_json(&self, json: &str) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.volume.as_ref() {
-            Some(volume) => match parse_micro_register_json(json) {
-                Ok(definition) => match self.conn.register_host_micro(definition) {
-                    Ok(()) => unit_result_json(persist_persistent_connection(&self.conn, volume)),
-                    Err(error) => unit_result_json(Err(error)),
-                },
-                Err(error) => unit_result_json(Err(error)),
-            },
-            None => unit_result_json(Err(closed_session_error())),
-        }
+    pub fn register_micro_json(&mut self, json: &str) -> String {
+        unit_result_json(self.session.write(|conn| match parse_micro_register_json(json) {
+            Ok(definition) => conn.register_host_micro(definition),
+            Err(error) => Err(error),
+        }))
     }
 
     /// Invoke a scalar UDF from JSON args (Persistent session variant).
     #[wasm_bindgen(js_name = callScalarJson)]
     pub fn call_scalar_json(&self, json: &str) -> String {
-        run_call_scalar_json(&self.conn, self.closed, json)
+        match self.session.connection() {
+            Ok(conn) => run_call_scalar_json(conn, json),
+            Err(error) => scalar_call_json(Err(error)),
+        }
     }
 
     /// Read-only consistency probes against the persistent database.
@@ -1206,11 +1097,11 @@ impl PersistentSession {
     /// Returns JSON `{ ok, report, error }` matching Node-side DoctorReport shape.
     #[wasm_bindgen(js_name = doctorJson)]
     pub fn doctor_json(&self) -> String {
-        if self.closed {
-            return unit_result_json(Err(closed_session_error()));
-        }
-        match self.conn.doctor() {
-            Ok(report) => serde_json::json!({ "ok": true, "report": report }).to_string(),
+        match self.session.connection() {
+            Ok(conn) => match conn.doctor() {
+                Ok(report) => serde_json::json!({ "ok": true, "report": report }).to_string(),
+                Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+            },
             Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
         }
     }
@@ -1220,10 +1111,11 @@ impl PersistentSession {
     /// must go through the write surface.
     #[wasm_bindgen(js_name = prepareJson)]
     pub fn prepare_json(&mut self, source: &str) -> String {
-        if self.closed {
-            return serde_json::json!({ "ok": false, "error": closed_session_error().to_string() }).to_string();
-        }
-        match self.conn.prepare_vos(source) {
+        let conn = match self.session.connection() {
+            Ok(conn) => conn,
+            Err(error) => return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
+        };
+        match conn.prepare_vos(source) {
             Ok(stmt) => {
                 if stmt.query_kind != database::query::local::QueryKind::Read {
                     let error = Error::Schema { message: "Phase 1 only executes pipelines ending in `.collect()`".into() };
@@ -1243,64 +1135,8 @@ impl PersistentSession {
     /// Execute a previously prepared statement (Persistent session variant).
     #[wasm_bindgen(js_name = queryPreparedJson)]
     pub fn query_prepared_json(&self, json: &str) -> String {
-        if self.closed {
-            return serde_json::json!({ "ok": false, "error": closed_session_error().to_string() }).to_string();
-        }
-        let obj: serde_json::Value = match serde_json::from_str(json) {
-            Ok(v) => v,
-            Err(error) => {
-                return serde_json::json!({ "ok": false, "error": format!("invalid queryPrepared body: {error}") }).to_string();
-            }
-        };
-        let id = match obj.get("statementId").and_then(|v| v.as_str()) {
-            Some(s) => s.to_owned(),
-            None => {
-                return serde_json::json!({ "ok": false, "error": "queryPrepared: missing string `statementId`" }).to_string();
-            }
-        };
-        let stmt = match self.stmts.get(&id) {
-            Some(s) => s,
-            None => {
-                return serde_json::json!({ "ok": false, "error": format!("prepared statement not found: {id}") }).to_string();
-            }
-        };
-        let named: BTreeMap<String, database::types::Value> = match obj.get("params") {
-            None | Some(serde_json::Value::Null) => BTreeMap::new(),
-            Some(val) => {
-                let obj = match val.as_object() {
-                    Some(o) => o,
-                    None => {
-                        return serde_json::json!({ "ok": false, "error": "queryPrepared: params must be an object or null" })
-                            .to_string();
-                    }
-                };
-                let mut out = BTreeMap::new();
-                for (k, v) in obj {
-                    out.insert(
-                        k.clone(),
-                        match json_value_to_runtime(v) {
-                            Ok(val) => val,
-                            Err(error) => return serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
-                        },
-                    );
-                }
-                out
-            }
-        };
-        match self.conn.query_prepared(stmt, &named) {
-            Ok(rows) => {
-                let mapped: Vec<serde_json::Map<String, serde_json::Value>> = rows
-                    .into_iter()
-                    .map(|row| {
-                        let mut map = serde_json::Map::new();
-                        for (k, v) in row {
-                            map.insert(k, value_to_json(v));
-                        }
-                        map
-                    })
-                    .collect();
-                serde_json::json!({ "ok": true, "rows": mapped }).to_string()
-            }
+        match self.session.connection() {
+            Ok(conn) => run_query_prepared_json(conn, &self.stmts, json),
             Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }).to_string(),
         }
     }
@@ -1311,16 +1147,29 @@ impl PersistentSession {
         self.stmts.remove(statement_id).is_some()
     }
 
-    /// Flush pending durable state, then mark the session closed.
+    /// Publish any pending image, then close the session.
+    ///
+    /// Wasm path: a failed final publication throws, so the host can fix the
+    /// environment and retry `close`.
+    #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen]
-    pub fn close(&mut self) {
-        if !self.closed {
-            if let Some(volume) = self.volume.take() {
-                let _ = persist_persistent_connection(&self.conn, &volume);
-            }
-            self.stmts.clear();
-            self.closed = true;
-        }
+    pub fn close(&mut self) -> std::result::Result<(), JsValue> {
+        self.session.close().map_err(|error| JsValue::from_str(&error.to_string()))?;
+        self.stmts.clear();
+        Ok(())
+    }
+}
+
+impl PersistentSession {
+    /// Publish any pending image, then close the session.
+    ///
+    /// Native acceptance path: the typed publication outcome, kept out of the
+    /// wasm surface because `JsValue` cannot be built off-target.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn close(&mut self) -> database::types::Result<()> {
+        self.session.close()?;
+        self.stmts.clear();
+        Ok(())
     }
 }
 

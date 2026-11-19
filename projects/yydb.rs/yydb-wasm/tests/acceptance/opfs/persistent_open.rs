@@ -18,7 +18,7 @@ fn yydb_opfs_persistent_session_reads_an_empty_volume() {
         open_persistent_session_with_store(path.to_str().unwrap(), fs_store(&path)).expect("open over byte store");
     assert_eq!(session.path(), path.to_str().unwrap());
     assert!(!path.exists(), "opening an empty volume must not create a main file");
-    session.close();
+    session.close().expect("close");
     cleanup(&path);
 }
 

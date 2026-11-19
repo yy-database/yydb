@@ -9,6 +9,7 @@ mod core;
 mod host_js;
 mod opfs;
 mod session;
+mod wire;
 
 pub use core::{SchemaCheck, check_schema_source, introspect_schema_json, yydb_version};
 pub use opfs::{

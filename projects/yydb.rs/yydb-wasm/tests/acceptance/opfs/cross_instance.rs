@@ -118,7 +118,7 @@ fn yydb_opfs_a_new_store_serves_the_committed_rows() {
             .expect("open the first instance");
         assert_ok_true(&first.ensure_schema(USER_SCHEMA));
         assert_ok_true(&first.put("alpha", b"committed"));
-        first.close();
+        first.close().expect("close");
     }
 
     // A brand-new store over the same bytes: what the host kept is what loads.
@@ -127,7 +127,7 @@ fn yydb_opfs_a_new_store_serves_the_committed_rows() {
     let parsed = parse_json(&second.get("alpha"));
     assert_eq!(parsed.get("ok"), Some(&serde_json::Value::Bool(true)), "a committed row must be visible: {parsed}");
     assert!(second.generation() >= 1.0, "the reopened instance must see the published generation");
-    second.close();
+    second.close().expect("close");
     cleanup(&path);
 }
 
@@ -141,7 +141,7 @@ fn yydb_opfs_a_failed_publish_is_invisible_to_the_next_instance() {
             .expect("open");
         assert_ok_true(&committed.ensure_schema(USER_SCHEMA));
         assert_ok_true(&committed.put("alpha", b"committed"));
-        committed.close();
+        committed.close().expect("close");
     }
 
     // The host turns read-only after the committed publish. The row reaches the
@@ -152,7 +152,7 @@ fn yydb_opfs_a_failed_publish_is_invisible_to_the_next_instance() {
                 .expect("open over a read-only host");
         let parsed = parse_json(&blocked.put("beta", b"never-durable"));
         assert_eq!(parsed.get("ok"), Some(&serde_json::Value::Bool(false)), "a failed publish must answer with an error: {parsed}");
-        blocked.close();
+        assert!(blocked.close().is_err(), "close must propagate the failed final publication");
     }
 
     let mut third = open_persistent_session_with_store(path.to_str().unwrap(), Box::new(FsVolumeStore::open(&path)))
@@ -160,7 +160,7 @@ fn yydb_opfs_a_failed_publish_is_invisible_to_the_next_instance() {
     assert!(third.get("alpha").contains("\"ok\":true"));
     let beta = parse_json(&third.get("beta"));
     assert_eq!(beta.get("value"), Some(&serde_json::Value::Null), "an uncommitted row must not appear after a restart: {beta}");
-    third.close();
+    third.close().expect("close");
     cleanup(&path);
 }
 
@@ -197,6 +197,6 @@ fn yydb_opfs_a_second_writer_on_the_same_lease_is_refused() {
     )
     .expect("the second writer opens after the release");
     assert_ok_true(&second.put("owner", b"second"));
-    second.close();
+    second.close().expect("close");
     cleanup(&path);
 }

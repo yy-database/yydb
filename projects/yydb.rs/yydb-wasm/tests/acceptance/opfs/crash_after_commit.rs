@@ -18,7 +18,7 @@ fn yydb_opfs_crash_after_commit_keeps_the_committed_image() {
         assert_ok_true(&session.ensure_schema(USER_SCHEMA));
         assert_ok_true(&session.put("kept", b"committed"));
         assert_ok_true(&session.put("second", b"row"));
-        session.close();
+        session.close().expect("close");
     }
 
     // Simulated crash: nothing survives except what the host already synced.

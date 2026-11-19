@@ -248,7 +248,7 @@ fn yydb_opfs_a_torn_write_is_detected_instead_of_silently_accepted() {
             // doctor, so a torn prefix can never masquerade as a healthy one.
             let report = session.doctor_json();
             assert!(report.contains("\"ok\":true"), "a torn image must not be served as healthy: {report}");
-            session.close();
+            session.close().expect("close");
         }
         Err(error) => assert!(
             matches!(error, Error::Corrupt(_)),
@@ -331,7 +331,7 @@ fn yydb_opfs_an_uncommitted_session_is_invisible_after_a_crash() {
     cleanup(&path);
 
     {
-        let session = open_persistent_session_with_store(path.to_str().unwrap(), Box::new(FaultyStore::new(&path, &FaultSwitch::default())))
+        let mut session = open_persistent_session_with_store(path.to_str().unwrap(), Box::new(FaultyStore::new(&path, &FaultSwitch::default())))
             .expect("open");
         assert!(!path.exists(), "opening an empty volume must not create a main file");
         assert_ok_true(&session.ensure_schema(USER_SCHEMA));
