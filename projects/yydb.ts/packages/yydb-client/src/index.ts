@@ -4,7 +4,6 @@ export { Client } from './client.js';
 export type { ConnectOptions } from './client.js';
 export {
     initWire,
-    MAGIC,
     MAGIC_YYDB,
     MAGIC_YYDS,
     WIRE_VERSION,

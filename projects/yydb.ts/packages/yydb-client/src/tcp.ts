@@ -1,4 +1,12 @@
-import { decodeFrame, decodeMicroHostInvoke, encodeFrame, encodeMicroHostInvokeOk, MsgType, type Frame } from './wire.js';
+import {
+    decodeFrame,
+    decodeMicroHostInvoke,
+    encodeFrame,
+    encodeMicroHostInvokeOk,
+    HEADER_LEN,
+    MsgType,
+    type Frame,
+} from './wire.js';
 import { normalizeTcpHostPort, type MicroHostHandler, type Transport } from './transport.js';
 
 async function readExact(readExactBytes: (n: number) => Promise<Uint8Array>, n: number): Promise<Uint8Array> {
@@ -6,12 +14,12 @@ async function readExact(readExactBytes: (n: number) => Promise<Uint8Array>, n: 
 }
 
 async function readFrame(readExactBytes: (n: number) => Promise<Uint8Array>): Promise<Frame> {
-    const header = await readExact(readExactBytes, 20);
-    const bodyLen = new DataView(header.buffer, header.byteOffset, header.byteLength).getUint32(16, true);
+    const header = await readExact(readExactBytes, HEADER_LEN);
+    const bodyLen = new DataView(header.buffer, header.byteOffset, header.byteLength).getUint32(HEADER_LEN - 4, true);
     const body = bodyLen > 0 ? await readExact(readExactBytes, bodyLen) : new Uint8Array();
-    const full = new Uint8Array(20 + body.byteLength);
+    const full = new Uint8Array(HEADER_LEN + body.byteLength);
     full.set(header, 0);
-    full.set(body, 20);
+    full.set(body, HEADER_LEN);
     return decodeFrame(full);
 }
 

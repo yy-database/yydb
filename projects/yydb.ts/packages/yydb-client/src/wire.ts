@@ -23,8 +23,6 @@ export let WIRE_VERSION_NEXT = new Uint8Array(4);
 export let MAGIC_YYDB = new Uint8Array(4);
 /** Product magic bytes for `"YYDS"`. */
 export let MAGIC_YYDS = new Uint8Array(4);
-/** @deprecated Use MAGIC_YYDB — encode default product. */
-export let MAGIC = MAGIC_YYDB;
 /** Absolute frame header length in bytes. */
 export let HEADER_LEN = 0;
 /** Body soft limit enforced by the core on encode and decode. */
@@ -43,7 +41,6 @@ export async function initWire(options: InitWasmOptions = {}): Promise<void> {
     WIRE_VERSION_NEXT = encoder.encode(core.versionNext());
     MAGIC_YYDB = core.magic('YYDB');
     MAGIC_YYDS = core.magic('YYDS');
-    MAGIC = MAGIC_YYDB;
     HEADER_LEN = core.headerLen();
     MAX_BODY_LEN = core.maxBodyLen();
 }
