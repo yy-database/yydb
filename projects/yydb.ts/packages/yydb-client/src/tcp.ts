@@ -4,6 +4,7 @@ import {
     encodeFrame,
     encodeMicroHostInvokeOk,
     HEADER_LEN,
+    MAX_BODY_LEN,
     MsgType,
     type Frame,
 } from './wire.js';
@@ -16,6 +17,11 @@ async function readExact(readExactBytes: (n: number) => Promise<Uint8Array>, n: 
 async function readFrame(readExactBytes: (n: number) => Promise<Uint8Array>): Promise<Frame> {
     const header = await readExact(readExactBytes, HEADER_LEN);
     const bodyLen = new DataView(header.buffer, header.byteOffset, header.byteLength).getUint32(HEADER_LEN - 4, true);
+    // 帧上限归上游协议：核心在 encode/decode 两侧都按 `MAX_BODY_LEN` 拒绝，
+    // 宿主读帧前先用同一常量拦截，避免为超限帧分配和读取整段 body。
+    if (MAX_BODY_LEN > 0 && bodyLen > MAX_BODY_LEN) {
+        throw new Error(`frame body length ${bodyLen} exceeds the protocol limit ${MAX_BODY_LEN}`);
+    }
     const body = bodyLen > 0 ? await readExact(readExactBytes, bodyLen) : new Uint8Array();
     const full = new Uint8Array(HEADER_LEN + body.byteLength);
     full.set(header, 0);
