@@ -18,8 +18,8 @@ repository = "https://github.com/yy-database/yydb"
 # `database` is the single stable public facade of the boost.rs database ecosystem. Pin full 40-char rev.
 # Local absolute path overrides belong in `.cargo/config.toml` (facade only).
 # VOS types are used directly by the native bindings, at the rev boost.rs pins.
-database = { git = "https://github.com/oovm/boost.rs.git", rev = "f3c91a8aad028c07ee297a66da8e75beeefcae12", default-features = false }
-yydb = { git = "https://github.com/oovm/boost.rs.git", rev = "f3c91a8aad028c07ee297a66da8e75beeefcae12" }
+database = { git = "https://github.com/oovm/boost.rs.git", rev = "9d40653b21e3bb8130f032e15cb56960b11071b4", default-features = false }
+yydb = { git = "https://github.com/oovm/boost.rs.git", rev = "9d40653b21e3bb8130f032e15cb56960b11071b4" }
 vos = { git = "https://github.com/voml/vos-language.git", rev = "387d9fc3c9a556ddb8a433c627a866a2918d0186" }
 
 blake3 = "1"
