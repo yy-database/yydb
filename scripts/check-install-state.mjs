@@ -49,9 +49,17 @@ const targets = [
     {
         name: '@yydb/yydb-client',
         dir: join(tsDir, 'packages', 'yydb-client'),
-        companions: [],
+        // `yydb-client` wires frames through the wasm fallback, so the packed
+        // fallback must be installed from the same tarball set instead of the
+        // registry copy.
+        companions: [join(tsDir, 'platforms', 'yydb-unknown-wasm32')],
         smoke: [
             "import { decodeFrame, encodeFrame } from '@yydb/yydb-client';",
+            "import { readFileSync } from 'node:fs';",
+            "import { createRequire } from 'node:module';",
+            "import { initWasm } from '@yydb/yydb-unknown-wasm32';",
+            "const require = createRequire(import.meta.url);",
+            "await initWasm({ module: readFileSync(require.resolve('@yydb/yydb-unknown-wasm32/wasm')) });",
             'const frame = { msgType: 1, flags: 0, requestId: 7, body: new Uint8Array([1, 2, 3]) };',
             'const decoded = decodeFrame(encodeFrame(frame));',
             "if (decoded.requestId !== 7 || decoded.body.length !== 3) throw new Error('wire frame roundtrip failed');",
