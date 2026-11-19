@@ -28,6 +28,7 @@ __all__ = [
     "Connection",
     "Database",
     "YydbError",
+    "bench_summary",
     "is_native_available",
     "native_unavailable_reason",
     "read_schema_file",
@@ -88,6 +89,16 @@ def version() -> str:
     """Return the embedded YYDB engine version string."""
     native = _require_native()
     return _call("version", native.version)
+
+
+def bench_summary(samples_ms: list[float]) -> dict[str, float | int]:
+    """Return the harness median, p95, minimum, maximum and sample count.
+
+    The nearest-rank kernel lives upstream in ``database.harness``; invalid
+    samples (empty, non-finite or negative) raise ``YydbError``.
+    """
+    native = _require_native()
+    return _call("bench_summary", native.bench_summary, samples_ms)
 
 
 def read_schema_file(schema_path: str | os.PathLike[str]) -> str:

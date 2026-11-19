@@ -8,7 +8,7 @@ use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 use pyo3::{
     IntoPyObjectExt,
-    exceptions::{PyRuntimeError, PyTypeError},
+    exceptions::{PyRuntimeError, PyTypeError, PyValueError},
     prelude::*,
     types::{PyBool, PyBytes, PyDict, PyString},
 };
@@ -668,6 +668,21 @@ fn summarize_document(document: &str) -> String {
     out.replace('\n', " ")
 }
 
+/// 对一组毫秒样本求 median/p95/极值，使用 `database.harness` 的 nearest-rank 内核。
+///
+/// 无效样本（空、非有限或负数）返回 `ValueError`，不产生看似正常的统计结果。
+#[pyfunction]
+fn bench_summary<'py>(py: Python<'py>, samples_ms: Vec<f64>) -> PyResult<Bound<'py, PyDict>> {
+    let stats = database::harness::summarize(&samples_ms).map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let dict = PyDict::new(py);
+    dict.set_item("median_ms", stats.median_ms)?;
+    dict.set_item("p95_ms", stats.p95_ms)?;
+    dict.set_item("min_ms", stats.min_ms)?;
+    dict.set_item("max_ms", stats.max_ms)?;
+    dict.set_item("rounds", stats.rounds)?;
+    Ok(dict)
+}
+
 #[pymodule]
 fn yydb_pyo3(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
@@ -691,5 +706,6 @@ fn yydb_pyo3(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(backup_db, m)?)?;
     m.add_function(wrap_pyfunction!(compact_db, m)?)?;
     m.add_function(wrap_pyfunction!(restore, m)?)?;
+    m.add_function(wrap_pyfunction!(bench_summary, m)?)?;
     Ok(())
 }

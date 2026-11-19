@@ -14,6 +14,7 @@ crate-type = ["cdylib"]
 name = "yydb_pyo3"
 
 [dependencies]
+database = { workspace = true, features = ["harness"] }
 pyo3 = { workspace = true }
 serde_json = { workspace = true }
 yydb = { workspace = true }

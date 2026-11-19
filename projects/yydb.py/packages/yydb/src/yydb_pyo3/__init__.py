@@ -11,6 +11,7 @@ try:
     from .yydb_pyo3 import (
         Connection,
         backup_db,
+        bench_summary,
         compact_db,
         doctor_text,
         execute_vos_transaction,
@@ -37,6 +38,7 @@ except ImportError as error:  # running from a source checkout without a wheel
 __all__ = [
     "Connection",
     "backup_db",
+    "bench_summary",
     "compact_db",
     "doctor_text",
     "execute_vos_transaction",

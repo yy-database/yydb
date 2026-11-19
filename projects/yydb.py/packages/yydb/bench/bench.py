@@ -8,18 +8,16 @@ Run: python bench/bench.py
 
 from __future__ import annotations
 
-import math
 import os
 import pathlib
 import shutil
-import statistics
 import sys
 import tempfile
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from yydb import Connection  # noqa: E402
+from yydb import Connection, bench_summary  # noqa: E402
 
 ROWS = int(os.environ.get("BENCH_ROWS", "20000"))
 KEYS_PER_TXN = int(os.environ.get("BENCH_TXN", "1000"))
@@ -33,24 +31,14 @@ def key(row: int) -> str:
     return f"row:{row:05d}"
 
 
-def median(values: list[float]) -> float:
-    return statistics.median(values)
+def summary(values: list[float]) -> tuple[float, float]:
+    """Reads the median and nearest-rank p95 from `database.harness`.
 
-
-def p95(values: list[float]) -> float:
-    """Nearest-rank p95, byte-for-byte the same rule as `database.harness`.
-
-    rank = ceil(n * 0.95) computed in integer arithmetic; invalid samples are
-    rejected instead of producing a plausible-looking number.
+    The statistics kernel lives upstream: invalid samples are rejected there
+    instead of producing a plausible-looking number.
     """
-    if not values:
-        raise ValueError("p95 requires at least one sample")
-    if any(not math.isfinite(value) or value < 0 for value in values):
-        raise ValueError("samples must be finite non-negative milliseconds")
-    ordered = sorted(values)
-    rank = (len(ordered) * 95 + 99) // 100
-    index = min(len(ordered) - 1, max(0, rank - 1))
-    return ordered[index]
+    stats = bench_summary(values)
+    return float(stats["median_ms"]), float(stats["p95_ms"])
 
 
 def elapsed_ms(start: float) -> float:
@@ -129,15 +117,15 @@ def main() -> int:
         ]
 
         single_ours = our_single(single_our_path)
-        rows.append(("our single insert 200 (autocommit put)", median(single_ours), p95(single_ours), "us"))
+        rows.append(("our single insert 200 (autocommit put)", *summary(single_ours), "us"))
 
         point_ours = our_point(our_path)
-        rows.append((f"our point get {POINT_OPS}", median(point_ours), p95(point_ours), "us"))
+        rows.append((f"our point get {POINT_OPS}", *summary(point_ours), "us"))
 
         scan_ours = our_scan(our_path)
-        rows.append((f"our range scan {RANGE_SCANS}x{RANGE_LEN}", median(scan_ours), p95(scan_ours), "us"))
+        rows.append((f"our range scan {RANGE_SCANS}x{RANGE_LEN}", *summary(scan_ours), "us"))
 
-        rows.append(("our reopen + get (20 rounds)", median(reopen_ours), p95(reopen_ours), "ms"))
+        rows.append(("our reopen + get (20 rounds)", *summary(reopen_ours), "ms"))
 
         print(f"yydb py bench · rows={ROWS} · txn={KEYS_PER_TXN} · point={POINT_OPS} · range={RANGE_SCANS}x{RANGE_LEN}")
         print()
