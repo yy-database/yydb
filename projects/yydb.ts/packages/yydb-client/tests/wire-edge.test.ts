@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -15,11 +16,10 @@ import {
     encodeMicroRegister,
     encodeScalarCall,
     HEADER_LEN,
+    initWire,
     MAGIC_YYDS,
     MAX_BODY_LEN,
     MsgType,
-    pushBytes,
-    pushU32,
     WIRE_VERSION_NEXT,
     type MicroRegisterPayload,
 } from "../src/wire.ts";
@@ -28,7 +28,23 @@ import {
  * Wire edge coverage: the product-magic and version gates, truncation and
  * oversize guards on both directions, raw-octet fidelity, and the scalar
  * value codec including its malformed-input rejections.
+ *
+ * Adversarial bodies are assembled with local byte helpers on purpose: the
+ * point is to poke the core's guards with hand-built frames.
  */
+
+await initWire({
+    module: readFileSync(new URL('../../../platforms/yydb-unknown-wasm32/lib/yydb_wasm_bg.wasm', import.meta.url)),
+});
+
+function pushU32(acc: number[], value: number): void {
+    acc.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+}
+
+function pushBytes(acc: number[], bytes: Uint8Array): void {
+    pushU32(acc, bytes.length);
+    acc.push(...bytes);
+}
 
 function frameBytes(msgType: number, body: readonly number[], magic: Uint8Array = MAGIC_YYDS, version = "0000"): Uint8Array {
     const out = new Uint8Array(HEADER_LEN + body.length);
@@ -60,7 +76,7 @@ test("both product magics decode and `YYDS` survives an encode-decode round trip
 test("the version gate accepts only the spoken wire version", () => {
     assert.throws(
         () => decodeFrame(frameBytes(MsgType.Info, [], MAGIC_YYDS, new TextDecoder().decode(WIRE_VERSION_NEXT))),
-        /wire version not supported \(got 0001, want 0000\)/,
+        /wire version not supported \(want 0000\)/,
     );
     assert.throws(() => decodeFrame(frameBytes(MsgType.Info, [], new TextEncoder().encode("YYXX"))), /bad product magic/);
 });
@@ -96,8 +112,9 @@ test("raw octets survive the kv put encode and get-ok decode without text coerci
     // key length prefix (u32 LE = 1), key, value length prefix (u32 LE = 5), value.
     assert.deepEqual(Array.from(put.subarray(0, 5)), [1, 0, 0, 0, 0x6b]);
 
-    const ok = Uint8Array.from([1, ...(() => { const acc: number[] = []; pushBytes(acc, octets); return acc; })()]);
-    const decoded = decodeKvGetOk(ok);
+    const acc: number[] = [1];
+    pushBytes(acc, octets);
+    const decoded = decodeKvGetOk(Uint8Array.from(acc));
     assert.ok(decoded);
     assert.deepEqual(Array.from(decoded), Array.from(octets));
 });
@@ -156,12 +173,12 @@ test("micro register bodies enforce the fingerprint and arity budgets", () => {
         returns: "i64",
         fingerprint: new Uint8Array(32).fill(0xab),
     };
-    assert.throws(() => encodeMicroRegister({ ...base, fingerprint: new Uint8Array(31) }), /fingerprint must be 32 bytes/);
+    assert.throws(() => encodeMicroRegister({ ...base, fingerprint: new Uint8Array(31) }), /must be 32 bytes/);
     assert.throws(
         () => encodeMicroRegister({ ...base, args: Array.from({ length: 256 }, () => "i64" as const) }),
-        /at most 255 args/,
+        /arg count exceeds u8/,
     );
-    assert.throws(() => encodeMicroRegister({ ...base, returns: "f64" as never }), /unsupported wire udf type/);
+    assert.throws(() => encodeMicroRegister({ ...base, returns: "f64" as never }), /unknown UDF type tag/);
 
     const body = encodeMicroRegister(base);
     // hostId u64 + handleVersion u32 + udfVersion u32 + name bytes + functionId bytes + count + tags + fingerprint.
@@ -183,19 +200,21 @@ test("micro host invoke decodes full payloads and refuses truncated ones", () =>
     assert.deepEqual(decoded, { hostId: 9, handleVersion: 2, functionId: "fn-1", args: [true, "hi"] });
 
     assert.throws(() => decodeMicroHostInvoke(new Uint8Array(7)), /truncated u64/);
-    assert.throws(() => decodeMicroHostInvoke(Uint8Array.from(new Uint8Array(8 + 4 + 4))), /missing count/);
+    assert.throws(() => decodeMicroHostInvoke(new Uint8Array(8 + 4 + 4)), /missing count/);
 });
 
 test("error bodies carry arbitrary unicode codes and messages", () => {
-    const body = encodeErrorBody({ code: "yydb.schema.invalid", message: "VOS schema：字段“名字”重复" });
-    assert.deepEqual(decodeErrorBody(body), { code: "yydb.schema.invalid", message: "VOS schema：字段“名字”重复" });
-    assert.throws(() => decodeErrorBody(Uint8Array.from([4, 0, 0, 0, 1])), /not valid JSON/);
-});
-
-test("little-endian primitives write u32 and length-prefixed bytes verbatim", () => {
-    const acc: number[] = [];
-    pushU32(acc, 0x1234_5678);
-    assert.deepEqual(acc, [0x78, 0x56, 0x34, 0x12]);
-    pushBytes(acc, Uint8Array.from([1, 2, 3]));
-    assert.deepEqual(acc, [0x78, 0x56, 0x34, 0x12, 3, 0, 0, 0, 1, 2, 3]);
+    const body = encodeErrorBody({
+        code: "yydb.schema.invalid",
+        message: "VOS schema：字段“名字”重复",
+        operation: "schema",
+        retryable: false,
+    });
+    assert.deepEqual(decodeErrorBody(body), {
+        code: "yydb.schema.invalid",
+        message: "VOS schema：字段“名字”重复",
+        operation: "schema",
+        retryable: false,
+    });
+    assert.throws(() => decodeErrorBody(Uint8Array.from([1, 0, 0, 0, 0x7b])), /not valid JSON/);
 });

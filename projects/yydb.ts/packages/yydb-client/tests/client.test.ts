@@ -1,7 +1,12 @@
 // 相对 `.js` 说明符只在 tsc 产物里可解析，因此该文件针对 `dist` 公共入口测试。
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { Client, encodeErrorBody, isYydbError, MsgType, YydbError, YydbErrorCodes, type Frame, type Transport } from '../dist/index.js';
+import { Client, encodeErrorBody, initWire, isYydbError, MsgType, YydbError, YydbErrorCodes, type Frame, type Transport } from '../dist/index.js';
+
+await initWire({
+    module: readFileSync(new URL('../../../platforms/yydb-unknown-wasm32/lib/yydb_wasm_bg.wasm', import.meta.url)),
+});
 
 function scriptedTransport(respond: (frame: Frame) => Frame): Transport {
     return {
@@ -21,6 +26,8 @@ test('engine error frame becomes a YydbError with the engine code', async () => 
             body: encodeErrorBody({
                 code: 'yydb.schema.invalid',
                 message: 'VOS schema: boom',
+                operation: 'schema',
+                retryable: false,
             }),
         })),
     );

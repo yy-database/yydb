@@ -10,6 +10,7 @@ import {
     encodeMicroRegister,
     encodeScalarCall,
     encodeSchemaEnsure,
+    responseType,
     Frame,
     MicroRegisterPayload,
     MsgType,
@@ -55,18 +56,33 @@ export interface ConnectOptions {
     token?: string;
 }
 
-/** Expected reply type and operation label per request type. */
-const REQUESTS: Record<number, { operation: string; ok: number }> = {
-    [MsgType.Hello]: { operation: 'hello', ok: MsgType.HelloOk },
-    [MsgType.Authenticate]: { operation: 'authenticate', ok: MsgType.AuthenticateOk },
-    [MsgType.Info]: { operation: 'info', ok: MsgType.InfoOk },
-    [MsgType.SchemaGet]: { operation: 'schemaGet', ok: MsgType.SchemaGetOk },
-    [MsgType.SchemaEnsure]: { operation: 'schemaEnsure', ok: MsgType.SchemaEnsureOk },
-    [MsgType.KvGet]: { operation: 'kvGet', ok: MsgType.KvGetOk },
-    [MsgType.KvPut]: { operation: 'kvPut', ok: MsgType.KvPutOk },
-    [MsgType.MicroRegister]: { operation: 'microRegister', ok: MsgType.MicroRegisterOk },
-    [MsgType.ScalarCall]: { operation: 'scalarCall', ok: MsgType.ScalarCallOk },
+/** Operation labels per request code; the pairing itself comes from the core. */
+const OPERATIONS: Record<number, string> = {
+    [MsgType.Hello]: 'hello',
+    [MsgType.Authenticate]: 'authenticate',
+    [MsgType.Info]: 'info',
+    [MsgType.SchemaGet]: 'schemaGet',
+    [MsgType.SchemaEnsure]: 'schemaEnsure',
+    [MsgType.KvGet]: 'kvGet',
+    [MsgType.KvPut]: 'kvPut',
+    [MsgType.MicroRegister]: 'microRegister',
+    [MsgType.ScalarCall]: 'scalarCall',
 };
+
+/** Expected reply type and operation label per request type, from `responseType`. */
+let requestsTable: Record<number, { operation: string; ok: number }> | null = null;
+function requests(): Record<number, { operation: string; ok: number }> {
+    if (requestsTable === null) {
+        requestsTable = {};
+        for (const [code, operation] of Object.entries(OPERATIONS)) {
+            const ok = responseType(Number(code));
+            if (ok !== null) {
+                requestsTable[Number(code)] = { operation, ok };
+            }
+        }
+    }
+    return requestsTable;
+}
 
 /**
  * TypeScript client for YY wire (browser = WebSocket `/wire`).
@@ -186,7 +202,7 @@ export class Client {
     }
 
     private async roundtrip(msgType: number, body: Uint8Array): Promise<Frame> {
-        const request = REQUESTS[msgType];
+        const request = requests()[msgType];
         const operation = request?.operation ?? `msgType(${msgType})`;
         if (this.closed) {
             throw new YydbError(YydbErrorCodes.sessionClosed, `${operation}: YYDB session is closed`, { operation });

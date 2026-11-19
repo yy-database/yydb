@@ -117,6 +117,49 @@ export type MicroHostInvokePayload = {
     args: readonly unknown[];
 };
 
+/** A wire frame decoded by the Rust core. */
+export type DecodedFrame = {
+    readonly msgType: number;
+    readonly flags: number;
+    readonly requestId: number;
+    readonly body: Uint8Array;
+    readonly product: string;
+};
+
+/**
+ * YY wire protocol codec, owned by the Rust core (`database.protocol.yy`).
+ * Every frame layout, header bound and body encoding rule lives upstream;
+ * this surface only bridges it onto JS types. Requires {@link initWasm}.
+ */
+export type WireApi = {
+    version(): string;
+    versionNext(): string;
+    magic(product: string): Uint8Array;
+    headerLen(): number;
+    maxBodyLen(): number;
+    responseType(code: number): number | null;
+    frameEncode(msgType: number, flags: number, requestId: number, body: Uint8Array, product: string): Uint8Array;
+    frameDecode(bytes: Uint8Array): DecodedFrame;
+    encodeSchemaEnsure(version: number, document: string): Uint8Array;
+    decodeSchemaEnsure(body: Uint8Array): string;
+    encodeKvGet(key: string): Uint8Array;
+    decodeKvGet(body: Uint8Array): string;
+    encodeKvPut(key: string, value: Uint8Array): Uint8Array;
+    decodeKvPut(body: Uint8Array): string;
+    encodeAuthenticate(token: string): Uint8Array;
+    decodeAuthenticateOk(body: Uint8Array): string;
+    decodeSchemaGetOk(body: Uint8Array): string | null;
+    decodeKvGetOk(body: Uint8Array): Uint8Array | null;
+    encodeScalarCall(requestJson: string): Uint8Array;
+    decodeScalarCallOk(body: Uint8Array): string;
+    encodeMicroRegister(payloadJson: string): Uint8Array;
+    decodeMicroRegister(body: Uint8Array): string;
+    decodeMicroHostInvoke(body: Uint8Array): string;
+    encodeMicroHostInvokeOk(valueJson: string): Uint8Array;
+    encodeErrorBody(diagnosticJson: string): Uint8Array;
+    decodeErrorBody(body: Uint8Array): string;
+};
+
 /** Stateful wasm session (memory or OPFS-backed). */
 export type WasmSession = {
     ensureSchema(document: string): string;
@@ -158,6 +201,7 @@ export type WasmSession = {
     rollbackTo(name: string): string;
     /** Release a savepoint. Returns JSON `{ ok, error? }`. */
     release(name: string): string;
+    /** Close the session; a failed final durable publication throws. */
     close(): void;
     readonly path?: string;
 };
@@ -182,6 +226,32 @@ const glueApi = glue as {
             handles: PersistentHandles,
         ) => PersistentWasmSession;
     };
+    wireVersion?: () => string;
+    wireVersionNext?: () => string;
+    wireMagic?: (product: string) => Uint8Array;
+    wireHeaderLen?: () => number;
+    wireMaxBodyLen?: () => number;
+    responseType?: (code: number) => number | undefined;
+    frameEncode?: (msgType: number, flags: number, requestId: number, body: Uint8Array, product: string) => Uint8Array;
+    frameDecode?: (bytes: Uint8Array) => DecodedFrame;
+    encodeSchemaEnsure?: (version: number, document: string) => Uint8Array;
+    decodeSchemaEnsure?: (body: Uint8Array) => string;
+    encodeKvGet?: (key: string) => Uint8Array;
+    decodeKvGet?: (body: Uint8Array) => string;
+    encodeKvPut?: (key: string, value: Uint8Array) => Uint8Array;
+    decodeKvPut?: (body: Uint8Array) => string;
+    encodeAuthenticate?: (token: string) => Uint8Array;
+    decodeAuthenticateOk?: (body: Uint8Array) => string;
+    decodeSchemaGetOk?: (body: Uint8Array) => string | undefined;
+    decodeKvGetOk?: (body: Uint8Array) => Uint8Array | undefined;
+    encodeScalarCall?: (requestJson: string) => Uint8Array;
+    decodeScalarCallOk?: (body: Uint8Array) => string;
+    encodeMicroRegister?: (payloadJson: string) => Uint8Array;
+    decodeMicroRegister?: (body: Uint8Array) => string;
+    decodeMicroHostInvoke?: (body: Uint8Array) => string;
+    encodeMicroHostInvokeOk?: (valueJson: string) => Uint8Array;
+    encodeErrorBody?: (diagnosticJson: string) => Uint8Array;
+    decodeErrorBody?: (body: Uint8Array) => string;
 };
 
 let ready = false;
@@ -330,3 +400,131 @@ export function openPersistentSession(path: string): WasmSession {
 export function resetWasmBindingForTests(): void {
     ready = false;
 }
+
+function wireExport<T>(name: string, fn: T | undefined): T {
+    if (!fn) {
+        throw new Error(`@yydb/yydb-unknown-wasm32: ${name} export missing, rebuild wasm artifacts`);
+    }
+    return fn;
+}
+
+function wireGuard<R>(run: () => R): R {
+    try {
+        return run();
+    } catch (error) {
+        throw error instanceof Error ? error : new Error(String(error));
+    }
+}
+
+/**
+ * YY wire protocol codec backed by the Rust core.
+ *
+ * Frame layout, header bounds and every body encoding rule are owned
+ * upstream; nothing here re-declares the wire. Call {@link initWasm} first.
+ */
+export const wire: WireApi = {
+    version(): string {
+        assertReady();
+        return wireGuard(() => wireExport('wireVersion', glueApi.wireVersion)());
+    },
+    versionNext(): string {
+        assertReady();
+        return wireGuard(() => wireExport('wireVersionNext', glueApi.wireVersionNext)());
+    },
+    magic(product: string): Uint8Array {
+        assertReady();
+        return wireGuard(() => wireExport('wireMagic', glueApi.wireMagic)(product));
+    },
+    headerLen(): number {
+        assertReady();
+        return wireGuard(() => wireExport('wireHeaderLen', glueApi.wireHeaderLen)());
+    },
+    maxBodyLen(): number {
+        assertReady();
+        return wireGuard(() => wireExport('wireMaxBodyLen', glueApi.wireMaxBodyLen)());
+    },
+    responseType(code: number): number | null {
+        assertReady();
+        return wireGuard(() => wireExport('responseType', glueApi.responseType)(code)) ?? null;
+    },
+    frameEncode(msgType: number, flags: number, requestId: number, body: Uint8Array, product: string): Uint8Array {
+        assertReady();
+        return wireGuard(() => wireExport('frameEncode', glueApi.frameEncode)(msgType, flags, requestId, body, product));
+    },
+    frameDecode(bytes: Uint8Array): DecodedFrame {
+        assertReady();
+        return wireGuard(() => wireExport('frameDecode', glueApi.frameDecode)(bytes));
+    },
+    encodeSchemaEnsure(version: number, document: string): Uint8Array {
+        assertReady();
+        return wireGuard(() => wireExport('encodeSchemaEnsure', glueApi.encodeSchemaEnsure)(version, document));
+    },
+    decodeSchemaEnsure(body: Uint8Array): string {
+        assertReady();
+        return wireGuard(() => wireExport('decodeSchemaEnsure', glueApi.decodeSchemaEnsure)(body));
+    },
+    encodeKvGet(key: string): Uint8Array {
+        assertReady();
+        return wireGuard(() => wireExport('encodeKvGet', glueApi.encodeKvGet)(key));
+    },
+    decodeKvGet(body: Uint8Array): string {
+        assertReady();
+        return wireGuard(() => wireExport('decodeKvGet', glueApi.decodeKvGet)(body));
+    },
+    encodeKvPut(key: string, value: Uint8Array): Uint8Array {
+        assertReady();
+        return wireGuard(() => wireExport('encodeKvPut', glueApi.encodeKvPut)(key, value));
+    },
+    decodeKvPut(body: Uint8Array): string {
+        assertReady();
+        return wireGuard(() => wireExport('decodeKvPut', glueApi.decodeKvPut)(body));
+    },
+    encodeAuthenticate(token: string): Uint8Array {
+        assertReady();
+        return wireGuard(() => wireExport('encodeAuthenticate', glueApi.encodeAuthenticate)(token));
+    },
+    decodeAuthenticateOk(body: Uint8Array): string {
+        assertReady();
+        return wireGuard(() => wireExport('decodeAuthenticateOk', glueApi.decodeAuthenticateOk)(body));
+    },
+    decodeSchemaGetOk(body: Uint8Array): string | null {
+        assertReady();
+        return wireGuard(() => wireExport('decodeSchemaGetOk', glueApi.decodeSchemaGetOk)(body)) ?? null;
+    },
+    decodeKvGetOk(body: Uint8Array): Uint8Array | null {
+        assertReady();
+        return wireGuard(() => wireExport('decodeKvGetOk', glueApi.decodeKvGetOk)(body)) ?? null;
+    },
+    encodeScalarCall(requestJson: string): Uint8Array {
+        assertReady();
+        return wireGuard(() => wireExport('encodeScalarCall', glueApi.encodeScalarCall)(requestJson));
+    },
+    decodeScalarCallOk(body: Uint8Array): string {
+        assertReady();
+        return wireGuard(() => wireExport('decodeScalarCallOk', glueApi.decodeScalarCallOk)(body));
+    },
+    encodeMicroRegister(payloadJson: string): Uint8Array {
+        assertReady();
+        return wireGuard(() => wireExport('encodeMicroRegister', glueApi.encodeMicroRegister)(payloadJson));
+    },
+    decodeMicroRegister(body: Uint8Array): string {
+        assertReady();
+        return wireGuard(() => wireExport('decodeMicroRegister', glueApi.decodeMicroRegister)(body));
+    },
+    decodeMicroHostInvoke(body: Uint8Array): string {
+        assertReady();
+        return wireGuard(() => wireExport('decodeMicroHostInvoke', glueApi.decodeMicroHostInvoke)(body));
+    },
+    encodeMicroHostInvokeOk(valueJson: string): Uint8Array {
+        assertReady();
+        return wireGuard(() => wireExport('encodeMicroHostInvokeOk', glueApi.encodeMicroHostInvokeOk)(valueJson));
+    },
+    encodeErrorBody(diagnosticJson: string): Uint8Array {
+        assertReady();
+        return wireGuard(() => wireExport('encodeErrorBody', glueApi.encodeErrorBody)(diagnosticJson));
+    },
+    decodeErrorBody(body: Uint8Array): string {
+        assertReady();
+        return wireGuard(() => wireExport('decodeErrorBody', glueApi.decodeErrorBody)(body));
+    },
+};

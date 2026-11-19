@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
     decodeErrorBody,
@@ -8,8 +9,14 @@ import {
     encodeFrame,
     encodeKvPut,
     encodeMicroRegister,
+    initWire,
     MsgType,
+    responseType,
 } from '../src/wire.ts';
+
+await initWire({
+    module: readFileSync(new URL('../../../platforms/yydb-unknown-wasm32/lib/yydb_wasm_bg.wasm', import.meta.url)),
+});
 
 test('frame roundtrip', () => {
     const encoded = encodeFrame({
@@ -25,6 +32,13 @@ test('frame roundtrip', () => {
     assert.equal(decoded.requestId, 9);
     assert.equal(decoded.product, 'YYDB');
     assert.equal(new TextDecoder().decode(decoded.body), 'x');
+});
+
+test('response pairing comes from the core table', () => {
+    assert.equal(responseType(MsgType.Hello), MsgType.HelloOk);
+    assert.equal(responseType(MsgType.ScalarCall), MsgType.ScalarCallOk);
+    assert.equal(responseType(MsgType.HelloOk), null);
+    assert.equal(responseType(MsgType.Error), null);
 });
 
 test('kv put body encodes lengths', () => {
@@ -91,11 +105,18 @@ test('kv get ok decode', () => {
     assert.deepEqual(value, new Uint8Array([65, 66]));
 });
 
-test('error body roundtrip keeps code and message', () => {
-    const body = encodeErrorBody({ code: 'yydb.schema.invalid', message: 'VOS schema: boom' });
+test('error body roundtrip keeps the full diagnostic envelope', () => {
+    const body = encodeErrorBody({
+        code: 'yydb.schema.invalid',
+        message: 'VOS schema: boom',
+        operation: 'schema',
+        retryable: false,
+    });
     assert.deepEqual(decodeErrorBody(body), {
         code: 'yydb.schema.invalid',
         message: 'VOS schema: boom',
+        operation: 'schema',
+        retryable: false,
     });
 });
 

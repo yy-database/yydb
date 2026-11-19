@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { Client, encodeErrorBody, isYydbError, MsgType, YydbClientErrorCodes, YydbError, type Frame, type Transport } from "../dist/index.js";
+import { Client, encodeErrorBody, initWire, isYydbError, MsgType, YydbClientErrorCodes, YydbError, type Frame, type Transport } from "../dist/index.js";
 import { normalizeTcpHostPort, normalizeWsUrl } from "../src/transport.ts";
+
+await initWire({
+    module: readFileSync(new URL('../../../platforms/yydb-unknown-wasm32/lib/yydb_wasm_bg.wasm', import.meta.url)),
+});
 
 /**
  * Client protocol usage over a scripted transport: every request maps to its
@@ -147,7 +152,7 @@ test("engine errors keep their code and pick up the request's operation label", 
             msgType: MsgType.Error,
             flags: 0,
             requestId: frame.requestId,
-            body: encodeErrorBody({ code: "yydb.unique.violation", message: "unique constraint violated" }),
+            body: encodeErrorBody({ code: "yydb.unique.violation", message: "unique constraint violated", operation: "kv", retryable: false }),
         })).transport,
     );
     await assert.rejects(client.get("k"), (error: unknown) => {

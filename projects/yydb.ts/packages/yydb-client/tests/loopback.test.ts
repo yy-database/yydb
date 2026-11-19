@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { connect, isYydbError, type Client } from '../dist/node.js';
+import { connect, initWire, isYydbError, type Client } from '../dist/node.js';
+
+await initWire({
+    module: readFileSync(new URL('../../../platforms/yydb-unknown-wasm32/lib/yydb_wasm_bg.wasm', import.meta.url)),
+});
 
 /**
  * Real-serve loopback: spawn `yydb serve` on a private port and drive it with

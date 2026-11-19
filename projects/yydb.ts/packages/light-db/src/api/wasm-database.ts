@@ -68,6 +68,102 @@ interface WasmResult {
     code?: unknown;
 }
 
+/** Lowercase hex → bytes, rejecting malformed spellings. */
+function hexToBytes(hex: unknown, kind: string): Uint8Array {
+    if (typeof hex !== 'string' || hex.length % 2 !== 0 || !/^[0-9a-f]*$/.test(hex)) {
+        throw new Error(`light-db: tagged \`${kind}\` value carries malformed hex`);
+    }
+    const out = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < out.length; i += 1) {
+        out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    }
+    return out;
+}
+
+/**
+ * Decode tagged scalars emitted by the Rust core (`$yydb` descriptors from
+ * `database.types::scalar`) into host values.
+ *
+ * Lossless forms collapse to natives the host represents exactly: `bytes` →
+ * `Uint8Array`, out-of-range `i64`/`u64` → `BigInt`, non-finite `f64` →
+ * `Number`, `vector` → `Float64Array`, `object` refs → plain descriptor.
+ * Temporal, decimal, uuid and file values keep their tagged descriptor shape
+ * (`./types.js`). Unknown tags throw; plain objects and arrays recurse.
+ */
+function decodeTaggedValue(value: unknown): unknown {
+    if (Array.isArray(value)) {
+        return value.map(decodeTaggedValue);
+    }
+    if (value === null || typeof value !== 'object') {
+        return value;
+    }
+    const record = value as Record<string, unknown>;
+    const tag = record['$yydb'];
+    if (tag === undefined) {
+        const out: Record<string, unknown> = {};
+        for (const [key, item] of Object.entries(record)) {
+            out[key] = decodeTaggedValue(item);
+        }
+        return out;
+    }
+    if (typeof tag !== 'string') {
+        throw new Error('light-db: tagged scalar carries a non-string `$yydb` tag');
+    }
+    switch (tag) {
+        case 'bytes':
+            return hexToBytes(record['hex'], 'bytes');
+        case 'i64':
+        case 'u64': {
+            const text = record['value'];
+            if (typeof text !== 'string') {
+                throw new Error(`light-db: tagged \`${tag}\` value requires a decimal string`);
+            }
+            return BigInt(text);
+        }
+        case 'f64': {
+            const spelling = record['value'];
+            if (spelling === 'NaN') return Number.NaN;
+            if (spelling === 'Infinity') return Number.POSITIVE_INFINITY;
+            if (spelling === '-Infinity') return Number.NEGATIVE_INFINITY;
+            throw new Error('light-db: tagged `f64` value requires a non-finite spelling');
+        }
+        case 'vector': {
+            const octets = hexToBytes(record['components'], 'vector');
+            const dimension = record['dimension'];
+            if (typeof dimension !== 'number' || !Number.isInteger(dimension)) {
+                throw new Error('light-db: tagged `vector` dimension must be an integer');
+            }
+            if (octets.length !== dimension * 8) {
+                throw new Error('light-db: tagged `vector` components disagree with dimension');
+            }
+            const view = new DataView(octets.buffer, octets.byteOffset, octets.byteLength);
+            const out = new Float64Array(dimension);
+            for (let i = 0; i < dimension; i += 1) {
+                out[i] = view.getFloat64(i * 8, true);
+            }
+            return out;
+        }
+        case 'object': {
+            const fields: Record<string, unknown> = {};
+            for (const [key, item] of Object.entries(record)) {
+                if (key !== '$yydb') {
+                    fields[key] = decodeTaggedValue(item);
+                }
+            }
+            return fields;
+        }
+        case 'uuid':
+        case 'date':
+        case 'time':
+        case 'timestamp':
+        case 'decimal':
+        case 'file':
+            return record;
+        default:
+            throw new Error(`light-db: unknown tagged scalar \`${tag}\``);
+    }
+}
+
 /**
  * A durable browser volume always starts from host-owned OPFS sync handles.
  *
@@ -530,7 +626,9 @@ export class Database implements LightDatabase {
     /**
      * Close the session. Idempotent — further calls fail.
      *
-     * On persistent (OPFS) sessions this triggers a final snapshot publish.
+     * On persistent (OPFS) sessions this triggers a final snapshot publish;
+     * the WASM core throws when that publication fails, and the error
+     * propagates instead of being swallowed.
      */
     public async close(): Promise<void> {
         this.session.close();
@@ -648,7 +746,7 @@ export class Statement {
         if (!raw.ok) {
             throw (LightDbError.fromDiagnosticJson(raw.error) ?? new Error(raw.error as string));
         }
-        return (raw.rows ?? []) as T[];
+        return (raw.rows ?? []).map((row) => decodeTaggedValue(row)) as T[];
     }
 
     /** Release this statement's plan from the WASM session registry. Idempotent. */

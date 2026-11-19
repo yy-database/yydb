@@ -1,23 +1,54 @@
 /**
  * YY wire protocol — VOS-native serve frames.
- * Prefix: product magic `YYDB` | `YYDS` (backend self-claim only; same effect),
- * then four ASCII version digits (`0000` current, `0001` next).
- * Frontends accept either magic and do not require product consistency.
+ *
+ * The wire is owned by the Rust core (`database.protocol.yy`, shipped inside
+ * `@yydb/yydb-unknown-wasm32`): frame layout, header bounds, version digits,
+ * product magics and every body codec live upstream. This module only maps
+ * those exports onto the host-side shapes and keeps the message-type labels.
+ *
+ * Call `initWire()` (or the platform package's `initWasm()`) before using any
+ * codec here. The constants below are filled from the core during `initWire()`.
  */
 
-export const MAGIC_YYDB = new TextEncoder().encode('YYDB');
-export const MAGIC_YYDS = new TextEncoder().encode('YYDS');
+import { initWasm, wire as core, type InitWasmOptions } from '@yydb/yydb-unknown-wasm32';
+
+/** Product magic the backend self-claims (same protocol either way). */
+export type ProductMagic = 'YYDB' | 'YYDS';
+
+/** Four ASCII bytes of the current wire version (`"0000"`). */
+export let WIRE_VERSION = new Uint8Array(4);
+/** Four ASCII bytes of the next planned wire version (`"0001"`, not spoken yet). */
+export let WIRE_VERSION_NEXT = new Uint8Array(4);
+/** Product magic bytes for `"YYDB"`. */
+export let MAGIC_YYDB = new Uint8Array(4);
+/** Product magic bytes for `"YYDS"`. */
+export let MAGIC_YYDS = new Uint8Array(4);
 /** @deprecated Use MAGIC_YYDB — encode default product. */
-export const MAGIC = MAGIC_YYDB;
+export let MAGIC = MAGIC_YYDB;
+/** Absolute frame header length in bytes. */
+export let HEADER_LEN = 0;
+/** Body soft limit enforced by the core on encode and decode. */
+export let MAX_BODY_LEN = 0;
 
-/** Current wire version digits. */
-export const WIRE_VERSION = new TextEncoder().encode('0000');
-/** Next planned wire version (not spoken yet). */
-export const WIRE_VERSION_NEXT = new TextEncoder().encode('0001');
+/**
+ * Initialize the wasm core backing every codec in this module.
+ *
+ * Browser bundles load the packaged `lib/yydb_wasm_bg.wasm` automatically;
+ * Node hosts pass the wasm bytes (or a URL) through `options`.
+ */
+export async function initWire(options: InitWasmOptions = {}): Promise<void> {
+    await initWasm(options);
+    const encoder = new TextEncoder();
+    WIRE_VERSION = encoder.encode(core.version());
+    WIRE_VERSION_NEXT = encoder.encode(core.versionNext());
+    MAGIC_YYDB = core.magic('YYDB');
+    MAGIC_YYDS = core.magic('YYDS');
+    MAGIC = MAGIC_YYDB;
+    HEADER_LEN = core.headerLen();
+    MAX_BODY_LEN = core.maxBodyLen();
+}
 
-export const HEADER_LEN = 20;
-export const MAX_BODY_LEN = 16 * 1024 * 1024;
-
+/** Message type codes as defined by the upstream `MessageType` table. */
 export const MsgType = {
     Hello: 1,
     HelloOk: 2,
@@ -42,22 +73,15 @@ export const MsgType = {
     Error: 255,
 } as const;
 
-/** Phase-1 scalar kinds on the YY wire micro register path. */
-export type WireUdfScalarKind = 'null' | 'bool' | 'i64' | 'text';
-
-/** Phase-1 scalar value on the YY wire host invoke path. */
-export type WireUdfScalarValue = null | boolean | number | string;
-
-export interface MicroHostInvokePayload {
-    hostId: number;
-    handleVersion: number;
-    functionId: string;
-    args: readonly WireUdfScalarValue[];
-}
-
 export type MsgTypeCode = (typeof MsgType)[keyof typeof MsgType];
 
-export type ProductMagic = 'YYDB' | 'YYDS';
+/**
+ * Response type a request code must be answered with, or `null` when the
+ * code is not a request. Owned by the core.
+ */
+export function responseType(code: number): number | null {
+    return core.responseType(code);
+}
 
 export interface Frame {
     msgType: number;
@@ -68,120 +92,32 @@ export interface Frame {
     product?: ProductMagic;
 }
 
-function writeU16(view: DataView, offset: number, value: number) {
-    view.setUint16(offset, value, true);
-}
-
-function writeU32(view: DataView, offset: number, value: number) {
-    view.setUint32(offset, value, true);
-}
-
-function readU16(view: DataView, offset: number) {
-    return view.getUint16(offset, true);
-}
-
-function readU32(view: DataView, offset: number) {
-    return view.getUint32(offset, true);
-}
-
-function productBytes(product: ProductMagic): Uint8Array {
-    return product === 'YYDS' ? MAGIC_YYDS : MAGIC_YYDB;
-}
-
-function parseProduct(bytes: Uint8Array): ProductMagic {
-    const text = new TextDecoder().decode(bytes.subarray(0, 4));
-    if (text === 'YYDB' || text === 'YYDS') {
-        return text;
-    }
-    throw new Error('wire frame bad product magic (want YYDB|YYDS)');
-}
-
-function checkVersion(bytes: Uint8Array) {
-    const version = new TextDecoder().decode(bytes.subarray(4, 8));
-    if (version !== '0000') {
-        throw new Error(`wire version not supported (got ${version}, want 0000)`);
-    }
-}
-
+/** Encode one frame; the core validates the magic, version and body limit. */
 export function encodeFrame(frame: Frame, product: ProductMagic = 'YYDB'): Uint8Array {
-    if (frame.body.byteLength > MAX_BODY_LEN) {
-        throw new Error('wire body too large');
-    }
-    const out = new Uint8Array(HEADER_LEN + frame.body.byteLength);
-    out.set(productBytes(product), 0);
-    out.set(WIRE_VERSION, 4);
-    const view = new DataView(out.buffer);
-    writeU16(view, 8, frame.msgType);
-    writeU16(view, 10, frame.flags);
-    writeU32(view, 12, frame.requestId);
-    writeU32(view, 16, frame.body.byteLength);
-    out.set(frame.body, HEADER_LEN);
-    return out;
+    return core.frameEncode(frame.msgType, frame.flags, frame.requestId, frame.body, product);
 }
 
+/** Decode one complete frame; partial or corrupt buffers throw the core error. */
 export function decodeFrame(bytes: Uint8Array): Frame {
-    if (bytes.byteLength < HEADER_LEN) {
-        throw new Error('wire frame truncated header');
-    }
-    const product = parseProduct(bytes);
-    checkVersion(bytes);
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const msgType = readU16(view, 8);
-    const flags = readU16(view, 10);
-    const requestId = readU32(view, 12);
-    const bodyLen = readU32(view, 16);
-    if (bodyLen > MAX_BODY_LEN) {
-        throw new Error('wire body too large');
-    }
-    const need = HEADER_LEN + bodyLen;
-    if (bytes.byteLength < need) {
-        throw new Error('wire frame truncated body');
-    }
+    const decoded = core.frameDecode(bytes);
     return {
-        msgType,
-        flags,
-        requestId,
-        body: bytes.slice(HEADER_LEN, need),
-        product,
+        msgType: decoded.msgType,
+        flags: decoded.flags,
+        requestId: decoded.requestId,
+        body: decoded.body,
+        product: decoded.product as ProductMagic,
     };
 }
 
-export function pushU32(out: number[], value: number) {
-    out.push(value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, (value >> 24) & 0xff);
-}
+/** Phase-1 scalar kinds on the YY wire micro register path. */
+export type WireUdfScalarKind = 'null' | 'bool' | 'i64' | 'text';
 
-export function pushBytes(out: number[], bytes: Uint8Array) {
-    pushU32(out, bytes.byteLength);
-    for (let i = 0; i < bytes.byteLength; i++) {
-        out.push(bytes[i]!);
-    }
-}
+/** Phase-1 scalar value on the YY wire host invoke path. */
+export type WireUdfScalarValue = null | boolean | number | string;
 
-export function encodeSchemaEnsure(version: number, document: string): Uint8Array {
-    const out: number[] = [];
-    pushU32(out, version >>> 0);
-    pushBytes(out, new TextEncoder().encode(document));
-    return Uint8Array.from(out);
-}
-
-export function encodeKvGet(key: string): Uint8Array {
-    const out: number[] = [];
-    pushBytes(out, new TextEncoder().encode(key));
-    return Uint8Array.from(out);
-}
-
-/** Encode an `Authenticate` request body: raw bearer token (opaque). */
-export function encodeAuthenticate(token: string): Uint8Array {
-    const out: number[] = [];
-    pushBytes(out, new TextEncoder().encode(token));
-    return Uint8Array.from(out);
-}
-
-/** Decode an `AuthenticateOk` reply body: the session token. */
-export function decodeAuthenticateOk(body: Uint8Array): string {
-    const offset = { n: 0 };
-    const len = readU32At(body, offset);
-    return new TextDecoder().decode(readBytesAt(body, offset, len));
+export interface SchemaVersion {
+    version: number;
+    document: string;
 }
 
 export interface MicroRegisterPayload {
@@ -195,271 +131,160 @@ export interface MicroRegisterPayload {
     fingerprint: Uint8Array;
 }
 
-function encodeUdfTypeTag(kind: WireUdfScalarKind): number {
-    switch (kind) {
-        case 'null':
-            return 0;
-        case 'bool':
-            return 1;
-        case 'i64':
-            return 2;
-        case 'text':
-            return 3;
-        default:
-            throw new Error(`unsupported wire udf type: ${kind}`);
-    }
+export interface MicroHostInvokePayload {
+    hostId: number;
+    handleVersion: number;
+    functionId: string;
+    args: readonly WireUdfScalarValue[];
 }
 
-function pushU64(out: number[], value: number) {
-    const view = new DataView(new ArrayBuffer(8));
-    view.setBigUint64(0, BigInt(value), true);
-    out.push(...new Uint8Array(view.buffer));
+/** Encode a `SchemaEnsure` body. */
+export function encodeSchemaEnsure(version: number, document: string): Uint8Array {
+    return core.encodeSchemaEnsure(version, document);
 }
 
-/** Encode a `MicroRegister` body. */
-function encodeUdfValue(out: number[], value: WireUdfScalarValue): void {
-    if (value === null) {
-        out.push(0);
-        return;
-    }
-    if (typeof value === 'boolean') {
-        out.push(1, value ? 1 : 0);
-        return;
-    }
-    if (typeof value === 'number') {
-        out.push(2);
-        const view = new DataView(new ArrayBuffer(8));
-        view.setBigInt64(0, BigInt(value), true);
-        out.push(...new Uint8Array(view.buffer));
-        return;
-    }
-    if (typeof value === 'string') {
-        out.push(3);
-        pushBytes(out, new TextEncoder().encode(value));
-        return;
-    }
-    throw new Error('unsupported wire udf value');
+/** Decode a `SchemaEnsure` body (round-trip and server-side use). */
+export function decodeSchemaEnsure(body: Uint8Array): SchemaVersion {
+    return JSON.parse(core.decodeSchemaEnsure(body)) as SchemaVersion;
 }
 
-function decodeUdfValue(body: Uint8Array, offset: { n: number }): WireUdfScalarValue {
-    if (offset.n >= body.byteLength) {
-        throw new Error('wire scalar value missing tag');
-    }
-    const tag = body[offset.n]!;
-    offset.n += 1;
-    switch (tag) {
-        case 0:
-            return null;
-        case 1: {
-            if (offset.n >= body.byteLength) {
-                throw new Error('wire bool value truncated');
-            }
-            const value = body[offset.n]! !== 0;
-            offset.n += 1;
-            return value;
-        }
-        case 2: {
-            if (offset.n + 8 > body.byteLength) {
-                throw new Error('wire i64 value truncated');
-            }
-            const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
-            const value = Number(view.getBigInt64(offset.n, true));
-            offset.n += 8;
-            return value;
-        }
-        case 3: {
-            const len = readU32At(body, offset);
-            const bytes = readBytesAt(body, offset, len);
-            return new TextDecoder().decode(bytes);
-        }
-        default:
-            throw new Error('wire scalar value has invalid type tag');
-    }
+/** Encode a `KvGet` body. */
+export function encodeKvGet(key: string): Uint8Array {
+    return core.encodeKvGet(key);
 }
 
-function encodeUdfValues(values: readonly WireUdfScalarValue[]): number[] {
-    if (values.length > 255) {
-        throw new Error('wire scalar arg count exceeds u8');
-    }
-    const out: number[] = [values.length];
-    for (const value of values) {
-        encodeUdfValue(out, value);
-    }
-    return out;
+/** Decode a `KvGet` body (the key). */
+export function decodeKvGet(body: Uint8Array): string {
+    return core.decodeKvGet(body);
 }
 
-function decodeUdfValues(body: Uint8Array, offset: { n: number }): WireUdfScalarValue[] {
-    if (offset.n >= body.byteLength) {
-        throw new Error('wire scalar args missing count');
-    }
-    const count = body[offset.n]!;
-    offset.n += 1;
-    const values: WireUdfScalarValue[] = [];
-    for (let index = 0; index < count; index += 1) {
-        values.push(decodeUdfValue(body, offset));
-    }
-    return values;
+/** Encode a `KvPut` body. */
+export function encodeKvPut(key: string, value: Uint8Array): Uint8Array {
+    return core.encodeKvPut(key, value);
 }
 
-/** Decode a `MicroHostInvoke` body. */
-export function decodeMicroHostInvoke(body: Uint8Array): MicroHostInvokePayload {
-    const offset = { n: 0 };
-    const hostId = Number(readU64At(body, offset));
-    const handleVersion = readU32At(body, offset);
-    const functionIdLen = readU32At(body, offset);
-    const functionId = new TextDecoder().decode(readBytesAt(body, offset, functionIdLen));
-    const args = decodeUdfValues(body, offset);
-    return { hostId, handleVersion, functionId, args };
+/** Decode a `KvPut` body (round-trip and server-side use). */
+export function decodeKvPut(body: Uint8Array): { key: string; value: Uint8Array } {
+    const parsed = JSON.parse(core.decodeKvPut(body)) as { key: string; value: number[] };
+    return { key: parsed.key, value: Uint8Array.from(parsed.value) };
 }
 
-/** Encode a `MicroHostInvokeOk` body. */
-export function encodeMicroHostInvokeOk(value: WireUdfScalarValue): Uint8Array {
-    const out: number[] = [];
-    encodeUdfValue(out, value);
-    return Uint8Array.from(out);
+/** Encode an `Authenticate` request body: raw bearer token (opaque). */
+export function encodeAuthenticate(token: string): Uint8Array {
+    return core.encodeAuthenticate(token);
+}
+
+/** Decode an `AuthenticateOk` reply body: the session token. */
+export function decodeAuthenticateOk(body: Uint8Array): string {
+    return core.decodeAuthenticateOk(body);
+}
+
+/** Decode a `SchemaGetOk` reply body; `null` means no schema yet. */
+export function decodeSchemaGetOk(body: Uint8Array): SchemaVersion | null {
+    const decoded = core.decodeSchemaGetOk(body);
+    return decoded == null ? null : (JSON.parse(decoded) as SchemaVersion);
+}
+
+/** Decode a `KvGetOk` reply body; `null` means the key is absent. */
+export function decodeKvGetOk(body: Uint8Array): Uint8Array | null {
+    return core.decodeKvGetOk(body) ?? null;
 }
 
 /** Encode a `ScalarCall` body. */
-export function encodeScalarCall(name: string, version: number, args: readonly WireUdfScalarValue[]): Uint8Array {
-    const out: number[] = [];
-    pushU32(out, version >>> 0);
-    pushBytes(out, new TextEncoder().encode(name));
-    out.push(...encodeUdfValues(args));
-    return Uint8Array.from(out);
+export function encodeScalarCall(
+    name: string,
+    version: number,
+    args: readonly WireUdfScalarValue[],
+): Uint8Array {
+    return core.encodeScalarCall(JSON.stringify({ name, version, args }));
 }
 
 /** Decode a `ScalarCallOk` body. */
 export function decodeScalarCallOk(body: Uint8Array): WireUdfScalarValue {
-    return decodeUdfValue(body, { n: 0 });
+    return JSON.parse(core.decodeScalarCallOk(body)) as WireUdfScalarValue;
 }
 
-function readU64At(body: Uint8Array, offset: { n: number }): bigint {
-    if (offset.n + 8 > body.byteLength) {
-        throw new Error('wire body truncated u64');
-    }
-    const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
-    const value = view.getBigUint64(offset.n, true);
-    offset.n += 8;
-    return value;
-}
-
+/** Encode a `MicroRegister` body. */
 export function encodeMicroRegister(payload: MicroRegisterPayload): Uint8Array {
-    if (payload.fingerprint.byteLength !== 32) {
-        throw new Error('micro register fingerprint must be 32 bytes');
-    }
-    const out: number[] = [];
-    pushU64(out, payload.hostId);
-    pushU32(out, payload.handleVersion);
-    pushU32(out, payload.udfVersion);
-    pushBytes(out, new TextEncoder().encode(payload.name));
-    pushBytes(out, new TextEncoder().encode(payload.functionId));
-    if (payload.args.length > 255) {
-        throw new Error('micro register supports at most 255 args');
-    }
-    out.push(payload.args.length);
-    for (const arg of payload.args) {
-        out.push(encodeUdfTypeTag(arg));
-    }
-    out.push(encodeUdfTypeTag(payload.returns));
-    out.push(...payload.fingerprint);
-    return Uint8Array.from(out);
+    return core.encodeMicroRegister(
+        JSON.stringify({
+            name: payload.name,
+            version: payload.udfVersion,
+            argTypes: payload.args,
+            returnType: payload.returns,
+            hostId: payload.hostId,
+            functionId: payload.functionId,
+            handleVersion: payload.handleVersion,
+            fingerprint: Array.from(payload.fingerprint),
+        }),
+    );
 }
 
-export function encodeKvPut(key: string, value: Uint8Array): Uint8Array {
-    const out: number[] = [];
-    pushBytes(out, new TextEncoder().encode(key));
-    pushBytes(out, value);
-    return Uint8Array.from(out);
+/** Decode a `MicroRegister` body (round-trip and server-side use). */
+export function decodeMicroRegister(body: Uint8Array): MicroRegisterPayload {
+    const decoded = JSON.parse(core.decodeMicroRegister(body)) as {
+        name: string;
+        version: number;
+        argTypes: WireUdfScalarKind[];
+        returnType: WireUdfScalarKind;
+        hostId: number;
+        functionId: string;
+        handleVersion: number;
+        fingerprint: number[];
+    };
+    return {
+        hostId: decoded.hostId,
+        handleVersion: decoded.handleVersion,
+        udfVersion: decoded.version,
+        name: decoded.name,
+        functionId: decoded.functionId,
+        args: decoded.argTypes,
+        returns: decoded.returnType,
+        fingerprint: Uint8Array.from(decoded.fingerprint),
+    };
 }
 
-function readU32At(body: Uint8Array, offset: { n: number }): number {
-    if (offset.n + 4 > body.byteLength) {
-        throw new Error('wire body truncated u32');
-    }
-    const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
-    const value = readU32(view, offset.n);
-    offset.n += 4;
-    return value;
+/** Decode a `MicroHostInvoke` body. */
+export function decodeMicroHostInvoke(body: Uint8Array): MicroHostInvokePayload {
+    const decoded = JSON.parse(core.decodeMicroHostInvoke(body)) as {
+        hostId: number;
+        handleVersion: number;
+        functionId: string;
+        args: WireUdfScalarValue[];
+    };
+    return {
+        hostId: decoded.hostId,
+        handleVersion: decoded.handleVersion,
+        functionId: decoded.functionId,
+        args: decoded.args,
+    };
 }
 
-function readBytesAt(body: Uint8Array, offset: { n: number }, len: number): Uint8Array {
-    if (offset.n + len > body.byteLength) {
-        throw new Error('wire body truncated bytes');
-    }
-    const slice = body.slice(offset.n, offset.n + len);
-    offset.n += len;
-    return slice;
-}
-
-export interface SchemaVersion {
-    version: number;
-    document: string;
-}
-
-export function decodeSchemaGetOk(body: Uint8Array): SchemaVersion | null {
-    if (body.byteLength === 0) {
-        throw new Error('schema get ok empty');
-    }
-    if (body[0] === 0) {
-        return null;
-    }
-    const offset = { n: 1 };
-    const version = readU32At(body, offset);
-    const docLen = readU32At(body, offset);
-    const doc = readBytesAt(body, offset, docLen);
-    return { version, document: new TextDecoder().decode(doc) };
-}
-
-export function decodeKvGetOk(body: Uint8Array): Uint8Array | null {
-    if (body.byteLength === 0) {
-        throw new Error('kv get ok empty');
-    }
-    if (body[0] === 0) {
-        return null;
-    }
-    const offset = { n: 1 };
-    const valLen = readU32At(body, offset);
-    return readBytesAt(body, offset, valLen);
+/** Encode a `MicroHostInvokeOk` body. */
+export function encodeMicroHostInvokeOk(value: WireUdfScalarValue): Uint8Array {
+    return core.encodeMicroHostInvokeOk(JSON.stringify(value));
 }
 
 /** Structured `Error` frame body — mirrors the Rust `DiagnosticEnvelope`. */
 export interface WireErrorBody {
     /** Stable dotted code (`yydb.schema.invalid`, …). */
     code: string;
-    /** Operation category (`io`, `schema`, `udf`, …). */
-    operation?: string;
-    /** Whether the caller may retry with the same arguments. */
-    retryable?: boolean;
+    /** Operation category (`io`, `schema`, `udf`, …). Required by the core. */
+    operation: string;
+    /** Whether the caller may retry with the same arguments. Required by the core. */
+    retryable: boolean;
     /** Display message; hosts must not branch on this text. */
     message: string;
     /** Structured parameters for catalog templating. */
     params?: Readonly<Record<string, string>>;
 }
 
-/** Encode an `Error` frame body as the shared diagnostic JSON. */
+/** Encode an `Error` frame body as the shared diagnostic JSON (validated by the core). */
 export function encodeErrorBody(error: WireErrorBody): Uint8Array {
-    return new TextEncoder().encode(JSON.stringify(error));
+    return core.encodeErrorBody(JSON.stringify(error));
 }
 
-/** Decode an `Error` frame body; rejects bodies that are not diagnostic JSON. */
+/** Decode an `Error` frame body; the core enforces the diagnostic envelope contract. */
 export function decodeErrorBody(body: Uint8Array): WireErrorBody {
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(new TextDecoder().decode(body));
-    } catch {
-        throw new Error('wire error body is not valid JSON');
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('wire error body is not a diagnostic object');
-    }
-    const diag = parsed as Record<string, unknown>;
-    if (typeof diag['code'] !== 'string') throw new Error('wire error body missing code');
-    if (typeof diag['message'] !== 'string') throw new Error('wire error body missing message');
-    const decoded: WireErrorBody = { code: diag['code'], message: diag['message'] };
-    if (typeof diag['operation'] === 'string') decoded.operation = diag['operation'];
-    if (typeof diag['retryable'] === 'boolean') decoded.retryable = diag['retryable'];
-    if (diag['params'] && typeof diag['params'] === 'object') {
-        decoded.params = diag['params'] as Record<string, string>;
-    }
-    return decoded;
+    return JSON.parse(core.decodeErrorBody(body)) as WireErrorBody;
 }
