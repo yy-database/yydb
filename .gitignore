@@ -63,3 +63,6 @@ changelog/releases/*.reference.md
 .bench-*/
 .bench-*.json
 *.pdb
+
+# npm secrets (nifty)
+.secrets/
